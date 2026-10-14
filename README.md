@@ -104,6 +104,8 @@ Chrome 若不执行用户脚本，按油猴的官方提示检查扩展的用户�
 
 ## 本地模拟与开发
 
+分支与版本按 [开发和发布流程](docs/release-process.zh-CN.md) 管理：日常开发提交到 `dev`，稳定版通过 PR 合入 `main`；普通提交不提升插件版本号。
+
 ```sh
 npm ci
 npm run build
