@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "抖音直播运营助手",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "抖音直播礼物感谢、观众欢迎、AI互动和定时消息助手，默认仅预览。",
   "permissions": ["storage"],
   "host_permissions": ["https://live.douyin.com/*"],

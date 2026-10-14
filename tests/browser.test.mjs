@@ -17,7 +17,7 @@ function setup(body = '') {
   return dom;
 }
 test('面板可完整读写配置、切换选项、保存不会丢失隐藏字段', () => {
-  const dom = setup(); const c = copy(DEFAULTS); c.anchorId = '1234567890';
+  const dom = setup(); const c = copy(DEFAULTS); c.anchorId = '1234567890'; c.like.enabled = true;
   const panel = new Panel({ config: c, room: '1234567890', callbacks: {} });
   assert.deepEqual(panel.read(), c);
   panel.root.querySelector('[data-field="welcome.minWealth"]').value = '40';
@@ -184,7 +184,7 @@ test('名单模式隐藏无关条件且保留配置；模式提示跟随草稿�
 });
 
 test('各模块摘要跟随草稿；礼物快捷阈值和独立关键词页可用', () => {
-  const dom=setup(),c=copy(DEFAULTS);c.keyword.rules=[];const p=new Panel({config:c,room:'1',callbacks:{}});
+  const dom=setup(),c=copy(DEFAULTS);c.keyword.enabled=true;c.keyword.rules=[];const p=new Panel({config:c,room:'1',callbacks:{}});
   try {
     assert.deepEqual([...p.root.querySelectorAll('[data-category]')].map(node=>node.textContent),['回复','互动','设置']);
     assert.equal(p.activeTab,'runtime'); assert.equal(p.node('[data-page="runtime"]').hidden,false);
@@ -209,13 +209,43 @@ test('各模块摘要跟随草稿；礼物快捷阈值和独立关键词页可�
 
     assert.ok(p.node('[data-tab=keywords]'));
     p.tab('keywords');assert.equal(p.node('[data-page=keywords]').hidden,false);
-    p.node('[data-field="keyword.enabled"]').click();
     const rule=p.addRow('keywords');rule.querySelector('[data-item=keywords]').value='几点开播';rule.querySelector('[data-item=reply]').value='请看直播预告';p.syncControls();
     assert.match(p.node('[data-summary=keyword]').textContent,/1 条规则/);
     assert.equal(p.read().keyword.rules[0].reply,'请看直播预告');
 
     p.node('[data-field="ai.enabled"]').checked=true;p.syncControls();assert.match(p.node('[data-summary=ai]').textContent,/当前仅预览/);
     const timer=p.addRow('timers');timer.querySelector('[data-item=enabled]').checked=true;p.syncControls();assert.match(p.node('[data-summary=timers]').textContent,/已开启 1 组/);
+  } finally {p.destroy();dom.window.close();}
+});
+test('运行设置关闭模块时隐藏导航和页面，重新启用后恢复入口', () => {
+  const dom=setup(),p=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
+  try {
+    p.node('[data-category="reply"]').click();
+    assert.equal(p.activeTab,'timers');
+    assert.equal(p.node('[data-page="timers"]').hidden,false);
+    assert.equal(p.node('[data-tab="keywords"]').hidden,true);
+    p.tab('keywords');
+    assert.equal(p.activeTab,'timers');
+    assert.equal(p.node('[data-page="keywords"]').hidden,true);
+
+    p.tab('gift');
+    const giftSwitch=p.node('[data-field="gift.enabled"]');
+    giftSwitch.click();
+    assert.equal(p.node('[data-tab="gift"]').hidden,true);
+    assert.equal(p.node('[data-page="gift"]').hidden,true);
+    assert.equal(p.activeTab,'runtime');
+    assert.equal(p.node('[data-category="interaction"]').hidden,false);
+
+    p.node('[data-field="welcome.enabled"]').click();
+    assert.equal(p.node('[data-tab="welcome"]').hidden,true);
+    assert.equal(p.node('[data-category="interaction"]').hidden,true);
+    assert.equal(p.node('.primary-nav').style.gridTemplateColumns,'repeat(2, minmax(0, 1fr))');
+
+    giftSwitch.click();
+    assert.equal(p.node('[data-tab="gift"]').hidden,false);
+    assert.equal(p.node('[data-category="interaction"]').hidden,false);
+    p.tab('gift');
+    assert.equal(p.node('[data-page="gift"]').hidden,false);
   } finally {p.destroy();dom.window.close();}
 });
 test('主分类导航收敛二级页面；悬浮按钮可拖动吸附并记住位置', () => {

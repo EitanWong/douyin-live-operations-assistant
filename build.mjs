@@ -4,7 +4,7 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 const header = `// ==UserScript==
 // @name         抖音直播运营助手
 // @namespace    local.douyin-live-assistant
-// @version      0.1.0
+// @version      0.1.1
 // @description  抖音直播礼物感谢、观众欢迎、AI互动和定时消息助手，支持预览和人工审核。
 // @match        https://live.douyin.com/*
 // @run-at       document-start

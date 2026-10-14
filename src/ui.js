@@ -31,7 +31,7 @@ const CSS_TEXT = `
 
 export class Panel {
   constructor({ config, room, demo = false, callbacks }) {
-    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.activeTab = 'runtime'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
+    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.activeTab = 'runtime'; this.activeCategory = 'settings'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = `${CSS_TEXT}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
@@ -59,7 +59,7 @@ export class Panel {
         <div class="toast" role="status" hidden></div>
         <div class="scroll"><form autocomplete="off">
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime">
-            <h2>运行设置</h2><p class="intro">统一设置发送方式、节奏和各项自动互动开关。</p>
+            <h2>运行设置</h2><p class="intro">统一设置发送方式、节奏和各项自动互动开关。关闭的互动模块会从导航中隐藏。</p>
             <div class="status"><strong data-state>已暂停</strong><span class="badge" data-network>等待直播数据</span></div>
             <div class="grid">${this.select('mode', '回复方式', [['preview', '仅预览，不发送'], ['review', '逐条审核后发送'], ['auto', '自动发送']])}<label class="field"><span>发言节奏</span><select data-pace><option value="gentle">安静些</option><option value="normal">适中（推荐）</option><option value="lively">活跃些</option><option value="custom">自定义</option></select></label></div>
             <div class="mode-note" data-mode-note>仅预览，不会发送到直播间。</div>
@@ -296,6 +296,7 @@ export class Panel {
     get('welcome.requireLit').disabled = !fan; get('welcome.minFanLevel').disabled = !fan;
     get('anchorId').readOnly = get('identity.autoAnchor').checked && Boolean(this.identity?.anchor);
     get('selfId').readOnly = get('identity.autoSelf').checked && Boolean(this.identity?.self);
+    this.applyFeatureVisibility();
   }
   setBusy(action, value) { if (value) this.busyActions.add(action); else this.busyActions.delete(action); this.syncControls(); }
   revealError(el, page = el.closest('[data-page]')?.dataset.page) { el.setAttribute('aria-invalid','true'); if (page) this.tab(page); for (let parent=el.parentElement;parent;parent=parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; el.focus(); }
@@ -348,13 +349,44 @@ export class Panel {
     clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { node.hidden = true; }, 8000);
   }
   toggleOpen() { this.open = !this.open; this.node('.panel').hidden = !this.open; this.node('.launcher').setAttribute('aria-expanded', String(this.open)); if (this.open) { if (this.latest) this.refresh(...this.latest); this.renderLogs(); this.positionPanel(); } }
+  applyFeatureVisibility() {
+    const enabled = key => Boolean(this.root.querySelector(`[data-field="${key}.enabled"]`)?.checked);
+    for (const key of ['gift', 'welcome', 'likes', 'keywords']) {
+      const visible = enabled(key === 'likes' ? 'like' : key === 'keywords' ? 'keyword' : key);
+      const tab = this.root.querySelector(`[data-tab="${key}"]`);
+      const page = this.root.querySelector(`[data-page="${key}"]`);
+      if (tab) tab.hidden = !visible;
+      if (page) page.hidden = !visible || this.activeTab !== key;
+    }
+    for (const category of ['reply', 'interaction', 'settings']) {
+      const subnav = this.root.querySelector(`[data-subnav="${category}"]`);
+      const hasVisibleTab = [...subnav.querySelectorAll('[data-tab]')].some(tab => !tab.hidden);
+      subnav.hidden = category !== this.activeCategory || !hasVisibleTab;
+      const categoryButton = this.root.querySelector(`[data-category="${category}"]`);
+      categoryButton.hidden = !hasVisibleTab;
+    }
+    const visibleCategories = [...this.root.querySelectorAll('[data-category]')].filter(button => !button.hidden).length;
+    this.root.querySelector('.primary-nav').style.gridTemplateColumns = `repeat(${Math.max(visibleCategories, 1)}, minmax(0, 1fr))`;
+    const activeTab = this.root.querySelector(`[data-tab="${this.activeTab}"]`);
+    if (activeTab?.hidden) {
+      const target = this.activeCategory === 'interaction' ? 'runtime' : 'replies';
+      this.tab(target);
+    }
+  }
   tab(key) {
+    if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
     const category = ['keywords','timers','replies'].includes(key) ? 'reply' : ['gift','welcome','likes'].includes(key) ? 'interaction' : 'settings';
+    this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-subnav]')) node.hidden = node.dataset.subnav !== category;
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
-    for (const node of this.root.querySelectorAll('[data-page]')) node.hidden = node.dataset.page !== key;
+    const featureByPage = { gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword' };
+    for (const node of this.root.querySelectorAll('[data-page]')) {
+      const feature = featureByPage[node.dataset.page];
+      const disabled = feature && !this.root.querySelector(`[data-field="${feature}.enabled"]`)?.checked;
+      node.hidden = node.dataset.page !== key || Boolean(disabled);
+    }
   }
   bind() {
     this.root.querySelector('form').addEventListener('submit', e => e.preventDefault());
@@ -400,7 +432,7 @@ export class Panel {
     this.node('.nav').addEventListener('keydown', e => {
       if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
       const category = ['keywords','timers','replies'].includes(this.activeTab) ? 'reply' : ['gift','welcome','likes'].includes(this.activeTab) ? 'interaction' : 'settings';
-      const tabs = [...this.root.querySelectorAll(`[data-subnav="${category}"] [data-tab]`)];
+      const tabs = [...this.root.querySelectorAll(`[data-subnav="${category}"] [data-tab]`)].filter(tab => !tab.hidden);
       if (!tabs.length || !tabs.includes(this.root.activeElement)) return;
       e.preventDefault(); const current = tabs.indexOf(this.root.activeElement);
       const i = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (current + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
@@ -408,7 +440,11 @@ export class Panel {
     });
     this.root.addEventListener('click', async e => {
       const category=e.target.closest('[data-category]');
-      if(category){const defaults={reply:'keywords',interaction:'gift',settings:'runtime'};this.tab(defaults[category.dataset.category]);return;}
+      if(category){
+        const firstVisibleTab=[...this.root.querySelectorAll(`[data-subnav="${category.dataset.category}"] [data-tab]`)].find(tab=>!tab.hidden);
+        if(firstVisibleTab)this.tab(firstVisibleTab.dataset.tab);
+        return;
+      }
       const giftValue = e.target.closest('[data-gift-value]'); if (giftValue) { const field = this.root.querySelector('[data-field="gift.minValue"]'); field.value = giftValue.dataset.giftValue; this.markDirty(); this.syncControls(); field.focus(); return; }
       const add = e.target.closest('[data-add]'); if (add) return this.addRow(add.dataset.add);
       const remove = e.target.closest('[data-remove]'); if (remove) { remove.closest('[data-list-row]').remove(); this.markDirty(); this.syncControls(); return; }
