@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Validate release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          const manifest = JSON.parse(readFileSync('extension/manifest.json', 'utf8'));
+          const tagVersion = process.env.RELEASE_TAG.replace(/^v/, '');
+          if (pkg.version !== tagVersion || manifest.version !== tagVersion) {
+            throw new Error(`Tag ${tagVersion}, package ${pkg.version}, and manifest ${manifest.version} must match`);
+          }
+          NODE
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+      - name: Build distributables
+        run: npm run build
+      - name: Check generated JavaScript
+        run: npm run check
+      - name: Package release assets
+        run: |
+          cd dist
+          zip -qr ../douyin-live-operations-assistant-chrome.zip chrome-extension
+          cp douyin-live-assistant.user.js ../douyin-live-operations-assistant.user.js
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            douyin-live-operations-assistant-chrome.zip \
+            douyin-live-operations-assistant.user.js \
+            --title "抖音直播运营助手 $RELEASE_TAG" \
+            --generate-notes

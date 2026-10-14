@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "抖音直播运营助手",
+  "version": "0.1.0",
+  "description": "抖音直播礼物感谢、观众欢迎、AI互动和定时消息助手，默认仅预览。",
+  "permissions": ["storage"],
+  "host_permissions": ["https://live.douyin.com/*"],
+  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "抖音直播运营助手", "default_popup": "popup.html" },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "content_scripts": [
+    { "matches": ["https://live.douyin.com/*"], "js": ["page.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://live.douyin.com/*"], "js": ["content.js"], "run_at": "document_start", "world": "ISOLATED" }
+  ],
+  "minimum_chrome_version": "111"
+}

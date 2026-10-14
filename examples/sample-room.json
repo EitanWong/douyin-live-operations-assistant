@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "mode": "preview",
+  "gift": {
+    "enabled": true,
+    "minValue": 100,
+    "basis": "total",
+    "mergeSec": 4,
+    "cooldownSec": 1,
+    "templates": [
+      "感谢 {user} 哥送的 {gift}，太给力了！",
+      "谢谢 {user} 哥的 {gift}，心意收到啦！",
+      "{user} 哥送来 {gift} ×{count}，感谢支持！",
+      "感谢 {user} 哥送的 {gift}，祝你今天开心！"
+    ]
+  },
+  "welcome": {
+    "enabled": true,
+    "mode": "qualified-or-listed",
+    "minWealth": 30,
+    "requireFan": true,
+    "minFanLevel": 1,
+    "requireLit": true,
+    "listed": [],
+    "cooldownSec": 600,
+    "templates": [
+      "欢迎 {user} 大哥回家，感谢陪伴！",
+      "{user} 来啦，欢迎一起聊天！"
+    ]
+  },
+  "ai": {
+    "enabled": false
+  }
+}
