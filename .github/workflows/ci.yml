@@ -21,10 +21,10 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Run tests
-        run: npm test
       - name: Build distributables
         run: npm run build
+      - name: Run tests
+        run: npm test
       - name: Check generated JavaScript
         run: npm run check
       - name: Package Chrome extension
