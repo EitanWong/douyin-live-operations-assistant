@@ -69,11 +69,14 @@ export function decodeMessage(method, bytes, outerId = '') {
   }
   if (method === 'WebcastControlMessage') return numberAt(m, 2) === 3 ? { ...event, type: 'end' } : null;
   if (method === 'WebcastLikeMessage') return { ...event, type: 'like', user: decodeUser(bytesAt(m, 5)), count: numberAt(m, 2) || 1, total: numberAt(m, 3) };
-  const gift = nested(m, 15), count = numberAt(m, 5) || numberAt(m, 6) || numberAt(m, 4) || 1;
+  const gift = nested(m, 15), count = numberAt(m, 5) || numberAt(m, 6) || numberAt(m, 4) || numberAt(m, 44) || 1;
+  // GiftStruct.type 是字段 11，字段 10 是 combo 标记。显式的零分组不是连击 ID。
+  const giftType = numberAt(gift, 11), combo = giftType === 1 || (giftType === null && numberAt(gift, 10) === 1);
+  const rawGroup = idAt(m, 11), groupId = rawGroup === '0' ? '' : rawGroup;
   return {
     ...event, type: 'gift', user: decodeUser(bytesAt(m, 7)), giftId: idAt(m, 2) || idAt(gift, 5),
     giftName: textAt(gift, 16) || textAt(gift, 2) || '礼物', unitValue: numberAt(gift, 12),
-    count, groupId: idAt(m, 11) || (numberAt(gift, 10) !== 1 ? `single:${event.id}` : ''), final: numberAt(m, 9) === 1 || numberAt(gift, 10) !== 1
+    count, groupId: groupId || (!combo && event.id ? `single:${event.id}` : ''), final: numberAt(m, 9) === 1 || (giftType !== null && !combo)
   };
 }
 async function inflate(bytes, encoding) {
@@ -92,7 +95,7 @@ async function inflate(bytes, encoding) {
   for (const chunk of chunks) { result.set(chunk, at); at += chunk.length; }
   return result;
 }
-export async function decodeFrame(data) {
+export async function decodeFrame(data, onError = () => {}) {
   let bytes;
   if (typeof data === 'string') return []; // 不解析其他业务 socket 的 JSON。
   if (data && typeof data.arrayBuffer === 'function') bytes = new Uint8Array(await data.arrayBuffer());
@@ -105,8 +108,11 @@ export async function decodeFrame(data) {
   const response = wire(await inflate(payload, encoding)), events = [];
   for (const message of response.get(1) || []) {
     if (!(message instanceof Uint8Array)) continue;
-    const m = wire(message), body = bytesAt(m, 2); if (!body) continue;
-    const e = decodeMessage(textAt(m, 1), body, idAt(m, 3)); if (e) events.push(e);
+    // 单条消息的字段变化/损坏不能吞掉同一帧中的其他礼物。
+    try {
+      const m = wire(message), body = bytesAt(m, 2); if (!body) continue;
+      const e = decodeMessage(textAt(m, 1), body, idAt(m, 3)); if (e) events.push(e);
+    } catch (error) { onError(error); }
   }
   return events;
 }

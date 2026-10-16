@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
-import { decodeFrame, decodeMessage, decodeUser, wire } from '../src/protocol.js';
+import { decodeFrame, decodeMessage, decodeUser, wire } from '../../src/browser/protocol.js';
 const cat = (...v) => Buffer.concat(v.map(x => Buffer.from(x)));
 const varint = input => { let v = BigInt(input); const out = []; while (v > 127n) { out.push(Number(v & 127n) | 128); v >>= 7n; } out.push(Number(v)); return Buffer.from(out); };
 const i = (field, value) => cat(varint(field * 8), varint(value));
@@ -48,4 +48,21 @@ test('损坏帧明确报错、非二进制消息不参与解析', async () => {
 test('非进场 Member action 被忽略，非下播 Control 不触发暂停', () => {
   assert.equal(decodeMessage('WebcastMemberMessage', cat(b(2, user), i(10, 5))), null);
   assert.equal(decodeMessage('WebcastControlMessage', i(2, 1)), null);
+});
+
+test('显式零 groupId 的独立礼物不共用连击组，GiftStruct 字段 11 正确判断连击', () => {
+  const single = cat(i(5, 77), i(11, 2), i(12, 50), b(16, '星星'));
+  const body = cat(i(2, 77), i(5, 1), b(7, user), i(11, 0), b(15, single));
+  const a = decodeMessage('WebcastGiftMessage', body, '1001'), c = decodeMessage('WebcastGiftMessage', body, '1002');
+  assert.equal(a.groupId, 'single:1001'); assert.notEqual(a.groupId, c.groupId); assert.equal(a.final, true);
+  const combo = decodeMessage('WebcastGiftMessage', cat(i(5, 2), i(9, 0), i(11, 88), b(15, cat(i(10, 0), i(11, 1)))));
+  assert.equal(combo.final, false); assert.equal(combo.groupId, '88');
+  assert.equal(decodeMessage('WebcastGiftMessage', cat(i(44, 7), b(15, single)), '1003').count, 7);
+});
+
+test('同一帧一条损坏消息不影响前后礼物，并保留解析错误诊断', async () => {
+  const good = id => b(1, cat(b(1, 'WebcastGiftMessage'), b(2, cat(i(5, 3), b(7, user))), i(3, id)));
+  const bad = b(1, cat(b(1, 'WebcastChatMessage'), b(2, Buffer.from([10, 5, 1]))));
+  const errors = [], events = await decodeFrame(b(8, cat(good(101), bad, good(102))), error => errors.push(error));
+  assert.deepEqual(events.map(e => e.id), ['101', '102']); assert.equal(errors.length, 1);
 });
