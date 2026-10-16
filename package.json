@@ -3,10 +3,14 @@
   "version": "0.1.1",
   "type": "module",
   "scripts": {
-    "build": "node build.mjs",
-    "test": "node --test tests/*.test.mjs",
-    "check": "node --check dist/douyin-live-assistant.user.js && node --check dist/chrome-extension/background.js && node --check dist/chrome-extension/popup.js && node --check dist/chrome-extension/content.js && node --check dist/chrome-extension/page.js",
-    "demo": "node serve.mjs"
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests",
+    "benchmark:runtime": "node --expose-gc scripts/benchmark-runtime.mjs",
+    "check": "node scripts/check.mjs",
+    "demo": "node scripts/serve.mjs",
+    "test:unit": "node --test tests/unit",
+    "test:integration": "node --test tests/integration"
   },
   "engines": {
     "node": ">=20"

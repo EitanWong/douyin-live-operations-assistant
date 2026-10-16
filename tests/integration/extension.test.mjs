@@ -1,0 +1,213 @@
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile, access } from 'node:fs/promises';
+import { join } from 'node:path';
+import vm from 'node:vm';
+import { JSDOM } from 'jsdom';
+import { validateEndpoint } from '../../src/services/ai.js';
+import { GiftStore } from '../../src/data/gifts.js';
+import { webLocks } from '../helpers/web-locks.mjs';
+import { buildFixture } from '../helpers/build.mjs';
+const {dist:testDist, cleanup} = await buildFixture();
+after(cleanup);
+const file=name=>join(testDist,'chrome-extension',name);
+async function worker(values = {}) {
+  let listener,changed; const sent=[], requests=[]; let allowed=true;
+  const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>sent.push([id,m])}};
+  const code=(await readFile(file('background.js'),'utf8')).replace(/^import .*;\n/gm,'');
+  vm.runInNewContext(code,{chrome,validateEndpoint,GiftStore,AbortController,setTimeout,clearTimeout,URL,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
+  const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
+  return {values,sent,requests,changed,send:(m,s=sender)=>new Promise(r=>listener(m,s,r)),deny:()=>allowed=false};
+}
+test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
+  const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
+  assert.deepEqual(m.permissions,['storage']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
+  for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
+  assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
+  const main=await readFile(file('page.js'),'utf8'); assert.doesNotMatch(main,/chrome\.storage|GM_getValue|api-key:|GM_xmlhttpRequest/);
+});
+
+test('MAIN 观察器在 content 握手之前完整缓存事件，握手只回放一次', async () => {
+  let captured;
+  const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only'});
+  const received = [];
+  dom.window.DouyinAdapter = class { constructor(options) {captured=options;} hook() {} emitStatus() {} };
+  dom.window.DEFAULTS = {}; dom.window.copy = value => value;
+  dom.window.addEventListener('message', e => {if(e.data?.source==='live-assistant-page-v1' && e.data.type==='event')received.push(e.data.event);});
+  try {
+    dom.window.eval(await readFile(new URL('../../extension/page.js',import.meta.url),'utf8'));
+    for(let n=0;n<160;n++)captured.onEvent({type:n % 2 ? 'chat' : 'gift',id:String(n),text:`消息${n}`});
+    assert.equal(received.length,0);
+    const hello=()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-content-v1',type:'hello'}}));
+    hello(); hello(); await new Promise(r=>setTimeout(r,20));
+    assert.equal(received.length,160); assert.equal(received[159].id,'159'); assert.equal(received.filter(e=>e.type==='chat').length,80);
+  } finally {dom.window.close();}
+});
+test('后台拒绝非直播页面与子frame，保存读取可复用', async()=>{
+  const w=await worker(); assert.equal((await w.send({type:'init'},{frameId:0,tab:{url:'https://evil.example/'}})).ok,false);
+  assert.equal((await w.send({type:'init'},{frameId:1,tab:{url:'https://live.douyin.com/1'}})).ok,false);
+  assert.equal((await w.send({type:'set',key:'outside',value:1})).ok,false);
+  assert.equal((await w.send({type:'set',key:'live-assistant:config:1',value:{mode:'auto'}})).ok,true);
+  assert.equal((await w.send({type:'set',key:'live-assistant:runtime:1',value:{version:1}})).ok,true);
+  assert.equal((await w.send({type:'init'})).value['live-assistant:config:1'].mode,'auto');
+  assert.equal((await w.send({type:'init'})).value['live-assistant:runtime:1'].version,1);
+});
+test('事件日志先持久化、后台重启后可回放，并严格隔离主播房间', async()=>{
+  const w=await worker(), other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
+  const event={type:'gift',id:'gift-event-1',roomId:'stream-1',giftId:'rose',groupId:'combo-1',count:3,final:true,user:{id:'viewer-1',name:'观众'}};
+  const saved=await w.send({type:'event-append',id:'event-uuid-00000001',event});
+  assert.equal(saved.ok,true);
+  const restarted=await worker(w.values);
+  const pending=await restarted.send({type:'event-list'});
+  assert.equal(pending.value.length,1);assert.equal(pending.value[0].event.count,3);
+  assert.equal((await restarted.send({type:'event-ack',key:pending.value[0].key},other)).ok,false);
+  assert.equal((await restarted.send({type:'event-ack',key:pending.value[0].key})).ok,true);
+  assert.equal((await restarted.send({type:'event-list'})).value.length,0);
+  const batch=await restarted.send({type:'event-append',id:'event-uuid-00000002',event:{...event,id:'gift-event-2'}});
+  const second=await restarted.send({type:'event-append',id:'event-uuid-00000003',event:{...event,id:'gift-event-3'}});
+  assert.equal((await restarted.send({type:'event-ack-many',keys:[batch.value.key,second.value.key]})).ok,true);
+  assert.equal((await restarted.send({type:'event-list'})).value.length,0);
+  assert.equal((await restarted.send({type:'event-ack-many',keys:['live-assistant:event:2:foreign-000000000000']})).ok,false);
+  assert.equal((await restarted.send({type:'event-ack-many',keys:Array(101).fill(batch.value.key)})).ok,false);
+});
+test('AI网络需指定域名权限且不携带Cookies、不跟随跳转', async()=>{
+  const w=await worker(); const m={type:'ai',url:'https://ai.example/v1/chat/completions',data:JSON.stringify({model:'model',messages:[]}),headers:{Authorization:'Bearer dummy',Cookie:'not-forwarded'}};
+  assert.equal((await w.send(m)).ok,true); assert.equal(w.requests[0].opts.credentials,'omit'); assert.equal(w.requests[0].opts.redirect,'error'); assert.equal(w.requests[0].opts.headers.Cookie,undefined);
+  w.deny(); assert.equal((await w.send(m)).ok,false); assert.equal(w.requests.length,1);
+});
+test('积压运行快照超过1MiB仍保存，普通配置保留大小校验', async () => {
+  const w = await worker(), payload = {version:1, queue:[{text:'x'.repeat(1100000)}]};
+  assert.equal((await w.send({type:'set',key:'live-assistant:runtime:1',value:payload})).ok, true);
+  assert.equal(w.values['live-assistant:runtime:1'].queue[0].text.length, 1100000);
+  assert.equal((await w.send({type:'set',key:'live-assistant:config:1',value:payload})).ok, false);
+});
+test('内容脚本持续突发按序交接并回收已消费槽位，回放不会覆盖在途任务', async () => {
+  const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only'});
+  let adapter, release, replayRelease, blocked = false; const handled = [];
+  const gate = new Promise(resolve => { release = resolve; });
+  const replayGate = new Promise(resolve => { replayRelease = resolve; });
+  Object.assign(dom.window, {
+    DouyinAdapter:class { constructor(options) { Object.assign(this, options); } emitStatus() {} },
+    IdentityReader:class {},
+    chrome:{runtime:{sendMessage:async message => ({ok:true,value:message.type === 'init' ? {} : message.type === 'event-list' ? await replayGate : true}),onMessage:{addListener() {}}}},
+    boot:options => {
+      adapter = options.adapterFactory({onLog() {},onEvent:async event => {
+        if (event.id === '0' && !blocked) { blocked = true; await gate; }
+        handled.push(event.id);
+      }});
+      adapter.hook();
+    }
+  });
+  try {
+    await dom.window.eval(`(async () => {${await readFile(new URL('../../extension/content.js',import.meta.url),'utf8')}})()`);
+    const tasks = [];
+    for (let i = 0; i < 2400; i++) tasks.push(adapter.dispatch({type:'chat',id:String(i)}));
+    const replay = adapter.replayJournal();
+    replayRelease([{key:'replay',event:{type:'chat',id:'replay'}}]);
+    await Promise.resolve(); await Promise.resolve(); release();
+    await Promise.all([...tasks, replay]);
+    assert.deepEqual(handled, ['0','replay',...Array.from({length:2399},(_, i) => String(i + 1))]);
+    assert.equal(adapter.eventHead, 0); assert.equal(adapter.eventQueue.length, 0);
+    let compacted = false;
+    adapter.onEvent = async event => {
+      if (event.id === '1199') {
+        await Promise.resolve();
+        compacted = adapter.eventHead < 1200;
+      }
+    };
+    const burst = [];
+    for (let i = 0; i < 2300; i++) burst.push(adapter.dispatch({type:'chat',id:String(i)}));
+    await Promise.all(burst);
+    assert.equal(compacted, true, '持续处理期间应回收大块已消费前缀');
+    assert.equal(adapter.eventQueue.length, 0); assert.equal(adapter.eventHead, 0);
+  } finally { release(); replayRelease([]); dom.window.close(); }
+});
+test('同步只送当前房间配置/租约，不广播AI密钥',async()=>{
+  const w=await worker(); await w.changed({'live-assistant:api-key:https://ai.example':{newValue:'dummy'}},'local'); assert.equal(w.sent.length,0);
+  await w.changed({'live-assistant:config:1':{newValue:{}}},'local'); assert.equal(w.sent.length,1); assert.equal(w.sent[0][0],1);
+});
+test('实际扩展content产物通过Chrome接口启动；保存失败显示且保持未保存',async()=>{
+  let listener;
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+  Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>m.type==='init'?{ok:true,value:{}}:{ok:false,error:'测试存储失败'},onMessage:{addListener:f=>listener=f}}}});
+  dom.window.eval(await readFile(file('content.js'),'utf8')); await new Promise(r=>setTimeout(r,100));
+  const root=dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot; assert.ok(root);
+  const f=root.querySelector('[data-field="gift.minValue"]');f.value='200';f.dispatchEvent(new dom.window.Event('input',{bubbles:true}));root.querySelector('[data-action="save"]').click();await new Promise(r=>setTimeout(r,30));
+  assert.match(root.querySelector('.toast').textContent,/测试存储失败/); assert.match(root.querySelector('[data-save-state]').textContent,/未保存/);
+  const info=await new Promise(r=>listener({type:'room-info'},{},r));assert.equal(info.ready,true);dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();
+});
+
+test('实际扩展接收点赞和礼物，过滤本人事件且保留同名观众的互动',async()=>{
+  const selfId='9007199254740993123';
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+  Object.defineProperty(dom.window.navigator,'locks',{value:webLocks()});
+  const values={'live-assistant:config:1':{mode:'preview',selfId,identity:{autoSelf:false},like:{enabled:true}}};
+  const journal=new Map();let journalId=0,failAppendOnce=true;
+  const giftStore = new GiftStore({get:async(key,fallback)=>values[key] ?? fallback,set:async(key,value)=>{values[key]=JSON.parse(JSON.stringify(value));},all:async()=>values});
+  Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>{
+    if(m.type==='init')return {ok:true,value:values};
+    if(m.type==='event-append'&&failAppendOnce){failAppendOnce=false;return {ok:false,error:'模拟后台存储短暂失败'};}
+    if(m.type==='event-append'){const key=`live-assistant:event:1:${++journalId}000000000000`;journal.set(key,{key,event:m.event,savedAt:Date.now()});return {ok:true,value:{key}};}
+    if(m.type==='event-list')return {ok:true,value:[...journal.values()]};
+    if(m.type==='event-ack'){journal.delete(m.key);return {ok:true,value:true};}
+    if(m.type==='event-ack-many'){for(const key of m.keys)journal.delete(key);return {ok:true,value:true};}
+    if(m.type==='set')values[m.key]=m.value;
+    if(m.type==='income-profile')return {ok:true,value:await giftStore.profile(m.profile)};
+    if(m.type==='income-profiles')return {ok:true,value:await giftStore.profiles()};
+    if(m.type==='income-report')return {ok:true,value:await giftStore.report(m.room,m.month)};
+    if(m.type==='gift-record')return {ok:true,value:await giftStore.record(m)};
+    return {ok:true};
+  },onMessage:{addListener:()=>{}}}}});
+  try {
+    dom.window.eval(await readFile(file('content.js'),'utf8'));await new Promise(r=>setTimeout(r,100));
+    const root=dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot;assert.ok(root);
+    root.querySelector('[data-action="start"]').click();await new Promise(r=>setTimeout(r,30));
+    root.querySelector('[data-tab="diagnostics"]').click();root.querySelector('[data-log-details]').open=true;
+    const emit=event=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-page-v1',room:'1',type:'event',event}}));
+    const user={id:selfId,name:'同名账号'};
+    emit({type:'like',id:'self-like',user,count:30});
+    emit({type:'gift',id:'self-gift',user,giftId:'1',giftName:'本人的礼物',unitValue:500,count:1,groupId:'self',final:true});
+    await new Promise(r=>setTimeout(r,550));
+    assert.equal(root.querySelector('[data-gift-diamonds]').textContent,'0');
+    assert.doesNotMatch(root.querySelector('[data-recent-gifts]').textContent,/本人的礼物/);
+    assert.doesNotMatch(root.querySelector('[data-logs]').textContent,/like：|gift：/);
+
+    const other={id:'9007199254740993124',name:user.name};
+    emit({type:'like',id:'other-like',user:other,count:30});
+    emit({type:'gift',id:'other-gift',user:other,giftId:'1',giftName:'观众的礼物',unitValue:500,count:1,groupId:'other',final:true});
+    const deadline=Date.now()+2500;
+    while(Date.now()<deadline && !root.querySelector('[data-logs]').textContent.includes('gift：'))await new Promise(r=>setTimeout(r,25));
+    assert.match(root.querySelector('[data-logs]').textContent,/like：.*同名账号/);
+    assert.match(root.querySelector('[data-logs]').textContent,/gift：.*同名账号/);
+    const incomeDeadline=Date.now()+2000;
+    while(Date.now()<incomeDeadline && root.querySelector('[data-gift-diamonds]').textContent!=='500')await new Promise(r=>setTimeout(r,25));
+    assert.equal(root.querySelector('[data-gift-diamonds]').textContent,'500');
+    assert.equal(values['live-assistant:income:1'].days[0][1].totalDiamonds,500);
+    assert.match(root.querySelector('[data-recent-gifts]').textContent,/观众的礼物/);
+    assert.doesNotMatch(root.querySelector('[data-recent-gifts]').textContent,/本人的礼物/);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
+});
+
+test('实际后台持久存储月报，重启后仍去重；两个主播配置与收入隔离',async()=>{
+  const w=await worker();
+  const other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
+  await w.send({type:'set',key:'live-assistant:config:1',value:{selfId:'10',gift:{minValue:100},ai:{model:'model-a'}}});
+  await w.send({type:'set',key:'live-assistant:config:2',value:{selfId:'20',gift:{minValue:500},ai:{model:'model-b'}}},other);
+  await w.send({type:'income-profile',profile:{room:'1',name:'主播甲',anchorId:'101'}});
+  await w.send({type:'income-profile',profile:{room:'2',name:'主播乙',anchorId:'202'}},other);
+  const event={type:'gift',roomId:'stream-1',giftId:'g',groupId:'combo',count:2,unitValue:100,user:{id:'30'},final:true};
+  const message={type:'gift-record',room:'2',event,userKey:'uid:30',rate:0.05};
+  const results=await Promise.all([w.send(message),w.send(message)]);
+  assert.ok(results.every(result=>result.ok));
+  const again=await worker(w.values),month=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit'}).format(new Date());
+  const report=await again.send({type:'income-report',room:'1',month});
+  assert.equal(report.ok,true);assert.equal(report.value.summary.estimatedIncome,10);
+  assert.equal((await again.send({type:'income-report',room:'2',month})).value.summary.totalDiamonds,0);
+  assert.equal((await again.send({type:'gift-record',event:{...event,groupId:'self',user:{id:'10'}},userKey:'uid:10',rate:0.05})).value,false);
+  await again.send(message);
+  assert.equal((await again.send({type:'income-report',room:'1',month})).value.summary.giftCount,2);
+  const initial=(await again.send({type:'init'})).value;
+  assert.equal(initial['live-assistant:config:1'].ai.model,'model-a');assert.equal(initial['live-assistant:config:2'].ai.model,'model-b');
+  assert.equal(initial['live-assistant:income:1'],undefined);
+  assert.equal((await again.send({type:'income-profiles'})).value.length,2);
+});

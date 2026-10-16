@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { IdentityReader, identityFromResponse, identityUser, parseIdentityJSON, roomAdminStatus } from '../src/identity.js';
+import { IdentityReader, identityFromResponse, identityUser, parseIdentityJSON, roomAdminStatus } from '../../src/browser/identity.js';
 
 test('身份解析保留64位ID且不改写昵称里的数字', () => {
   const data = parseIdentityJSON('{"id":9876543210987654321,"nickname":"abc :9876543210987654321}"}');

@@ -1,5 +1,7 @@
 # LiveBot 参考脚本复盘
 
+> 历史调研记录。当前功能与操作方式见[产品范围](../product/overview.zh-CN.md)和[使用指南](../guides/usage.zh-CN.md)。
+
 分析对象：用户提供的 LiveBot 0.2.7 用户脚本。作者仓库声明 MIT 许可，公开说明见 [livebot-assets](https://github.com/TanMusong/livebot-assets)。对附件进行了静态解混淆和代码检查，没有在抖音页面执行脚本。
 
 ## 观察到的实现
