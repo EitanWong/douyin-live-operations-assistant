@@ -30,8 +30,8 @@ test('面板可完整读写配置、切换选项、保存不会丢失隐藏字�
   panel.root.querySelector('[data-field="gift.minValue"]').value = '200';
   const next = panel.read(); assert.equal(next.welcome.minWealth, 40); assert.equal(next.gift.minValue, 200); assert.equal(next.sending.queueLimit, 200);
   panel.tab('gift'); assert.equal(panel.root.querySelector('[data-page="gift"]').hidden, false); assert.equal(panel.root.querySelector('[data-page="runtime"]').hidden, true);
-  panel.tab('likes'); panel.root.querySelector('[data-field="like.cooldownSec"]').value = '90';
-  assert.equal(panel.read().like.cooldownSec, 90); assert.equal(panel.root.querySelector('[data-page="likes"]').hidden, false);
+  panel.tab('likes');
+  assert.equal(panel.root.querySelector('[data-field="like.cooldownSec"]'), null); assert.equal(panel.root.querySelector('[data-page="likes"]').hidden, false);
   dom.window.close();
 });
 test('昵称、回复和日志不会注入 HTML；界面不再提供人工审核队列', () => {
@@ -138,6 +138,34 @@ test('突发超过 100 帧全部按序交付，事件订阅异常不截断后续
     assert.equal(delivered,160); assert.equal(adapter.status.frames,160); assert.equal(adapter.status.errors,1); assert.equal(adapter.pending,0);
   } finally {dom.window.close();}
 });
+
+test('异步事件处理失败会被收敛为诊断错误，并保持后续帧可交付', async () => {
+  const dom = setup();
+  class Socket extends dom.window.EventTarget { constructor() { super(); } }
+  dom.window.WebSocket = Socket;
+  let delivered = 0;
+  const adapter = new DouyinAdapter({
+    page: dom.window,
+    getConfig: () => copy(DEFAULTS),
+    onEvent: async () => {
+      delivered++;
+      await Promise.resolve();
+      if (delivered === 1) throw new Error('异步订阅异常');
+    },
+    onLog: () => {}, onStatus: () => {}
+  });
+  try {
+    adapter.hook();
+    const socket = new dom.window.WebSocket('wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/');
+    const message = Buffer.from([10,27,10,21,...Buffer.from('WebcastControlMessage'),18,2,16,3]);
+    const frame = Buffer.concat([Buffer.from([66,message.length]),message]);
+    for (let n = 0; n < 8; n++) socket.dispatchEvent(new dom.window.MessageEvent('message', {data:frame}));
+    await adapter.chain;
+    assert.equal(delivered, 8);
+    assert.equal(adapter.status.errors, 1);
+    assert.equal(adapter.pending, 0);
+  } finally { dom.window.close(); }
+});
 test('生成的单文件油猴脚本在加载前可启动，无外部依赖且默认暂停', async () => {
   const source = await readFile(join(fixture.dist, 'douyin-live-assistant.user.js'), 'utf8');
   const values = new Map();
@@ -188,7 +216,70 @@ test('DOM备用只读新增弹幕，无关变化不全页扫描；socket活跃�
   enabled=false;a.stopDOM();dom.window.close();
 });
 
-test('保存和开始互斥；运行时保存明确暂停，失败保留修改且可重试', async () => {
+test('DOM备用异步订阅异常和下播回调 rejection 会被收敛，后续事件仍可处理', async () => {
+  const dom = setup('<div id="chat"></div>');
+  const c = copy(DEFAULTS); c.adapter.endSelector = '#end';
+  const events = [], calls = [], logs = [];
+  const a = new DouyinAdapter({
+    page: dom.window,
+    getConfig: () => c,
+    onEvent: async event => {
+      calls.push(event.type);
+      if (event.type === 'end') throw new Error('异步下播订阅异常');
+      events.push(event);
+      await Promise.resolve();
+      if (event.text === '第一次') throw new Error('异步弹幕订阅异常');
+    },
+    onLog: (_, message) => logs.push(message), onStatus: () => {}
+  });
+  a.observeDOM();
+  const insert = text => {
+    const row = dom.window.document.createElement('div'); row.dataset.e2e = 'chat-message';
+    row.innerHTML = `<b data-e2e="chat-nickname">观众</b><span data-e2e="chat-content">${text}</span>`;
+    dom.window.document.querySelector('#chat').append(row);
+  };
+  try {
+    const end = dom.window.document.createElement('div'); end.id = 'end'; end.getClientRects = () => [{ width: 1, height: 1 }];
+    dom.window.document.body.append(end);
+    insert('第一次'); insert('第二次');
+    await new Promise(resolve => setTimeout(resolve, 120));
+    assert.deepEqual(events.map(event => event.text), ['第一次', '第二次']);
+    assert.deepEqual(calls, ['end', 'chat', 'chat']);
+    assert.equal(logs.length, 1); // report() 对短时间内的重复异常做限流
+    a.stopDOM();
+  } finally { dom.window.close(); }
+});
+
+test('DOM备用停止时会取消挂起批次的剩余事件，不与异步 flush 并发', async () => {
+  const dom = setup('<div id="chat"></div>');
+  const calls = []; let release;
+  const a = new DouyinAdapter({
+    page: dom.window,
+    getConfig: () => copy(DEFAULTS),
+    onEvent: async event => {
+      calls.push(event.text);
+      if (calls.length === 1) await new Promise(resolve => { release = resolve; });
+    },
+    onLog: () => {}, onStatus: () => {}
+  });
+  const insert = text => {
+    const row = dom.window.document.createElement('div'); row.dataset.e2e = 'chat-message';
+    row.innerHTML = `<b data-e2e="chat-nickname">观众</b><span data-e2e="chat-content">${text}</span>`;
+    dom.window.document.querySelector('#chat').append(row);
+  };
+  a.observeDOM();
+  try {
+    insert('正在处理');
+    await new Promise(resolve => setTimeout(resolve, 80));
+    insert('停止后不应投递');
+    a.stopDOM(); release?.();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(calls, ['正在处理']);
+    assert.equal(a.status.domBatches, 1);
+  } finally { release?.(); dom.window.close(); }
+});
+
+test('保存和开始互斥；运行时保存不暂停，失败保留修改且可重试', async () => {
   const dom=setup(),c={...copy(DEFAULTS),mode:'preview'},e=new Engine({config:c}); let rejectSave,starts=0;
   const p=new Panel({config:c,room:'1',callbacks:{save:()=>new Promise((_,reject)=>rejectSave=reject),start:()=>starts++}});
   try {
@@ -198,7 +289,7 @@ test('保存和开始互斥；运行时保存明确暂停，失败保留修改�
     rejectSave(new Error('暂时无法保存')); await new Promise(r=>setTimeout(r,10));
     assert.equal(p.dirty,true); assert.equal(p.node('form').inert,false); assert.equal(p.node('[data-action=start]').disabled,false);
     assert.match(p.node('.toast').textContent,/无法保存/);
-    e.start();p.refresh(e);assert.equal(p.node('[data-action=start]').hidden,true);assert.equal(p.node('[data-action=stop]').hidden,false);assert.equal(p.node('[data-action=save]').textContent,'保存并暂停');
+    e.start();p.refresh(e);assert.equal(p.node('[data-action=start]').hidden,true);assert.equal(p.node('[data-action=stop]').hidden,false);assert.equal(p.node('[data-action=save]').textContent,'保存设置');
     p.tab('gift');assert.equal(p.node('[data-action=stop]').closest('[data-page]'),null);
   } finally {p.destroy();dom.window.close();}
 });
@@ -254,7 +345,7 @@ test('各模块摘要跟随草稿；礼物快捷阈值和独立关键词页可�
     assert.equal(p.node('[data-field="gift.responseMode"]').value,'rules');
     assert.equal(p.node('[data-field="welcome.responseMode"]').value,'rules');
     assert.equal(p.node('[data-field="keyword.responseMode"]').value,'rules');
-    assert.match(p.node('[data-summary=gift]').textContent,/连击总价 ≥ 100 钻/);
+    assert.match(p.node('[data-summary=gift]').textContent,/连击总价 ≥ 2 钻/);
     p.node('[data-gift-value="500"]').click();
     assert.equal(p.node('[data-field="gift.minValue"]').value,'500');
     assert.match(p.node('[data-summary=gift]').textContent,/≥ 500 钻/);
@@ -384,17 +475,64 @@ test('真实抖音 SVG 发送按钮无 click 方法时仍提交一次，并等�
   adapter.status={connected:true,lastFrame:Date.now()};
   try {
     assert.equal(typeof button.click,'undefined');
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true});
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
     assert.equal(clicks,1);
-    assert.deepEqual(await adapter.send('欢迎新朋友',()=>true),{submitted:true});assert.equal(clicks,2);
+    assert.deepEqual(await adapter.send('欢迎新朋友',()=>true),{submitted:true,clicked:true});assert.equal(clicks,2);
   } finally {dom.window.close();}
+});
+
+test('ARIA 角色型抖音编辑器和相邻图标也能被准确定位', async () => {
+  const dom=setup('<div class="webcast-chatroom___input-container"><div id="editor" role="textbox" aria-label="与大家互动一下..."></div><div class="toolbar"><img class="webcast-chatroom___send-icon" alt=""></div></div>');
+  const input=dom.window.document.querySelector('#editor'), icon=dom.window.document.querySelector('img');
+  let clicks=0; icon.addEventListener('click',()=>{ clicks++; input.textContent=''; });
+  dom.window.document.execCommand=(command,unused,text)=>{ assert.equal(command,'insertText'); input.textContent=text; return true; };
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status={connected:true,lastFrame:Date.now()};
+  try { assert.equal(adapter.findInput(),input); assert.equal(adapter.findSend(input),icon); assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true}); assert.equal(clicks,1); }
+  finally { dom.window.close(); }
+});
+
+test('高价值欢迎发送时临时启用管理员弹幕并恢复用户原状态', async () => {
+  const dom=setup('<div id="chatInput"><label><input id="admin-mode" type="checkbox" role="switch"></label><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
+  const input=dom.window.document.querySelector('textarea'), toggle=dom.window.document.querySelector('#admin-mode'), button=dom.window.document.querySelector('button');
+  let modeAtSend;
+  button.addEventListener('click',()=>{modeAtSend=toggle.checked;input.value='';});
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
+  try {
+    const result=await adapter.send('欢迎贵宾',()=>true,{channel:'admin'});
+    assert.equal(result.submitted,true);assert.equal(result.channelUsed,'admin');assert.equal(modeAtSend,true);assert.equal(toggle.checked,false);
+    toggle.checked=true;
+    await adapter.send('普通互动',()=>true,{channel:'chat'});
+    assert.equal(modeAtSend,false);assert.equal(toggle.checked,true);
+  } finally {dom.window.close();}
+});
+
+test('管理员弹幕开关不可用时安全回退普通弹幕', async () => {
+  const dom=setup('<div id="chatInput"><input type="checkbox" role="switch" disabled><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
+  const input=dom.window.document.querySelector('textarea'),button=dom.window.document.querySelector('button');let clicks=0;
+  button.addEventListener('click',()=>{clicks++;input.value='';});
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
+  try { const result=await adapter.send('欢迎贵宾',()=>true,{channel:'admin'});assert.equal(result.submitted,true);assert.equal(result.channelUsed,'chat');assert.match(result.modeFallback,/不可用/);assert.equal(clicks,1); }
+  finally {dom.window.close();}
+});
+
+test('抖音重绘后旧的手动选择器失效时回退到当前控件', () => {
+  const dom=setup('<div id="chatInput" class="webcast-chatroom___input-container"><div contenteditable="true" data-placeholder="与大家互动一下...">​</div><svg class="webcast-chatroom___send-btn"></svg></div>');
+  const c=copy(DEFAULTS); c.adapter.inputSelector='#removed-editor'; c.adapter.sendSelector='#removed-send';
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>c,onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  const input=dom.window.document.querySelector('[contenteditable]'),send=dom.window.document.querySelector('svg');
+  try { assert.equal(adapter.findInput(),input); assert.equal(adapter.findSend(input),send); }
+  finally { dom.window.close(); }
 });
 
 test('点击无效不会误报已提交，也不重复点击发送按钮', async () => {
   const dom=setup('<div><textarea placeholder="说点什么"></textarea><svg class="webcast-chatroom___send-btn"></svg></div>');
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status={connected:true,lastFrame:Date.now()};let clicks=0;dom.window.document.querySelector('svg').addEventListener('click',()=>clicks++);
-  try {await assert.rejects(adapter.send('感谢支持',()=>true),/未确认提交/);assert.equal(clicks,1);assert.equal(dom.window.document.querySelector('textarea').value,'感谢支持');}
+  adapter.status={connected:true,lastFrame:Date.now()};let clicks=0;const input=dom.window.document.querySelector('textarea');dom.window.document.querySelector('svg').addEventListener('click',()=>{clicks++;if(clicks===2)input.value='';});
+  try {
+    const first=await adapter.send('感谢支持',()=>true);assert.equal(first.submitted,false);assert.equal(first.clicked,true);assert.match(first.reason,/自动重试/);assert.equal(clicks,1);assert.equal(input.value,'');
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(clicks,2);
+  }
   finally {dom.window.close();}
 });
 
@@ -413,7 +551,7 @@ test('发送控件短暂缺失或输入禁用可以重试，多个发送候选�
     const pending=adapter.send('感谢支持',()=>true);button.remove();
     await assert.rejects(pending,retryable);assert.equal(input.value,'');
     input.parentElement.append(button);button.addEventListener('click',()=>{input.value='';});
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true});
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
   } finally {dom.window.close();}
 });
 
@@ -491,15 +629,46 @@ test('面板键盘事件不冒泡到直播页，输入法/修饰键/长按不导
     key(dom.window.document.body,' ');assert.equal(hostKeys,1);
   } finally {p.destroy();dom.window.close();}
 });
-test('应用所有内部暂停都释放本页锁；重连不中止，页面缓存返回后可重新开始', async () => {
+test('消息入队和上一条发送完成立即唤醒发送器，不依赖轮询且保持串行', async () => {
+  const dom = setup(), values = new Map([['live-assistant:config:1234567890',{mode:'auto'}]]);
+  let api, finishFirst, active = 0, maximum = 0; const sent = [];
+  const adapter = {status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true,
+    send:async text => {
+      active++; maximum = Math.max(maximum,active); sent.push(text);
+      if (sent.length === 1) await new Promise(resolve => { finishFirst = resolve; });
+      active--; return {submitted:true};
+    }};
+  const savedInterval = globalThis.setInterval;
+  globalThis.setInterval = callback => savedInterval(callback,60000);
+  let engine;
+  try {
+    engine = boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:(key,value)=>values.set(key,value),del:key=>values.delete(key),request:()=>{},adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>{api=value;}});
+  } finally { globalThis.setInterval = savedInterval; }
+  try {
+    engine.start(); engine.enqueue('gift','第一条礼物'); engine.enqueue('gift','第二条礼物');
+    await new Promise(setImmediate);
+    assert.deepEqual(sent,['第一条礼物']); assert.equal(engine.busy,true);
+    finishFirst(); await new Promise(setImmediate);
+    assert.deepEqual(sent,['第一条礼物','第二条礼物']); assert.equal(maximum,1); assert.equal(engine.queue.length,0);
+    engine.config.blockedWords = ['被屏蔽'];
+    let checks = 0; const tick = engine.tick.bind(engine);
+    engine.tick = async (...args) => { checks++; return tick(...args); };
+    engine.queue.push({id:999,kind:'gift',text:'被屏蔽',priority:100,created:Date.now(),expires:Infinity,giftReply:{userKey:'uid:block'}});
+    engine.changed(); await new Promise(setImmediate);
+    assert.equal(checks,1,'格式错误应保留任务且不能触发无进展的微任务循环');
+    assert.equal(engine.queue.length,1); assert.equal(sent.length,2);
+  } finally {finishFirst?.();dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});
+
+test('发送异常和重连不主动暂停；页面缓存返回后仍可继续运行', async () => {
   const dom=setup(),values=new Map([['live-assistant:config:1234567890',{mode:'auto'}]]);
   let api;let connected=true;const lock=new RoomLock({room:'1234567890'});
   const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>connected,findInput:()=>({}),findSend(){},sync(){},send:async()=>{throw new Error('模拟失败');}};
   const engine=boot({page:dom.window,lock,get:(k,f)=>values.get(k)??f,set:(k,v)=>values.set(k,v),del:k=>values.delete(k),request:()=>{},adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
   const clickStart=async()=>{api.panel.refresh(engine);api.panel.node('[data-action=start]').click();await new Promise(r=>setTimeout(r,20));assert.equal(engine.running,true);assert.equal(lock.held,true);};
   try {
-    await clickStart();engine.enqueue('gift','谢谢支持');await engine.tick();assert.equal(engine.running,false);assert.equal(lock.held,false);
-    await clickStart();engine.ingest({type:'end'});assert.equal(lock.held,false);
+    await clickStart();engine.enqueue('gift','谢谢支持');await engine.tick();assert.equal(engine.running,true);assert.equal(lock.held,true);
+    engine.ingest({type:'end'});assert.equal(engine.running,true);assert.equal(lock.held,true);
     await clickStart();connected=false;await new Promise(r=>setTimeout(r,310));assert.equal(engine.running,true);assert.equal(lock.held,true);
     connected=true;await new Promise(r=>setTimeout(r,310));assert.equal(engine.running,true);
     dom.window.dispatchEvent(new dom.window.PageTransitionEvent('pagehide',{persisted:true}));assert.equal(engine.running,false);assert.equal(lock.held,false);
@@ -519,7 +688,7 @@ test('运行中事件先写入日志；状态快照成功后确认日志，重�
   const engine=boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:async(key,value)=>{if(key.includes(':runtime:')){order.push('snapshot');if(failSnapshot)throw new Error('测试快照失败');}values.set(key,value);},del:key=>values.delete(key),journal,request:()=>{},adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>true,sync(){},replayJournal:async()=>{if(allowReplay)for(const record of [...pending])await onEvent({...record.event,_journalKey:record.key});}};},identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>{api=value;}});
   try {
     api.panel.node('[data-action=start]').click();await new Promise(resolve=>setTimeout(resolve,30));
-    order.length=0;await onEvent({type:'chat',id:'live-chat',user:{id:'viewer-1',name:'实时观众'},text:'你好'});
+    order.length=0;await onEvent(Object.freeze({type:'chat',id:'live-chat',user:{id:'viewer-1',name:'实时观众'},text:'你好'}));
     await onEvent({type:'chat',id:'live-chat-2',user:{id:'viewer-2',name:'实时观众2'},text:'你好2'});
     const liveDeadline=Date.now()+1000;while(Date.now()<liveDeadline&&!order.includes('ack'))await new Promise(resolve=>setTimeout(resolve,5));
     assert.equal(order.filter(item=>item==='snapshot').length,1,'相邻事件应合并为一次运行快照');

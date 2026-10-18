@@ -25,7 +25,7 @@ export function boot(options = {}) {
   if (!config.anchorId) config.anchorId = new URLSearchParams(location.search).get('anchor_id')?.match(/^\d+$/)?.[0] || '';
   const sessionKeys = new Map(); let panel, engine, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false;
   const runtimeWriter = new RuntimeWriter(snapshot => set(runtimeKey, snapshot));
-  // 自动开启只在本页首次进入时保持武装；手动暂停、发送失败或下播后不偷偷重启。
+  // 自动开启只在本页首次进入时保持武装；只有用户明确点击暂停才关闭。
   let autoStartArmed = true, resumeAutoStart = false, manualPause = false, autoStartNext = 0, autoStartError = '';
   const viewers = new Map(), giftActivity = new Map(), giftLedger = new GiftLedger();
   // 账本写入与场控发送解耦：存储短暂失败时保留最新连击进度并自动重试，
@@ -35,7 +35,7 @@ export function boot(options = {}) {
     if (!engine || closed && !immediate) return;
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
     const save = () => {
-      const snapshot = { ...engine.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])) };
+      const snapshot = { ...engine.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0} : runtimeSnapshot?.collection || null };
       const write = runtimeWriter.save(snapshot);
       const reported = write.catch(error => log('error', `运行状态保存失败：${error.message}`));
       return immediate ? write : reported;
@@ -52,6 +52,28 @@ export function boot(options = {}) {
   let identity = {};
   const log = (category, message) => { if (panel) panel.log(category, message); else { logBacklog.push([category, message]); if (logBacklog.length > 200) logBacklog.shift(); } };
   const refresh = () => { if (panel && !closed && !suspended && !renderTimer) renderTimer = setTimeout(() => { renderTimer = null; panel.refresh(engine, network); }, 100); };
+  let sendingScheduled = false, senderActive = false;
+  const wakeSender = () => {
+    if (sendingScheduled || senderActive || !engine?.running || engine.busy || closed || suspended || location.pathname !== initialPath) return;
+    const now = Date.now();
+    if (!engine.queue.some(job => engine.giftReady(job, now)) && ![...engine.gifts.values()].some(gift => gift.due <= now && gift.count > gift.credited)) return;
+    if (!demo && engine.config.mode !== 'preview' && !adapter.healthy()) return;
+    sendingScheduled = true;
+    queueMicrotask(async () => {
+      sendingScheduled = false;
+      if (!engine.running || engine.busy || closed || suspended || location.pathname !== initialPath) return;
+      const beforeJob = engine.selectNextJob(engine.queue, Date.now())?.id;
+      const beforeSent = engine.stats.submitted + engine.stats.previews;
+      senderActive = true;
+      try { await engine.tick(demo || engine.config.mode === 'preview' || adapter.healthy()); }
+      catch (error) { log('error', `即时发送异常，消息保留：${error.message}`); }
+      finally {
+        senderActive = false;
+        // 格式错误等没有进展的任务交给常规检查，避免微任务持续重试阻塞页面。
+        if (engine.stats.submitted + engine.stats.previews > beforeSent || engine.selectNextJob(engine.queue, Date.now())?.id !== beforeJob) wakeSender();
+      }
+    });
+  };
   async function loadIncome({ profiles = false } = {}) {
     if (!panel || closed) return;
     const request = ++incomeRequest;
@@ -81,7 +103,7 @@ export function boot(options = {}) {
       for (const [key, item] of incomePending) {
         if (item.nextAt > Date.now()) continue;
         try {
-          await repository.record({ room, event:item.event, userKey:item.userKey, rate:item.rate });
+          await repository.record({ room, event:item.event, userKey:item.userKey, rate:item.rate, capturedAt:item.capturedAt });
           if (incomePending.get(key) === item) { incomePending.delete(key); persistRuntime(); }
           refreshIncome();
         } catch (error) {
@@ -104,9 +126,10 @@ export function boot(options = {}) {
   };
   const queueIncome = (event, userKey) => {
     const key = incomeKey(event, userKey), old = incomePending.get(key);
+    if (!old && incomePending.size >= 2000) throw Object.assign(new Error('待入账礼物已达上限；原始日志保留，请恢复存储后重试'),{code:'BACKPRESSURE'});
     // 同一连击只保留最新累计数；GiftStore 会按持久进度计算增量。
     const nextEvent = old && Number(old.event.count) > Number(event.count) ? old.event : event;
-    incomePending.set(key, { event:nextEvent, userKey, rate:engine.config.gift.yuanPerDiamond, attempts:old?.attempts || 0, nextAt:old?.nextAt || Date.now() });
+    incomePending.set(key, { event:nextEvent, userKey, rate:engine.config.gift.yuanPerDiamond, capturedAt:old?.capturedAt || event.capturedAt || Date.now(), attempts:old?.attempts || 0, nextAt:old?.nextAt || Date.now() });
     void drainIncome();
   };
   async function registerProfile(name) {
@@ -131,7 +154,7 @@ export function boot(options = {}) {
       const eventUserKey = user?.id ? `uid:${user.id}` : user?.secUid ? `sec:${user.secUid}` : user?.name ? `name:${user.name}` : 'anonymous';
       const override = engine.config.gift.prices[event.giftId] ?? engine.config.gift.prices[event.giftName];
       const unitValue = event.unitValue > 0 ? event.unitValue : override > 0 ? override : null;
-      const record = { type:'gift', id:event.id, groupId:event.groupId, giftId:event.giftId, giftName:event.giftName, roomId:event.roomId, count:Number(event.count) || 1, unitValue, at:event.at, receivedAt:event.receivedAt, final:Boolean(event.final), user:{id:user?.id || ''} };
+      const record = { type:'gift', id:event.id, groupId:event.groupId, giftId:event.giftId, giftName:event.giftName, roomId:event.roomId, count:Number(event.count) || 1, unitValue, at:event.at, receivedAt:event.receivedAt, capturedAt:event._journalSavedAt || event.receivedAt || Date.now(), final:Boolean(event.final), user:{id:user?.id || ''} };
       giftLedger.observe(record, room, eventUserKey);
       if (engine.config.incomeEnabled) queueIncome(record, eventUserKey);
       if (!user?.name) refreshGifts();
@@ -165,50 +188,69 @@ export function boot(options = {}) {
   const adapter = makeAdapter({
     page,
     getConfig: () => engine.config,
+    onEcho:event=>engine?.observeEcho(event),
     onEvent: async event => {
       const journalKey = event?._journalKey;
-      const { _journalKey, ...liveEvent } = event || {};
+      const { _journalKey, _journalId, _journalSavedAt, ...liveEvent } = event || {};
       // A journal append may finish after pagehide. Keep that record for recovery.
       if (!engine || closed || suspended || location.pathname !== initialPath) return;
-      if (engine.isSelfUser(liveEvent?.user)) {
+      const echoed = engine.observeEcho(liveEvent);
+      if (engine.isSelfUser(liveEvent?.user) && (echoed || !engine.acceptsSelfGameChat(liveEvent))) {
         if (journalKey) await options.journal.ack(journalKey);
         return;
       }
-      if (engine.running && options.journal && !journalKey) {
-        const saved = await options.journal.append(liveEvent);
-        event = { ...liveEvent, _journalKey:saved.key };
-      } else event = liveEvent;
+      let journalWrite = null;
+      if ((engine.running || liveEvent.type === 'gift') && options.journal && !journalKey) {
+        // Incoming messages are structured-cloned in the extension, but direct
+        // integrations/tests may provide frozen objects. Work on a shallow copy
+        // before attaching recovery metadata so a read-only event cannot abort
+        // the whole inbox drain.
+        const journalId = event?._journalId || crypto.randomUUID();
+        event = {...liveEvent,_journalId:journalId};
+        try { journalWrite = Promise.resolve(options.journal.append(liveEvent,journalId)); }
+        catch (error) { log('error', `事件日志写入失败，直播互动已继续处理：${error.message}`); }
+        if (!event.id) event.id = `journal:${journalId}`;
+      } else event = {...liveEvent,...(journalKey ? {_journalKey:journalKey,_journalSavedAt} : {})};
       if (closed || suspended || location.pathname !== initialPath) return;
-      if (journalKey || event?._journalKey) {
-        if (!engine.running) { await options.journal.ack(journalKey || event._journalKey); return; }
-      }
       // 账本/侧栏错误不能中断场控回复，也不能阻塞同帧中后续的消息。
       try { rememberUser(event); } catch (error) { log('error', `互动资料更新失败：${error.message}`); }
       engine.ingest(event);
-      if (journalKey || event?._journalKey) journalCommitter?.add(journalKey || event._journalKey);
+      if (journalWrite) {
+        void (async () => {
+          try {
+            const saved = await journalWrite;
+            event._journalKey = saved.key;
+            event._journalSavedAt = saved.savedAt;
+            journalCommitter?.add(saved.key);
+          } catch (error) { log('error', `事件日志写入失败，直播互动已继续处理：${error.message}`); }
+        })();
+      } else if (journalKey || event?._journalKey) journalCommitter?.add(journalKey || event._journalKey);
     },
-    onLog: log, onStatus: status => { network = status; refresh(); },
+    onLog: log, onStatus: status => {
+      const previousGaps = (network.ingestion?.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0);
+      network = status; refresh(); wakeSender();
+      if ((status.ingestion?.gaps || 0)+(status.bridgeGaps || 0)+(status.frameGaps || 0) !== previousGaps) persistRuntime();
+    },
     shouldReadChat: () => engine.running && ((engine.config.ai.enabled && engine.config.ai.chatEnabled) || engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled)
   });
   engine = new Engine({
     config, log, ai: client,
-    changed: () => { refresh(); persistRuntime(); }, checkpoint: () => persistRuntime(true),
+    changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
     onStop: () => { lock.release(); autoStartArmed = false; },
-    send: demo ? async (text, isCurrent) => { if (!isCurrent()) return { submitted: false }; log('lab', `模拟发送：${text}`); return { submitted: true }; } : (text, isCurrent) => adapter.send(text, () => isCurrent() && lock.held && location.pathname === initialPath)
+    send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : (text, isCurrent, hooks) => adapter.send(text, () => isCurrent() && lock.held && location.pathname === initialPath,hooks)
   });
-  if (engine.restore(runtimeSnapshot)) {
-    if (Array.isArray(runtimeSnapshot.incomePending)) for (const entry of copy(runtimeSnapshot.incomePending)) {
+  if (runtimeSnapshot?.version === 1 && Array.isArray(runtimeSnapshot.incomePending)) for (const entry of copy(runtimeSnapshot.incomePending)) {
       if (Array.isArray(entry) && typeof entry[0] === 'string' && entry[1]?.event) incomePending.set(entry[0], entry[1]);
-    }
+  }
+  if (engine.restore(runtimeSnapshot)) {
     autoStartArmed = engine.resumeRequested || Boolean(engine.config.automation.autoStart);
-    if (engine.recoveredUncertainSend) log('system', '刷新前有一条消息尚未确认；已恢复到队列继续处理，极少数情况下可能重复发送');
     if (engine.resumeRequested) log('system', '已恢复上次运行状态，连接就绪后自动续跑');
   }
   function applyIdentity(next) {
     identity = { ...next, admin: roomAdminStatus(next.self, next.adminUserIds) }; const c = engine.config;
     engine.setIdentity(identity);
     if (next.anchor && c.identity.autoAnchor) {
-      if (c.anchorId && c.anchorId !== next.anchor.id && engine.running) pause('主播资料发生变化，已暂停；请核对后重新开始');
+      if (c.anchorId && c.anchorId !== next.anchor.id && engine.running) log('error', '识别到主播资料变化；场控保持运行，请检查当前房间配置');
       c.anchorId = next.anchor.id;
     }
     if (c.identity.autoSelf && Object.hasOwn(next,'self')) c.selfId = next.self?.id || '';
@@ -217,7 +259,7 @@ export function boot(options = {}) {
   }
   const identityReader = demo ? null : options.identityFactory ? options.identityFactory(applyIdentity) : new IdentityReader({ page, room, onIdentity:applyIdentity });
   // 首屏渲染前安装，不重建连接、不改变 binaryType、不发送 ACK 或心跳。
-  if (!demo) adapter.hook();
+  if (!demo) { adapter.restoreCollection?.(runtimeSnapshot?.collection); adapter.hook(); }
   else network = adapter.status = { hook: true, sockets: 1, frames: 1, events: 0, errors: 0, connected: true, lastFrame: Date.now() };
   async function keepKey(c, key, remember) {
     if (!key) return;
@@ -293,7 +335,7 @@ export function boot(options = {}) {
       start: () => start(), stop: () => pause('人工暂停，已清空发送队列与弹幕上下文', { manual: true }), lab,
       identify: async () => { if (demo) { applyIdentity({ anchor:{ id:'1234567890', name:'模拟主播' }, self:{ id:'9876543210', name:'我的场控账号（模拟）' } }); panel.toast('已识别模拟主播和账号'); } else { await identityReader.refresh(); panel.toast('识别完成；未识别的项目可手动补充'); } },
       save: async (c, key, remember) => {
-        await keepKey(c, key, remember); pause('正在保存设置，已暂停场控');
+        await keepKey(c, key, remember);
         if (c.identity.autoAnchor && identity.anchor) c.anchorId = identity.anchor.id;
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
         await set(configKey, c); engine.update(c); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
@@ -306,6 +348,8 @@ export function boot(options = {}) {
         log('ai', `连接测试通过：${output.slice(0, 300)}`); panel.toast('AI 连接测试通过。测试内容不会发送到公屏。');
       },
       diagnose: () => adapter.diagnose(),
+      recoverEvents: async () => { await drainIncome(); await journalCommitter?.flush(); await adapter.recoverEvents?.(); await adapter.checkStorage?.(); refresh(); },
+      exportEvents: async () => download(`douyin-recovery-${room}.json`,JSON.stringify({savedAt:Date.now(),runtime:engine.snapshot(),incomePending:[...incomePending],collection:adapter.exportEvents ? await adapter.exportEvents() : network},null,2)),
       exportConfig: () => download(`douyin-live-${room}.json`, JSON.stringify(engine.config, null, 2)),
       income: () => loadIncome({profiles:true}),
       exportIncome: async () => { const selection = panel.incomeSelection(); download(`douyin-income-${selection.room}-${selection.month}.json`, JSON.stringify(await repository.report(selection.room, selection.month), null, 2)); },
@@ -339,19 +383,45 @@ export function boot(options = {}) {
     panel.refresh(engine, network);
     if (demo) applyIdentity({ anchor:{ id:'1234567890', name:'模拟主播' }, self:{ id:'9876543210', name:'我的场控账号（模拟）' } });
     else void identityReader.refresh().catch(e => log('error', `自动识别暂不可用：${e.message}`));
-    let lastDateCheck = 0, incomeDay = giftDate(), waitingForConnection = false;
+    let lastDateCheck = 0, lastStorageCheck = 0, lastPKRefresh = 0, lastContributionCheck = 0, contributionCheckBusy = false, incomeDay = giftDate(), waitingForConnection = false;
     const timer = setInterval(async () => {
       if (closed || suspended) return;
       if (demo) { network.lastFrame = adapter.status.lastFrame = Date.now(); }
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
-      if (location.pathname !== initialPath) { pause('直播间已切换，请刷新页面重新载入对应设置'); clearInterval(timer); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (engine.config.incomeEnabled && repository.recordContribution && adapter.readAudienceContributions && Date.now() - lastContributionCheck >= 15000 && !contributionCheckBusy) {
+        lastContributionCheck = Date.now(); contributionCheckBusy = true;
+        void (async () => {
+          try {
+            const rows = adapter.readAudienceContributions();
+            const knownByName = new Map();
+            let matched = 0, updated = false;
+            const nameKey = value => String(value || '').replace(/\s+/g, '').trim();
+            for (const viewer of viewers.values()) {
+              const key = nameKey(viewer.name), list = knownByName.get(key) || []; list.push(viewer); knownByName.set(key, list);
+            }
+            for (const row of rows) {
+              const matches = knownByName.get(nameKey(row.name)) || [];
+              const id = row.userId && /^\d{4,30}$/.test(row.userId) ? row.userId : matches.length === 1 ? matches[0].id : '';
+              if (!id) continue;
+              matched++;
+              updated = await repository.recordContribution({ room, date:giftDate(), userId:`uid:${id}`, name:row.name, score:row.score, scoreIsFloor:row.scoreIsFloor }) || updated;
+            }
+            panel?.updateContributionStatus({rows:rows.length,matched,checkedAt:Date.now()});
+            if (updated) refreshIncome();
+          } catch (error) { log('error', `在线贡献榜校准读取失败：${error.message}`); }
+          finally { contributionCheckBusy = false; }
+        })();
+      }
+      if (location.pathname !== initialPath) { log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
+      if (engine.pk.current()?.phase === 'active' && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
+      if (adapter.checkStorage && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>log('error',`存储用量检查失败：${error.message}`)); }
       void tryAutoStart();
       const waiting = engine.running && !demo && engine.config.mode !== 'preview' && !adapter.healthy();
       if (waiting !== waitingForConnection) { waitingForConnection = waiting; if (engine.running) log('system', waiting ? '直播数据重连中，暂缓发送；连接恢复后继续' : '直播数据连接已恢复，继续场控'); }
       const tickEpoch = engine.epoch;
       try { await engine.tick(demo || engine.config.mode === 'preview' || adapter.healthy()); }
-      catch (e) { if (engine.epoch === tickEpoch) { log('error', e.message); pause('运行异常，已暂停'); } }
+      catch (e) { if (engine.epoch === tickEpoch) log('error', `运行异常，场控保持运行：${e.message}`); }
     }, 250);
     panel.updateGifts([...giftActivity.values()].reverse());
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.snapshot(), engine.config.gift.yuanPerDiamond);
@@ -363,7 +433,7 @@ export function boot(options = {}) {
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { clearInterval(timer); identityReader?.close(); }
+      if (closed) { clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();

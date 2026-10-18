@@ -76,6 +76,14 @@ test('协议缺失创建时间返回 0 时按采集日期记账，不写入 1970
   assert.equal(ledger.days.get('2026-10-15').totalDiamonds,50);
 });
 
+test('实时礼物平台时间偏差超过十分钟时按捕获日期记收入', () => {
+  const capturedAt = Date.parse('2026-10-18T04:00:00Z');
+  const ledger = new GiftLedger({now:()=>capturedAt});
+  ledger.observe(gift({giftName:'暮光恋人',count:1,unitValue:1999,final:true,at:capturedAt-30*60000,capturedAt,receivedAt:capturedAt}), '1', 'uid:1');
+  assert.deepEqual(ledger.summary('2026-10-18'),{totalDiamonds:1999,unknownCount:0,giftCount:1,estimatedIncome:99.95});
+  assert.equal(ledger.days.has('2026-10-17'),false);
+});
+
 test('结束通知先到时，后到的更大累计数只补增量，单价可在结束后补齐', () => {
   const ledger = new GiftLedger();
   ledger.observe(gift({count:2,unitValue:null,final:true}), '1', 'uid:1');

@@ -6,9 +6,10 @@
 
 - 礼物感谢、连击合并、荣誉等级与粉丝团条件欢迎、点赞感谢。
 - 关键词回复、多组定时消息、可配置的 AI 回复。
-- @机器人菜单、成语接龙、猜数字、真心话与大冒险等互动。
-- 多主播配置、礼物日/月统计和收入估算。
-- 消息队列、失败重试、运行状态保存与刷新恢复。
+- @机器人菜单、成语接龙、猜数字、真心话与大冒险等互动；部分玩法支持房间内自然回答。
+- PK 比分状态、倒计时、双方归属和可解释的观测统计；无法确认的数据保持未知。
+- 多主播配置、礼物日/月统计、榜单估值和收入估算，数据跨刷新与后台重启保留。
+- 有界事件缓冲、持久日志、失败隔离、发送回显/未知状态和恢复导出。
 
 ## 安装
 
@@ -47,6 +48,7 @@ npm run dev
 - [项目结构与架构](docs/development/architecture.zh-CN.md)
 - [开发与测试](docs/development/contributing.zh-CN.md)
 - [验证记录](docs/reviews/validation.zh-CN.md)
+- [PK 协议核对](docs/research/pk-protocol.zh-CN.md)
 - [发布流程](docs/development/release-process.zh-CN.md)
 - [全部文档](docs/README.md)
 

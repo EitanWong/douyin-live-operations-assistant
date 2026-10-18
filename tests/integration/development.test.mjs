@@ -9,7 +9,7 @@ import { installDevelopmentReload } from '../../extension/development-reload.js'
 const run = promisify(execFile);
 const a = 'a'.repeat(64), b = 'b'.repeat(64);
 
-function harness({revision=a,values={},fetchUpdate,beforeReload}={}) {
+function harness({revision=a,values={},fetchUpdate,beforeReload,alarmsAvailable=true}={}) {
   let alarm,connect,reloads=0,flushed=0;
   const tabs = new Map([[1,{id:1,url:'https://live.douyin.com/123'}],[2,{id:2,url:'https://example.com/'}]]), refreshed=[];
   const chrome = {
@@ -18,9 +18,28 @@ function harness({revision=a,values={},fetchUpdate,beforeReload}={}) {
     tabs:{query:async()=>[...tabs.values()],get:async id=>tabs.get(id),reload:async id=>refreshed.push(id)},
     alarms:{create:async()=>{},onAlarm:{addListener:f=>alarm=f}}
   };
+  if (!alarmsAvailable) delete chrome.alarms;
   const api=installDevelopmentReload({chrome,revision,endpoint:'http://127.0.0.1:4179/build',beforeReload:async()=>{flushed++;await beforeReload?.();},fetchUpdate:fetchUpdate || (async()=>({ok:true,json:async()=>({revision})}))});
   return {api,values,tabs,refreshed,alarm,connect,reloads:()=>reloads,flushed:()=>flushed};
 }
+
+test('缺少 alarms 权限时仍完成初始化，并通过直播页心跳检测更新', async () => {
+  let next=a, ping;
+  const h=harness({alarmsAvailable:false,fetchUpdate:async()=>({ok:true,json:async()=>({revision:next})})});
+  await h.api.checkUpdate(); assert.equal(h.reloads(),0);
+  h.connect({name:'live-assistant-development',sender:{frameId:0,tab:{url:'https://live.douyin.com/123'}},onMessage:{addListener:f=>ping=f}});
+  next=b; ping(); await h.api.checkUpdate();
+  assert.equal(h.reloads(),1); assert.equal(h.flushed(),1);
+});
+
+test('具有 alarms 权限时由定时事件检测更新，忽略其他闹钟', async () => {
+  let next=a, checks=0;
+  const h=harness({fetchUpdate:async()=>{checks++;return {ok:true,json:async()=>({revision:next})};}});
+  await h.api.checkUpdate(); const initialChecks=checks;
+  next=b; h.alarm({name:'unrelated'}); assert.equal(checks,initialChecks);
+  h.alarm({name:'live-assistant-development'}); await h.api.checkUpdate();
+  assert.equal(h.reloads(),1); assert.equal(h.flushed(),1);
+});
 
 test('开发更新仅在构建变化后重载，先落账，并发检测只重载一次', async () => {
   let next=a;
