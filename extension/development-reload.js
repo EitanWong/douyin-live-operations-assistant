@@ -46,11 +46,15 @@ export function installDevelopmentReload({ chrome, revision, endpoint, beforeRel
     if (port.name !== 'live-assistant-development' || port.sender?.frameId !== 0 || !roomURL(port.sender?.tab?.url)) return;
     port.onMessage.addListener(() => { void checkUpdate(); });
   });
-  chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'live-assistant-development') void checkUpdate(); });
-  void (async () => {
-    try { await chrome.alarms.create('live-assistant-development', {periodInMinutes:0.5}); }
-    catch (error) { console.error('开发更新：无法创建更新检测', error); }
-  })();
+  // 从正式版切换到开发版后，Chrome 重新加载 manifest 前可能没有 alarms 权限。
+  // 此时保留直播页端口心跳和首次检测，避免开发辅助逻辑中断后台初始化。
+  if (chrome.alarms?.onAlarm && typeof chrome.alarms.create === 'function') {
+    chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === 'live-assistant-development') void checkUpdate(); });
+    void (async () => {
+      try { await chrome.alarms.create('live-assistant-development', {periodInMinutes:0.5}); }
+      catch (error) { console.error('开发更新：无法创建更新检测', error); }
+    })();
+  }
   void checkUpdate();
   return { checkUpdate, restored };
 }

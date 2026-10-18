@@ -16,3 +16,6 @@ coverage/
 .playwright-cli/
 output/
 *.zip
+
+# Local editor and OS metadata
+.DS_Store

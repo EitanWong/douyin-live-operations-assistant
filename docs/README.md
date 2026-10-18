@@ -21,7 +21,10 @@
 ## 调研资料
 
 - [功能与市场调研](research/market-research.zh-CN.md)
+- [2026-10-16 泛娱乐市场与开源项目调研](research/market-research-2026-10-16.zh-CN.md)
 - [LiveBot 参考脚本复盘](research/livebot-review.zh-CN.md)
+- [PK 比分协议核对](research/pk-protocol.zh-CN.md)
+- [互动题库来源与许可](research/interaction-question-sources.zh-CN.md)
 
 调研文档保留调研时的结论；当前行为以使用指南和代码为准。
 

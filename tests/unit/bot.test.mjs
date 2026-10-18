@@ -31,7 +31,7 @@ test('旧配置升级保留机器人默认关闭，子功能和间隔类型均�
   const config = mergeConfig({gift:{minValue:2}});
   assert.equal(config.bot.enabled,false); assert.equal(config.gift.minValue,2);
   assert.throws(()=>validateConfig({...config,bot:{...config.bot,diceEnabled:'yes'}}),/机器人/);
-  assert.throws(()=>validateConfig({...config,bot:{...config.bot,cooldownSec:0}}),/机器人/);
+  assert.equal(mergeConfig({bot:{...config.bot,cooldownSec:3}}).bot.cooldownSec,undefined);
 });
 
 test('不开启模块、未识别账号、自己或忽略用户均不触发机器人', () => {
@@ -41,12 +41,25 @@ test('不开启模块、未识别账号、自己或忽略用户均不触发机�
   engine.config.ignored=['uid:200'];chat('@小明 菜单');assert.equal(engine.queue.length,0);
 });
 
-test('本地指令优先于关键词和 AI，同一条帧不重复执行', () => {
+test('互动指令优先于关键词和普通聊天，同一条帧只运行一次并请求 AI', () => {
   const {engine,chat} = fixture(c=>{c.ai.enabled=true;c.ai.chatEnabled=true;c.keyword.enabled=true;});
-  engine.ai=async()=>assert.fail('本地指令不调用 AI');
+  engine.ai=async()=> '试试手气吧！';
   chat('@小明 骰子',{id:'one'});chat('@小明 骰子',{id:'one'});
   assert.equal(engine.queue.length,1);assert.equal(engine.queue[0].kind,'bot');assert.match(engine.queue[0].text,/1 点/);
-  assert.equal(engine.stats.aiCalls,0);
+  assert.equal(engine.stats.aiCalls,1);
+});
+
+test('机器人只有被@后收到明确菜单命令才回菜单；空命令和其他文本静默忽略', () => {
+  const {engine,chat} = fixture(c=>{c.ai.enabled=true;c.ai.chatEnabled=true;});
+  engine.ai=async()=>assert.fail('机器人未知文本不能转交AI');
+  chat('@小明');
+  chat('@小明 随便聊聊');
+  chat('@小明 帮助');
+  chat('@小红 菜单',{mentions:['300']});
+  assert.equal(engine.queue.length,0);
+  chat('@小明 菜单');
+  assert.equal(engine.queue.length,1);
+  assert.match(engine.queue[0].text,/🎮菜单/);
 });
 
 test('菜单按开关生成，最短字数限制下可翻页，不列出禁用玩法', () => {
@@ -110,33 +123,193 @@ test('机器人菜单使用短 emoji，并在分页时引导下一页', () => {
   assert.match(page, /菜单2|菜单/);
 });
 
-test('限制单人积压，但不同观众可得到相同结果；冷却后同一指令可再次回复', async () => {
-  const {engine,chat,advance} = fixture();
-  chat('@小明 硬币');advance(4000);chat('@小明 硬币');assert.equal(engine.queue.length,1);
+test('同一观众没有互动秒数冷却，但未发送的互动不重复排队', async () => {
+  const {engine,chat} = fixture();
+  chat('@小明 硬币');chat('@小明 硬币');assert.equal(engine.queue.length,1);
+  await engine.tick();
+  chat('@小明 硬币');assert.equal(engine.queue.length,1);
   chat('@小明 硬币',{user:{id:'300',name:'观众'}});assert.equal(engine.queue.length,2);
-  await engine.tick();advance(4000);chat('@小明 硬币');assert.equal(engine.queue.length,2);
 });
 
-test('接龙共享一局，拒绝重复/非词库/错开头；入队失败不推进游戏', async () => {
+test('随机起始成语保证可接续，游戏入队失败不推进状态且接龙不会超时结束', async () => {
   const {engine,chat,advance} = fixture();
   chat('@小明 接龙');assert.match(engine.queue[0].text,/一心一意/);await engine.tick();advance(4000);
   chat('@小明 接龙 意气风发');assert.equal(engine.bot.chain.word,'意气风发');await engine.tick();advance(4000);
-  chat('@小明 接龙 你好世界');assert.match(engine.queue[0].text,/未收录/);assert.equal(engine.bot.chain.word,'意气风发');await engine.tick();advance(4000);
+  chat('@小明 接龙 你好世界');assert.match(engine.queue[0].text,/应接|继续/);assert.equal(engine.bot.chain.word,'意气风发');await engine.tick();advance(4000);
   chat('@小明 接龙 一心一意');assert.match(engine.queue[0].text,/已用过/);await engine.tick();advance(4000);
   engine.config.sending.queueLimit=1;engine.enqueue('gift','谢谢礼物');
   chat('@小明 接龙 发扬光大');assert.equal(engine.bot.chain.word,'意气风发');
   await engine.tick();advance(4000);chat('@小明 接龙 发扬光大');assert.equal(engine.bot.chain.word,'发扬光大');
-  await engine.tick();advance(300001);chat('@小明 接龙');assert.match(engine.queue[0].text,/一心一意/);
+  await engine.tick();advance(300001);chat('@小明 接龙');assert.match(engine.queue[0].text,/当前词「发扬光大」/);assert.equal(engine.bot.session?.word,'发扬光大');
   engine.stop();assert.equal(engine.bot.chain,null);
 });
 
-test('房间级成语接龙启动后，普通观众无需 @ 即可参与', () => {
+test('每局随机抽取词库中的可接续成语', () => {
+  const bot = new RoomBot({random:()=>0.75});
+  bot.startSession('idiom');
+  assert.notEqual(bot.session.word,'一心一意');
+  assert.equal(bot.session.used.has(bot.session.word),true);
+});
+
+test('只需 @ 一次启动接龙；之后所有观众无需 @，同音成语都能接续', () => {
   const {engine,chat} = fixture();
   chat('@小明 开始成语接龙',{user:{id:'300',name:'主持观众'}});
   assert.equal(engine.bot.session?.type,'idiom');
-  chat('意气风发');
-  assert.equal(engine.bot.session?.word,'意气风发');
-  assert.ok(engine.queue.some(job=>/意气风发/.test(job.text)));
+  chat('以德报怨',{user:{id:'301',name:'第一位玩家'}});
+  assert.equal(engine.bot.session?.word,'以德报怨');
+  chat('怨天尤人',{user:{id:'302',name:'第二位玩家'}});
+  assert.equal(engine.bot.session?.word,'怨天尤人');
+  assert.ok(engine.queue.some(job=>/以德报怨/.test(job.text)));
+  assert.ok(engine.queue.some(job=>/怨天尤人/.test(job.text)));
+});
+
+test('明确开局无需 @，优先于普通聊天，AI 接话不重复开局', () => {
+  for (const [command,type] of [['开始成语接龙','idiom'],['开始接龙','idiom'],['开始猜数字','guess'],['开始真心话','truth'],['开始大冒险','dare']]) {
+    const {engine,chat} = fixture(c=>{
+      c.keyword.enabled=true;c.keyword.rules=[{keywords:[command],reply:'关键词回复',exact:true}];
+      c.ai.enabled=true;c.ai.chatEnabled=true;c.ai.trigger='all';
+    });
+    engine.ai=async()=> '欢迎来玩！';
+    chat(command,{id:'start',user:{id:'301',name:'一只开心🎀'}});
+    const session = engine.bot.session;
+    assert.equal(session?.type,type);
+    assert.equal(session.startedBy,'301');
+    assert.equal(engine.queue.length,1);
+    assert.equal(engine.queue[0].kind,'bot');
+    assert.match(engine.queue[0].text,/开始/u);
+    chat(command,{id:'start',user:{id:'301',name:'一只开心🎀'}});
+    chat(command,{user:{id:'301',name:'一只开心🎀'}});
+    assert.equal(engine.bot.session,session);
+    assert.equal(engine.queue.length,1);
+  }
+});
+
+test('成语接龙持续运行，直到主持人明确结束', async () => {
+  for (const expireWithTick of [false,true]) {
+    const {engine,chat,advance} = fixture();
+    chat('@小明 开始成语接龙');
+    await engine.tick();
+    const previous = engine.bot.session;
+    advance(300001);
+    if (expireWithTick) await engine.tick();
+    assert.equal(engine.bot.session,previous);
+    chat('开始成语接龙',{user:{id:'301',name:'一只开心🎀'}});
+    assert.equal(engine.bot.session?.type,'idiom');
+    assert.equal(engine.bot.session,previous);
+    assert.match(engine.queue.at(-1).text,/当前词/u);
+    chat('意气风发',{user:{id:'302',name:'接龙观众'}});
+    assert.equal(engine.bot.session.word,'意气风发');
+  }
+});
+
+test('免 @ 开局仍遵守开关和用户过滤，入队失败不创建会话', () => {
+  for (const change of [c=>{c.bot.enabled=false;},c=>{c.bot.idiomEnabled=false;},c=>{c.ignored=['uid:200'];}]) {
+    const {engine,chat} = fixture(change);
+    chat('开始成语接龙');
+    assert.equal(engine.bot.session,null);
+    assert.ok(engine.queue.every(job=>!/接龙开始/u.test(job.text)));
+  }
+  const {engine,chat} = fixture(c=>{c.sending.queueLimit=1;});
+  engine.enqueue('gift','感谢送礼');
+  chat('开始成语接龙');
+  assert.equal(engine.bot.session,null);
+  assert.equal(engine.queue.length,1);
+  assert.equal(engine.queue[0].kind,'gift');
+});
+
+test('免 @ 仅识别明确开局，普通提及不启动，进行中的接龙不被重置', () => {
+  const {engine,chat} = fixture();
+  for (const text of ['成语接龙','我想开始成语接龙','开始成语接龙了吗','菜单']) chat(text);
+  assert.equal(engine.bot.session,null);
+  assert.equal(engine.queue.length,0);
+  chat('开始成语接龙');
+  chat('意气风发',{user:{id:'301',name:'接龙观众'}});
+  const session = engine.bot.session;
+  chat('开始成语接龙',{user:{id:'302',name:'另一位观众'}});
+  assert.equal(engine.bot.session,session);
+  assert.equal(engine.bot.session.word,'意气风发');
+  assert.match(engine.queue.at(-1).text,/当前词「意气风发」/u);
+});
+
+test('接龙识别入不敷出，且本局中重复发词会反馈已用过（包括再次 @）', () => {
+  const {engine,chat} = fixture();
+  engine.bot.startSession('idiom','主持观众','uid:300','长驱直入');
+  chat('入不敷出',{user:{id:'301',name:'一只开心🎀'}});
+  assert.equal(engine.bot.session?.word,'入不敷出');
+  assert.match(engine.queue.at(-1).text,/✅入不敷出/u);
+  chat('@小明 入不敷出',{user:{id:'302',name:'一只开心🎀'}});
+  assert.equal(engine.bot.session?.word,'入不敷出');
+  assert.match(engine.queue.at(-1).text,/已用过/u);
+});
+
+test('主播本人可以继续已开始的接龙，常见成语不被小词库截断', () => {
+  const {engine,chat} = fixture();
+  engine.bot.startSession('idiom','一只开心🎀','uid:viewer','长驱直入');
+  chat('入不敷出',{user:{id:'200',name:'一只开心🎀'}});
+  chat('出谋划策',{user:self});
+  chat('策马扬鞭',{user:self});
+  assert.equal(engine.bot.session?.word,'策马扬鞭');
+  assert.ok(engine.queue.some(job=>/✅出谋划策/u.test(job.text)));
+  assert.ok(engine.queue.some(job=>/✅策马扬鞭/u.test(job.text)));
+});
+
+test('登录账号可开局，多个观众可随时接续，词库外四字词与错误均不截断游戏', async () => {
+  const {engine,chat,advance} = fixture();
+  chat('开始接龙',{user:self});
+  assert.equal(engine.bot.session?.type,'idiom');
+  await engine.tick();
+  const session = engine.bot.session;
+  chat('意在笔先',{user:{id:'301',name:'新加入观众'}});
+  assert.equal(session.word,'意在笔先');
+  await engine.tick();
+  for (let i=0;i<4;i++) {
+    chat('@小明 接龙 你好世界',{user:{id:`error-${i}`,name:'路过观众'}});
+    await engine.tick();
+  }
+  advance(86400000);
+  await engine.tick();
+  chat('@小明 先声夺人',{user:self});
+  assert.equal(engine.bot.session,session);
+  assert.equal(session.word,'先声夺人');
+  chat('人山人海',{user:{id:'302',name:'另一位新观众'}});
+  assert.equal(session.word,'人山人海');
+});
+
+test('接龙期间状态、菜单与结束命令优先于四字词识别，结束后仍可重新开局', async () => {
+  const {engine,chat} = fixture();
+  chat('开始接龙',{user:self});
+  await engine.tick();
+  const session = engine.bot.session;
+  for (const command of ['游戏状态','菜单']) {
+    chat(`@小明 ${command}`);
+    assert.equal(engine.bot.session,session);
+    assert.doesNotMatch(engine.queue.at(-1).text,/应接|请发四字/u);
+    await engine.tick();
+  }
+  chat('@小明 结束游戏',{user:self});
+  assert.equal(engine.bot.session,null);
+  assert.match(engine.queue.at(-1).text,/已结束/u);
+  await engine.tick();
+  chat('开始接龙',{user:{id:'303',name:'下一位观众'}});
+  assert.equal(engine.bot.session?.type,'idiom');
+});
+
+test('接龙允许常见近音，水和岁可按 sh/s 近音衔接', () => {
+  const bot = new RoomBot();
+  bot.startSession('idiom', '', '', '行云流水');
+  const move = bot.participate('岁月如梭',{id:'303',name:'近音玩家'},copy(DEFAULTS.bot),50);
+  assert.equal(move.handled,true);
+  move.commit();
+  assert.equal(bot.session.word,'岁月如梭');
+});
+
+test('接龙的前后鼻音归一化可双向匹配', () => {
+  for (const [previous,next] of [['掉以轻心','行云流水'],['身体力行','心想事成']]) {
+    const bot = new RoomBot(); bot.startSession('idiom', '', '', previous);
+    const move = bot.participate(next,{id:'player',name:'观众'},copy(DEFAULTS.bot),50);
+    assert.equal(move.handled,true); assert.match(move.text,/✅/u);
+    move.commit(); assert.equal(bot.session.word,next);
+  }
 });
 
 test('真心话和大冒险支持全房间报名与免 @ 回答', () => {
@@ -166,15 +339,15 @@ test('成语接龙不会误吞普通四字弹幕，显式接龙前缀仍可反�
   chat('明天见呀',{user:{id:'301',name:'普通观众'}});
   assert.ok(engine.queue.some(job=>job.kind==='keyword' && job.text==='晚点见'));
   chat('接龙 明天见呀',{user:{id:'302',name:'游戏观众'}});
-  assert.ok(engine.queue.some(job=>job.kind==='bot' && /未收录/.test(job.text)));
+  assert.ok(engine.queue.some(job=>job.kind==='bot' && /应接|请发四字/.test(job.text)));
 });
 
-test('成语接龙连续三次失败后结束本局，回答超时也会结束', async () => {
+test('成语接龙错误不会结束本局，其他游戏回答超时仍会结束', async () => {
   const f = fixture();
   f.chat('@小明 开始成语接龙',{user:{id:'300',name:'主持观众'}});
   for (const word of ['接龙 你好世界','接龙 你好世界','接龙 你好世界']) f.chat(word);
-  assert.equal(f.engine.bot.session,null);
-  assert.ok(f.engine.queue.some(job=>/本局结束/.test(job.text)));
+  assert.ok(f.engine.bot.session);
+  assert.equal(f.engine.bot.session.errors,3);
 
   const g = fixture();
   g.chat('@小明 开始真心话',{user:{id:'300',name:'主持观众'}});
@@ -195,17 +368,18 @@ test('游戏回复入队失败时不推进会话状态，礼物队列保持优�
   assert.equal(engine.queue[0].kind,'gift');
 });
 
-test('普通 @ 提问仅在 AI 服务及问答都开启时调用，忙碌/失败也有本地反馈', async () => {
-  const f=fixture();f.chat('@小明 今天天气如何？');assert.match(f.engine.queue[0].text,/菜单/);assert.equal(f.engine.stats.aiCalls,0);
+test('机器人开启时，@当前账号的普通提问不会默认触发菜单或AI回复', async () => {
   const g=fixture(c=>{c.ai.enabled=true;c.ai.chatEnabled=true;});
-  g.engine.ai=async()=>{throw new Error('offline');};g.chat('@小明 今天天气如何？');await new Promise(setImmediate);
-  assert.equal(g.engine.queue.length,1);assert.match(g.engine.queue[0].text,/AI.*菜单/);assert.equal(g.engine.queue[0].botUser,viewer.id);
-  g.chat('@小明 你好吗？',{user:{id:'300',name:'其他人'}});await new Promise(setImmediate);
-  assert.equal(g.engine.stats.aiCalls,1);assert.equal(g.engine.queue.length,2);
+  g.engine.ai=async()=>assert.fail('未知机器人命令不调用AI');
+  g.chat('@小明 今天天气如何？');
+  g.chat('@小明 你好吗？',{user:{id:'300',name:'其他人'}});
+  await new Promise(setImmediate);
+  assert.equal(g.engine.stats.aiCalls,0);
+  assert.equal(g.engine.queue.length,0);
 });
 
 test('普通 AI 问答仍受全局调用限额，暂停后迟到结果不会发送', async () => {
-  const {engine,chat}=fixture(c=>{c.ai.enabled=true;c.ai.chatEnabled=true;});let complete;
+  const {engine,chat}=fixture(c=>{c.bot.enabled=false;c.ai.enabled=true;c.ai.chatEnabled=true;});let complete;
   engine.ai=()=>new Promise(resolve=>{complete=resolve;});chat('@小明 介绍一下今天直播');chat('@小明 第二个问题');
   assert.equal(engine.stats.aiCalls,1);engine.stop();complete('今天聊音乐');await new Promise(setImmediate);assert.equal(engine.queue.length,0);
 });

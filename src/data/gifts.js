@@ -4,6 +4,7 @@ export const giftDate = (at = Date.now()) => {
   return `${parts.year}-${parts.month}-${parts.day}`;
 };
 const emptyGiftTotal = () => ({ totalDiamonds: 0, unknownCount: 0, giftCount: 0, estimatedIncome: 0 });
+const CONTRIBUTION_YUAN_PER_POINT = 0.1;
 
 export class GiftLedger {
   constructor({ maxActive = 500, maxFinalized = 2000, state, now = Date.now } = {}) {
@@ -36,7 +37,12 @@ export class GiftLedger {
       }
     }
     if (added) {
-      const date = giftDate(Number.isFinite(event.at) && event.at > 0 ? event.at : this.now());
+      const now = this.now();
+      const capturedAt = Number.isFinite(event.capturedAt) && event.capturedAt > 0 && event.capturedAt <= now
+        ? event.capturedAt
+        : Number.isFinite(event.receivedAt) && event.receivedAt > 0 && event.receivedAt <= now ? event.receivedAt : now;
+      const platformAt = Number.isFinite(event.at) && event.at > 0 ? event.at : 0;
+      const date = giftDate(platformAt && capturedAt - platformAt <= 600000 && platformAt - capturedAt <= 60000 ? platformAt : capturedAt);
       const day = this.days.get(date) || emptyGiftTotal();
       const appliedRate = Number.isFinite(rate) && rate >= 0 ? rate : 0.05;
       day.giftCount += added;
@@ -82,7 +88,12 @@ export class GiftLedger {
 export class GiftStore {
   constructor({ get, set, all, now = Date.now, retryWait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) { this.get = get; this.set = set; this.all = all; this.now = now; this.retryWait = retryWait; this.tail = Promise.resolve(); }
   transaction(work) {
-    const task = this.tail.catch(() => {}).then(work); this.tail = task; return task;
+    const previous = this.tail;
+    const task = (async () => {
+      try { await previous; } catch {}
+      return work();
+    })();
+    this.tail = task; return task;
   }
   profile(profile) {
     return this.transaction(async () => {
@@ -93,15 +104,23 @@ export class GiftStore {
       await this.set(key, next); return next;
     });
   }
-  record({ room, event, userKey, rate }) {
+  record({ room, event, userKey, rate, capturedAt }) {
     const now = this.now();
-    const receivedAt = Number.isFinite(event?.receivedAt) && event.receivedAt <= now && now - event.receivedAt < 600000 ? event.receivedAt : now;
+    // Durable pending facts retain their original capture time across long outages.
+    // Fresh callers without a capture checkpoint retain the historical-push filter.
+    const hasCapturedAt = Number.isFinite(capturedAt) && capturedAt > 0 && capturedAt <= now;
+    const hasRecentReceipt = Number.isFinite(event?.receivedAt) && event.receivedAt > 0 && event.receivedAt <= now && now - event.receivedAt < 600000;
+    const receivedAt = hasCapturedAt ? capturedAt : hasRecentReceipt ? event.receivedAt : now;
     return this.transaction(async () => {
       if (!/^(\d+|demo)$/.test(room) || event?.type !== 'gift') throw new Error('礼物记录无效');
       if (!Number.isFinite(event.count) || event.count < 1 || event.count > 1e9 || !Number.isFinite(rate) || rate < 0 || rate > 10) throw new Error('礼物数值无效');
-      // 按进入存储队列时判断，不能因磁盘写入积压漏记；容纳服务端延迟的近十分钟事件。
-      // 更久的历史补推仍不冒充完整收入；去重依赖持久化连击进度。
-      if (event.at && (receivedAt - event.at > 600000 || event.at - receivedAt > 60000)) return false;
+      // A captured live gift is authoritative even if the platform clock is far
+      // from local time. Use its capture date instead of silently dropping income.
+      const platformAt = Number.isFinite(event.at) && event.at > 0 ? event.at : 0;
+      if (platformAt && (receivedAt - platformAt > 600000 || platformAt - receivedAt > 60000)) {
+        if (!hasCapturedAt && !hasRecentReceipt) return false;
+        event = { ...event, at:receivedAt };
+      }
       const key = `live-assistant:income:${room}`;
       for (let attempt = 0; ; attempt++) {
         try {
@@ -115,6 +134,21 @@ export class GiftStore {
           await this.retryWait(attempt === 0 ? 100 : 400);
         }
       }
+    });
+  }
+  recordContribution({ room, date = giftDate(this.now()), userId, name = '', score, scoreIsFloor = false }) {
+    return this.transaction(async () => {
+      if (!/^\d+$/.test(String(room)) || !/^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(date) || giftDate(Date.parse(`${date}T12:00:00+08:00`)) !== date || !/^uid:\d+$/.test(String(userId)) || !Number.isFinite(score) || score < 0 || score > 1e9) throw new Error('榜单校准数据无效');
+      const key = `live-assistant:income-calibration:${room}`;
+      const state = await this.get(key, { version: 1, entries: [] });
+      const entries = new Map(Array.isArray(state?.entries) ? state.entries : []);
+      const entryKey = `${date}:${userId}`;
+      const previous = entries.get(entryKey);
+      if (previous && (Number(previous.score) > score || (Number(previous.score) === score && (!previous.scoreIsFloor || scoreIsFloor)))) return false;
+      entries.set(entryKey, { date, userId, name: String(name).slice(0, 60), score, scoreIsFloor:Boolean(scoreIsFloor), observedAt: this.now() });
+      // 历史月报依赖这些持久记录，新一天采样不能删除以前的收入估值。
+      await this.set(key, { version: 1, entries: [...entries] });
+      return true;
     });
   }
   async profiles() {
@@ -132,6 +166,25 @@ export class GiftStore {
     if (!/^(\d+|demo)$/.test(room) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('统计日期或直播间无效');
     const ledger = new GiftLedger({ state: await this.get(`live-assistant:income:${room}`, null), now: this.now });
     const days = [...ledger.days].filter(([date]) => date.startsWith(month)).sort(([a], [b]) => b.localeCompare(a)).map(([date, day]) => ({ date, ...day }));
-    return { room, month, timezone: 'Asia/Shanghai', summary: ledger.summary(month), days };
+    const calibrationState = await this.get(`live-assistant:income-calibration:${room}`, null);
+    const entries = (Array.isArray(calibrationState?.entries) ? calibrationState.entries.map(([, entry]) => entry) : []).filter(entry => entry.date.startsWith(month));
+    const byDay = new Map();
+    const monthUsers = new Set();
+    for (const entry of entries) {
+      const day = byDay.get(entry.date) || { calibrationUsers: 0, calibrationScore: 0, calibratedIncomeEstimate: 0, calibrationHasFloor: false };
+      day.calibrationUsers++;
+      day.calibrationScore += entry.score;
+      day.calibratedIncomeEstimate += entry.score * CONTRIBUTION_YUAN_PER_POINT;
+      day.calibrationHasFloor ||= Boolean(entry.scoreIsFloor);
+      byDay.set(entry.date, day);
+      monthUsers.add(entry.userId);
+    }
+    const mergedDays = new Map(days.map(day => [day.date, day]));
+    for (const [date, calibration] of byDay) mergedDays.set(date, { ...(mergedDays.get(date) || { date, totalDiamonds: 0, unknownCount: 0, giftCount: 0, estimatedIncome: 0 }), ...calibration });
+    const reportDays = [...mergedDays.values()].sort((a, b) => b.date.localeCompare(a.date));
+    const calibration = entries.reduce((total, entry) => {
+      total.observations++; total.score += entry.score; total.incomeEstimate += entry.score * CONTRIBUTION_YUAN_PER_POINT; total.hasFloor ||= Boolean(entry.scoreIsFloor); return total;
+    }, { users: monthUsers.size, observations: 0, score: 0, incomeEstimate: 0, hasFloor: false });
+    return { room, month, timezone: 'Asia/Shanghai', calibrationBasis: { yuanPerPoint: CONTRIBUTION_YUAN_PER_POINT, anchor: '1000 分约 ¥100' }, calibration, summary: ledger.summary(month), days: reportDays };
   }
 }

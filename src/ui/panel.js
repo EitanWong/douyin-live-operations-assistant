@@ -1,3 +1,5 @@
+import { SOLID_GLASS_CSS } from './solid-glass.js';
+import { installTheme } from './theme.js';
 import { copy, mergeConfig, validateConfig } from '../core/engine.js';
 import { validateEndpoint } from '../services/ai.js';
 import { giftDate } from '../data/gifts.js';
@@ -8,7 +10,7 @@ const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
 const put = (o, path, value) => { const parts = path.split('.'); const key = parts.pop(); parts.reduce((v, k) => v[k], o)[key] = value; };
 const categories = { system: '运行', filter: '过滤', moderation: '内容提醒', queue: '发送队列', preview: '预览', sent: '提交', ai: 'AI', error: '错误', lab: '自检' };
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-const interactionPages = ['gift','welcome','likes','keywords','bot','timers','income'];
+const interactionPages = ['pk','gift','welcome','likes','keywords','bot','timers','income'];
 const money = value => new Intl.NumberFormat('zh-CN', {style:'currency',currency:'CNY',maximumFractionDigits:2}).format(value);
 const presets = {
   deepseek: ['https://api.deepseek.com/chat/completions', 'deepseek-flash'],
@@ -17,47 +19,72 @@ const presets = {
   local: ['http://localhost:11434/v1/chat/completions', 'qwen2.5:7b']
 };
 const CSS_TEXT = `
-:host{all:initial;font:14px/1.5 "PingFang SC","Microsoft YaHei",sans-serif;color:#172a2d;--ink:#172a2d;--muted:#53666a;--line:#cbd6d4;--accent:#08796f;--accent-strong:#075b56;--paper:#f4f7f5;--surface:#fff;--wash:#e2f1ed;--signal:#d76048;--amber:#f2c66d;--warning:#fff1d2;--danger:#a62f3f}
-*{box-sizing:border-box}button,input,select,textarea{font:inherit}button{cursor:pointer;transition:background-color 120ms,border-color 120ms,color 120ms,transform 120ms}button:disabled{cursor:wait;opacity:.52}button,input,select,textarea{border:1px solid var(--line);border-radius:6px;color:var(--ink)}button{background:var(--surface);padding:8px 12px;min-height:38px}button:hover:not(:disabled){background:var(--wash);border-color:#93bbb3}button:active:not(:disabled){transform:translateY(1px)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #7ec5b9;outline-offset:2px}.primary{background:var(--accent);color:#fff;border-color:var(--accent)}.primary:hover:not(:disabled){background:var(--accent-strong);color:#fff}.danger{color:var(--danger)}
-.launcher{position:fixed;right:24px;bottom:24px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:grab}.launcher>*{pointer-events:none}
-.panel{position:fixed;right:24px;bottom:82px;width:min(560px,calc(100vw - 32px));height:min(780px,calc(100vh - 110px));display:flex;flex-direction:column;background:var(--paper);border:1px solid #aebfbb;border-radius:8px;box-shadow:0 22px 66px #142c2d42;overflow:hidden}.panel[hidden]{display:none}
-.head{padding:16px 20px;background:#173a3b;color:#fff;display:flex;justify-content:space-between;gap:16px;align-items:center;border-bottom:3px solid var(--accent)}.head h1{font-size:18px;line-height:1.25;margin:0;font-weight:680}.room{color:#d0e3dd;font-size:12px;margin-top:4px}.head button{border:1px solid #62817c;background:transparent;color:white;padding:4px 10px;min-height:32px}.head button:hover{background:#285453;color:white}.banner{margin:0;background:var(--warning);color:#634a19;padding:8px 20px;font-size:12px;border-bottom:1px solid #ecd69e}.nav{background:var(--surface);border-bottom:1px solid var(--line);flex-shrink:0}.primary-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:8px 12px 6px}.primary-nav button{border:0;background:transparent;min-height:34px;padding:5px 8px;color:var(--muted);font-size:13px;font-weight:600}.primary-nav button[aria-pressed=true]{background:#e5f1ed;color:var(--accent-strong)}.subnav{display:flex;gap:5px;padding:0 14px 8px;overflow-x:auto;scrollbar-width:none}.subnav[hidden]{display:none}.subnav button{border:0;border-radius:4px;background:transparent;padding:5px 10px;white-space:nowrap;color:var(--muted);min-height:30px;font-size:12px}.subnav button[aria-selected=true]{background:#f3eae6;color:#983f34;font-weight:700}.subnav button:hover{background:#f1f7f4;color:var(--ink)}
-.scroll{overflow-y:auto;flex:1;padding:18px 20px;overscroll-behavior:contain;scrollbar-color:#afc1bd transparent}.page[hidden]{display:none}.page h2{font-size:18px;margin:0 0 6px;line-height:1.35}.intro,.hint{font-size:12px;color:var(--muted);margin:6px 0 14px;line-height:1.6}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.status{display:flex;gap:9px;align-items:center;margin-bottom:12px}.status strong{font-size:13px}.badge{background:#e9eeec;color:#526467;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600}.badge.live{background:#e2f4eb;color:#17694d}.actions{display:flex;gap:7px;flex-wrap:wrap}.stats{display:flex;margin:14px 0 18px;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.stats div{flex:1}.stats b{font-size:22px;display:block;line-height:1.2;font-weight:650}.stats span{font-size:11px;color:var(--muted)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}.field{display:flex;flex-direction:column;gap:5px;margin:0 0 12px;min-width:0}.field span{font-size:12px;font-weight:650}.field small{color:var(--muted);font-size:11px;font-weight:400}.field input,.field select,.field textarea{background:var(--surface);width:100%;padding:8px 10px;min-height:40px}.field textarea{resize:vertical;min-height:76px;line-height:1.5}.toggle{display:flex;align-items:center;gap:9px;min-height:38px;margin:3px 0 10px;font-size:13px}.toggle input{width:18px;height:18px;accent-color:var(--accent)}.section{padding-top:14px;margin-top:14px;border-top:1px solid var(--line)}.section h3,.subhead{font-size:13px;margin:0 0 9px;font-weight:700}.notice{padding:10px 12px;border-left:3px solid var(--amber);background:#fff7e5;font-size:12px;color:#624e27;line-height:1.65;margin:12px 0}
-.queue{margin-top:10px}.candidate{border-bottom:1px solid var(--line);padding:12px 0;display:grid;grid-template-columns:74px 1fr;gap:10px}.candidate .kind{font-size:11px;color:var(--accent-strong);font-weight:650}.candidate textarea{display:block;width:100%;padding:8px 10px;background:var(--surface);resize:vertical;min-height:52px;margin-bottom:7px}.candidate p{margin:0 0 6px;word-break:break-word}.candidate button{font-size:12px;padding:4px 9px;min-height:30px}.empty{color:var(--muted);font-size:12px;padding:12px 0}.log-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.log-head select{background:var(--surface);padding:5px 8px;max-width:150px}.logs{max-height:230px;overflow:auto;border-top:1px solid var(--line)}.log{display:grid;grid-template-columns:54px 42px 1fr;gap:8px;font-size:11px;padding:8px 0;border-bottom:1px solid #dce4e1;word-break:break-word}.log time,.log .cat{color:var(--muted)}.log[data-category=error]{color:var(--danger)}.log[data-category=preview] .cat{color:var(--accent-strong)}
-.foot{padding:10px 18px;border-top:1px solid #bfcfcb;background:var(--surface);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-shrink:0}.foot small{font-size:11px;color:var(--muted)}.foot .primary{min-width:122px}.foot [hidden]{display:none}.foot [data-action=save]:disabled{cursor:default}.dirty{color:#9b5a12!important}.toast{padding:9px 20px;font-size:12px;background:#e2f1ed;color:#24564f;flex-shrink:0;border-bottom:1px solid #c2d9d2}.toast[hidden]{display:none}.toast.error{background:#fae7e8;color:#8c2336}pre{font:12px/1.65 "SFMono-Regular",Consolas,monospace;white-space:pre-wrap;word-break:break-all;background:#e8efec;padding:12px;border-radius:6px;color:#334b4a}.inline{display:flex;gap:8px;align-items:center}.inline input{flex:1}.file{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}.wide{grid-column:1/-1}
-.identity{padding:0 0 10px;border:0;border-bottom:1px solid var(--line);border-radius:0;margin-bottom:13px;background:transparent}.identity strong{font-size:13px}.identity p{margin:3px 0;font-size:12px;color:var(--muted)}.identity .actions{margin-top:8px}.identity details{margin-top:4px}.identity summary{padding:3px 0}.recent-gifts h3{margin:0;font-size:13px}.gift-activity{display:grid;grid-template-columns:minmax(74px,1fr) minmax(90px,1.4fr) auto;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}.gift-activity strong,.gift-activity span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gift-activity small{color:var(--muted);text-align:right}.editor-row{padding:12px 0;border-bottom:1px solid var(--line)}.editor-row .row-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.editor-row .row-head b{font-size:12px}.editor-row .row-head button{min-height:30px;padding:4px 9px;font-size:11px}.editor-row .grid{gap:8px 10px}.editor-row .field{margin-bottom:8px}.editor-row textarea{min-height:60px}.list-add{margin-top:9px}.feature-shortcuts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.feature-shortcuts button{font-size:12px}.feature-shortcuts button[aria-pressed=true]{background:#e4f1eb;color:#28694f;border-color:#bad8ca}summary{cursor:pointer;color:var(--muted);font-size:12px;padding:8px 0}summary:hover{color:var(--accent-strong)}.choice-hint{font-size:11px;color:var(--muted)}[aria-invalid=true]{border-color:var(--danger)!important;box-shadow:0 0 0 2px #a62f3f18}
-.mode-note{font-size:12px;color:var(--muted);margin:0 0 10px;padding:7px 9px;border-left:2px solid var(--amber);background:#fff7e5}.feature-list{border-top:1px solid var(--line);margin:9px 0 12px}.feature-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)}.feature-title{flex:1;text-align:left;padding:0;border:0;background:transparent;font-weight:700;min-width:0;font-size:13px}.feature-title small{display:block;font-size:11px;color:var(--muted);font-weight:400;overflow-wrap:anywhere;margin-top:2px}.feature-title:hover,.text-button:hover{background:transparent;color:var(--accent-strong)}.text-button{border:0;background:transparent;font-size:12px;padding:4px;color:var(--muted);min-height:32px}.switch{position:relative;width:40px;height:26px;min-height:26px;padding:3px;border:0;border-radius:20px;background:#b3c0bd;flex-shrink:0}.switch input{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}.switch span{display:block;height:20px;width:34px;border-radius:20px;background:#b3c0bd;transition:background-color 130ms}.switch span:after{content:"";display:block;height:18px;width:18px;border-radius:50%;background:white;transition:transform 130ms}.switch input:checked+span{background:var(--accent)}.switch input:checked+span:after{transform:translateX(14px)}.switch:has(input:focus-visible){outline:3px solid #7ec5b9;outline-offset:2px}.switch:hover span{background:#899f9a}.switch input:checked+span{background:var(--accent)}.reply-section h3{font-size:13px;margin:0 0 7px}.reply-section p{font-size:12px;margin:0;line-height:1.65;overflow-wrap:anywhere}.reply-section [data-queue-section]{margin-top:12px}.rule-summary{padding:9px 11px;margin:0 0 13px;border-left:3px solid var(--accent);background:var(--wash)}.rule-summary strong{font-size:11px;color:var(--muted);font-weight:650}.rule-summary p{margin:2px 0 0;font-size:13px;line-height:1.5;overflow-wrap:anywhere}.presets{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:-3px 0 12px}.presets span{font-size:11px;color:var(--muted);margin-right:2px}.presets button{min-height:32px;padding:4px 10px;font-size:12px}.subhead{margin:16px 0 8px}.foot small{max-width:180px}.subnav button:focus-visible{outline-offset:-3px}
-.overview-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:12px 0 16px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}.overview-metric{padding:11px 10px 12px 0;min-width:0}.overview-metric+.overview-metric{border-left:1px solid var(--line);padding-left:12px}.overview-metric b{display:block;font-size:22px;line-height:1.1;font-variant-numeric:tabular-nums}.overview-metric span{display:block;margin-top:4px;color:var(--muted);font-size:11px}.overview-block{padding:12px 0;border-top:1px solid var(--line)}.overview-block h3{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 6px;font-size:13px}.overview-block .text-button{flex:0 0 auto}.overview-empty{padding:7px 0;color:var(--muted);font-size:12px}.overview-item{display:grid;grid-template-columns:54px minmax(0,1fr);gap:8px;padding:7px 0;border-bottom:1px solid #dce4e1;font-size:12px}.overview-item:last-child{border-bottom:0}.overview-item time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:11px}.overview-item span{overflow-wrap:anywhere}.overview-item[data-category=moderation] span{color:#8b4b25}.overview-item[data-category=error] span{color:var(--danger)}.overview-queue{font-size:12px;line-height:1.55;overflow-wrap:anywhere}.overview-queue small{display:block;color:var(--muted);font-size:11px}.overview-note{margin:11px 0 0;padding:8px 10px;background:#edf1ee;color:#475c58;font-size:11px;line-height:1.55}
-.gift-totals{margin:12px 0 14px;padding:12px;background:#e6f1ed;border-left:3px solid var(--accent)}.gift-totals h3{margin:0 0 8px;font-size:13px}.gift-total-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.gift-total-grid>div{min-width:0}.gift-total-grid b{display:block;font-size:22px;line-height:1.2;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.gift-total-grid span,.gift-total-note{font-size:11px;color:var(--muted)}.gift-total-note{margin:8px 0 0;line-height:1.5}
-.head{border-bottom-width:1px}.gift-totals{border-left-width:1px}
-:host{color:#161616;--ink:#161616;--muted:#737373;--line:#e5e5e7;--accent:#fe2c55;--accent-strong:#d91f45;--paper:#f7f7f8;--surface:#fff;--wash:#fff0f3;--signal:#fe2c55;--warning:#fff7e6;--danger:#c6283d}
-button,input,select,textarea{border-radius:8px}button:hover:not(:disabled){background:#f5f5f7;border-color:#d1d1d6}.primary{background:#fe2c55;border-color:#fe2c55}.primary:hover:not(:disabled){background:#e3234b;color:#fff}
-/* Keep launcher states above generic button hover and press rules. */
-button.launcher{--launcher-surface:#202023;--launcher-hover:#2b2b30;--launcher-ink:#fafafa;--launcher-muted:#b8b8c0;--launcher-edge:#ffffff24;--launcher-live:#25f4ee;display:inline-flex;align-items:center;gap:8px;height:48px;min-width:184px;padding:0 12px;border:1px solid var(--launcher-edge);border-radius:16px;background:var(--launcher-surface);color:var(--launcher-ink);box-shadow:0 4px 16px #00000026,inset 0 1px 0 #ffffff0a;font-size:13px;line-height:1;font-weight:500;white-space:nowrap;transition:transform 140ms cubic-bezier(.23,1,.32,1)}
-button.launcher:hover:not(:disabled){background:var(--launcher-hover);border-color:#ffffff38;color:var(--launcher-ink)}
-button.launcher:active:not(:disabled){background:var(--launcher-hover);color:var(--launcher-ink);transform:scale(.98)}
-button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.launcher.dragging:active:not(:disabled){background:var(--launcher-hover);color:var(--launcher-ink);border-color:#fe2c5580;box-shadow:0 8px 24px #00000033,0 0 0 2px #fe2c551a;cursor:grabbing;transform:none;transition:none}
-button.launcher:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
-.launcher .launcher-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:9px;background:#fe2c551c;color:#ff6b89;flex-shrink:0}.launcher-mark svg{width:18px;height:18px}.launcher b{font-weight:650;color:var(--launcher-ink)}.launcher i{width:5px;height:5px;margin-left:4px;flex-shrink:0;border-radius:50%;background:var(--launcher-muted)}.launcher.running i{background:var(--launcher-live);box-shadow:0 0 0 3px #25f4ee14}.launcher span{font-size:12px;color:var(--launcher-muted);min-width:48px;text-align:left}.launcher.running span{color:var(--launcher-ink)}.launcher .launcher-grip{width:10px;height:16px;margin-left:4px;color:#8e8e99;flex-shrink:0}
-.panel{background:#f7f7f8;border-color:#d1d1d6;border-radius:12px;box-shadow:0 20px 64px #0003}.head{background:#151515;color:#fff;border-bottom:1px solid #333;padding:15px 18px}.room{color:#b8b8bd}.head button{border-color:#555;color:#f5f5f7;border-radius:7px}.head button:hover{background:#333}.banner{background:#fff7e6;border-color:#f0dfb8;color:#72551b}.nav{padding:0 10px 2px}.primary-nav{background:#f2f2f4;border-radius:9px;margin:8px 9px 4px;padding:3px;gap:3px}.primary-nav button{border-radius:7px;color:#64646a}.primary-nav button[aria-pressed=true]{background:#fff;color:#161616;box-shadow:0 1px 3px #0002}.subnav{padding:2px 8px 8px;gap:3px}.subnav button{border-radius:7px}.subnav button[aria-selected=true]{background:#fff0f3;color:#d91f45}
-.scroll{scrollbar-color:#c7c7cc transparent}.page>.intro{margin:3px 0 12px}.page h2{font-size:17px;letter-spacing:0}.badge.live{background:#e7fcff;color:#007d88}.status strong{font-weight:650}.section{border-color:var(--line)}.notice{border-color:#f0bd50;background:#fff8e8;color:#72551b}.mode-note{border-color:#f0bd50;background:#fff8e8}.rule-summary{border-color:var(--accent);background:#fff0f3}.rule-summary strong{color:#777}.feature-title:hover,.text-button:hover,summary:hover{color:var(--accent)}.feature-shortcuts button[aria-pressed=true]{background:#fff0f3;color:#d91f45;border-color:#ffc6d2}.switch{background:#d1d1d6}.switch span{background:#d1d1d6}.switch input:checked+span{background:var(--accent)}.switch:hover span{background:#b8b8bd}.switch:has(input:focus-visible){outline-color:#fe2c5555}.toggle input{accent-color:var(--accent)}
-.subnav[data-subnav=interaction]{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:3px 8px 8px}.subnav[data-subnav=interaction] button{white-space:normal;line-height:1.3;min-height:34px}.settings-group{margin:0 0 14px;padding:12px;background:#fff;border:1px solid #e5e5e7;border-radius:9px}.settings-group h3{font-size:13px;margin:0 0 3px}.group-note{font-size:11px;line-height:1.5;color:var(--muted);margin:0 0 8px}.settings-group .feature-list{border-top:1px solid var(--line);margin:0}.settings-group .feature-row:last-child{border-bottom:0}.settings-group .field{margin-bottom:4px}.settings-group .mode-note{margin:4px 0 0;border-radius:5px}.settings-group+.section{margin-top:8px}
-.subnav[data-subnav=interaction][hidden]{display:none}
-.gift-totals{background:#fff0f3;border-color:var(--accent);border-radius:8px}.overview-note{background:#f0f0f2;color:#65656a;border-radius:7px}.overview-item,.log{border-color:#ededf0}.overview-item[data-category=moderation] span{color:#855b2a}.toast{background:#fff0f3;color:#8e1732;border-color:#ffc6d2}.toast.error{background:#fae7e8;color:#8c2336}pre{background:#f0f0f2;color:#343438}
-button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #fe2c5555;outline-offset:2px}
-@media(max-width:560px){.panel{width:calc(100vw - 20px);height:calc(100dvh - 24px)}.launcher{right:12px;bottom:12px}.grid{grid-template-columns:1fr}.head,.scroll{padding:14px 15px}.foot{padding:9px 14px}.primary-nav{padding:6px 8px 4px;gap:2px}.primary-nav button{font-size:12px;padding:4px}.subnav{padding:0 9px 6px}.stats b{font-size:19px}.stats span{font-size:10px}.row{gap:7px}.foot small{max-width:130px}.candidate{grid-template-columns:64px 1fr}.gift-activity{grid-template-columns:minmax(65px,1fr) minmax(75px,1.2fr) auto;gap:5px;font-size:11px}}
-@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto;transition:none!important}}
-.income-hero{padding:16px;background:var(--surface);border:1px solid var(--line);border-radius:10px;margin:4px 0 16px}.income-hero>span{font-size:12px;color:var(--muted)}.income-hero>b{display:block;font-size:32px;line-height:1.4;letter-spacing:-1px;margin:4px 0 12px;font-weight:650}.income-meta{display:flex;gap:20px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.income-meta strong{color:var(--ink);font-weight:600}.income-hero b,.income-meta strong,.income-table{font-variant-numeric:tabular-nums}.income-table{width:100%;border-collapse:collapse;font-size:12px}.income-table th,.income-table td{text-align:right;padding:10px 6px;border-bottom:1px solid var(--line)}.income-table th{font-size:11px;color:var(--muted);font-weight:500}.income-table th:first-child,.income-table td:first-child{text-align:left;padding-left:0;white-space:nowrap}.income-table-wrap{overflow-x:auto}.income-error{color:var(--danger);font-size:12px}.profile-card{padding:12px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.profile-card strong,.profile-card small{display:block;overflow-wrap:anywhere}.profile-card strong{font-size:13px}.profile-card small{font-size:11px;color:var(--muted);margin-top:3px}.profile-card a{color:var(--accent-strong);font-size:12px;white-space:nowrap;text-decoration:none;padding:10px 0}.profile-card a:hover{text-decoration:underline}.income-toolbar{margin:16px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}.income-toolbar h3{font-size:13px;margin:0}
+:host{all:initial;color-scheme:var(--sg-scheme);font:14px/1.55 var(--sg-font);color:var(--sg-foreground);--ink:var(--sg-foreground);--muted:var(--sg-muted);--line:var(--sg-border);--accent:var(--sg-brand);--accent-strong:var(--sg-brand);--paper:var(--sg-background);--surface:var(--sg-solid);--wash:var(--sg-control);--signal:var(--sg-brand);--amber:var(--sg-warning);--danger:var(--sg-danger);-webkit-font-smoothing:antialiased}
+[hidden]{display:none!important}
+.launcher{position:fixed;right:24px;bottom:24px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:grab}
+.launcher>*{pointer-events:none}
+button.launcher{display:inline-flex;align-items:center;gap:9px;height:48px;min-width:184px;padding:0 13px;border:0;border-radius:14px;background:var(--sg-solid);color:var(--ink);box-shadow:var(--sg-pane-shadow);font-size:13px;line-height:1;white-space:nowrap}
+button.launcher:hover:not(:disabled),button.launcher:active:not(:disabled){background:var(--sg-solid-hover);color:var(--ink);box-shadow:var(--sg-pane-shadow)}
+button.launcher:active:not(:disabled){transform:scale(.98)}
+button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.launcher.dragging:active:not(:disabled){background:var(--sg-solid-hover);box-shadow:var(--sg-pane-shadow);outline:2px solid var(--sg-focus);cursor:grabbing;transform:none;transition:none}
+.launcher-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--sg-brand-wash);color:var(--sg-brand);flex-shrink:0}
+.launcher-mark svg{width:18px;height:18px}.launcher b{font-weight:650}.launcher i{width:5px;height:5px;flex-shrink:0;border-radius:50%;background:var(--muted);margin-left:3px}.launcher.running i{background:var(--sg-success)}.launcher span{font-size:12px;color:var(--muted);min-width:48px;text-align:left}.launcher.running span{color:var(--ink)}.launcher-grip{width:10px;height:16px;margin-left:3px;color:var(--muted);flex-shrink:0}
+.panel{position:fixed;right:24px;bottom:82px;width:min(560px,calc(100vw - 32px));height:min(800px,calc(100dvh - 110px));display:flex;flex-direction:column;background:var(--sg-popover);border:0;border-radius:18px;box-shadow:inset 0 1px 0 var(--sg-rim),inset 0 0 0 1px var(--sg-inner),0 0 0 1px var(--sg-edge),0 24px 60px -18px var(--sg-shade),0 6px 16px -6px var(--sg-contact);overflow:hidden;backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px)}
+.head{padding:20px 22px 17px;display:flex;justify-content:space-between;gap:14px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--line)}
+.head-title{display:flex;gap:11px;align-items:center;min-width:0}.head-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--sg-control);box-shadow:var(--sg-state-shadow);color:var(--sg-brand);flex-shrink:0}.head-mark svg{width:21px;height:21px;filter:drop-shadow(-1px -1px 0 var(--sg-cyan))}
+.head h1{font-size:17px;line-height:1.35;margin:0;font-weight:650;letter-spacing:.1px}.room{color:var(--muted);font-size:11px;margin-top:4px;overflow-wrap:anywhere}.head button{background:transparent;min-height:32px;padding:5px 9px;color:var(--muted);font-size:12px}
+.banner{margin:0;background:color-mix(in srgb,var(--sg-warning) 7%,transparent);color:var(--sg-warning);padding:9px 22px;font-size:11px;border-bottom:1px solid color-mix(in srgb,var(--sg-warning) 20%,transparent);flex-shrink:0;line-height:1.6}.banner[hidden]{display:none}.banner button{font-size:11px;padding:3px 7px;min-height:26px}
+.nav{border-bottom:1px solid var(--line);flex-shrink:0;padding:0 14px 9px;background:var(--sg-panel)}
+.primary-nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;padding:4px;margin:12px 4px 8px;background:var(--sg-well);border-radius:10px;box-shadow:inset 0 1px 3px var(--sg-contact),inset 0 -1px 0 var(--sg-inner)}
+.primary-nav button{border:0;background:transparent;box-shadow:none;min-height:34px;padding:5px 8px;color:var(--muted);font-size:13px;font-weight:600;border-radius:7px}
+.primary-nav button[aria-pressed=true],.primary-nav button:hover:not(:disabled){background:var(--sg-brand-wash);box-shadow:var(--sg-state-shadow);color:var(--sg-brand)}
+.subnav{display:flex;flex-wrap:wrap;gap:4px;padding:2px 4px}
+.subnav button{border:0;border-radius:7px;background:transparent;box-shadow:none;padding:6px 10px;white-space:nowrap;color:var(--muted);min-height:32px;font-size:12px}
+.subnav button[aria-selected=true],.subnav button:hover:not(:disabled){background:var(--sg-brand-wash);box-shadow:var(--sg-state-shadow);color:var(--sg-brand)}
+.subnav button:focus-visible{outline-offset:-2px}
+.scroll{overflow-y:auto;overflow-x:hidden;min-height:0;flex:1;padding:22px;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--sg-scroll) transparent}
+form{margin:0}.page{min-width:0}.page h2{font-size:20px;line-height:1.4;margin:0 0 5px;font-weight:650;letter-spacing:.1px}.intro,.hint{font-size:12px;color:var(--muted);margin:6px 0 16px;line-height:1.7}.page>.intro{margin:3px 0 20px}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.status{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 14px}.status strong{font-size:13px;font-weight:600}.actions{display:flex;gap:7px;flex-wrap:wrap}
+.stats{display:flex;margin:16px 0 20px;padding:14px 0;border-block:1px solid var(--line)}.stats div{flex:1}.stats b{font-size:24px;display:block;line-height:1.3;font-weight:600;font-variant-numeric:tabular-nums}.stats span{font-size:11px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 14px}.wide{grid-column:1/-1}
+.field{display:flex;flex-direction:column;gap:7px;margin:0 0 16px;min-width:0}.field span{font-size:12px;font-weight:600}.field small{color:var(--muted);font-size:11px;font-weight:400;line-height:1.6}.field input,.field select,.field textarea{width:100%;padding:10px 12px;min-height:42px}.field textarea{resize:vertical;min-height:92px;line-height:1.7}
+.toggle{display:flex;align-items:center;gap:9px;min-height:38px;margin:3px 0 10px;font-size:13px}.toggle input{width:17px;height:17px;flex-shrink:0}
+.section{padding-top:18px;margin-top:18px;border-top:1px solid var(--line)}.section h3,.subhead{font-size:13px;margin:0 0 10px;font-weight:600}.subhead{margin-top:20px}
+.notice,.mode-note,.pk-note{padding:11px 13px;border:1px solid color-mix(in srgb,var(--sg-warning) 22%,transparent);border-radius:8px;background:color-mix(in srgb,var(--sg-warning) 7%,transparent);font-size:11px;color:var(--sg-warning);line-height:1.75;margin:14px 0}.mode-note{margin:0 0 12px}
+.rule-summary{padding:12px 14px;margin:18px 0;background:var(--sg-panel);border-radius:10px;box-shadow:var(--sg-pane-shadow)}.rule-summary strong{font-size:11px;color:var(--muted);font-weight:500}.rule-summary p{margin:4px 0 0;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.queue{margin-top:10px}.candidate{border-bottom:1px solid var(--line);padding:12px 0;display:grid;grid-template-columns:74px minmax(0,1fr);gap:10px}.candidate .kind{font-size:11px;color:var(--ink);font-weight:600}.candidate textarea{display:block;width:100%;padding:8px 10px;resize:vertical;min-height:52px;margin-bottom:7px}.candidate p{margin:0 0 6px;overflow-wrap:anywhere}.candidate button{font-size:12px;padding:4px 9px;min-height:30px}
+.empty{color:var(--muted);font-size:12px;padding:14px 0;line-height:1.7}.log-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}.log-head select{padding:5px 8px;max-width:150px}.logs{max-height:230px;overflow:auto;border-top:1px solid var(--line);scrollbar-color:var(--sg-scroll) transparent}.log{display:grid;grid-template-columns:54px 42px minmax(0,1fr);gap:8px;font-size:11px;padding:9px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.log time,.log .cat{color:var(--muted)}.log[data-category=error]{color:var(--danger)}.log[data-category=preview] .cat{color:var(--sg-success)}
+.foot{padding:14px 22px;border-top:1px solid var(--line);background:var(--sg-panel);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-shrink:0;box-shadow:0 -5px 20px var(--sg-contact)}.foot small{font-size:11px;color:var(--muted);max-width:210px}.foot .primary{min-width:132px;min-height:40px}.dirty{color:var(--sg-warning)!important}
+.toast{padding:10px 22px;font-size:12px;background:color-mix(in srgb,var(--sg-success) 8%,var(--sg-solid));color:var(--sg-success);flex-shrink:0;border-bottom:1px solid color-mix(in srgb,var(--sg-success) 20%,transparent)}.toast.error{background:color-mix(in srgb,var(--sg-danger) 8%,var(--sg-solid));color:var(--danger)}
+pre{font:12px/1.7 "SFMono-Regular",Consolas,monospace;white-space:pre-wrap;word-break:break-all;background:var(--sg-well);padding:14px;border:1px solid var(--line);border-radius:9px;color:var(--ink)}.inline{display:flex;gap:8px;align-items:center}.inline input{flex:1;min-width:0}.file{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.identity{padding:0 0 14px;border-bottom:1px solid var(--line);margin-bottom:16px}.identity strong{font-size:13px}.identity p{margin:4px 0;font-size:12px;color:var(--muted)}.identity .actions{margin-top:10px}.identity details{margin-top:4px}.identity summary{padding:3px 0}
+.recent-gifts h3{margin:0;font-size:13px;font-weight:600}.gift-activity{display:grid;grid-template-columns:minmax(74px,1fr) minmax(90px,1.4fr) auto;gap:8px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);font-size:12px}.gift-activity strong,.gift-activity span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gift-activity small{color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.editor-row{padding:14px 0;border-bottom:1px solid var(--line)}.editor-row .row-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.editor-row .row-head b{font-size:12px}.editor-row .row-head button{min-height:30px;padding:4px 9px;font-size:11px}.editor-row .grid{gap:8px 10px}.editor-row .field{margin-bottom:8px}.editor-row textarea{min-height:60px}.list-add{margin-top:10px}
+.feature-shortcuts{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.feature-shortcuts button{font-size:12px}.feature-shortcuts button[aria-pressed=true]{background:var(--sg-control);box-shadow:var(--sg-state-shadow)}
+summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-height:1.6}summary:hover{color:var(--ink)}details[open]>summary{color:var(--ink)}.choice-hint{font-size:11px;color:var(--muted);line-height:1.5}
+.settings-group{margin:0 0 16px;padding:16px;background:var(--sg-panel);border:0;border-radius:12px;box-shadow:var(--sg-pane-shadow)}.settings-group h3{font-size:13px;margin:0 0 4px;font-weight:600}.group-note{font-size:11px;line-height:1.7;color:var(--muted);margin:0 0 10px}.settings-group .field{margin-bottom:6px}.settings-group .mode-note{margin:6px 0 0}.settings-group+.section{margin-top:10px}
+.feature-list{border-top:1px solid var(--line);margin:10px 0 12px}.settings-group .feature-list{margin:0}.feature-row{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}.feature-row:last-child{border-bottom:0}.feature-title{flex:1;text-align:left;padding:0;border:0;background:transparent;box-shadow:none;font-weight:600;min-width:0;font-size:13px}.feature-title small{display:block;font-size:11px;color:var(--muted);font-weight:400;overflow-wrap:anywhere;margin-top:4px;line-height:1.6}
+.text-button{border:0;background:transparent;box-shadow:none;font-size:12px;padding:4px 0;color:var(--muted);min-height:32px;text-align:left}.text-button:hover:not(:disabled),.feature-title:hover:not(:disabled){background:transparent;color:var(--ink);box-shadow:none}.text-button:hover{text-decoration:underline;text-underline-offset:4px}
+.switch{position:relative;width:38px;height:24px;min-height:24px;padding:3px;border:0;border-radius:20px;flex-shrink:0;background:var(--sg-well);box-shadow:inset 0 1px 3px var(--sg-contact),inset 0 -1px 0 var(--sg-rim)}.switch input{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}.switch span{display:block;height:18px;width:32px;border-radius:20px;background:transparent;transition:background-color 140ms}.switch span:after{content:"";display:block;height:18px;width:18px;border-radius:50%;background:var(--sg-knob-off);box-shadow:inset 0 1px 0 var(--sg-rim),0 1px 3px var(--sg-contact);transition:transform 140ms}.switch input:checked+span{background:var(--sg-primary)}.switch input:checked+span:after{transform:translateX(14px);background:var(--sg-knob)}.switch:has(input:focus-visible){outline:2px solid var(--sg-focus);outline-offset:3px}
+.reply-section h3{font-size:13px;margin:0 0 8px}.reply-section p{font-size:12px;margin:0;line-height:1.7;overflow-wrap:anywhere}.reply-section [data-queue-section]{margin-top:12px}
+.presets{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:-3px 0 14px}.presets span{font-size:11px;color:var(--muted);margin-right:3px}.presets button{min-height:30px;padding:4px 10px;font-size:11px}
+.overview-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:14px 0 18px;border-block:1px solid var(--line)}.overview-metric{padding:14px 10px 14px 0;min-width:0}.overview-metric+.overview-metric{border-left:1px solid var(--line);padding-left:14px}.overview-metric b{display:block;font-size:24px;line-height:1.2;font-variant-numeric:tabular-nums}.overview-metric span{display:block;margin-top:6px;color:var(--muted);font-size:11px}
+.overview-block{padding:14px 0;border-top:1px solid var(--line)}.overview-block h3{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 8px;font-size:13px}.overview-block .text-button{flex:0 0 auto}.overview-empty{padding:8px 0;color:var(--muted);font-size:12px}.overview-item{display:grid;grid-template-columns:54px minmax(0,1fr);gap:8px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12px}.overview-item:last-child{border-bottom:0}.overview-item time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:11px}.overview-item span{overflow-wrap:anywhere}.overview-item[data-category=moderation] span{color:var(--sg-warning)}.overview-item[data-category=error] span{color:var(--danger)}.overview-queue{font-size:12px;line-height:1.6;overflow-wrap:anywhere}.overview-queue small{display:block;color:var(--muted);font-size:11px}.overview-note{margin:12px 0 0;padding:10px 12px;background:var(--sg-panel);color:var(--muted);border-radius:8px;font-size:11px;line-height:1.6}
+.gift-totals{margin:16px 0 20px;padding:16px 18px;background:var(--sg-card);border-radius:12px;box-shadow:var(--sg-pane-shadow)}.gift-totals h3{margin:0 0 14px;font-size:12px;font-weight:500;color:var(--muted)}.gift-total-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.gift-total-grid>div{min-width:0}.gift-total-grid>div+div{padding-left:18px;border-left:1px solid var(--line)}.gift-total-grid b{display:block;font-size:28px;line-height:1.3;font-weight:550;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.gift-total-grid span,.gift-total-note{font-size:11px;color:var(--muted)}.gift-total-grid span{display:block;margin-top:5px}.gift-total-note{margin:14px 0 0;line-height:1.7}.gift-totals .text-button{margin-top:6px;font-size:11px}
+.income-hero{padding:18px;background:var(--sg-card);border-radius:12px;box-shadow:var(--sg-pane-shadow);margin:4px 0 18px}.income-hero>span{font-size:12px;color:var(--muted)}.income-hero>b{display:block;font-size:32px;line-height:1.4;letter-spacing:-.5px;margin:6px 0 14px;font-weight:550}.income-meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.income-meta strong{color:var(--ink);font-weight:600}.income-hero b,.income-meta strong,.income-table{font-variant-numeric:tabular-nums}.income-hero .hint{margin-bottom:0}.income-table{width:100%;border-collapse:collapse;font-size:12px}.income-table th,.income-table td{text-align:right;padding:11px 6px;border-bottom:1px solid var(--line)}.income-table th{font-size:11px;color:var(--muted);font-weight:500}.income-table th:first-child,.income-table td:first-child{text-align:left;padding-left:0;white-space:nowrap}.income-table-wrap{overflow-x:auto}.income-error{color:var(--danger);font-size:12px}
+.profile-card{padding:14px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.profile-card strong,.profile-card small{display:block;overflow-wrap:anywhere}.profile-card strong{font-size:13px}.profile-card small{font-size:11px;color:var(--muted);margin-top:4px}.profile-card a{color:var(--ink);font-size:12px;white-space:nowrap;text-decoration:none;padding:10px 0}.profile-card a:hover{text-decoration:underline}.income-toolbar{margin:18px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}.income-toolbar h3{font-size:13px;margin:0}
+.pk-scoreboard{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:12px;align-items:center;padding:20px 12px;background:var(--sg-card);border-radius:12px;box-shadow:var(--sg-pane-shadow);text-align:center}.pk-scoreboard strong{display:block;font-size:30px;font-weight:550;font-variant-numeric:tabular-nums}.pk-scoreboard span{display:block;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:5px}.pk-scoreboard .vs{font-size:11px;color:var(--muted)}.pk-prob{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}.pk-prob>div{padding:13px 14px;background:var(--sg-panel);border-radius:9px}.pk-prob b{display:block;font-size:21px;font-weight:550;font-variant-numeric:tabular-nums}.pk-prob span{font-size:11px;color:var(--muted)}.pk-factors{margin:0;padding-left:18px;font-size:12px;color:var(--muted);line-height:1.8}.pk-table{width:100%;border-collapse:collapse;font-size:12px}.pk-table th,.pk-table td{text-align:left;padding:10px 4px;border-bottom:1px solid var(--line)}.pk-table th{font-size:11px;color:var(--muted);font-weight:500}.pk-table td:last-child,.pk-table th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+@supports not (backdrop-filter:blur(1px)){.panel{background:var(--sg-solid)}}
+@media(max-width:560px){.panel{width:calc(100vw - 20px);height:calc(100dvh - 24px);border-radius:14px}.launcher{right:12px;bottom:12px}.grid{grid-template-columns:minmax(0,1fr)}.head{padding:16px}.head h1{font-size:16px}.scroll{padding:18px 16px}.banner{padding:9px 16px}.nav{padding:0 10px 8px}.primary-nav{margin-top:10px}.subnav{gap:3px}.subnav button{font-size:11px;padding:5px 9px}.foot{padding:12px 16px}.foot small{max-width:140px}.foot .primary{min-width:116px}.row{gap:8px}.candidate{grid-template-columns:64px minmax(0,1fr)}.gift-activity{grid-template-columns:minmax(65px,1fr) minmax(75px,1.2fr) auto;gap:5px;font-size:11px}.gift-total-grid b{font-size:24px}.gift-totals{padding:14px}.settings-group{padding:14px}.log-head{flex-wrap:wrap}.head-mark{width:32px;height:32px}}
 `;
 
 export class Panel {
   constructor({ config, room, demo = false, callbacks }) {
-    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.activeTab = 'gift'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
+    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style'); style.textContent = `${CSS_TEXT}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
-    this.root.append(this.build()); document.body.append(this.host); this.cache = new Map(); this.populate(config); this.bind(); this.restoreLauncherPosition(); this.positionPanel();
+    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
+    this.root.append(this.build()); document.body.append(this.host); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.cache = new Map(); this.populate(config); this.bind(); this.restoreLauncherPosition(); this.positionPanel();
   }
   input(path, label, type = 'text', hint = '') {
     return `<label class="field"><span>${label}</span><input data-field="${path}" type="${type}" ${type === 'number' ? 'step="any"' : ''}>${hint ? `<small>${hint}</small>` : ''}</label>`;
@@ -71,33 +98,50 @@ export class Panel {
   }
   build() {
     const container = document.createElement('div');
-    const tabGroups = { interaction: [['gift', '礼物感谢'], ['welcome', '进场欢迎'], ['likes', '点赞感谢'], ['keywords', '关键词回复'], ['bot','@机器人'], ['timers', '定时消息'], ['income','收入统计']], settings: [['features', '功能开关'], ['ai', 'AI 设置'], ['runtime', '运行规则'], ['profiles','主播管理'], ['diagnostics', '连接诊断']] };
+    const tabGroups = { interaction: [['pk', 'PK 预测'], ['gift', '礼物感谢'], ['welcome', '进场欢迎'], ['likes', '点赞感谢'], ['keywords', '关键词回复'], ['bot','@机器人'], ['timers', '定时消息'], ['income','收入统计']], settings: [['features', '功能开关'], ['appearance','外观'], ['ai', 'AI 设置'], ['runtime', '运行规则'], ['profiles','主播管理'], ['diagnostics', '连接诊断']] };
     container.innerHTML = `
       <button type="button" class="launcher" aria-expanded="true" aria-label="收起场控面板，当前已暂停" title="点击收起 · 拖动调整位置"><div class="launcher-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="4"/><path d="M9 21h6M12 18v3M8 10v3m4-5v7m4-5v3"/></svg></div><b>场控</b><i aria-hidden="true"></i><span>已暂停</span><svg class="launcher-grip" aria-hidden="true" viewBox="0 0 10 16" fill="currentColor"><circle cx="3" cy="4" r="1"/><circle cx="7" cy="4" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="7" cy="8" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="7" cy="12" r="1"/></svg></button>
-      <section class="panel" aria-label="抖音直播运营助手控制台">
-        <header class="head"><div><h1>抖音直播运营助手</h1><div class="room">${this.demo ? '模拟直播间' : `直播间 ${esc(this.room)}`}</div></div><button data-action="close" aria-label="收起面板">收起</button></header>
+      <section class="panel" data-slot="panel" aria-label="抖音直播运营助手控制台">
+        <header class="head" data-slot="panel-header"><div class="head-title"><span class="head-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="4"/><path d="M9 21h6M12 18v3M8 10v3m4-5v7m4-5v3"/></svg></span><div><h1>抖音直播运营助手</h1><div class="room">${this.demo ? '模拟直播间' : `直播间 ${esc(this.room)}`}</div></div></div><button type="button" data-action="close" aria-label="收起面板">收起</button></header>
         ${this.demo ? '<p class="banner">本地演示：弹幕和礼物均为模拟数据，消息不会发到抖音。</p>' : ''}
-        <nav class="nav" aria-label="功能导航"><div class="primary-nav" role="group" aria-label="功能分类">${[['interaction','直播互动'],['settings','设置']].map(([key,label])=>`<button type="button" data-category="${key}" aria-pressed="${key==='interaction'}">${label}</button>`).join('')}</div>${Object.entries(tabGroups).map(([category,group])=>`<div class="subnav" data-subnav="${category}" role="tablist" aria-label="${{interaction:'直播互动功能',settings:'功能与运行设置'}[category]}" ${category!=='interaction'?'hidden':''}>${group.map(([key,name])=>`<button type="button" role="tab" id="tab-${key}" aria-controls="page-${key}" data-tab="${key}" aria-selected="${key==='gift'}" tabindex="${key==='gift'?0:-1}">${name}</button>`).join('')}</div>`).join('')}</nav>
+        <div class="banner" data-runtime-alert role="status" hidden><strong data-runtime-alert-text></strong> <button type="button" data-go="diagnostics">查看并处理</button></div>
+        <nav class="nav" aria-label="功能导航"><div class="primary-nav" role="group" aria-label="功能分类">${[['interaction','直播互动'],['settings','设置']].map(([key,label])=>`<button type="button" data-category="${key}" aria-pressed="${key==='interaction'}">${label}</button>`).join('')}</div>${Object.entries(tabGroups).map(([category,group])=>`<div class="subnav" data-subnav="${category}" role="tablist" aria-label="${{interaction:'直播互动功能',settings:'功能与运行设置'}[category]}" ${category!=='interaction'?'hidden':''}>${group.map(([key,name])=>`<button type="button" role="tab" id="tab-${key}" aria-controls="page-${key}" data-tab="${key}" aria-selected="${key===this.activeTab}" tabindex="${key===this.activeTab?0:-1}">${name}</button>`).join('')}</div>`).join('')}</nav>
         <div class="toast" role="status" hidden></div>
         <div class="scroll"><form autocomplete="off">
           <section class="page" id="page-overview" data-page="overview" aria-label="暂存总览" hidden>
             <h2>直播总览</h2><p class="intro">查看房间连接、场控记录和近期提醒。</p>
-            <div class="status"><strong data-overview-state>已暂停</strong><span class="badge" data-network>等待直播数据</span></div>
+            <div class="status"><strong data-overview-state>已暂停</strong><span class="badge" data-slot="tag" data-network>等待直播数据</span></div>
             <div class="overview-metrics" aria-label="本场运行概况"><div class="overview-metric"><b data-overview-stat="events">0</b><span>已处理事件</span></div><div class="overview-metric"><b data-overview-stat="submitted">0</b><span>已提交</span></div><div class="overview-metric"><b data-overview-stat="alerts">0</b><span>近期提醒</span></div></div>
             <section class="overview-block"><h3>管理员提醒 <button type="button" class="text-button" data-go="diagnostics">查看运行记录</button></h3><div data-overview-alerts><div class="overview-empty">启动后，内容提醒与连接异常会显示在这里。</div></div></section>
             <section class="overview-block"><h3>最近回复 <button type="button" class="text-button" data-go="replies">查看记录</button></h3><p data-overview-reply class="overview-empty">暂无回复记录。</p></section>
             <p class="overview-note">提醒用于辅助管理员核查；无法确认的账号身份或权限会保持未知。</p>
+          </section>
+          <section class="page" role="tabpanel" id="page-pk" aria-labelledby="tab-pk" data-page="pk" hidden>
+            <h2>PK 预测</h2><p class="intro">实时汇总已观测比分、得分速度和送礼行为，输出可解释的模型估计。</p>
+            <div class="status"><strong data-pk-state>等待 PK 事件</strong><span class="badge" data-slot="tag" data-pk-quality>数据不足</span></div>
+            <div class="pk-scoreboard"><div><strong data-pk-self-score>0</strong><span data-pk-self-name>己方</span></div><div class="vs">VS<br><small data-pk-remaining>--</small></div><div><strong data-pk-opponent-score>0</strong><span data-pk-opponent-name>对方</span></div></div>
+            <div class="pk-prob"><div><b data-pk-self-win>未知</b><span>己方获胜估计</span></div><div><b data-pk-opponent-win>未知</b><span>对方获胜估计</span></div></div>
+            <div class="grid"><div><span class="choice-hint">近 15 秒速度</span><p><strong data-pk-self-speed>--</strong> / <strong data-pk-opponent-speed>--</strong></p></div><div><span class="choice-hint">近 60 秒速度</span><p><strong data-pk-self-velocity>--</strong> / <strong data-pk-opponent-velocity>--</strong></p></div><div><span class="choice-hint">置信度</span><p><strong data-pk-confidence>--</strong></p></div><div><span class="choice-hint">样本与延迟</span><p><strong data-pk-sample>--</strong></p></div></div>
+            <section class="section"><h3>局势因素</h3><ul class="pk-factors" data-pk-factors><li>等待可用比分或礼物事件。</li></ul></section>
+            <section class="section"><h3>大额贡献者意愿</h3><table class="pk-table"><thead><tr><th>侧</th><th>活跃送礼意愿</th><th>观测用户</th><th>近窗贡献</th></tr></thead><tbody data-pk-intent><tr><td colspan="4" class="empty">暂无可估计样本</td></tr></tbody></table></section>
+            <section class="section"><h3>对面弹幕信号</h3><p data-pk-chat class="empty">等待已采集的对手房间弹幕。</p><div class="grid"><div><span class="choice-hint">近 60 秒样本</span><p><strong data-pk-chat-recent>--</strong></p></div><div><span class="choice-hint">求援倾向</span><p><strong data-pk-chat-request>--</strong></p></div><div><span class="choice-hint">反超倾向</span><p><strong data-pk-chat-comeback>--</strong></p></div><div><span class="choice-hint">情绪信号</span><p><strong data-pk-chat-sentiment>--</strong></p></div></div></section>
+            <section class="section"><h3>活动与卡片经验记录</h3><table class="pk-table"><thead><tr><th>项目</th><th>命中 / 样本</th><th>经验频率</th><th>区间</th></tr></thead><tbody data-pk-rates><tr><td colspan="4" class="empty">尚无已记录样本</td></tr></tbody></table></section>
+            <p class="pk-note">这是基于当前页面观测和历史样本的估计，不是抖音官方胜率。3 倍加成、卡片和宝箱概率只会按你实际记录的场次给出经验频率与区间；样本不足时保持未知。</p>
           </section>
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime" hidden>
             <h2>运行规则</h2><p class="intro">符合规则的消息按优先级及时发送。</p>
             <div class="status"><strong data-state>已暂停</strong></div>
             <section class="settings-group"><h3>互动发送</h3><p class="group-note">所有已接受的互动按优先级连续处理；发送控件就绪后立即提交，无需逐条审核。</p><div class="grid">${this.select('mode', '回复方式', [['auto', '自动发送'], ['preview', '仅预览，不发送']])}</div><label class="toggle"><input type="checkbox" data-field="automation.autoStart">进入此主播直播间后自动开始场控</label><p class="hint">仅当前主播生效；连接未就绪时等待恢复。手动暂停后本次页面不会自动重启。</p><div class="mode-note" data-mode-note>符合规则的回复会自动发送。</div></section>
           </section>
+          <section class="page" role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" data-page="appearance" hidden>
+            <h2>外观</h2><p class="intro">选择适合当前环境的亮暗模式。</p>
+            <section class="settings-group"><h3>颜色模式</h3><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
+          </section>
           <section class="page" role="tabpanel" id="page-features" aria-labelledby="tab-features" data-page="features" hidden>
             <h2>功能开关</h2><p class="intro">集中启用或停用直播互动模块；关闭后，该模块从互动导航中隐藏。</p>
             <section class="settings-group"><h3>礼物与进场</h3><p class="group-note">按观众送礼和进入直播间事件触发。</p><div class="feature-list">${[['gift','礼物感谢'],['welcome','进场欢迎']].map(([key,label]) => `<div class="feature-row"><div class="feature-title">${label}<small data-feature-note="${key}"></small></div><label class="switch" aria-label="${label}"><input type="checkbox" role="switch" data-field="${key}.enabled" aria-label="${label}"><span></span></label></div>`).join('')}</div></section>
             <section class="settings-group"><h3>弹幕与反馈</h3><p class="group-note">按点赞、弹幕内容或提醒条件触发。</p><div class="feature-list">${[['like','点赞感谢'],['keyword','关键词回复']].map(([key,label]) => `<div class="feature-row"><div class="feature-title">${label}<small data-feature-note="${key}"></small></div><label class="switch" aria-label="${label}"><input type="checkbox" role="switch" data-field="${key}.enabled" aria-label="${label}"><span></span></label></div>`).join('')}<div class="feature-row"><div class="feature-title">内容提醒<small data-feature-note="moderation"></small></div><label class="switch" aria-label="内容提醒"><input type="checkbox" role="switch" data-field="moderation.enabled" aria-label="内容提醒"><span></span></label></div></div></section>
-            <section class="settings-group"><h3>@ 机器人</h3><p class="group-note">观众 @ 当前登录账号，呼出菜单或参加互动小游戏，无需 AI。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">机器人互动<small data-feature-note="bot"></small></div><label class="switch" aria-label="机器人互动"><input type="checkbox" role="switch" data-field="bot.enabled" aria-label="机器人互动"><span></span></label></div></div></section>
+            <section class="settings-group"><h3>@ 机器人</h3><p class="group-note">观众 @ 当前登录账号参加互动；启用 AI 服务后优先 AI 接话，不可用时自动使用内置回复。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">机器人互动<small data-feature-note="bot"></small></div><label class="switch" aria-label="机器人互动"><input type="checkbox" role="switch" data-field="bot.enabled" aria-label="机器人互动"><span></span></label></div></div></section>
             <section class="settings-group"><h3>计划互动</h3><p class="group-note">按已配置的时间间隔循环发送。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">定时消息<small data-feature-note="timers"></small></div><label class="switch" aria-label="定时消息"><input type="checkbox" role="switch" data-field="timersEnabled" aria-label="定时消息"><span></span></label></div></div></section>
             <section class="settings-group"><h3>礼物账本</h3><p class="group-note">独立于礼物感谢，按主播与北京时间保存统计。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">收入统计<small>本地保存每日礼物价值与月度收入估算；关闭后停止采集，历史数据仍保留。</small></div><label class="switch" aria-label="收入统计"><input type="checkbox" role="switch" data-field="incomeEnabled" aria-label="收入统计"><span></span></label></div></div></section>
             <section class="settings-group"><h3>AI 互动</h3><p class="group-note">先启用 AI 服务，再单独决定要使用的 AI 功能。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">AI 服务<small data-feature-note="ai-service"></small></div><label class="switch" aria-label="AI 服务"><input type="checkbox" role="switch" data-field="ai.enabled" aria-label="AI 服务"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 弹幕问答<small data-feature-note="ai-chat"></small></div><label class="switch" aria-label="AI 弹幕问答"><input type="checkbox" role="switch" data-field="ai.chatEnabled" aria-label="AI 弹幕问答"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 冷场互动<small data-feature-note="ai-idle"></small></div><label class="switch" aria-label="AI 冷场互动"><input type="checkbox" role="switch" data-field="ai.idleEnabled" aria-label="AI 冷场互动"><span></span></label></div></div><button type="button" class="text-button" data-go="ai">配置 AI 服务与问答</button></section>
@@ -116,7 +160,7 @@ export class Panel {
             ${this.input('gift.yuanPerDiamond', '收入估算比例 / 元每钻', 'number')}
             <p class="hint">默认按 100 钻约 10 元、主播分成约一半估算（0.05 元/钻）；请按主播结算情况调整。</p>
             <div class="presets" aria-label="常用礼物阈值"><span>快速设为</span>${[[50,'50'],[100,'100'],[500,'500'],[1000,'1000']].map(([value,label])=>`<button type="button" data-gift-value="${value}">${label} 钻</button>`).join('')}</div>
-            <details><summary>筛选与防刷屏</summary>${this.select('gift.basis', '按什么计算价值', [['total', '整次连击的总价值（推荐）'], ['unit', '单个礼物的价值']])}<div class="grid">${this.input('gift.cooldownSec', '同一人感谢间隔 / 秒', 'number')}${this.input('gift.mergeSec', '连击等待 / 秒', 'number')}</div></details>
+            <details><summary>筛选与防刷屏</summary>${this.select('gift.basis', '按什么计算价值', [['total', '整次连击的总价值（推荐）'], ['unit', '单个礼物的价值']])}</details>
             ${this.area('gift.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 昵称、{gift} 礼物名、{count} 数量、{value} 总钻石、{unit} 单价。')}
             <div class="notice">收入估算仅按已知钻石面值和你填写的比例计算，不代表平台结算或到账金额。单价未知的礼物不会计入面值，会单独统计。</div>
             <details><summary>补充未知礼物的单价</summary><div data-list="prices"></div><button type="button" class="list-add" data-add="prices">添加礼物单价</button><p class="hint">填礼物名称或 ID，仅在直播消息缺少单价时使用。</p></details>
@@ -125,9 +169,9 @@ export class Panel {
             <h2>收入统计</h2><p class="intro">按主播独立保存，刷新或重开浏览器后继续累计。</p>
             <div class="grid"><label class="field"><span>主播</span><select data-income-room><option value="${esc(this.room)}">当前直播间 ${esc(this.room)}</option></select></label><label class="field"><span>统计月份 · 北京时间</span><input type="month" data-income-month value="${giftDate().slice(0,7)}"></label></div>
             <p class="income-error" data-income-error role="status" hidden></p>
-            <section class="income-hero" aria-label="月度礼物收入"><span data-income-period>所选月份收入估算</span><b data-income-total>¥0.00</b><div class="income-meta"><span>礼物面值 <strong data-income-diamonds>0 钻</strong></span><span>礼物数量 <strong data-income-count>0</strong></span><span>记录天数 <strong data-income-days>0</strong></span></div></section>
+            <section class="income-hero" aria-label="月度礼物收入"><span data-income-period>所选月份收入估算</span><b data-income-total>¥0.00</b><div class="income-meta"><span>礼物面值 <strong data-income-diamonds>0 钻</strong></span><span>礼物数量 <strong data-income-count>0</strong></span><span>记录天数 <strong data-income-days>0</strong></span></div><p class="hint" data-income-calibration>在线贡献榜估值：暂无可识别用户</p></section>
             <div class="income-toolbar"><h3>每日明细</h3><button type="button" data-action="export-income" disabled>导出当月</button></div><div data-income-daily><p class="empty">正在读取本地账本…</p></div>
-            <p class="hint" data-income-coverage></p><p class="hint">只统计工具在线时实际采集的礼物，无法补回未采集时段。每笔按采集时保存的元/钻比例估算；修改比例仅影响后续礼物。未知单价不计入金额。数据保存在当前浏览器，卸载扩展或清除其数据会移除账本。</p>
+            <p class="hint" data-income-coverage></p><p class="hint" data-income-calibration-status>在线榜单：等待自动采样</p><p class="hint">在线榜估值按你提供的经验锚点线性折算：1000 分约 ¥100，单独显示，不与已采集礼物收入相加；只接受 UID 可唯一识别的用户。这个换算尚未用长期直播样本校准，不代表平台结算或实际到账。榜单只采集页面当前可见的用户。</p><p class="hint">礼物统计按工具在线时实际采集的事件估算；较早的礼物无法还原。每笔按采集时保存的元/钻比例计算；修改比例仅影响后续礼物。未知单价不计入金额。数据保存在当前浏览器，卸载扩展或清除其数据会移除账本。</p>
           </section>
           <section class="page" role="tabpanel" id="page-profiles" aria-labelledby="tab-profiles" data-page="profiles" hidden>
             <h2>主播管理</h2><p class="intro">每位主播的互动规则、功能开关、AI 配置与收入比例独立保存。进入直播间自动载入对应配置。</p>
@@ -142,18 +186,17 @@ export class Panel {
             ${this.select('welcome.mode', '欢迎范围', [['qualified-or-listed', '达标用户 + 指定名单'], ['qualified', '只欢迎达标用户'], ['listed', '只欢迎指定名单']])}
             <div data-qualified><div class="grid">${this.input('welcome.minWealth', '最低荣誉等级', 'number')}${this.input('welcome.minFanLevel', '最低粉丝团等级', 'number')}</div>
             ${this.toggle('welcome.requireFan', '必须加入本直播间粉丝团')}${this.toggle('welcome.requireLit', '粉丝牌必须已点亮')}</div>
-            <details><summary>防止重复欢迎</summary>${this.input('welcome.cooldownSec', '同一人欢迎间隔 / 秒', 'number')}</details>
+            <details class="section"><summary>高价值欢迎</summary>${this.toggle('welcome.admin.enabled', '达到等级后使用管理员弹幕')}${this.input('welcome.admin.minWealth', '管理员弹幕最低荣誉等级', 'number')}<p class="hint">仅对已核实荣誉等级达到阈值的进场用户启用。账号没有管理员弹幕权限或页面开关不可用时，自动使用普通弹幕。</p></details>
             <details data-welcome-list><summary>指定欢迎的人</summary><div class="inline"><select data-viewer-picker aria-label="最近观众"><option value="">等待观众出现…</option></select><button type="button" data-action="add-viewer">加入欢迎名单</button></div><p class="hint">优先按账号识别；仅有昵称的备用弹幕可能重名。</p><div data-list="listed"></div><button type="button" class="list-add" data-add="listed">手动添加用户</button></details>
             ${this.area('welcome.templates', '欢迎话术（每行一条）', 'lines', '变量：{user}、{level} 荣誉等级、{fanLevel} 粉丝团等级。')}
             <div class="notice">无法核实主播 UID、粉丝团或等级时，条件筛选不会通过。指定名单仍可按明确身份匹配。</div>
           </section>
           <section class="page" role="tabpanel" id="page-likes" aria-labelledby="tab-likes" data-page="likes" hidden>
-            <h2>点赞感谢</h2><p class="intro">按点赞事件感谢观众；同一人冷却期间的连续点赞会合并忽略。</p>
+            <h2>点赞感谢</h2><p class="intro">按点赞事件感谢观众。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="like"></p></div>
             ${this.select('like.responseMode', '感谢生成方式', [['rules', '使用预设话术'], ['ai', '使用 AI 生成']])}
-            ${this.input('like.cooldownSec', '同一人感谢间隔 / 秒', 'number')}
             ${this.area('like.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 昵称、{count} 本次点赞数。')}
-            <div class="notice">点赞感谢也遵守全局发送节奏和当前回复方式。</div>
+            <div class="notice">点赞感谢使用当前回复方式，按事件及时发送。</div>
           </section>
           <section class="page" role="tabpanel" id="page-keywords" aria-labelledby="tab-keywords" data-page="keywords" hidden>
             <h2>关键词回复</h2><p class="intro">固定话术优先于 AI；每条弹幕最多命中一条规则。</p>
@@ -161,7 +204,6 @@ export class Panel {
             ${this.select('keyword.responseMode', '命中后回复方式', [['rules', '使用规则话术'], ['ai', '使用 AI 生成']])}
             <div data-list="keywords"></div><button type="button" class="list-add" data-add="keywords">添加关键词回复</button>
             <p class="hint">按列表顺序匹配；可用“上移 / 下移”调整优先级。每条规则支持包含关键词或完全一致。</p>
-            ${this.input('keyword.cooldownSec', '同一用户回复间隔 / 秒', 'number')}
           </section>
           <section class="page" role="tabpanel" id="page-ai" aria-labelledby="tab-ai" data-page="ai" hidden>
             <h2>AI 服务与问答</h2><p class="intro">连接模型服务，并配置 AI 如何回应直播间弹幕。</p>
@@ -171,7 +213,7 @@ export class Panel {
             <label class="field"><span>API Key</span><input type="password" data-api-key autocomplete="new-password" placeholder="留空保留此服务已有密钥"><small data-key-status>密钥按服务域名隔离，不随配置导出。</small></label>
             <label class="toggle"><input type="checkbox" data-remember-key>记住新密钥（仅此设备）</label>
             <div class="actions"><button type="button" data-action="test-ai">测试 AI 连接</button><button type="button" class="danger" data-action="forget-key">清除此服务密钥</button></div>
-            <div class="section"><div data-chat-controls>${this.select('ai.trigger', '自动回复触发条件', [['question', '提问弹幕'], ['mention', '呼叫场控'], ['all', '所有弹幕（受调用限额约束）']])}<details><summary>AI 频率与上下文</summary><div class="grid">${this.input('ai.intervalSec', '两次 AI 调用间隔 / 秒', 'number')}${this.input('ai.userCooldownSec', '同一用户 AI 冷却 / 秒', 'number')}${this.input('ai.maxPerHour', '每小时最多调用 / 次', 'number')}${this.input('ai.contextSize', '最近弹幕条数', 'number')}${this.input('ai.contextAgeSec', '弹幕保留时长 / 秒', 'number')}</div></details>
+            <div class="section"><div data-chat-controls>${this.select('ai.trigger', '自动回复触发条件', [['question', '提问弹幕'], ['mention', '呼叫场控'], ['all', '所有弹幕（受调用限额约束）']])}<details><summary>AI 额度与上下文</summary><div class="grid">${this.input('ai.maxPerHour', '每小时最多调用 / 次', 'number')}${this.input('ai.contextSize', '最近弹幕条数', 'number')}${this.input('ai.contextAgeSec', '弹幕保留时长 / 秒', 'number')}</div></details>
             <div data-ai-mentions>${this.area('ai.mentions', '场控呼叫词（每行一个）')}</div></div><div data-ai-profile>${this.area('ai.persona', '场控风格', 'text')}${this.area('ai.knowledge', '主播与本场直播资料', 'text', '填写已核实的直播主题、开播时间和资料。')}</div>
             <details data-idle-controls><summary>冷场互动</summary>${this.input('ai.idleSec', '没有新互动多久算冷场 / 秒', 'number')}</details>
             <div class="notice">启用 AI 的模块才会显示 AI 生成选项。最近弹幕、昵称和你填写的资料会发往所配置的服务，不发送 Cookies 或观众 UID。预览模式仍会调用 AI。</div></div>
@@ -183,8 +225,7 @@ export class Panel {
             <p class="hint" data-bot-session>当前没有进行中的游戏。</p>
             <section class="settings-group"><h3>互动菜单</h3><p class="group-note">菜单只列出开启的玩法。每次回复一条弹幕；菜单较长时用「菜单 2」翻页。</p><div class="feature-list">${BOT_COMMANDS.map(item => `<div class="feature-row"><div class="feature-title">${item.label}<small>@当前昵称 ${item.example}</small></div><label class="switch" aria-label="${item.label}"><input type="checkbox" role="switch" data-field="bot.${item.key}" aria-label="${item.label}"><span></span></label></div>`).join('')}</div></section>
             <div class="rule-summary"><strong>观众看到的菜单 · 第 1 页</strong><p data-bot-menu></p></div>
-            <p class="hint">成语接龙使用本地小词库，按同字衔接；全直播间共用一局，5 分钟无人接龙后从「一心一意」重新开始。</p>
-            ${this.input('bot.cooldownSec', '同一观众互动间隔 / 秒', 'number')}
+            <p class="hint">每局随机抽取起始成语，接受同音或近音接续；只需 @ 一次启动，之后全直播间都可直接参与。</p>
             <p class="hint" data-bot-ai></p>
           </section>
           <section class="page" role="tabpanel" id="page-timers" aria-labelledby="tab-timers" data-page="timers" hidden>
@@ -201,6 +242,8 @@ export class Panel {
             <div class="actions"><button type="button" data-action="diagnose">检查连接与发送控件</button><button type="button" data-action="pick-input">定位输入框</button><button type="button" data-action="pick-send">定位发送按钮</button></div>
             <pre data-diagnostics>点击“检查连接与发送控件”查看结果。</pre>
             <p class="hint" data-delivery-health role="status">发送队列为空。</p>
+            <section class="settings-group"><h3>发送状态</h3><p class="hint">发送后自动跟踪平台回显；结果未知、发送失败或页面恢复时会自动重试。</p><div data-deliveries><p class="empty">暂无发送记录。</p></div></section>
+            <section class="settings-group"><h3>采集与存储</h3><p data-ingestion-health role="status">采集就绪，尚未检查存储用量。</p><p class="hint">礼物事实先写入日志，感谢任务独立排队。缓冲耗尽后的采集缺口无法自动补回。</p><div class="actions"><button type="button" data-action="recover-events">恢复采集与重试隔离事件</button><button type="button" data-action="export-events">导出恢复数据</button></div><p class="hint">导出可能包含观众昵称和弹幕，请妥善保管。导出不会清除原始数据。</p></section>
             <h3 class="subhead">账号身份</h3>
             <details data-manual-identity><summary>主播与账号识别</summary>${this.toggle('identity.autoAnchor', '自动识别主播')}${this.input('anchorId', '主播 UID（自动识别不到时填写）')}${this.toggle('identity.autoSelf', '自动识别登录账号')}${this.input('selfId', '登录账号 UID（自动识别不到时填写）')}</details>
             <h3 class="subhead">互动过滤</h3>
@@ -256,10 +299,10 @@ export class Panel {
   syncFooter() {
     const running = Boolean(this.latest?.[0].running);
     const busy = ['start','save','test-ai'].some(action => this.busyActions.has(action));
-    this.text('[data-save-state]', this.busyActions.has('save') ? '正在保存…' : this.busyActions.has('start') ? '正在开始…' : this.dirty ? (running ? '未保存，保存后暂停' : '未保存，开始时保存') : '设置已保存');
+    this.text('[data-save-state]', this.busyActions.has('save') ? '正在保存…' : this.busyActions.has('start') ? '正在开始…' : this.dirty ? '未保存，保存后继续运行' : '设置已保存');
     this.node('[data-save-state]').classList.toggle('dirty', this.dirty);
     this.hidden('[data-action=save]', !this.dirty);
-    this.text('[data-action=save]', running ? '保存并暂停' : '保存设置');
+    this.text('[data-action=save]', '保存设置');
     this.hidden('[data-action=start]', running); this.hidden('[data-action=stop]', !running);
     this.text('[data-action=start]', this.dirty ? '保存并开始' : '开始场控');
     this.disabled('[data-action=start]', running || busy); this.disabled('[data-action=save]', busy);
@@ -332,6 +375,7 @@ export class Panel {
     const listedCount = this.root.querySelectorAll('[data-list="listed"] [data-list-row="listed"]').length;
     const fanRule = get('welcome.requireFan').checked ? `本房粉丝团 ≥ ${get('welcome.minFanLevel').value} 级${get('welcome.requireLit').checked ? '且已点亮' : ''}` : '不限制粉丝团';
     const welcomeRule = welcomeMode === 'listed' ? `仅欢迎指定名单（${listedCount} 人）` : `荣誉 ≥ ${get('welcome.minWealth').value} 级 · ${fanRule}${welcomeMode === 'qualified-or-listed' ? ` · 或名单 ${listedCount} 人` : ''}`;
+    const adminRule = get('welcome.admin.enabled').checked ? ` · 高价值用户 ≥ ${get('welcome.admin.minWealth').value} 级用管理员弹幕` : '';
     const aiReady = get('ai.enabled').checked;
     for (const option of this.root.querySelectorAll('[data-ai-choice]')) option.hidden = !aiReady;
     for (const select of this.root.querySelectorAll('[data-field$=".responseMode"], [data-item="responseMode"]')) {
@@ -342,15 +386,15 @@ export class Panel {
     this.hidden('[data-idle-controls]', !get('ai.idleEnabled').checked);
     this.hidden('[data-ai-profile]', !get('ai.chatEnabled').checked && !get('ai.idleEnabled').checked);
     const strategy = mode => mode === 'ai' ? (aiReady ? 'AI 优先，规则兜底' : '规则话术（AI 服务关闭）') : '预设话术';
-    this.text('[data-summary=gift]', !get('gift.enabled').checked ? '已关闭，不会生成礼物感谢。' : `${get('gift.basis').value === 'total' ? '连击总价' : '单个礼物'} ≥ ${get('gift.minValue').value || 0} 钻 · ${strategy(get('gift.responseMode').value)} · 同一人冷却 ${get('gift.cooldownSec').value} 秒。`);
-    this.text('[data-summary=welcome]', !get('welcome.enabled').checked ? '已关闭，不会生成进场欢迎。' : `${welcomeRule} · ${strategy(get('welcome.responseMode').value)}`);
+    this.text('[data-summary=gift]', !get('gift.enabled').checked ? '已关闭，不会生成礼物感谢。' : `${get('gift.basis').value === 'total' ? '连击总价' : '单个礼物'} ≥ ${get('gift.minValue').value || 0} 钻 · ${strategy(get('gift.responseMode').value)} · 即时感谢。`);
+    this.text('[data-summary=welcome]', !get('welcome.enabled').checked ? '已关闭，不会生成进场欢迎。' : `${welcomeRule}${adminRule} · ${strategy(get('welcome.responseMode').value)}`);
     this.text('[data-feature-note=gift]', !get('gift.enabled').checked ? '已关闭' : `门槛 ≥ ${get('gift.minValue').value || 0} 钻`);
     this.text('[data-feature-note=welcome]', !get('welcome.enabled').checked ? '已关闭' : welcomeMode === 'listed' ? `指定名单 ${listedCount} 人` : `荣誉 ≥ ${get('welcome.minWealth').value} 级${get('welcome.requireFan').checked ? ' · 粉丝团条件已启用' : ''}`);
-    this.text('[data-feature-note=like]', !get('like.enabled').checked ? '已关闭' : `${strategy(get('like.responseMode').value)} · 同一人 ${get('like.cooldownSec').value} 秒冷却`);
-    this.text('[data-summary=like]', !get('like.enabled').checked ? '已关闭，不会生成点赞感谢。' : `${strategy(get('like.responseMode').value)} · 同一人感谢间隔 ${get('like.cooldownSec').value} 秒。`);
+    this.text('[data-feature-note=like]', !get('like.enabled').checked ? '已关闭' : strategy(get('like.responseMode').value));
+    this.text('[data-summary=like]', !get('like.enabled').checked ? '已关闭，不会生成点赞感谢。' : `${strategy(get('like.responseMode').value)} · 即时感谢。`);
     const keywordCount = this.root.querySelectorAll('[data-list="keywords"] [data-list-row="keywords"]').length;
     this.text('[data-feature-note=keyword]', !get('keyword.enabled').checked ? '已关闭' : `启用 ${keywordCount} 条规则`);
-    this.text('[data-feature-note=bot]', get('bot.enabled').checked ? '@当前账号呼出菜单 · 本地即时处理' : '已关闭');
+    this.text('[data-feature-note=bot]', get('bot.enabled').checked ? (aiReady ? '@当前账号呼出菜单 · AI 接话，内置兜底' : '@当前账号呼出菜单 · 内置回复') : '已关闭');
     const botConfig = Object.fromEntries(BOT_COMMANDS.map(item => [item.key, get(`bot.${item.key}`).checked]));
     this.text('[data-bot-menu]', new RoomBot().menu(botConfig, this.config.sending.maxLength || 50));
     const botSelf = this.identity?.self, configuredSelf = get('selfId').value;
@@ -358,8 +402,8 @@ export class Panel {
     this.text('[data-bot-address]', `@${selfMatches && botSelf.name ? botSelf.name : '当前昵称'} 菜单`);
     this.text('[data-bot-identity]', selfMatches ? `当前响应账号：${botSelf.name || botSelf.id}。请使用完整 @，并在昵称后留一个空格。` : configuredSelf ? '已配置登录账号 UID；可通过平台的 @ 账号选择器准确呼叫。' : '请先登录并在“连接诊断”识别当前账号，识别后才会响应 @。');
     this.text('[data-bot-session]', this.latest?.[0]?.bot?.sessionSummary?.() || '当前没有进行中的游戏。');
-    this.text('[data-bot-ai]', aiReady && get('ai.chatEnabled').checked ? '普通提问交给 AI 问答；AI 忙碌或失败时会提示使用本地菜单。小游戏不调用 AI。' : '小游戏无需 AI；如需回答普通提问，请在功能开关启用 AI 服务与 AI 弹幕问答。');
-    this.text('[data-summary=keyword]', !get('keyword.enabled').checked ? '已关闭，不会回复关键词弹幕。' : `${keywordCount} 条规则 · 按顺序命中首条 · ${strategy(get('keyword.responseMode').value)} · 同一用户冷却 ${get('keyword.cooldownSec').value} 秒。`);
+    this.text('[data-bot-ai]', aiReady ? '互动优先使用 AI 接话，无需开启 AI 弹幕问答；忙碌、失败或等待超过 5 秒时自动使用内置回复。菜单和游戏结果由本地确定。' : '当前使用内置题库和算法回复；启用 AI 服务后自动使用 AI 接话。主播和观众可直接回答，也可用文字或表情完成挑战。');
+    this.text('[data-summary=keyword]', !get('keyword.enabled').checked ? '已关闭，不会回复关键词弹幕。' : `${keywordCount} 条规则 · 按顺序命中首条 · ${strategy(get('keyword.responseMode').value)} · 即时回复。`);
     this.hidden('[data-ai-mentions]', get('ai.trigger').value !== 'mention');
     const triggerName = { question: '提问弹幕', mention: '呼叫词', all: '所有弹幕' }[get('ai.trigger').value];
     this.text('[data-summary=ai]', !aiReady ? 'AI 服务已关闭；已启用的模块仅使用预设话术。' : `AI 服务已开启 · 弹幕问答${get('ai.chatEnabled').checked ? `：${triggerName}` : '：关闭'} · 每小时最多 ${get('ai.maxPerHour').value} 次 · ${get('mode').value === 'preview' ? '当前仅预览' : '自动发送'}`);
@@ -376,6 +420,7 @@ export class Panel {
     this.text('[data-mode-note]', {preview:'仅预览，不会发送到直播间。AI 开启后仍会调用模型。',auto:'符合规则的回复会自动发送。'}[get('mode').value]);
     const fan = get('welcome.requireFan').checked;
     get('welcome.requireLit').disabled = !fan; get('welcome.minFanLevel').disabled = !fan;
+    get('welcome.admin.minWealth').disabled = !get('welcome.admin.enabled').checked;
     get('anchorId').readOnly = get('identity.autoAnchor').checked && Boolean(this.identity?.anchor);
     get('selfId').readOnly = get('identity.autoSelf').checked && Boolean(this.identity?.self);
     this.applyFeatureVisibility();
@@ -436,6 +481,11 @@ export class Panel {
   }
   incomeSelection() { return {room:this.node('[data-income-room]').value || this.room, month:this.node('[data-income-month]').value || giftDate().slice(0,7)}; }
   incomeError(message) { this.text('[data-income-error]', `本地账本暂不可用：${message}`); this.hidden('[data-income-error]', false); this.node('[data-action="export-income"]').disabled = true; }
+  updateContributionStatus(status) {
+    if (!status?.checkedAt) { this.text('[data-income-calibration-status]', '在线榜单：等待自动采样'); return; }
+    const time = new Date(status.checkedAt).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    this.text('[data-income-calibration-status]', `在线榜单读取 ${status.rows} 行，已关联 UID ${status.matched} 行 · ${time}${status.matched < status.rows ? `；${status.rows-status.matched} 行因 UID 不可唯一匹配，未计入估值` : ''}`);
+  }
   updateIncome(report) {
     if (!report?.summary || !Array.isArray(report.days)) return;
     this.hidden('[data-income-error]', true);
@@ -446,11 +496,15 @@ export class Panel {
     this.text('[data-income-count]',number(summary.giftCount));
     this.text('[data-income-days]',String(report.days.length));
     this.text('[data-income-coverage]',summary.unknownCount ? `另有 ${number(summary.unknownCount)} 个礼物单价未知，未计入面值与收入。` : '金额仅包含已识别单价的礼物，不代表平台结算或实际到账。');
+    const calibration = report.calibration || {users:0,score:0,incomeFloor:0};
+    this.text('[data-income-calibration]', calibration.users
+      ? `在线贡献榜${calibration.hasFloor ? '至少 ' : ''}估值 ${money(calibration.incomeEstimate)} · ${number(calibration.users)} 位已识别用户 · ${number(calibration.score)} 分；不与礼物收入重复相加。`
+      : '在线贡献榜估值：暂无可识别用户');
     const box = this.node('[data-income-daily]');
     const signature = JSON.stringify(report);
     if (signature !== this.incomeSignature) {
       this.incomeSignature = signature;
-      box.innerHTML = report.days.length ? `<div class="income-table-wrap"><table class="income-table"><thead><tr><th scope="col">日期</th><th scope="col">礼物数</th><th scope="col">面值 / 钻</th><th scope="col">收入估算</th></tr></thead><tbody>${report.days.map(day=>`<tr><td>${esc(day.date)}</td><td>${number(day.giftCount)}${day.unknownCount ? ` <span title="单价未知">(未知 ${number(day.unknownCount)})</span>` : ''}</td><td>${number(day.totalDiamonds)}</td><td>${money(day.estimatedIncome)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">这个月份还没有采集到礼物。进入对应直播间后，会自动记录收到的礼物。</p>';
+      box.innerHTML = report.days.length ? `<div class="income-table-wrap"><table class="income-table"><thead><tr><th scope="col">日期</th><th scope="col">礼物数</th><th scope="col">面值 / 钻</th><th scope="col">礼物收入估算</th><th scope="col">榜单估值</th></tr></thead><tbody>${report.days.map(day=>`<tr><td>${esc(day.date)}</td><td>${number(day.giftCount)}${day.unknownCount ? ` <span title="单价未知">(未知 ${number(day.unknownCount)})</span>` : ''}</td><td>${number(day.totalDiamonds)}</td><td>${money(day.estimatedIncome)}</td><td>${day.calibrationUsers ? `${day.calibrationHasFloor ? '至少 ' : ''}${money(day.calibratedIncomeEstimate)} · ${number(day.calibrationUsers)}人` : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">这个月份还没有采集到礼物或榜单校准数据。进入对应直播间后，会自动记录可见数据。</p>';
     }
     this.node('[data-action="export-income"]').disabled = false;
   }
@@ -482,8 +536,8 @@ export class Panel {
   toggleOpen() { this.open = !this.open; this.node('.panel').hidden = !this.open; this.syncLauncher(); if (this.open) { if (this.latest) this.refresh(...this.latest); this.renderLogs(); this.positionPanel(); } }
   applyFeatureVisibility() {
     const enabled = key => Boolean(this.root.querySelector(`[data-field="${key}.enabled"]`)?.checked);
-    for (const key of interactionPages) {
-      const visible = ['timers','income'].includes(key) ? Boolean(this.root.querySelector(`[data-field="${key === 'income' ? 'incomeEnabled' : 'timersEnabled'}"]`)?.checked) : enabled(({ gift:'gift', welcome:'welcome', likes:'like', keywords:'keyword', bot:'bot' })[key]);
+    for (const key of ['pk', ...interactionPages]) {
+      const visible = key === 'pk' ? true : ['timers','income'].includes(key) ? Boolean(this.root.querySelector(`[data-field="${key === 'income' ? 'incomeEnabled' : 'timersEnabled'}"]`)?.checked) : enabled(({ gift:'gift', welcome:'welcome', likes:'like', keywords:'keyword', bot:'bot' })[key]);
       const tab = this.root.querySelector(`[data-tab="${key}"]`);
       const page = this.root.querySelector(`[data-page="${key}"]`);
       if (tab) tab.hidden = !visible;
@@ -504,6 +558,36 @@ export class Panel {
       this.tab('features');
     }
   }
+  renderPK(engine) {
+    const data = engine.pk?.current?.();
+    if (!data || !data.key) return;
+    const fmt = value => Number.isFinite(value) ? Math.round(value).toLocaleString('zh-CN') : '--';
+    const pct = value => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '未知';
+    this.text('[data-pk-state]', data.phase === 'active' ? 'PK 进行中' : data.phase === 'ended' ? 'PK 已结束' : '等待 PK 事件');
+    this.text('[data-pk-quality]', data.prediction.status === 'estimated' ? `置信度 ${Math.round(data.prediction.confidence * 100)}%` : '数据不足');
+    this.text('[data-pk-self-score]', data.selfScoreObserved ? fmt(data.selfScore) : '--'); this.text('[data-pk-opponent-score]', data.opponentScoreObserved ? fmt(data.opponentScore) : '--');
+    this.text('[data-pk-self-name]', data.anchorName || '己方'); this.text('[data-pk-opponent-name]', data.opponentName || '对方');
+    this.text('[data-pk-remaining]', Number.isFinite(data.remainingMs) ? `${Math.ceil(data.remainingMs / 1000)} 秒` : '--');
+    this.text('[data-pk-self-win]', pct(data.prediction.selfWin)); this.text('[data-pk-opponent-win]', pct(data.prediction.opponentWin));
+    this.text('[data-pk-self-speed]', fmt(data.selfSpeed)); this.text('[data-pk-opponent-speed]', fmt(data.opponentSpeed)); this.text('[data-pk-self-velocity]', fmt(data.selfVelocity60)); this.text('[data-pk-opponent-velocity]', fmt(data.opponentVelocity60));
+    this.text('[data-pk-confidence]', Number.isFinite(data.prediction.confidence) ? `${Math.round(data.prediction.confidence * 100)}%` : '--');
+    this.text('[data-pk-sample]', `${data.prediction.sampleSize || 0} 场 · ${data.dataQuality.lagMs == null ? '--' : `${Math.round(data.dataQuality.lagMs)} ms`}`);
+    const factors = data.prediction.factors?.length ? data.prediction.factors : ['等待更多比分和速度变化']; this.node('[data-pk-factors]').innerHTML = factors.map(item => `<li>${esc(item)}</li>`).join('');
+    const intent = [['己方', data.selfIntent], ['对方', data.opponentIntent]]; this.node('[data-pk-intent]').innerHTML = intent.map(([label, item]) => `<tr><td>${label}</td><td>${pct(item.probability)}</td><td>${item.sampleSize || 0}</td><td>${fmt(item.expected)}</td></tr>`).join('');
+    const chat = data.chatSignals || { recent:0, opponent:{ total:0, request:0, comeback:0, positive:0, negative:0 } };
+    const opponent = chat.opponent || {};
+    this.text('[data-pk-chat-recent]', `${chat.recent || 0} 条`);
+    this.text('[data-pk-chat-request]', opponent.total ? `${Math.round((opponent.request || 0) / opponent.total * 100)}%` : '未知');
+    this.text('[data-pk-chat-comeback]', opponent.total ? `${Math.round((opponent.comeback || 0) / opponent.total * 100)}%` : '未知');
+    const sentiment = (opponent.positive || 0) > (opponent.negative || 0) ? '偏积极' : (opponent.negative || 0) > (opponent.positive || 0) ? '偏消极' : opponent.total ? '中性' : '未知';
+    this.text('[data-pk-chat-sentiment]', sentiment);
+    this.text('[data-pk-chat]', opponent.total ? `对手房间已采集 ${opponent.total} 条文本；信号仅按关键词计数，不能代表所有观众或主播真实意图。` : '等待已采集的对手房间弹幕。打开对手直播页后才会有样本。');
+    const rate = (label, item) => {
+      if (!item?.trials) return `<tr><td>${label}</td><td>0 / 0</td><td>未知</td><td>--</td></tr>`;
+      return `<tr><td>${label}</td><td>${item.successes} / ${item.trials}</td><td>${pct(item.rate)}</td><td>${pct(item.low)}–${pct(item.high)}</td></tr>`;
+    };
+    this.node('[data-pk-rates]').innerHTML = [rate('3 倍加成', data.multiplierStats), rate('卡片 / 宝箱命中', data.cardStats)].join('');
+  }
   tab(key) {
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
@@ -513,7 +597,7 @@ export class Panel {
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-subnav]')) node.hidden = node.dataset.subnav !== category;
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
-    const featureByPage = { gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword', bot:'bot', timers: 'timersEnabled', income:'incomeEnabled' };
+    const featureByPage = { pk: null, gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword', bot:'bot', timers: 'timersEnabled', income:'incomeEnabled' };
     for (const node of this.root.querySelectorAll('[data-page]')) {
       const feature = featureByPage[node.dataset.page];
       const disabled = feature && !this.root.querySelector(`[data-field="${['timersEnabled','incomeEnabled'].includes(feature) ? feature : `${feature}.enabled`}"]`)?.checked;
@@ -575,7 +659,7 @@ export class Panel {
     this.root.addEventListener('click', async e => {
       const category=e.target.closest('[data-category]');
       if(category){
-        const firstVisibleTab=[...this.root.querySelectorAll(`[data-subnav="${category.dataset.category}"] [data-tab]`)].find(tab=>!tab.hidden);
+        const firstVisibleTab=[...this.root.querySelectorAll(`[data-subnav="${category.dataset.category}"] [data-tab]`)].find(tab=>!tab.hidden && !(category.dataset.category === 'interaction' && tab.dataset.tab === 'pk'));
         if(firstVisibleTab)this.tab(firstVisibleTab.dataset.tab);
         return;
       }
@@ -602,6 +686,12 @@ export class Panel {
           this.addRow('listed',value); this.toast('已加入名单，保存后生效'); return;
         }
         if (action === 'clear-log') { this.entries = []; this.renderLogs(); return; }
+        if (action === 'recover-events' || action === 'export-events') {
+          button.disabled = true;
+          try { await this.callbacks[action === 'recover-events' ? 'recoverEvents' : 'exportEvents'](); this.toast(action === 'recover-events' ? '已尝试恢复，请核对采集状态和缺口记录' : '恢复数据已导出'); }
+          finally { button.disabled = false; }
+          return;
+        }
         if (action === 'import') return this.root.querySelector('[data-import-file]').click();
         if (action === 'save' || action === 'test-ai') {
           const config = this.read(); const key = this.root.querySelector('[data-api-key]').value.trim();
@@ -682,12 +772,31 @@ export class Panel {
     this.root.querySelector('[data-diagnostics]').textContent = [
       `连接观察器：${status.hook ? '已安装' : '未安装'}`, `捕获连接：${status.sockets}；连接${status.connected ? '在线' : '离线'}`,
       `解析消息帧：${status.frames}；结构化事件：${status.events}；解析失败：${status.errors}`,
+      `捕获礼物事件：${status.giftEvents || 0}`,
+      status.lastGift ? `最近礼物：${status.lastGift.giftName} ×${status.lastGift.count}；单价 ${status.lastGift.unitValue ?? '未知'} 钻${status.lastGift.timestampSkewMs == null ? '' : `；平台时间偏差 ${Math.round(status.lastGift.timestampSkewMs / 1000)} 秒`}` : '最近礼物：尚未捕获',
       `待解码帧：${status.pendingFrames || 0}`,
       `最近消息：${status.lastFrame ? new Date(status.lastFrame).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '尚未收到'}`,
       `发送连接检查：${status.healthy ? '通过' : '未通过；请刷新直播页，确认开播状态'}`,
       `主播 UID：${status.anchorId}`, `输入框：${status.input}`, `发送按钮：${status.send}`,
       '礼物价值与等级来源：结构化直播消息；网页文字不会用于猜测。'
     ].join('\n');
+  }
+  renderDelivery(engine, network) {
+    const records = engine.deliveries.records;
+    const pending = engine.deliveries.pending();
+    const signature = JSON.stringify(records.map(({jobs,...record})=>record));
+    if (signature !== this.deliverySignature) {
+      this.deliverySignature = signature;
+      const states = {prepared:'待发送',clicked:'已点击 · 等待回显',echoed:'已回显',unknown:'结果未知 · 自动重试',failed:'发送失败 · 自动重试',retrying:'自动重试中',cancelled:'未点击 · 自动重试'};
+      this.node('[data-deliveries]').innerHTML = records.length ? [...pending,...records.filter(record=>!pending.includes(record)).slice(-10).reverse()].map(record=>`<div class="section"><strong>${esc(states[record.state] || record.state)}</strong><p>${esc(record.text)}</p><p class="hint">${esc(record.reason || (record.state === 'echoed' ? `回显延迟 ${record.latencyMs} ms${record.messageId ? ` · 消息 ${record.messageId}` : ''}` : '等待本人账号的公屏回显'))}</p></div>`).join('') : '<p class="empty">暂无发送记录。</p>';
+    }
+    const health = network.ingestion || {}, storage = network.storage;
+    const gaps = (health.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0);
+    const storageText = storage?.used != null ? `存储 ${(storage.used/1024/1024).toFixed(2)} / ${(storage.quota/1024/1024).toFixed(0)} MB` : '存储用量尚未取得';
+    this.text('[data-ingestion-health]',`${health.blocked ? '采集交接受阻（场控仍保持运行）' : health.quarantined ? '有隔离事件待处理' : '采集交接正常'} · 待处理 ${health.pending || 0} 条 · 隔离 ${health.quarantined || 0} 条 · 已知缺口 ${gaps}（事件或帧） · ${storageText}${health.reason ? `。${health.reason}` : ''}`);
+    const alert = health.blocked || health.quarantined || gaps || storage?.ratio >= .8;
+    this.hidden('[data-runtime-alert]', !alert);
+    if (alert) this.text('[data-runtime-alert-text]',`${health.blocked ? '采集交接受阻，场控仍保持运行。' : ''}${gaps ? '采集存在缺口。' : ''}${health.quarantined ? '有隔离事件待重试。' : ''}${storage?.ratio >= .8 ? '本地存储接近上限。' : ''}`);
   }
   refresh(engine, network = {}) {
     this.latest = [engine,network];
@@ -698,9 +807,10 @@ export class Panel {
     const badge = this.node('[data-network]'); this.text('[data-network]', this.demo ? '模拟数据' : network.connected && network.frames ? '直播数据已连接' : '等待直播数据'); badge.classList.toggle('live', Boolean(network.connected && network.frames));
     for (const key of ['events','filtered','previews','submitted']) this.text(`[data-stat="${key}"]`,engine.stats[key]);
     this.text('[data-delivery-health]', `待发送 ${engine.queue.length} 条 · 等待结算 ${[...engine.gifts.values()].filter(g => g.count > g.credited).length} 组礼物 · 重试 ${engine.stats.retries} 次 · 过期 ${engine.stats.expired} 条 · 队列满 ${engine.stats.overflow} 次`);
+    this.renderDelivery(engine,network); this.renderPK(engine);
     this.text('[data-bot-session]', engine.bot?.sessionSummary?.() || '当前没有进行中的游戏。');
     this.syncFooter(); this.renderLastReply(); this.renderOverview(engine);
     for (const action of ['identify','test-ai','diagnose']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { clearTimeout(this.logTimer); clearTimeout(this.toastTimer); clearTimeout(this.suppressClickTimer); window.removeEventListener('resize',this.onResize); window.removeEventListener('pointermove',this.onPointerMove); window.removeEventListener('pointerup',this.onPointerUp); window.removeEventListener('pointercancel',this.onPointerUp); this.host.remove(); }
+  destroy() { this.theme.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); clearTimeout(this.suppressClickTimer); window.removeEventListener('resize',this.onResize); window.removeEventListener('pointermove',this.onPointerMove); window.removeEventListener('pointerup',this.onPointerUp); window.removeEventListener('pointercancel',this.onPointerUp); this.host.remove(); }
 }

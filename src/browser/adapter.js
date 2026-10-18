@@ -34,12 +34,95 @@ export function pickElement(kind, onPicked, onLog, excludedHost) {
   return cleanup;
 }
 
+const contributionScore = value => {
+  const text = String(value || '').replace(/[\s\u00a0,，]/g, '').trim();
+  const match = text.match(/^(\d+(?:\.\d+)?)(万|亿)?(?:分|票)?$/);
+  if (!match) return null;
+  const multiplier = match[2] === '亿' ? 1e8 : match[2] === '万' ? 1e4 : 1;
+  const score = Number(match[1]) * multiplier;
+  return Number.isFinite(score) && score <= 1e9 ? score : null;
+};
+const contributionCell = value => {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const score = contributionScore(text);
+  if (score !== null) return { name:'', score };
+  const match = text.match(/^(.+?)[\s·:：]+([\d,，]+(?:\.\d+)?(?:万|亿)?)(?:分|票)?$/);
+  if (!match) return null;
+  const name = match[1].trim();
+  const combinedScore = contributionScore(match[2]);
+  return name && combinedScore !== null ? { name, score:combinedScore } : null;
+};
+const excludedContributionName = value => /^(?:在线观众|贡献用户|高等级用户|全部|粉丝牌|粉丝团|(?:一千|千|1000)票用户|\d+|1000\s*(?:贡献|票)用户(?:\(\d+\))?)$/.test(String(value || '').trim());
+
+export function readAudienceContributions(doc = document) {
+  const chatroom = doc.querySelector('#chatroom');
+  if (!chatroom) return [];
+  const threshold = [...chatroom.querySelectorAll('p')].find(element => /1000\s*(?:贡献|票)用户/.test(element.textContent || ''));
+  if (!threshold) return [];
+  const suppliedList = doc.querySelector('#chatroom > div > div.LyAdeVIF.sBRqUw32 > div:nth-child(3) > div > div > div > div:nth-child(1)');
+  const thousandVoteList = doc.querySelector('#chatroom > div > div.LyAdeVIF.sBRqUw32 > div:nth-child(3) > div > div > div:nth-child(2) > div.Ypyh0f2S');
+  // The supplied selectors may point at one row, so include their immediate
+  // sibling container. If they drift, inspect only branches beside the label.
+  const roots = new Set();
+  for (const node of [suppliedList, thousandVoteList].filter(Boolean)) {
+    roots.add(node); if (node.parentElement) roots.add(node.parentElement);
+  }
+  if (!roots.size) {
+    let node = threshold;
+    for (let depth = 0; node && node !== chatroom && depth < 6; depth++, node = node.parentElement) {
+      for (const sibling of node.parentElement?.children || []) if (sibling !== node) roots.add(sibling);
+    }
+  }
+  const candidates = new Set([...roots].flatMap(root => [root, ...root.querySelectorAll('*')]));
+  const rows = new Map();
+  for (const row of candidates) {
+    if (!row.children?.length) continue;
+    const leaves = [...row.querySelectorAll('*')].filter(element => element.children.length === 0).map(element => element.textContent.trim()).filter(Boolean);
+    const combined = leaves.map((text,index) => ({...contributionCell(text), index})).filter(cell => cell?.name && cell.name.length <= 60 && !excludedContributionName(cell.name));
+    const numeric = leaves.map((text,index) => ({score:contributionScore(text),index})).filter(item => item.score !== null);
+    const names = leaves.map((text,index) => ({text,index})).filter(({text}) => contributionScore(text) === null && !contributionCell(text)?.name && !excludedContributionName(text) && text.length <= 60);
+    if (combined.length + names.length !== 1) continue;
+    const combinedCell = combined[0];
+    const nameCell = names[0];
+    const score = combinedCell?.score ?? numeric.at(-1)?.score;
+    // A lone leading number is usually the row rank, not the contribution score.
+    const hasScore = score !== undefined && !(numeric.length === 1 && numeric[0].index === 0 && nameCell);
+    const rowName = combinedCell?.name || nameCell?.text;
+    const scoreIsFloor = !hasScore && Boolean(thousandVoteList && (row === thousandVoteList || thousandVoteList.contains(row)));
+    if (!rowName || (!hasScore && !scoreIsFloor)) continue;
+    const rowScore = hasScore ? score : 1000;
+    const orderNode = leaves.length ? [...row.querySelectorAll('*')].filter(element => element.children.length === 0)[combinedCell?.index ?? nameCell?.index] : row;
+    let userId = '';
+    for (let node = row; node && node !== chatroom.parentElement && !userId; node = node.parentElement) {
+      for (const attr of ['data-user-id', 'data-uid', 'data-id']) {
+        const id = node.getAttribute?.(attr);
+        if (id && /^\d{4,30}$/.test(id)) { userId = id; break; }
+      }
+      const href = node.matches?.('a[href]') ? node.getAttribute('href') : node.querySelector?.('a[href]')?.getAttribute('href');
+      const match = href?.match(/\/user\/(\d{4,30})/);
+      if (match) userId = match[1];
+    }
+    const rowKey = userId ? `uid:${userId}` : `name:${rowName}`;
+    const previous = rows.get(rowKey);
+    if (!previous) rows.set(rowKey, { name:rowName, score:rowScore, scoreIsFloor, userId, orderNode });
+    else {
+      if (rowScore > previous.score || (rowScore === previous.score && previous.scoreIsFloor && !scoreIsFloor)) {
+        previous.score = rowScore; previous.scoreIsFloor = scoreIsFloor;
+      }
+      if (!previous.userId && userId) previous.userId = userId;
+    }
+  }
+  return [...rows.values()].sort((a,b) => a.orderNode?.compareDocumentPosition(b.orderNode) & 4 ? -1 : 1).map(({orderNode,...row})=>row);
+}
+
 export class DouyinAdapter {
-  constructor({ page, getConfig, onEvent, onLog, onStatus, shouldReadChat = () => true }) {
+  constructor({ page, getConfig, onEvent, onLog, onStatus, onEcho = () => false, shouldReadChat = () => true }) {
     this.page = page; this.getConfig = getConfig; this.shouldReadChat = shouldReadChat; this.onEvent = onEvent; this.onLog = onLog; this.onStatus = onStatus;
+    this.onEcho = onEcho;
     this.status = { hook: false, sockets: 0, frames: 0, events: 0, errors: 0, lastFrame: 0, connected: false };
-    this.pending = 0; this.chain = Promise.resolve(); this.roomPath = location.pathname;
+    this.pending = 0; this.pendingBytes = 0; this.chain = Promise.resolve(); this.roomPath = location.pathname;
     this.activeSockets = new Set(); this.domSeen = new WeakMap(); this.domActive = false; this.lastSocketChat = 0;
+    this.ownedDraft = null;
   }
   hook() {
     try {
@@ -56,17 +139,33 @@ export class DouyinAdapter {
           socket.addEventListener('close', () => { adapter.activeSockets.delete(socket); adapter.status.connected = adapter.activeSockets.size > 0; adapter.emitStatus(); });
           socket.addEventListener('message', e => {
             if (location.pathname !== adapter.roomPath) return;
+            if (adapter.pending >= 256 || adapter.pendingBytes + (e.data?.byteLength || e.data?.size || 0) > 16*1024*1024) {
+              adapter.status.frameGaps = (adapter.status.frameGaps || 0)+1; adapter.emitStatus(); return;
+            }
             const receivedAt = Date.now();
+            const frameBytes = e.data?.byteLength || e.data?.size || 0;
+            adapter.pendingBytes = (adapter.pendingBytes || 0)+frameBytes;
             adapter.pending++; adapter.status.pendingFrames = adapter.pending;
-            adapter.chain = adapter.chain.then(async () => {
+            const previous = adapter.chain;
+            adapter.chain = (async () => {
+              try { await previous; } catch (error) { adapter.reportError(error); }
               try {
                 const events = await decodeFrame(e.data, error => adapter.reportError(error));
                 adapter.status.frames++; adapter.status.lastFrame = Date.now();
                 adapter.status.events += events.length;
                 let processed = 0;
                 for (const event of events) {
+                  if (event.type === 'gift') {
+                    adapter.status.giftEvents = (adapter.status.giftEvents || 0) + 1;
+                    adapter.status.lastGift = {
+                      giftName:event.giftName || '礼物', giftId:event.giftId || '',
+                      count:Number(event.count) || 1, unitValue:Number.isFinite(event.unitValue) ? event.unitValue : null,
+                      eventAt:Number.isFinite(event.at) && event.at > 0 ? event.at : null,
+                      receivedAt, timestampSkewMs:Number.isFinite(event.at) && event.at > 0 ? receivedAt-event.at : null
+                    };
+                  }
                   if (event.type === 'chat') adapter.lastSocketChat = Date.now();
-                  try { adapter.onEvent({ ...event, receivedAt }); }
+                  try { await adapter.onEvent({ ...event, receivedAt }); }
                   catch (error) { adapter.reportError(error); }
                   if (++processed % 200 === 0) await new Promise(resolve => setTimeout(resolve, 0));
                 }
@@ -74,8 +173,8 @@ export class DouyinAdapter {
                 if (adapter.pending > 1 && adapter.status.frames % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0));
               } catch (error) {
                 adapter.reportError(error);
-              } finally { adapter.pending--; adapter.status.pendingFrames = adapter.pending; adapter.emitStatus(); }
-            });
+              } finally { adapter.pending--; adapter.pendingBytes -= frameBytes; adapter.status.pendingFrames = adapter.pending; adapter.emitStatus(); }
+            })();
           });
           return socket;
         }
@@ -93,26 +192,77 @@ export class DouyinAdapter {
   emitStatus() { this.onStatus({ ...this.status }); }
   // 无弹幕不等于断线；连接的 open/close 才决定传输是否可用。
   healthy() { return Boolean(this.status.connected); }
+  readAudienceContributions() { return readAudienceContributions(this.page.document || document); }
   findInput() {
     const configured = this.getConfig().adapter.inputSelector;
-    const selector = configured || '#chatroom [contenteditable="true"], .webcast-chatroom [contenteditable="true"], textarea[placeholder*="说点"], textarea[placeholder*="聊"], input[placeholder*="说点"], [contenteditable="true"][data-placeholder*="说点"], [contenteditable="true"][data-placeholder*="聊"], [contenteditable="true"][data-placeholder*="互动"]';
-    const list = [...document.querySelectorAll(selector)].filter(isVisible).filter(e => /^(INPUT|TEXTAREA)$/.test(e.tagName) || e.isContentEditable);
-    if (list.length !== 1) throw new Error(list.length ? '发现多个输入框，请在诊断页手动定位公屏输入框' : '未找到公屏输入框，请登录并在诊断页手动定位');
-    return list[0];
+    if (configured) {
+      let list = [];
+      try { list = [...document.querySelectorAll(configured)].filter(isVisible); } catch { throw new Error('输入框选择器无效，请在诊断页重新定位'); }
+      const input = list.find(e => this.isInputCandidate(e));
+      // 抖音会在输入后替换编辑器节点，旧的手动选择器可能短暂失效；
+      // 先尝试配置，再回退到当前页面的候选评分，避免一次重绘中断场控。
+      if (input) return input;
+    }
+    const selector = '#chatroom [contenteditable], .webcast-chatroom [contenteditable], [contenteditable], [role="textbox"], textarea, input[type="text"], input:not([type])';
+    const list = [...document.querySelectorAll(selector)].filter(isVisible).filter(e => this.isInputCandidate(e));
+    if (!list.length) throw new Error('未找到公屏输入框，请登录并在诊断页手动定位');
+    const ranked = list.map(element => ({ element, score: this.inputScore(element) })).sort((a, b) => b.score - a.score);
+    if (ranked.length > 1 && ranked[0].score === ranked[1].score && ranked[0].score < 5) throw new Error('发现多个输入框，请在诊断页手动定位公屏输入框');
+    return ranked[0].element;
+  }
+  isInputCandidate(element) {
+    if (!element || element.id === 'douyin-live-assistant' || element.closest?.('#douyin-live-assistant')) return false;
+    const tag = element.tagName, role = (element.getAttribute('role') || '').toLowerCase(), editable = element.getAttribute('contenteditable');
+    const native = (tag === 'INPUT' && ['text', 'search', ''].includes((element.type || '').toLowerCase())) || tag === 'TEXTAREA';
+    return native || element.isContentEditable || (editable !== null && editable !== 'false') || role === 'textbox';
+  }
+  inputScore(element) {
+    const attrs = [element.getAttribute('placeholder'), element.getAttribute('data-placeholder'), element.getAttribute('aria-label'), element.getAttribute('aria-placeholder'), element.className, element.id].filter(Boolean).join(' ').toLowerCase();
+    const parentAttrs = [...(element.parentElement ? [element.parentElement, element.parentElement.parentElement, element.parentElement.parentElement?.parentElement] : [])].map(node => `${node?.id || ''} ${node?.className || ''}`).join(' ').toLowerCase();
+    let score = 0;
+    if (/(互动|聊天|弹幕|说点|评论|发言|message|comment|chat)/.test(attrs)) score += 8;
+    if (/(chatroom|chat-room|comment|message|互动|弹幕)/.test(`${attrs} ${parentAttrs}`)) score += 5;
+    if (element.getAttribute('role') === 'textbox' || element.isContentEditable) score += 2;
+    if (element.disabled || element.readOnly || element.getAttribute('aria-disabled') === 'true') score -= 10;
+    return score;
   }
   findSend(input) {
     const configured = this.getConfig().adapter.sendSelector;
-    let list;
-    if (configured) list = [...document.querySelectorAll(configured)];
-    else {
-      const area = input.closest('#chatInput, .webcast-chatroom___input-container, form') || input.parentElement?.parentElement || document;
-      list = [...area.querySelectorAll('button, [role="button"], [class*="send"]')];
+    if (configured) {
+      let list = [];
+      try { list = [...document.querySelectorAll(configured)].filter(isVisible); } catch { throw new Error('发送按钮选择器无效，请在诊断页重新定位'); }
+      if (list.length === 1) return list[0];
+      // 发送图标也会随编辑器状态替换；旧选择器不再唯一时交给附近控件评分。
     }
-    list = list.filter(isVisible).filter(e => configured || e.classList.contains('webcast-chatroom___send-btn') || e.classList.contains('webcast-chatroom___send-icon') || /^(发送|send)(\s*\([^)]*\))?$/i.test((e.getAttribute('aria-label') || e.textContent || '').trim()));
-    // 自定义图标可能在外层和内层同时命中，保留最外层发送控件。
-    list = list.filter(e => !list.some(other => other !== e && other.contains(e)));
-    if (list.length !== 1) throw Object.assign(new Error('无法唯一确认“发送”按钮，请在诊断页定位公屏发送按钮'), { retryable: list.length === 0 });
-    return list[0];
+    const area = this.composerArea(input);
+    const selector = 'button, [role="button"], [class*="send"], [data-e2e*="send"], [aria-label*="发送"], [title*="发送"], svg, img';
+    const list = [...area.querySelectorAll(selector)].filter(isVisible).filter(element => element !== input);
+    const ranked = list.map(element => ({ element, score: this.sendScore(element, input, area) })).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
+    if (!ranked.length) throw Object.assign(new Error('无法找到公屏发送按钮，请在诊断页定位公屏发送按钮'), { retryable: true });
+    const top = ranked[0];
+    if (ranked.length > 1 && top.score === ranked[1].score) throw Object.assign(new Error('无法唯一确认“发送”按钮，请在诊断页定位公屏发送按钮'), { retryable: false });
+    // 图标节点本身可能没有 click 方法，但事件会冒泡到抖音真正的 React 控件。
+    return top.element;
+  }
+  composerArea(input) {
+    let current = input.parentElement;
+    for (let depth = 0; current && depth < 7; depth++, current = current.parentElement) {
+      const text = `${current.id || ''} ${current.className || ''}`.toLowerCase();
+      if (/(chat|comment|message|input|editor|互动|弹幕|评论)/.test(text)) return current;
+    }
+    return input.parentElement?.parentElement || input.parentElement || document;
+  }
+  sendScore(element, input, area) {
+    const attrs = [element.getAttribute('aria-label'), element.getAttribute('title'), element.getAttribute('data-e2e'), element.className, element.id, element.textContent].filter(Boolean).join(' ').toLowerCase();
+    const areaText = `${area.id || ''} ${area.className || ''}`.toLowerCase();
+    let score = 0;
+    if (/(发送|send|submit|发布)/.test(attrs)) score += 12;
+    if (/(send|发送)/.test(attrs)) score += 4;
+    if (element.closest('button,[role="button"], [class*="send"], [data-e2e*="send"]')) score += 3;
+    if (/(chat|comment|message|互动|弹幕|评论)/.test(areaText)) score += 2;
+    if (element === input.nextElementSibling || element.parentElement === input.parentElement) score += 4;
+    if (element.closest('#douyin-live-assistant')) score = -100;
+    return score;
   }
   diagnose() {
     const result = { ...this.status, anchorId: this.getConfig().anchorId || '未知', input: '', send: '', healthy: this.healthy() };
@@ -120,7 +270,39 @@ export class DouyinAdapter {
     catch (e) { result.input = e.message; }
     return result;
   }
-  async send(text, isCurrent) {
+  findChatModeToggle(input) {
+    let current = input?.parentElement;
+    for (let depth = 0; current && depth < 5; depth++, current = current.parentElement) {
+      if (current.id === 'douyin-live-assistant' || current.closest?.('#douyin-live-assistant')) continue;
+      const toggle = [...current.querySelectorAll('input[type="checkbox"][role="switch"], [role="switch"]')]
+        .find(element => isVisible(element) && !element.closest?.('#douyin-live-assistant'));
+      if (toggle) return toggle;
+    }
+    return null;
+  }
+  chatMode(toggle) {
+    if (!toggle) return false;
+    return toggle.checked === true || toggle.getAttribute('aria-checked') === 'true';
+  }
+  async setChatMode(input, channel) {
+    const desired = channel === 'admin', toggle = this.findChatModeToggle(input), current = this.chatMode(toggle);
+    if (!toggle || current === desired) return { toggle, previous: current, changed: false, used: desired && Boolean(toggle) ? 'admin' : 'chat', fallback: desired && !toggle ? '管理员弹幕开关未找到' : '' };
+    if (toggle.disabled || toggle.getAttribute('aria-disabled') === 'true') return { toggle, previous: current, changed: false, used: 'chat', fallback: desired ? '管理员弹幕开关不可用' : '' };
+    if (typeof toggle.click === 'function') toggle.click();
+    else toggle.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
+    await new Promise(resolve => setTimeout(resolve, 80));
+    if (this.chatMode(toggle) !== desired) return { toggle, previous: current, changed: false, used: 'chat', fallback: desired ? '管理员弹幕开关未响应' : '' };
+    return { toggle, previous: current, changed: true, used: desired ? 'admin' : 'chat', fallback: '' };
+  }
+  restoreChatMode(mode) {
+    if (!mode?.changed || !mode.toggle?.isConnected) return;
+    // 只恢复本次发送切换出的状态；用户若在发送期间手动改过开关，不再争抢控制权。
+    if (this.chatMode(mode.toggle) === (mode.previous ? false : true)) {
+      if (typeof mode.toggle.click === 'function') mode.toggle.click();
+      else mode.toggle.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
+    }
+  }
+  async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat' } = {}) {
     if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
     if (!this.healthy()) return { submitted: false, retryable: true, reason: '直播数据重连中，本条未发送' };
     const temporary = reason => Object.assign(new Error(reason), { retryable: true });
@@ -134,7 +316,16 @@ export class DouyinAdapter {
     }
     const readText = () => ('value' in input ? input.value : input.textContent).replace(/[\u200b\ufeff]/g, '').trim();
     const existing = readText();
-    if (existing.trim()) throw new Error('公屏输入框已有手动草稿，已暂停保护草稿');
+    if (existing.trim()) {
+      const own = this.ownedDraft;
+      if (own && own.text === existing && Date.now() - own.at < 120000) {
+        const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
+        if ('value' in input) Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, '');
+        else { input.textContent = ''; }
+        input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
+        this.ownedDraft = null;
+      } else throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
+    }
     if (input.disabled || input.readOnly || input.getAttribute('aria-disabled') === 'true') throw temporary('输入框暂不可用，等待网页恢复');
     if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
     const doc = input.ownerDocument;
@@ -149,12 +340,19 @@ export class DouyinAdapter {
         doc.execCommand?.('delete', false);
       }
       input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
+      this.ownedDraft = null;
       return !readText();
     };
     let previousFocus = doc.activeElement;
     while (previousFocus?.shadowRoot?.activeElement) previousFocus = previousFocus.shadowRoot.activeElement;
+    let clicked = false;
+    const failures = () => [...document.querySelectorAll('[role="alert"], [data-e2e="chat-error"], .webcast-chatroom___error')].filter(isVisible).map(el=>el.textContent.trim()).filter(value=>/^(发送失败|消息发送失败|发言过于频繁|操作过于频繁|你已被禁言|您已被禁言|暂时无法发言|当前无法发言)/.test(value));
+    const previousFailures = new Set(failures());
+    let mode;
     try {
       input.focus({ preventScroll: true });
+      mode = await this.setChatMode(input, channel);
+      const withMode = result => mode.used === 'admin' || mode.fallback ? { ...result, channelUsed: mode.used, ...(mode.fallback ? { modeFallback: mode.fallback } : {}) } : result;
       if ('value' in input) {
         const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
         Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, text);
@@ -173,35 +371,51 @@ export class DouyinAdapter {
       }
       // 等待 React 更新按钮状态；取消时只清理本脚本的文本。
       await new Promise(resolve => setTimeout(resolve, 120));
+      // React may replace the editor while applying the pasted message.
+      try { input = this.findInput(); } catch {}
       const currentValue = readText();
-      if (currentValue !== text) throw new Error('输入内容与候选不一致（可能被截断），已暂停供人工检查');
+      if (currentValue !== text) throw temporary('输入内容与候选不一致（可能被截断），稍后重试');
+      this.ownedDraft = { text, at: Date.now() };
       if (!isCurrent() || !this.healthy() || !isVisible(input)) {
         const cleared = clearOwnText();
-        if (isCurrent() && !cleared) throw new Error('未能清理待发送文本，已暂停供人工检查');
+        if (isCurrent() && !cleared) throw temporary('输入框已变化，等待网页稳定后重试');
         return { submitted: false, retryable: isCurrent(), reason: '连接或输入框暂不可用，本条未点击发送' };
       }
       // 富文本变化会把禁用的图标替换成另一个节点，需再次定位。
       let button;
       try { button = this.findSend(input); }
       catch (error) {
-        if (!clearOwnText()) throw new Error('发送控件已变化且待发送文本未能清理，已暂停供人工检查');
+        if (!clearOwnText()) throw temporary('发送控件已变化，等待网页稳定后重试');
         throw error;
       }
       if (!isVisible(button) || button.disabled || button.hasAttribute('disabled') || button.classList.contains('disable') || button.getAttribute('aria-disabled') === 'true') {
         if (clearOwnText()) throw temporary('发送按钮暂不可用，等待网页恢复');
-        throw new Error('发送按钮不可用且待发送文本未能清理，已暂停供人工检查');
+        throw temporary('发送按钮暂不可用，等待网页恢复');
       }
       // 抖音的发送控件是 SVGElement，没有 HTMLElement.click()。
       // 对真实控件派发一次冒泡点击，让页面自己的 React 处理发送。
+      await beforeClick();
+      if (!isCurrent() || !this.healthy()) {
+        clearOwnText(); return {submitted:false,reason:'点击前已暂停或断线'};
+      }
+      clicked = true;
       button.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
       const deadline = Date.now() + 1800;
       while (Date.now() < deadline) {
-        if (!readText()) return { submitted: true };
-        if (readText() !== text || !isCurrent()) return { submitted: false, reason: '发送后输入框已变更或场控已暂停' };
+        const rejected = failures().find(value=>!previousFailures.has(value));
+        if (rejected) { clearOwnText(); return {submitted:false,clicked:true,failed:true,reason:rejected.slice(0,200)}; }
+        if (!readText()) { this.ownedDraft = null; return withMode({ submitted: true, clicked:true }); }
+        if (readText() !== text || !isCurrent()) return withMode({ submitted: false, clicked:true, reason: '发送后输入框已变更或场控已暂停' });
         await new Promise(resolve => setTimeout(resolve, 60));
       }
-      throw new Error('点击发送后页面未清空输入框，未确认提交；已暂停，请检查网页提示');
+      clearOwnText();
+      return withMode({submitted:false,clicked:true,reason:'点击后暂未观察到提交结果，将自动重试'});
+    } catch (error) {
+      if (clicked) error.clicked = true;
+      if (this.ownedDraft?.text === text) clearOwnText();
+      throw error;
     } finally {
+      this.restoreChatMode(mode);
       // 自动化结束后还原面板/网页输入焦点，用户中途主动切换焦点时不争抢。
       if (doc.activeElement === input && previousFocus !== input) {
         if (previousFocus?.isConnected && previousFocus !== doc.body) previousFocus.focus({ preventScroll: true });
@@ -211,7 +425,7 @@ export class DouyinAdapter {
   }
   observeDOM() {
     // 变动时拍下弹幕快照；虚拟列表随即移除/复用节点也不丢掉已读消息。
-    const pending = []; let timer = null, lastError = 0, domNeedsBaseline = false;
+    const pending = []; let timer = null, flushing = false, stopped = false, lastError = 0, domNeedsBaseline = false;
     this.status.domRows = 0; this.status.domBatches = 0;
     const selector = () => this.getConfig().adapter.chatSelector || '[data-e2e="chat-message"], [class*="webcast-chatroom___item"]';
     const read = (row, emit, receivedAt) => {
@@ -227,20 +441,33 @@ export class DouyinAdapter {
       if (emit && name && text) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
     };
     const report = error => { if (Date.now() - lastError > 10000) { lastError = Date.now(); this.onLog('error', `页面弹幕采集异常：${error.message}`); } };
-    const flush = () => {
-      timer = null; this.status.domBatches++;
-      const enabled = this.shouldReadChat();
-      // 每批最多处理 200 条，余下继续处理，不能把超过 200 条的消息截掉。
-      for (const event of pending.splice(0, 200)) {
-        if (!enabled) continue;
-        try { this.onEvent(event); } catch (error) { report(error); }
+    const scheduleFlush = delay => {
+      if (stopped || flushing || timer !== null || !pending.length) return;
+      timer = setTimeout(() => { void flush().catch(report); }, delay);
+    };
+    const flush = async () => {
+      if (stopped || flushing) return;
+      timer = null; flushing = true; this.status.domBatches++;
+      try {
+        const enabled = this.shouldReadChat();
+        // 每批最多处理 200 条，余下继续处理，不能把超过 200 条的消息截掉。
+        for (const event of pending.splice(0, 200)) {
+          if (stopped) break;
+          if (!enabled) continue;
+          try { await Promise.resolve(this.onEvent(event)); } catch (error) { report(error); }
+        }
+      } finally {
+        flushing = false;
+        if (!stopped) scheduleFlush(0);
       }
-      if (pending.length) timer = setTimeout(flush, 0);
     };
     this.observer = new MutationObserver(records => {
       try {
         const c = this.getConfig().adapter;
-        if (c.endSelector && records.length) { const end = document.querySelector(c.endSelector); if (isVisible(end)) this.onEvent({ type:'end', source:'dom' }); }
+        if (c.endSelector && records.length) {
+          const end = document.querySelector(c.endSelector);
+          if (isVisible(end)) void Promise.resolve(this.onEvent({ type:'end', source:'dom' })).catch(report);
+        }
         const socketActive = Date.now() - this.lastSocketChat <= 15000;
         const emit = this.shouldReadChat() && !socketActive;
         const sel = selector(), rows = new Set(), receivedAt = Date.now();
@@ -265,12 +492,17 @@ export class DouyinAdapter {
           return;
         }
         for (const row of rows) { try { read(row, emit, receivedAt); } catch (error) { report(error); } }
-        if (pending.length && timer === null) timer = setTimeout(flush, 50);
+        scheduleFlush(50);
       } catch (error) { report(error); }
     });
     for (const row of [...document.querySelectorAll(selector())].slice(-200)) read(row, false, Date.now());
     this.observer.observe(document.body, { childList:true, subtree:true, characterData:true });
-    this.stopDOM = () => { this.observer.disconnect(); clearTimeout(timer); pending.length = 0; };
+    this.stopDOM = () => {
+      stopped = true;
+      this.observer.disconnect();
+      clearTimeout(timer); timer = null;
+      pending.length = 0;
+    };
   }
 }
 
@@ -300,7 +532,10 @@ export class RoomLock {
     });
     this.pending = attempt;
     const clear = () => { if (this.pending === attempt) this.pending = null; };
-    void attempt.then(clear, clear);
+    void (async () => {
+      try { await attempt; } catch {}
+      finally { clear(); }
+    })();
     return attempt;
   }
   renew() { return this.held; }

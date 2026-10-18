@@ -19,8 +19,10 @@ export function wire(input) {
   }
   while (pos < bytes.length) {
     if (++count > 100000) throw new Error('protobuf 字段数量过多');
-    const tag = Number(varint()), number = Math.floor(tag / 8), type = tag & 7;
-    if (!number) throw new Error('protobuf 字段编号为零');
+    const tag = varint(), numberBig = tag >> 3n;
+    if (numberBig < 1n) throw new Error('protobuf 字段编号为零');
+    if (numberBig > 0x1fffffffn) throw new Error('protobuf 字段编号超出范围');
+    const number = Number(numberBig), type = Number(tag & 7n);
     let value;
     if (type === 0) value = varint();
     else if (type === 2) {
@@ -54,7 +56,55 @@ export function decodeUser(bytes) {
   }
   return { id: textAt(m, 1028) || idAt(m, 1), secUid: textAt(m, 46), displayId: textAt(m, 38), name: textAt(m, 3), wealthLevel: numberAt(nested(m, 23), 6), fanClubs };
 }
+const messagesAt = (m, n) => (m.get(n) || []).filter(value => value instanceof Uint8Array).map(value => wire(value));
+// 字段核对自抖音网页 live-schema-im.e322bd8a.js（详见 docs/research/pk-protocol.zh-CN.md）。
+// LinkMicMethod.UserScores 才是累计 PK 分数；Armies 是贡献榜，PlayModeUpdateScore 是单次热度更新。
+function battleScores(m, field, finish = false) {
+  return messagesAt(m, field).flatMap(score => {
+    const anchorId = textAt(score, finish ? 8 : 21) || idAt(score, 2);
+    const displays = (finish ? [12, 15] : [4, 7]).map(field => textAt(score, field)).filter(Boolean);
+    // 显式 score 是总分；relative/blur 文本和标记也会伴随精确总分出现。
+    // 部分更新仅发数字文本；只接受纯数字，不能把“100万+”或“领先…”当作精确分数。
+    const numericText = displays.find(value => /^\d+$/.test(value));
+    const value = score.has(1) ? numberAt(score, 1)
+      : numericText ? Number(numericText) : displays.length || (finish && numberAt(score, 11) === 1) ? null : 0;
+    return anchorId && anchorId !== '0' && Number.isSafeInteger(value) && value >= 0 ? [{ anchorId, score: value }] : [];
+  });
+}
+function battleParticipants(m, field) {
+  return messagesAt(m, field).flatMap(entry => {
+    const info = nested(entry, 2), user = nested(info, 1);
+    const anchorId = textAt(user, 5) || idAt(user, 1) || idAt(entry, 1);
+    return anchorId ? [{ anchorId, name: textAt(user, 2), roomId: textAt(info, 13) }] : [];
+  });
+}
+function battleSettings(m) {
+  const settings = nested(m, 2), startedAt = numberAt(settings, 3), duration = numberAt(settings, 4);
+  const battleId = textAt(settings, 42) || idAt(settings, 2);
+  return {
+    battleId: battleId === '0' ? '' : battleId,
+    ...(startedAt > 0 ? { startedAt } : {}),
+    ...(duration > 0 && duration <= 7200 ? { durationMs: duration * 1000, ...(startedAt > 0 ? { endsAt: startedAt + duration * 1000 } : {}) } : {})
+  };
+}
+function decodeBattleMessage(method, bytes, outerId) {
+  const name = String(method).replace(/^Webcast/, '');
+  if (!['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage'].includes(name)) return null;
+  const m = wire(bytes), common = nested(m, 1);
+  const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket', confidence: 'protocol-field' };
+  if (name === 'LinkMicMethod' || name === 'LinkMicMethodMessage') {
+    const scores = battleScores(m, 17);
+    if (!scores.length) return null; // 普通连麦邀请、布局变化等不能建立 PK 战局。
+    const battleId = textAt(m, 114) || idAt(m, 104);
+    return { ...event, type: 'pk-score', battleId: battleId === '0' ? '' : battleId, scores };
+  }
+  const finish = /Finish/.test(name), settings = battleSettings(m);
+  const scores = finish ? battleScores(m, 4, true) : [];
+  if (!settings.battleId && !scores.length) return null;
+  return { ...event, ...settings, type: finish ? 'pk-end' : 'pk-start', scores, participants: battleParticipants(m, finish ? 12 : 6) };
+}
 export function decodeMessage(method, bytes, outerId = '') {
+  if (/^(?:Webcast)?(?:LinkMic|Linkmic|Battle)/.test(method)) return decodeBattleMessage(method, bytes, outerId);
   if (!['WebcastChatMessage', 'WebcastGiftMessage', 'WebcastLikeMessage', 'WebcastMemberMessage', 'WebcastControlMessage'].includes(method)) return null;
   const m = wire(bytes), common = nested(m, 1);
   const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket' };

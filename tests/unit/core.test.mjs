@@ -21,13 +21,49 @@ test('复用消息 ID 的连击更新和结束消息仍结算到最新累计数�
 });
 
 test('互动队列默认不设全局发送节流并保留自动发送', () => {
-  assert.equal(DEFAULTS.gift.cooldownSec, 1);
+  assert.equal(DEFAULTS.gift.cooldownSec, 0);
+  assert.equal(DEFAULTS.gift.minValue, 2);
+  assert.equal(DEFAULTS.gift.mergeSec, 0);
   assert.equal('intervalSec' in DEFAULTS.sending, false);
   assert.equal('perMinute' in DEFAULTS.sending, false);
   assert.equal(DEFAULTS.mode, 'auto');
   assert.ok(DEFAULTS.gift.templates.length >= 12);
   assert.ok(DEFAULTS.welcome.templates.length >= 10);
   assert.ok(DEFAULTS.like.templates.length >= 10);
+});
+test('旧配置等待秒数升级清零，保留功能开关、话术、价格和 AI 额度', () => {
+  const legacy = copy(DEFAULTS); legacy.version = 1;
+  legacy.gift.mergeSec = 4; legacy.gift.cooldownSec = 1;
+  legacy.welcome.cooldownSec = 600; legacy.keyword.cooldownSec = 60; legacy.like.cooldownSec = 60;
+  legacy.ai.intervalSec = 45; legacy.ai.userCooldownSec = 120; legacy.ai.maxPerHour = 70;
+  legacy.gift.prices = {'暮光恋人':1999}; legacy.gift.templates = ['感谢 {user}'];
+  const config = validateConfig(mergeConfig(legacy));
+  assert.equal(config.version,2);
+  for (const name of ['gift','welcome','keyword','like']) assert.equal(config[name].cooldownSec,0);
+  assert.equal(config.gift.mergeSec,0); assert.equal(config.ai.intervalSec,0); assert.equal(config.ai.userCooldownSec,0);
+  assert.equal(config.ai.maxPerHour,70); assert.deepEqual(config.gift.prices,legacy.gift.prices);
+  assert.deepEqual(config.gift.templates,legacy.gift.templates); assert.equal(config.bot.enabled,legacy.bot.enabled);
+});
+test('事件型回复不按用户间隔过滤，礼物默认立即进入发送队列', async () => {
+  const { e } = harness(c => {
+    c.keyword.enabled = true;
+    c.keyword.rules = [{keywords:['你好'],reply:'你好呀',exact:false},{keywords:['在吗'],reply:'我在',exact:false}];
+    c.gift.mergeSec = 0;
+  });
+  e.ingest({type:'chat',id:'chat-a',user:{id:'viewer',name:'观众'},text:'你好'});
+  e.ingest({type:'chat',id:'chat-b',user:{id:'viewer',name:'观众'},text:'在吗'});
+  assert.equal(e.queue.filter(item=>item.kind==='keyword').length,2);
+  e.queue.length = 0;
+  e.ingest(gift({id:'gift-now',count:1,final:false}));
+  await e.tick(false);
+  assert.equal(e.queue.filter(item=>item.kind==='gift').length,1);
+});
+test('有礼物任务时机器人消息不等待固定的三秒发送门槛', () => {
+  const { e, time } = harness();
+  e.enqueue('gift','感谢礼物',{giftReply:{userKey:'uid:gift',user:{name:'送礼观众'},items:[],template:'谢谢'}});
+  e.enqueue('bot','接龙继续',{botUser:'uid:player'});
+  const next = e.selectNextJob(e.queue,time());
+  assert.equal(next.kind,'bot');
 });
 test('空闲 tick 不触发运行快照，未就绪队列不重建礼物索引', async () => {
   const c = copy(DEFAULTS); c.mode = 'preview';
@@ -87,12 +123,12 @@ test('聊天提前返回与游戏提交仍通知持久化', () => {
   const {e} = harness(c => { c.bot.enabled = true; c.bot.guessEnabled = true; });
   let persisted; e.changed = () => { persisted = e.snapshot(); };
   e.handleBot = () => { e.bot.startSession('guess', '观众', 'viewer'); };
-  e.selfIdentity = {id:'self',name:'场控'};
+  e.selfIdentity = {id:'10',name:'场控'};
   e.ingest({type:'chat',id:'addressed',user, text:'@场控 猜数字'});
   assert.equal(persisted.history.at(-1).text, '@场控 猜数字');
   assert.equal(persisted.bot.type, 'guess');
 });
-test('发送中快照恢复未确认任务并记录一次重试', async () => {
+test('发送中快照恢复为结果未知并自动重发', async () => {
   const { e, time } = harness(); let resolveSend;
   e.config.mode = 'auto'; e.send = () => new Promise(resolve => { resolveSend = resolve; });
   e.enqueue('gift','感谢青山！',{giftReply:{userKey:'uid:9',user:{name:'青山'},items:[],template:'谢谢'}});
@@ -100,10 +136,10 @@ test('发送中快照恢复未确认任务并记录一次重试', async () => {
   await new Promise(setImmediate);
   const restored = new Engine({config:copy(e.config),now:time});
   assert.equal(restored.restore(e.snapshot()),true);
-  assert.equal(restored.queue.length,1); assert.equal(restored.queue[0].deliveryUncertain,true);
+  assert.equal(restored.queue.length,1); assert.equal(restored.deliveries.records[0].state,'retrying');
   resolveSend({submitted:true}); await pending;
 });
-test('自动发送前等待运行快照落盘，页面离开时把在途任务放回队列', async () => {
+test('运行快照写入挂起时发送仍会继续，页面离开时保留在途任务供恢复重发', async () => {
   const { e } = harness(c => { c.mode = 'auto'; });
   let checkpointed = false, sendCalls = 0;
   e.checkpoint = async () => { assert.equal(e.snapshot().inFlight.jobs.length,1); checkpointed = true; };
@@ -112,13 +148,15 @@ test('自动发送前等待运行快照落盘，页面离开时把在途任务�
   await e.tick(); assert.equal(sendCalls,1);
 
   e.enqueue('gift','感谢下一份支持');
+  e.checkpoint = () => new Promise(() => {});
   let finish;
-  e.checkpoint = () => new Promise(resolve => { finish = resolve; });
+  e.send = () => new Promise(resolve => { finish = resolve; });
   const sending = e.tick(); await new Promise(setImmediate);
+  assert.equal(sendCalls,1);
   e.stop('刷新',{preserveWork:true});
-  assert.equal(e.queue.length,1); assert.equal(e.queue[0].deliveryUncertain,true);
-  finish(); await sending;
-  assert.equal(e.queue.length,1);
+  assert.equal(e.queue.length,0); assert.equal(e.deliveries.pending().at(-1).state,'unknown');
+  finish({submitted:true}); await sending;
+  assert.equal(e.queue.length,0); assert.equal(e.deliveries.pending().at(-1).state,'unknown');
 });
 test('礼物回复不因相同文本去重丢失，其他类别仍保留重复过滤', () => {
   const { e } = harness();
@@ -131,14 +169,14 @@ test('礼物回复不因相同文本去重丢失，其他类别仍保留重复�
   assert.equal(e.enqueue('like', '谢谢青山哥点赞！'), true);
   assert.equal(e.queue.filter(item => item.kind === 'gift').length, 2);
 });
-test('点赞感谢按用户冷却，规则话术轮换且同文本不会过滤事件回复', async () => {
-  const { e, advance } = harness(c => { c.like.enabled = true; c.like.templates = ['谢谢 {user} 哥点赞！', '感谢 {user} 哥的赞！']; });
+test('点赞感谢即时处理同一用户的连续事件，规则话术轮换且不按用户间隔过滤', async () => {
+  const { e } = harness(c => { c.like.enabled = true; c.like.templates = ['谢谢 {user} 哥点赞！', '感谢 {user} 哥的赞！']; });
   e.ingest({ type: 'like', id: 'like-1', user, count: 30 });
   assert.equal(e.queue[0].text, '谢谢 青山 哥点赞！');
   e.ingest({ type: 'like', id: 'like-2', user, count: 30 });
-  assert.equal(e.queue.length, 1);
-  advance(60001); e.ingest({ type: 'like', id: 'like-3', user, count: 20 });
   assert.equal(e.queue.length, 2); assert.equal(e.queue[1].text, '感谢 青山 哥的赞！');
+  e.ingest({ type: 'like', id: 'like-3', user, count: 20 });
+  assert.equal(e.queue.length, 3); assert.match(e.queue[2].text,/点赞|的赞/u);
 });
 test('点赞 AI 生成失败时回退到轮换话术，不需要人工审核', async () => {
   const { e } = harness(c => { c.ai.enabled = true; c.like.enabled = true; c.like.responseMode = 'ai'; });
@@ -165,6 +203,14 @@ test('欢迎必须同时满足荣誉等级、本主播粉丝团和点亮状态',
   for (const u of [{ ...user, wealthLevel: null }, { ...user, wealthLevel: 29 }, { ...user, fanClubs: [] }, { ...user, fanClubs: [{ anchorId: 'other', level: 30, status: 1 }] }, { ...user, fanClubs: [{ anchorId: c.anchorId, level: 8, status: 2 }] }, { ...user, fanClubs: [{ anchorId: c.anchorId, level: 8, status: null }] }]) assert.equal(welcomeDecision(u, c).pass, false);
   c.anchorId = ''; assert.equal(welcomeDecision(user, c).pass, false);
 });
+
+test('只有明确启用且达到荣誉门槛的欢迎使用管理员弹幕', () => {
+  const e = new Engine({ config:copy(DEFAULTS) });
+  e.config.welcome.admin.enabled = true; e.config.welcome.admin.minWealth = 60;
+  assert.equal(e.welcomeChannel({wealthLevel:59}), 'chat');
+  assert.equal(e.welcomeChannel({wealthLevel:null}), 'chat');
+  assert.equal(e.welcomeChannel({wealthLevel:60}), 'admin');
+});
 test('指定名单可独立欢迎；昵称只接受显式 name 前缀', () => {
   const c = copy(DEFAULTS); c.welcome.listed = ['uid:9007199254740993123'];
   assert.equal(welcomeDecision({ ...user, wealthLevel: 1, fanClubs: [] }, c).pass, true);
@@ -178,15 +224,23 @@ test('连击 1、2、3 结算为 3 个而非 6；重复最终推送不再感谢'
   e.ingest(gift({ id: 'g-final-duplicate', count: 3, final: true })); await e.tick(); assert.equal(e.stats.previews, 1);
 });
 test('总价与单价阈值有不同结果', async () => {
-  const { e: total } = harness(); total.ingest(gift({ count: 3, final: true })); await total.tick(); assert.equal(total.stats.previews, 1);
-  const { e: unit } = harness(c => { c.gift.basis = 'unit'; }); unit.ingest(gift({ count: 3, final: true })); await unit.tick(); assert.equal(unit.stats.previews, 0);
+  const { e: total } = harness(c => { c.gift.minValue = 100; }); total.ingest(gift({ count: 3, final: true })); await total.tick(); assert.equal(total.stats.previews, 1);
+  const { e: unit } = harness(c => { c.gift.basis = 'unit'; c.gift.minValue = 100; }); unit.ingest(gift({ count: 3, final: true })); await unit.tick(); assert.equal(unit.stats.previews, 0);
+});
+test('礼物事件缺少昵称但有用户标识时仍会生成通用感谢', async () => {
+  const { e, logs } = harness();
+  e.config.gift.minValue = 0;
+  e.ingest({type:'gift',id:'nameless-gift',user:{id:'viewer-20'},giftId:'rose',giftName:'玫瑰',unitValue:1,count:1,final:true});
+  await e.tick();
+  assert.equal(e.stats.previews,1);
+  assert.ok(logs.some(item => /观众.*玫瑰/.test(item.text)));
 });
 test('未知礼物单价跳过，补价格表可恢复', async () => {
   const a = harness(); a.e.ingest(gift({ unitValue: null, count: 3, final: true })); await a.e.tick(); assert.equal(a.e.stats.previews, 0);
   const b = harness(c => { c.gift.prices = { '123': 50 }; }); b.e.ingest(gift({ unitValue: null, count: 3, final: true })); await b.e.tick(); assert.equal(b.e.stats.previews, 1);
 });
 test('先出现低价子连击，稍后累积达标仍感谢累计价值', async () => {
-  const { e, advance, logs } = harness();
+  const { e, advance, logs } = harness(c => { c.gift.minValue = 100; });
   e.ingest(gift({ id: 'first', count: 1, final: false })); advance(4100); await e.tick(); assert.equal(e.stats.previews, 0);
   e.ingest(gift({ id: 'second', count: 3, final: true })); await e.tick(); assert.equal(e.stats.previews, 1);
   assert.ok(logs.some(l => l.category === 'preview' && l.text.includes('150钻石')));
@@ -203,6 +257,36 @@ test('历史事件、重复事件、忽略用户和自己均不回复', async ()
   const a = harness(); a.e.ingest({ type: 'enter', id: 'old', at: time() - 31000, user }); assert.equal(a.e.queue.length, 0);
   a.e.ingest({ type: 'enter', id: 'same', user }); a.e.ingest({ type: 'enter', id: 'same', user }); assert.equal(a.e.queue.length, 1);
   const b = harness(c => { c.ignored = [`uid:${user.id}`]; }); b.e.ingest(gift({ final: true, count: 3 })); await b.e.tick(); assert.equal(b.e.stats.previews, 0);
+});
+test('实时大礼物以 socket 收到时间为准，不因平台礼物时间偏差漏掉感谢', async () => {
+  const { e, time, logs } = harness();
+  const now = time();
+  e.ingest(gift({id:'twilight-lover',giftName:'暮光恋人',unitValue:11999,count:1,final:true,at:now-120000,receivedAt:now}));
+  await e.tick();
+  assert.equal(e.stats.previews,1);
+  assert.ok(logs.some(item=>item.category==='preview' && item.text.includes('暮光恋人×1，11999钻石')));
+});
+test('两笔亲吻各一份的平台时间偏差不漏感谢，重复推送不增加数量', async () => {
+  const { e, time, logs } = harness();
+  const now = time();
+  for (const [index, skew] of [-120000, 120000].entries()) {
+    const event = gift({id:`kiss-${index}`,user:{id:'kiss-viewer',name:'( ✘_✘ )↯'},giftName:'亲吻',unitValue:99,count:1,groupId:`single:kiss-${index}`,final:true,source:'socket',at:now+skew,receivedAt:now});
+    e.ingest(event); e.ingest(event);
+  }
+  await e.tick();
+  assert.equal(e.stats.previews,1);
+  assert.equal(logs.find(item=>item.category==='preview')?.text,'( ✘_✘ )↯：亲吻×2，198钻石');
+  assert.equal(e.stats.filtered,0);
+});
+test('礼物捕获时间超过十分钟仍拒绝补发，缺少捕获时间不豁免历史检查', async () => {
+  for (const receipt of ['stale','missing']) {
+    const { e, time } = harness();
+    e.ingest(gift({id:receipt,at:time()-600000,receivedAt:receipt==='stale' ? time()-600000 : undefined,final:true}));
+    await e.tick();
+    assert.equal(e.stats.previews,0,receipt);
+    assert.equal(e.gifts.size,0,receipt);
+    assert.equal(e.stats.filtered,1,receipt);
+  }
 });
 test('自己的点赞与送礼事件不生成回复也不进入礼物累计', () => {
   const { e } = harness(c => { c.selfId = user.id; c.like.enabled = true; });
@@ -324,8 +408,8 @@ test('旧版全局发送限速配置被忽略，配置不携带未知密钥', ()
   const config = mergeConfig(JSON.parse('{"__proto__":{"polluted":true},"apiKey":"secret","mode":"preview"}'));
   assert.equal(config.apiKey, undefined); assert.equal({}.polluted, undefined);
 });
-test('发送失败自动暂停但保留未确认任务；真实发送中的暂停令取消函数失效', async () => {
-  const { e } = harness(c => { c.mode = 'auto'; }); e.send = async () => { throw new Error('不可用'); }; e.enqueue('gift', '感谢'); await e.tick(); assert.equal(e.running, false);
+test('发送失败不主动暂停并保留任务；真实发送中的手动暂停令取消函数失效', async () => {
+  const { e } = harness(c => { c.mode = 'auto'; }); e.send = async () => { throw new Error('不可用'); }; e.enqueue('gift', '感谢'); await e.tick(); assert.equal(e.running, true);
   assert.equal(e.queue.length, 1); assert.equal(e.queue[0].text, '感谢');
   const b = harness(c => { c.mode = 'auto'; }); let finish;
   b.e.send = async (text, current) => { await new Promise(r => { finish = r; }); assert.equal(current(), false); return { submitted: false }; };
@@ -333,17 +417,17 @@ test('发送失败自动暂停但保留未确认任务；真实发送中的暂�
 });
 
 test('没有全局间隔或每分钟上限，接受的消息可连续出队且默认自动发送',async()=>{
-  const sent=[],e=new Engine({config:mergeConfig({}),now:()=>100000,send:async text=>{sent.push(text);return {submitted:true};}});
+  const sent=[],e=new Engine({config:mergeConfig({selfId:'10'}),now:()=>100000,send:async (text,current,hooks)=>{await hooks.beforeClick();sent.push(text);e.observeEcho({type:'chat',source:'socket',user:{id:'10'},text,receivedAt:100000});return {submitted:true};}});
   e.start();for(let n=0;n<130;n++)e.enqueue('gift',`感谢支持 ${n}`);
   for(let n=0;n<130;n++)await e.tick();
   assert.equal(sent.length,130);assert.equal(e.queue.length,0);assert.equal(e.stats.submitted,130);assert.equal(e.stats.previews,0);
 });
 
-test('历史下播消息不会暂停当前直播，新下播事件才暂停并通知释放锁', () => {
+test('历史下播和新下播事件都不会主动暂停场控', () => {
   const {e,time}=harness();let stops=0;e.onStop=()=>stops++;
   e.ingest({type:'end',at:time()-31000});assert.equal(e.running,true);assert.equal(stops,0);
-  e.ingest({type:'end',at:time()});assert.equal(e.running,false);assert.equal(stops,1);
-  e.ingest({type:'end'});assert.equal(stops,1);
+  e.ingest({type:'end',at:time()});assert.equal(e.running,true);assert.equal(stops,0);
+  e.ingest({type:'end'});assert.equal(stops,0);
 });
 test('旧发送任务迟到的失败或成功不会暂停新一轮，也不写入新一轮提交记录', async () => {
   for(const fail of [true,false]) {
@@ -351,7 +435,7 @@ test('旧发送任务迟到的失败或成功不会暂停新一轮，也不写�
     e.send=()=>new Promise((yes,no)=>{resolve=yes;reject=no;});e.enqueue('gift','谢谢支持');const sending=e.tick();await new Promise(setImmediate);
     e.stop();e.start();e.enqueue('gift','新一轮礼物');
     if(fail)reject(new Error('旧任务失败'));else resolve({submitted:true});await sending;
-    assert.equal(e.running,true);assert.equal(e.queue.length,1);assert.equal(e.stats.submitted,0);
+    assert.equal(e.running,true);assert.equal(e.queue.length,2);assert.equal(e.stats.submitted,0);
     assert.equal(logs.some(l=>l.category==='error'||l.category==='sent'),false);assert.equal(e.busy,false);
   }
 });

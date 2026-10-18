@@ -34,6 +34,7 @@ export class JournalCommitter {
   }
   add(key) {
     if (!key) return;
+    if (!this.pending.has(key) && this.pending.size >= 4096) throw Object.assign(new Error('待确认日志已达上限，请恢复本地存储后重试'),{code:'BACKPRESSURE'});
     this.pending.add(key);
     if (this.pending.size >= this.batchSize && !this.retrying && !this.running) { this.pause(); this.schedule(0); }
     else this.schedule(this.delay);
