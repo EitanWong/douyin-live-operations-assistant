@@ -1,6 +1,7 @@
 const cloneDelivery = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const normalize = value => String(value || '').replace(/\s+/g, ' ').trim();
-const unresolved = record => ['prepared', 'clicked', 'unknown', 'failed'].includes(record.state);
+// Unknown deliveries are retained as recent history, never as sendable work.
+const unresolved = record => ['prepared', 'clicked', 'failed'].includes(record.state);
 
 export class DeliveryTracker {
   constructor({ now = Date.now, timeout = 8000 } = {}) {
@@ -9,7 +10,7 @@ export class DeliveryTracker {
   pending() { return this.records.filter(unresolved); }
   create(text, jobs, account) {
     this.prune();
-    const record = { id:`${this.now()}-${++this.serial}`, text:normalize(text), jobs:cloneDelivery(jobs), attempts:Math.max(0,...jobs.map(job=>job.attempts || 0)), account:{id:account?.id || '',secUid:account?.secUid || ''}, state:'prepared', createdAt:this.now() };
+    const record = { id:`${this.now()}-${++this.serial}`, text:normalize(text), jobs:cloneDelivery(jobs), attempts:Math.max(0,...jobs.map(job=>job.attempts || 0)), account:{id:account?.id || '',secUid:account?.secUid || ''}, requiresClickCheckpoint:true, state:'prepared', createdAt:this.now() };
     this.records.push(record); return record;
   }
   clicked(record) { if (record.state === 'prepared') { record.state = 'clicked'; record.clickedAt = this.now(); } }
@@ -34,7 +35,7 @@ export class DeliveryTracker {
   expire() {
     const expired = [];
     for (const record of this.records) if (record.state === 'clicked' && this.now() - record.clickedAt >= this.timeout) {
-      this.finish(record, 'unknown', '等待公屏回显超时；已进入自动重试'); expired.push(record);
+      this.finish(record, 'unknown', '等待公屏回显超时；为避免重复发送，不自动重发'); expired.push(record);
     }
     return expired;
   }
@@ -45,7 +46,10 @@ export class DeliveryTracker {
   snapshot() { return cloneDelivery(this.records); }
   restore(records = []) {
     this.records = cloneDelivery(records.filter(record => record && typeof record.text === 'string' && Array.isArray(record.jobs)));
-    for (const record of this.records) if (['prepared','clicked'].includes(record.state)) this.finish(record, 'unknown', '页面重建前发送结果未知；等待自动重试');
+    for (const record of this.records) if (record.state === 'clicked') this.finish(record, 'unknown', '页面重建前已点击发送；为避免重复发送，不自动重发');
+    // Older versions could click before persisting the intent, so even their
+    // prepared snapshots cannot prove that no click occurred.
+    for (const record of this.records) if (record.state === 'prepared' && !record.requiresClickCheckpoint) this.finish(record, 'unknown', '旧版点击意图未可靠保存；不自动重发');
     this.serial = Math.max(0,...this.records.map(record=>Number(String(record.id).split('-').at(-1)) || 0)); this.prune();
   }
 }

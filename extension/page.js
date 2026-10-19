@@ -21,15 +21,19 @@ if (room) {
       }
     } finally { flushing = false; }
   };
-  const adapter = new DouyinAdapter({ page:window, getConfig:()=>copy(DEFAULTS), onLog:()=>{}, onEvent:event=>{
-    if (ready && !paused && !backlog.length) publish(event);
-    else {
-      const bytes = jsonBytes(event);
-      if (bytes == null) { bridgeGaps++; emitStatus(); return; }
-      if (backlog.length < 4096 && backlogBytes+bytes <= 8*1024*1024) { backlog.push({event,bytes}); backlogBytes += bytes; }
-      else { bridgeGaps++; emitStatus(); }
-      void flush();
-    }
+  const enqueue = event => {
+    const bytes = jsonBytes(event);
+    if (bytes == null) { bridgeGaps++; emitStatus(); return; }
+    if (backlog.length < 4096 && backlogBytes+bytes <= 8*1024*1024) { backlog.push({event,bytes}); backlogBytes += bytes; }
+    else { bridgeGaps++; emitStatus(); }
+    void flush();
+  };
+  const adapter = new DouyinAdapter({ page:window, getConfig:()=>copy(DEFAULTS), onLog:()=>{}, onPK:event=>{
+    // PK 只读观察直接交给 content 的分析通道，不受普通事件存储背压阻塞。
+    if (ready) publish(event); else enqueue(event);
+  }, onEvent:event=>{
+    if (event.type.startsWith('pk-')) return; // onPK 已交付一份，避免桥接重复。
+    if (ready && !paused && !backlog.length) publish(event); else enqueue(event);
   }, onStatus:status=>window.postMessage({ source:'live-assistant-page-v1', room, type:'status', status:{...status,bridgeGaps,bridgePending:backlog.length} },location.origin) });
   emitStatus = () => adapter.emitStatus();
   adapter.hook();

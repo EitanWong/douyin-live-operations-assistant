@@ -142,3 +142,49 @@ test('同一帧一条损坏消息不影响前后礼物，并保留解析错误�
   const errors = [], events = await decodeFrame(b(8, cat(good(101), bad, good(102))), error => errors.push(error));
   assert.deepEqual(events.map(e => e.id), ['101', '102']); assert.equal(errors.length, 1);
 });
+
+test('PK 比分携带已核对的版本、贡献人数和原始 buff 比例，开始时间恢复倒计时', () => {
+  const body = cat(b(17, score(uid, 3210, cat(i(15, 150), i(16, 28), i(17, '9007199254740993999')))), i(26, 1800000000000), i(16, 300), b(82, 'score-log'));
+  const event = decodeMessage('WebcastLinkMicMethod', body);
+  assert.deepEqual(event.scores, [{anchorId:uid,score:3210,buffScoreRatio:150,contributorCount:28,scoreVersion:'9007199254740993999'}]);
+  assert.equal(event.endsAt, 1800000300000); assert.equal(event.scoreUpdateId, 'score-log');
+  const sync = decodeMessage('WebcastBattleStateSyncMessage', cat(b(2, cat(i(2, 42), i(3, 1800000000000), i(4, 300))), i(5, 12)));
+  assert.equal(sync.type, 'pk-score'); assert.deepEqual(sync.scores, []); assert.equal(sync.endsAt, event.endsAt); assert.equal(sync.scoreVersion, '12');
+});
+const rankUser = (id, value, rank) => cat(b(1, cat(i(1, id), b(3, `观众${rank}`))), i(2, value), i(3, rank));
+const v2Anchor = (anchor, ranks, extra = Buffer.alloc(0)) => b(1, cat(b(1, anchor), b(2, cat(...ranks.map(row => b(1, row)), extra))));
+const v2Settings = cat(i(1, 42), i(2, 1800000000000), i(3, 300));
+test('Armies v2 贡献榜按主播 UID 归属，data settings 独立字段恢复战局与时钟', () => {
+  const ranks = cat(v2Anchor(uid, [rankUser('9007199254740993222', 1200, 1)], i(2, 100)), v2Anchor('12345', [rankUser('9007199254740993333', 500, 1)]), b(3, v2Settings));
+  const events = decodeMessage('WebcastLinkMicArmiesMethod', cat(b(1, common), b(4, ranks)), '10001');
+  assert.equal(events.length, 2); assert.equal(new Set(events.map(event => event.id)).size, 2);
+  assert.equal(events[0].type, 'pk-contribution'); assert.equal(events[0].anchorId, uid); assert.equal(events[0].contributors[0].user.id, '9007199254740993222');
+  assert.equal(events[0].contributors[0].score, 1200); assert.equal(events[0].contributors[0].rank, 1); assert.equal(events[0].contributorCount, 100);
+  assert.equal(events[0].battleId, '42'); assert.equal(events[0].endsAt, 1800000300000); assert.equal(events[0].scores, undefined);
+});
+test('Armies 旧榜单读取显式主播 map，匿名列表和没有精确分值的用户不猜测', () => {
+  const army = cat(i(1, '9007199254740993222'), i(2, 1234), b(3, '支持者'));
+  const mapped = b(2, cat(i(1, uid), b(2, b(1, army))));
+  const events = decodeMessage('WebcastLinkMicArmiesMethod', cat(b(1, common), mapped));
+  assert.equal(events[0].anchorId, uid); assert.equal(events[0].contributors[0].score, 1234);
+  assert.equal(decodeMessage('WebcastLinkMicArmiesMethod', b(3, b(1, army))), null);
+  assert.equal(decodeMessage('WebcastLinkMicArmiesMethod', b(4, v2Anchor(uid, [b(1, user)]))), null);
+});
+test('LinkMicMethod 中贡献与总分分别交付，贡献分不得累加替代主播比分', async () => {
+  const contributors = b(22, cat(i(1, uid), b(2, b(1, cat(i(1, 100), i(2, 1), i(3, '9007199254740993222'), b(4, user))))));
+  const body = cat(b(17, score(uid, 3210)), contributors, i(104, 42));
+  const events = decodeMessage('WebcastLinkMicMethod', body, '1002');
+  assert.deepEqual(events.map(event => event.type), ['pk-score', 'pk-contribution']);
+  assert.equal(events[0].scores[0].score, 3210); assert.equal(events[1].contributors[0].score, 100); assert.notEqual(events[0].id, events[1].id);
+  const good = b(1, cat(b(1, 'WebcastLinkMicMethod'), b(2, body), i(3, 1002)));
+  const bad = b(1, cat(b(1, 'WebcastLinkMicArmiesMethod'), b(2, Buffer.from([10, 5, 1]))));
+  const errors = [], decoded = await decodeFrame(b(8, cat(good, bad, good)), error => errors.push(error));
+  assert.deepEqual(decoded.map(event => event.type), ['pk-score','pk-contribution','pk-score','pk-contribution']); assert.equal(errors.length, 1);
+});
+test('Armies 生效道具只提取官方毫秒窗口，不从未知 JSON 猜倍率或类型名', () => {
+  const card = cat(i(1, 7), b(2, '{"multiplier":100}'), i(3, 1800000001000), i(4, 20000));
+  const ranks = cat(v2Anchor(uid, [], b(3, cat(i(1, 7), b(2, card)))), b(3, v2Settings));
+  const [event] = decodeMessage('WebcastLinkMicArmiesMethod', b(4, ranks), '10003');
+  assert.equal(event.type, 'pk-effect'); assert.equal(event.effectType, 'card'); assert.equal(event.cardType, 7);
+  assert.equal(event.startAt, 1800000001000); assert.equal(event.endAt, 1800000021000); assert.equal(event.multiplier, undefined);
+});

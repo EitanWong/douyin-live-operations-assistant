@@ -132,3 +132,12 @@ test('实时大礼物平台时间偏差超过十分钟时仍入账到捕获日',
   assert.deepEqual(report.summary,{totalDiamonds:1999,unknownCount:0,giftCount:1,estimatedIncome:99.95});
   assert.equal(report.days[0].date,'2026-10-15');
 });
+
+test('无平台时间的恢复礼物跨月补记时沿用顶层采集检查点', async () => {
+  const {options}=setup(),capturedAt=options.now();
+  const later=new GiftStore({...options,now:()=>Date.parse('2026-11-18T00:00:00Z')});
+  const item={...record('recovery-no-timestamp'),capturedAt};
+  await later.record(item);await later.record(item);
+  assert.equal((await later.report('1','2026-10')).summary.totalDiamonds,100);
+  assert.equal((await later.report('1','2026-11')).summary.totalDiamonds,0);
+});

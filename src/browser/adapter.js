@@ -1,4 +1,5 @@
 import { decodeFrame } from './protocol.js';
+import { recognizeMilestone } from '../core/milestones.js';
 
 export function isVisible(element) {
   return !!element && element.isConnected && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden' && getComputedStyle(element).display !== 'none';
@@ -116,11 +117,11 @@ export function readAudienceContributions(doc = document) {
 }
 
 export class DouyinAdapter {
-  constructor({ page, getConfig, onEvent, onLog, onStatus, onEcho = () => false, shouldReadChat = () => true }) {
-    this.page = page; this.getConfig = getConfig; this.shouldReadChat = shouldReadChat; this.onEvent = onEvent; this.onLog = onLog; this.onStatus = onStatus;
-    this.onEcho = onEcho;
+  constructor({ page, getConfig, onEvent, onLog, onStatus, onPK = null, onEcho = () => false, shouldReadChat = () => true, shouldReadMilestones = shouldReadChat }) {
+    this.page = page; this.getConfig = getConfig; this.shouldReadChat = shouldReadChat; this.shouldReadMilestones = shouldReadMilestones; this.onEvent = onEvent; this.onLog = onLog; this.onStatus = onStatus;
+    this.onEcho = onEcho; this.onPK = onPK;
     this.status = { hook: false, sockets: 0, frames: 0, events: 0, errors: 0, lastFrame: 0, connected: false };
-    this.pending = 0; this.pendingBytes = 0; this.chain = Promise.resolve(); this.roomPath = location.pathname;
+    this.pending = 0; this.pendingBytes = 0; this.decodedCacheBytes = 0; this.chain = Promise.resolve(); this.decodeChain = Promise.resolve(); this.roomPath = location.pathname;
     this.activeSockets = new Set(); this.domSeen = new WeakMap(); this.domActive = false; this.lastSocketChat = 0;
     this.ownedDraft = null;
   }
@@ -146,13 +147,42 @@ export class DouyinAdapter {
             const frameBytes = e.data?.byteLength || e.data?.size || 0;
             adapter.pendingBytes = (adapter.pendingBytes || 0)+frameBytes;
             adapter.pending++; adapter.status.pendingFrames = adapter.pending;
+            const previousDecode = adapter.decodeChain;
+            // 解析按 socket 到达顺序串行；只读 PK 观察不等待前帧的普通事件存储。
+            const decoded = adapter.decodeChain = (async () => {
+              try { await previousDecode; } catch (error) { adapter.reportError(error); }
+              try {
+                const events = (await decodeFrame(e.data, error => adapter.reportError(error))).map(event => ({ ...event, receivedAt }));
+                adapter.status.frames++; adapter.status.lastFrame = Date.now();
+                adapter.status.events += events.length;
+                for (const event of events) if (event.type.startsWith('pk-')) {
+                  adapter.status.pkEvents = (adapter.status.pkEvents || 0) + 1;
+                  adapter.status.lastPK = { type:event.type, receivedAt, decodedAt:Date.now(), method:event.protocolMethod || '',
+                    eventAt:event.at > 0 ? event.at : null, timestampSkewMs:event.at > 0 ? receivedAt-event.at : null };
+                  if (event.type === 'pk-score' && event.scores?.length) {
+                    adapter.status.pkScoreEvents = (adapter.status.pkScoreEvents || 0) + 1;
+                    adapter.status.lastPKScore = receivedAt;
+                  }
+                  if (adapter.onPK) try { await adapter.onPK(event); } catch (error) { adapter.reportError(error); }
+                }
+                // 只保留有限已解码缓存；超额帧在普通交付时重解码，PK 观察仍及时完成。
+                const cacheBytes = JSON.stringify(events).length * 2;
+                const cache = adapter.decodedCacheBytes + cacheBytes <= 16 * 1024 * 1024;
+                if (cache) adapter.decodedCacheBytes += cacheBytes;
+                else adapter.status.uncachedFrames = (adapter.status.uncachedFrames || 0) + 1;
+                adapter.status.decodedCacheBytes = adapter.decodedCacheBytes;
+                adapter.emitStatus();
+                return { events: cache ? events : null, cacheBytes: cache ? cacheBytes : 0 };
+              } catch (error) { adapter.reportError(error); return {events:[],cacheBytes:0}; }
+            })();
             const previous = adapter.chain;
             adapter.chain = (async () => {
               try { await previous; } catch (error) { adapter.reportError(error); }
+              let cacheBytes = 0, result;
               try {
-                const events = await decodeFrame(e.data, error => adapter.reportError(error));
-                adapter.status.frames++; adapter.status.lastFrame = Date.now();
-                adapter.status.events += events.length;
+                result = await decoded; cacheBytes = result.cacheBytes;
+                // 错误已在快速解码报告；重解码不重复累计同一损坏消息的错误。
+                const events = result.events || (await decodeFrame(e.data)).map(event => ({ ...event, receivedAt }));
                 let processed = 0;
                 for (const event of events) {
                   if (event.type === 'gift') {
@@ -165,15 +195,14 @@ export class DouyinAdapter {
                     };
                   }
                   if (event.type === 'chat') adapter.lastSocketChat = Date.now();
-                  try { await adapter.onEvent({ ...event, receivedAt }); }
+                  try { await adapter.onEvent(event); }
                   catch (error) { adapter.reportError(error); }
                   if (++processed % 200 === 0) await new Promise(resolve => setTimeout(resolve, 0));
                 }
-                // 高峰时保留帧并按顺序处理，每批让出主线程，避免静默丢弃第 101 帧。
+                // 高峰时保留帧并按顺序处理，每批让出主线程。
                 if (adapter.pending > 1 && adapter.status.frames % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0));
-              } catch (error) {
-                adapter.reportError(error);
-              } finally { adapter.pending--; adapter.pendingBytes -= frameBytes; adapter.status.pendingFrames = adapter.pending; adapter.emitStatus(); }
+              } catch (error) { adapter.reportError(error); }
+              finally { if (result) result.events = null; adapter.pending--; adapter.pendingBytes -= frameBytes; adapter.decodedCacheBytes -= cacheBytes; adapter.status.decodedCacheBytes = adapter.decodedCacheBytes; adapter.status.pendingFrames = adapter.pending; adapter.emitStatus(); }
             })();
           });
           return socket;
@@ -315,33 +344,43 @@ export class DouyinAdapter {
       throw error;
     }
     const readText = () => ('value' in input ? input.value : input.textContent).replace(/[\u200b\ufeff]/g, '').trim();
+    const repeatedDraft = (value, candidate) => {
+      const normalize = text => String(text || '').replace(/[\u200b\ufeff]/g, '').replace(/\s+/g, '').trim();
+      const normalizedValue = normalize(value);
+      const normalizedCandidate = normalize(candidate);
+      if (!normalizedValue || !normalizedCandidate || normalizedValue === normalizedCandidate || normalizedValue.length > normalizedCandidate.length * 6) return false;
+      const count = normalizedValue.length / normalizedCandidate.length;
+      if (Number.isInteger(count) && count >= 2 && normalizedValue === normalizedCandidate.repeat(count)) return true;
+      // A prior submit may leave one complete reply followed by a partial duplicate.
+      const remainder = normalizedValue.slice(normalizedCandidate.length);
+      return normalizedValue.startsWith(normalizedCandidate)
+        && remainder.length >= Math.min(8, Math.ceil(normalizedCandidate.length * 0.2))
+        && normalizedCandidate.startsWith(remainder);
+    };
     const existing = readText();
-    if (existing.trim()) {
-      const own = this.ownedDraft;
-      if (own && own.text === existing && Date.now() - own.at < 120000) {
-        const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
-        if ('value' in input) Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, '');
-        else { input.textContent = ''; }
-        input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
-        this.ownedDraft = null;
-      } else throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
-    }
+    if (existing && this.ownedDraft?.text !== existing && !repeatedDraft(existing, text)) throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
     if (input.disabled || input.readOnly || input.getAttribute('aria-disabled') === 'true') throw temporary('输入框暂不可用，等待网页恢复');
     if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
     const doc = input.ownerDocument;
     const clearOwnText = () => {
-      if (readText() !== text) return false;
+      // 清理也必须作用于当前编辑器，不能误把已经脱离页面的旧节点清空当作成功。
+      try { input = this.findInput(); } catch { return false; }
+      if (!input.isConnected || readText() !== text) return false;
       if ('value' in input) {
         const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
         Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, '');
       } else {
+        if (doc.activeElement !== input && doc.activeElement !== doc.body) return false;
+        input.focus({ preventScroll: true });
         const selection = this.page.getSelection(), range = doc.createRange();
         range.selectNodeContents(input); selection.removeAllRanges(); selection.addRange(range);
         doc.execCommand?.('delete', false);
       }
       input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
-      this.ownedDraft = null;
-      return !readText();
+      const cleared = !readText();
+      // 编辑器可能拒绝 delete；保留归属，重试时复用原文，避免永远等待“人工草稿”。
+      if (cleared) this.ownedDraft = null;
+      return cleared;
     };
     let previousFocus = doc.activeElement;
     while (previousFocus?.shadowRoot?.activeElement) previousFocus = previousFocus.shadowRoot.activeElement;
@@ -351,51 +390,73 @@ export class DouyinAdapter {
     let mode;
     try {
       input.focus({ preventScroll: true });
+      const focusedInput = input;
       mode = await this.setChatMode(input, channel);
       const withMode = result => mode.used === 'admin' || mode.fallback ? { ...result, channelUsed: mode.used, ...(mode.fallback ? { modeFallback: mode.fallback } : {}) } : result;
-      if ('value' in input) {
-        const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
-        Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, text);
-        input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
-        input.dispatchEvent(new this.page.Event('change', { bubbles: true }));
-      } else {
-        // 当前抖音使用有内部文档状态的富文本编辑器，不能只改 textContent。
-        // 走编辑器的纯文本粘贴路径，保留原有输入校验、字数限制和 onChange。
-        let handled = false;
-        if (this.page.DataTransfer && this.page.ClipboardEvent) {
-          const clipboard = new this.page.DataTransfer(); clipboard.setData('text/plain', text);
-          const paste = new this.page.ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true });
-          input.dispatchEvent(paste); handled = paste.defaultPrevented;
+      // 切换弹幕模式也可能重建输入框；写入前重新确认，保留用户中途输入的草稿。
+      input = this.findInput();
+      const draft = readText();
+      if (draft && draft !== this.ownedDraft?.text && !repeatedDraft(draft, text)) throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
+      if (input.disabled || input.readOnly || input.getAttribute('aria-disabled') === 'true') throw temporary('输入框暂不可用，等待网页恢复');
+      if (doc.activeElement === focusedInput || (!focusedInput.isConnected && doc.activeElement === doc.body)) input.focus({ preventScroll: true });
+      // 上次点击未提交或清理失败时复用原文；改发另一条时通过编辑器选区替换。
+      if (draft !== text) {
+        if ('value' in input) {
+          const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, text);
+          input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
+          input.dispatchEvent(new this.page.Event('change', { bubbles: true }));
+        } else {
+          if (doc.activeElement !== input && doc.activeElement !== doc.body) throw temporary('输入焦点已变更，稍后重试');
+          // 当前抖音使用有内部文档状态的富文本编辑器，不能只改 textContent。
+          // 走编辑器的纯文本粘贴路径，保留原有输入校验、字数限制和 onChange。
+          if (draft) {
+            const selection = this.page.getSelection(), range = doc.createRange();
+            range.selectNodeContents(input); selection.removeAllRanges(); selection.addRange(range);
+          }
+          let handled = false;
+          if (this.page.DataTransfer && this.page.ClipboardEvent) {
+            const clipboard = new this.page.DataTransfer(); clipboard.setData('text/plain', text);
+            const paste = new this.page.ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true });
+            input.dispatchEvent(paste); handled = paste.defaultPrevented;
+          }
+          if (!handled && !this.page.document.execCommand?.('insertText', false, text)) throw new Error('富文本编辑器未接受输入，请用人工方式发送并检查页面适配');
         }
-        if (!handled && !this.page.document.execCommand?.('insertText', false, text)) throw new Error('富文本编辑器未接受输入，请用人工方式发送并检查页面适配');
       }
+      if (readText() === text) this.ownedDraft = { text, at: Date.now() };
       // 等待 React 更新按钮状态；取消时只清理本脚本的文本。
       await new Promise(resolve => setTimeout(resolve, 120));
-      // React may replace the editor while applying the pasted message.
-      try { input = this.findInput(); } catch {}
-      const currentValue = readText();
-      if (currentValue !== text) throw temporary('输入内容与候选不一致（可能被截断），稍后重试');
-      this.ownedDraft = { text, at: Date.now() };
-      if (!isCurrent() || !this.healthy() || !isVisible(input)) {
-        const cleared = clearOwnText();
-        if (isCurrent() && !cleared) throw temporary('输入框已变化，等待网页稳定后重试');
-        return { submitted: false, retryable: isCurrent(), reason: '连接或输入框暂不可用，本条未点击发送' };
-      }
-      // 富文本变化会把禁用的图标替换成另一个节点，需再次定位。
-      let button;
-      try { button = this.findSend(input); }
-      catch (error) {
-        if (!clearOwnText()) throw temporary('发送控件已变化，等待网页稳定后重试');
-        throw error;
-      }
-      if (!isVisible(button) || button.disabled || button.hasAttribute('disabled') || button.classList.contains('disable') || button.getAttribute('aria-disabled') === 'true') {
-        if (clearOwnText()) throw temporary('发送按钮暂不可用，等待网页恢复');
-        throw temporary('发送按钮暂不可用，等待网页恢复');
-      }
+      // 输入后的状态更新不保证在 120ms 内完成。等待当前控件真正就绪，
+      // 避免每次都在按钮启用前清空重填，并在重绘时重新定位。
+      const waitForSend = async () => {
+        const deadline = Date.now() + 1800;
+        while (true) {
+          if (!isCurrent() || !this.healthy()) return null;
+          let button, unavailable;
+          try { input = this.findInput(); }
+          catch (error) { unavailable = error; }
+          if (!unavailable) {
+            const value = readText();
+            // 粘贴处理器也可能异步提交文档；空编辑器继续等待，其他内容不冒险发送。
+            if (value && value !== text) throw temporary('输入内容已变更或与候选不一致（可能被截断），稍后重试');
+            if (value === text) this.ownedDraft = { text, at: Date.now() };
+            try { button = this.findSend(input); }
+            catch (error) { if (!error.retryable) throw error; unavailable = error; }
+            const disabled = element => element.disabled || element.readOnly || element.hasAttribute('disabled') || element.classList.contains('disable') || element.getAttribute('aria-disabled') === 'true';
+            if (value === text && button && isVisible(input) && !disabled(input) && isVisible(button) && !disabled(button) && !button.closest('[disabled], [aria-disabled="true"], .disable')) return button;
+          }
+          if (Date.now() >= deadline) throw unavailable || temporary('发送按钮暂不可用，等待网页恢复');
+          await new Promise(resolve => setTimeout(resolve, 60));
+        }
+      };
+      let button = await waitForSend();
+      if (!button) { clearOwnText(); return {submitted:false,reason:'点击前已暂停或断线'}; }
       // 抖音的发送控件是 SVGElement，没有 HTMLElement.click()。
       // 对真实控件派发一次冒泡点击，让页面自己的 React 处理发送。
       await beforeClick();
-      if (!isCurrent() || !this.healthy()) {
+      // 异步钩子期间控件与草稿仍可能变化，点击前再次校验并获取当前节点。
+      button = await waitForSend();
+      if (!button) {
         clearOwnText(); return {submitted:false,reason:'点击前已暂停或断线'};
       }
       clicked = true;
@@ -404,12 +465,14 @@ export class DouyinAdapter {
       while (Date.now() < deadline) {
         const rejected = failures().find(value=>!previousFailures.has(value));
         if (rejected) { clearOwnText(); return {submitted:false,clicked:true,failed:true,reason:rejected.slice(0,200)}; }
-        if (!readText()) { this.ownedDraft = null; return withMode({ submitted: true, clicked:true }); }
-        if (readText() !== text || !isCurrent()) return withMode({ submitted: false, clicked:true, reason: '发送后输入框已变更或场控已暂停' });
+        let currentInput = false;
+        try { input = this.findInput(); currentInput = input.isConnected; } catch {}
+        if (currentInput && !readText()) { this.ownedDraft = null; return withMode({ submitted: true, clicked:true }); }
+        if ((currentInput && readText() !== text) || !isCurrent()) return withMode({ submitted: false, clicked:true, reason: '发送后输入框已变更或场控已暂停' });
         await new Promise(resolve => setTimeout(resolve, 60));
       }
       clearOwnText();
-      return withMode({submitted:false,clicked:true,reason:'点击后暂未观察到提交结果，将自动重试'});
+      return withMode({submitted:false,clicked:true,reason:'点击后暂未观察到提交结果，为避免重复发送，不自动重发'});
     } catch (error) {
       if (clicked) error.clicked = true;
       if (this.ownedDraft?.text === text) clearOwnText();
@@ -428,17 +491,19 @@ export class DouyinAdapter {
     const pending = []; let timer = null, flushing = false, stopped = false, lastError = 0, domNeedsBaseline = false;
     this.status.domRows = 0; this.status.domBatches = 0;
     const selector = () => this.getConfig().adapter.chatSelector || '[data-e2e="chat-message"], [class*="webcast-chatroom___item"]';
-    const read = (row, emit, receivedAt) => {
+    const read = (row, emit, receivedAt, allowMilestone = true) => {
       this.status.domRows++;
+      const signature = row.textContent.trim();
+      if (this.domSeen.get(row) === signature) return;
+      this.domSeen.set(row, signature);
+      const milestone = recognizeMilestone(signature);
+      if (allowMilestone && milestone && this.shouldReadMilestones()) pending.push({ type:'milestone', milestone, source:'dom', receivedAt });
       const c = this.getConfig().adapter;
       const nameEl = row.querySelector(c.nicknameSelector || '[data-e2e="chat-nickname"], [class*="nickname"]');
       const contentEl = row.querySelector(c.contentSelector || '[data-e2e="chat-content"], [class*="content"]');
       if (!nameEl || !contentEl) return;
       const name = nameEl.textContent.trim().replace(/[:：]$/, ''), text = contentEl.textContent.trim();
-      const signature = `${name}\n${text}`;
-      if (this.domSeen.get(row) === signature) return;
-      this.domSeen.set(row, signature);
-      if (emit && name && text) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
+      if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
     };
     const report = error => { if (Date.now() - lastError > 10000) { lastError = Date.now(); this.onLog('error', `页面弹幕采集异常：${error.message}`); } };
     const scheduleFlush = delay => {
@@ -449,11 +514,11 @@ export class DouyinAdapter {
       if (stopped || flushing) return;
       timer = null; flushing = true; this.status.domBatches++;
       try {
-        const enabled = this.shouldReadChat();
+        const enabled = this.shouldReadChat(), milestonesEnabled = this.shouldReadMilestones();
         // 每批最多处理 200 条，余下继续处理，不能把超过 200 条的消息截掉。
         for (const event of pending.splice(0, 200)) {
           if (stopped) break;
-          if (!enabled) continue;
+          if (event.type === 'milestone' ? !milestonesEnabled : !enabled) continue;
           try { await Promise.resolve(this.onEvent(event)); } catch (error) { report(error); }
         }
       } finally {
@@ -486,7 +551,7 @@ export class DouyinAdapter {
         if (socketActive) domNeedsBaseline = true;
         if (emit && domNeedsBaseline) {
           for (const row of [...document.querySelectorAll(sel)].slice(-200)) {
-            try { read(row, false, receivedAt); } catch (error) { report(error); }
+            try { read(row, false, receivedAt, false); } catch (error) { report(error); }
           }
           domNeedsBaseline = false;
           return;
@@ -495,7 +560,7 @@ export class DouyinAdapter {
         scheduleFlush(50);
       } catch (error) { report(error); }
     });
-    for (const row of [...document.querySelectorAll(selector())].slice(-200)) read(row, false, Date.now());
+    for (const row of [...document.querySelectorAll(selector())].slice(-200)) read(row, false, Date.now(), false);
     this.observer.observe(document.body, { childList:true, subtree:true, characterData:true });
     this.stopDOM = () => {
       stopped = true;

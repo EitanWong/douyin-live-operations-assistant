@@ -216,6 +216,21 @@ test('DOM备用只读新增弹幕，无关变化不全页扫描；socket活跃�
   enabled=false;a.stopDOM();dom.window.close();
 });
 
+test('WebSocket 活跃且普通弹幕采集关闭时仍读取新增守护和贡献榜播报', async () => {
+  const dom=setup('<div id="chat"></div>'),events=[];
+  const a=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:e=>events.push(e),onLog:()=>{},onStatus:()=>{},shouldReadChat:()=>false,shouldReadMilestones:()=>true});a.observeDOM();
+  a.lastSocketChat=Date.now();
+  for(const text of ['恭喜 孤独患者 成为星守护','恭喜 孤独患者成为No.2本场1000贡献用户']){
+    const row=document.createElement('div');row.dataset.e2e='chat-message';row.textContent=text;document.querySelector('#chat').append(row);
+  }
+  await new Promise(resolve=>setTimeout(resolve,100));
+  assert.deepEqual(events.map(event=>event.milestone),[
+    {kind:'guardian',name:'孤独患者'},
+    {kind:'contribution',name:'孤独患者',rank:2}
+  ]);
+  a.stopDOM();dom.window.close();
+});
+
 test('DOM备用异步订阅异常和下播回调 rejection 会被收敛，后续事件仍可处理', async () => {
   const dom = setup('<div id="chat"></div>');
   const c = copy(DEFAULTS); c.adapter.endSelector = '#end';
@@ -530,10 +545,131 @@ test('点击无效不会误报已提交，也不重复点击发送按钮', async
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
   adapter.status={connected:true,lastFrame:Date.now()};let clicks=0;const input=dom.window.document.querySelector('textarea');dom.window.document.querySelector('svg').addEventListener('click',()=>{clicks++;if(clicks===2)input.value='';});
   try {
-    const first=await adapter.send('感谢支持',()=>true);assert.equal(first.submitted,false);assert.equal(first.clicked,true);assert.match(first.reason,/自动重试/);assert.equal(clicks,1);assert.equal(input.value,'');
+    const first=await adapter.send('感谢支持',()=>true);assert.equal(first.submitted,false);assert.equal(first.clicked,true);assert.match(first.reason,/不自动重发/);assert.equal(clicks,1);assert.equal(input.value,'');
     assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(clicks,2);
   }
   finally {dom.window.close();}
+});
+
+test('输入框已有重复候选文案时发送前收敛为一份', async () => {
+  const dom=setup('<div><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  const input=document.querySelector('textarea'),button=document.querySelector('button');
+  input.value='谢谢 @A 哥的 小心心，心意收到啦～谢谢 @A 哥的 小心心，心意收到啦～';
+  let clicks=0;
+  button.addEventListener('click',()=>{clicks++;input.value='';});
+  try {
+    assert.deepEqual(await adapter.send('谢谢 @A 哥的 小心心，心意收到啦～',()=>true),{submitted:true,clicked:true});
+    assert.equal(clicks,1); assert.equal(input.value,'');
+  } finally {dom.window.close();}
+});
+
+test('输入框已有完整话术加部分重复时只提交一份并保留灯牌名称', async () => {
+  const dom=setup('<div><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  const input=document.querySelector('textarea'),button=document.querySelector('button');
+  const message='感谢岁小孩LILAC成为本场No.1、1000票贡献用户！';
+  input.value=message + '感谢岁小孩LILAC成为本场No.1、10';
+  let clicks=0;
+  button.addEventListener('click',()=>{clicks++;assert.equal(input.value,message);input.value='';});
+  try {
+    assert.deepEqual(await adapter.send(message,()=>true),{submitted:true,clicked:true});
+    assert.equal(clicks,1);assert.equal(input.value,'');
+  } finally {dom.window.close();}
+});
+
+test('页面延迟启用发送按钮时等待就绪，不反复清空重填回复', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button disabled>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;let writes=0,clicks=0,timer;
+  input.addEventListener('input',()=>{writes++;timer=setTimeout(()=>{button.disabled=false;},350);});
+  button.addEventListener('click',()=>{clicks++;input.value='';});
+  try {
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
+    assert.equal(writes,1);assert.equal(clicks,1);
+  } finally {clearTimeout(timer);dom.window.close();}
+});
+
+test('点击前异步钩子触发重绘后只点击当前发送按钮', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');let oldClicks=0,newClicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;button.addEventListener('click',()=>{oldClicks++;});
+  try {
+    const result=await adapter.send('感谢支持',()=>true,{beforeClick:async()=>{
+      const replacement=button.cloneNode(true);replacement.getClientRects=button.getClientRects;
+      replacement.addEventListener('click',()=>{newClicks++;input.value='';});button.replaceWith(replacement);
+      await Promise.resolve();
+    }});
+    assert.deepEqual(result,{submitted:true,clicked:true});assert.equal(oldClicks,0);assert.equal(newClicks,1);
+  } finally {dom.window.close();}
+});
+
+test('富文本异步粘贴晚于初始等待时仍提交一次', async () => {
+  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么"></div><button disabled>发送</button></div>');
+  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let pastes=0,clicks=0,timer;
+  dom.window.DataTransfer=class {setData(key,value){this.value=value;} getData(){return this.value;}};
+  dom.window.ClipboardEvent=class extends dom.window.Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}};
+  input.addEventListener('paste',event=>{event.preventDefault();pastes++;timer=setTimeout(()=>{input.textContent=event.clipboardData.getData('text/plain');button.disabled=false;},350);});
+  button.addEventListener('click',()=>{clicks++;input.textContent='';});
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
+  try {
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(pastes,1);assert.equal(clicks,1);
+  } finally {clearTimeout(timer);dom.window.close();}
+});
+
+test('发送后编辑器被替换时读取新编辑器的提交结果', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');let clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  button.addEventListener('click',()=>{clicks++;const replacement=input.cloneNode();replacement.value='';replacement.getClientRects=input.getClientRects;input.replaceWith(replacement);});
+  try {
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(clicks,1);
+    assert.equal(adapter.ownedDraft,null);
+  } finally {dom.window.close();}
+});
+
+test('富文本清理失败后仍识别脚本草稿，恢复时直接发送而不重复粘贴', async () => {
+  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么"></div><button>发送</button></div>');
+  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  document.execCommand=(command,unused,text)=>{if(command==='delete')return false;inserts++;input.textContent+=text;return true;};
+  button.addEventListener('click',()=>{if(++clicks===2)input.textContent='';});
+  try {
+    assert.equal((await adapter.send('感谢支持',()=>true)).submitted,false);
+    assert.equal(input.textContent,'感谢支持');assert.equal(adapter.ownedDraft?.text,'感谢支持');
+    adapter.ownedDraft.at=Date.now()-180000;
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
+    assert.equal(inserts,1);assert.equal(clicks,2);
+  } finally {dom.window.close();}
+});
+
+test('残留脚本草稿改发另一条回复时通过编辑器选区替换', async () => {
+  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么">旧回复</div><button>发送</button></div>');
+  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;adapter.ownedDraft={text:'旧回复',at:Date.now()-180000};
+  document.execCommand=(command,unused,text)=>{assert.equal(command,'insertText');assert.equal(dom.window.getSelection().toString(),'旧回复');inserts++;input.textContent=text;return true;};
+  button.addEventListener('click',()=>{clicks++;assert.equal(input.textContent,'新回复');input.textContent='';});
+  try {
+    assert.deepEqual(await adapter.send('新回复',()=>true),{submitted:true,clicked:true});assert.equal(inserts,1);assert.equal(clicks,1);
+  } finally {dom.window.close();}
+});
+
+test('点击前用户改写草稿时不提交或清除人工内容', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');let clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;button.addEventListener('click',()=>{clicks++;input.value='';});
+  try {
+    await assert.rejects(adapter.send('感谢支持',()=>true,{beforeClick:async()=>{input.value='人工修改';}}),/不一致|变更/);
+    assert.equal(clicks,0);assert.equal(input.value,'人工修改');
+  } finally {dom.window.close();}
 });
 
 test('发送控件短暂缺失或输入禁用可以重试，多个发送候选仍停止', async () => {

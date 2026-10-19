@@ -1,5 +1,6 @@
 import { SOLID_GLASS_CSS } from './solid-glass.js';
 import { installTheme } from './theme.js';
+import { LiveCharts } from './live-charts.js';
 import { copy, mergeConfig, validateConfig } from '../core/engine.js';
 import { validateEndpoint } from '../services/ai.js';
 import { giftDate } from '../data/gifts.js';
@@ -74,6 +75,11 @@ summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-hei
 .income-hero{padding:18px;background:var(--sg-card);border-radius:12px;box-shadow:var(--sg-pane-shadow);margin:4px 0 18px}.income-hero>span{font-size:12px;color:var(--muted)}.income-hero>b{display:block;font-size:32px;line-height:1.4;letter-spacing:-.5px;margin:6px 0 14px;font-weight:550}.income-meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.income-meta strong{color:var(--ink);font-weight:600}.income-hero b,.income-meta strong,.income-table{font-variant-numeric:tabular-nums}.income-hero .hint{margin-bottom:0}.income-table{width:100%;border-collapse:collapse;font-size:12px}.income-table th,.income-table td{text-align:right;padding:11px 6px;border-bottom:1px solid var(--line)}.income-table th{font-size:11px;color:var(--muted);font-weight:500}.income-table th:first-child,.income-table td:first-child{text-align:left;padding-left:0;white-space:nowrap}.income-table-wrap{overflow-x:auto}.income-error{color:var(--danger);font-size:12px}
 .profile-card{padding:14px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.profile-card strong,.profile-card small{display:block;overflow-wrap:anywhere}.profile-card strong{font-size:13px}.profile-card small{font-size:11px;color:var(--muted);margin-top:4px}.profile-card a{color:var(--ink);font-size:12px;white-space:nowrap;text-decoration:none;padding:10px 0}.profile-card a:hover{text-decoration:underline}.income-toolbar{margin:18px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}.income-toolbar h3{font-size:13px;margin:0}
 .pk-scoreboard{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:12px;align-items:center;padding:20px 12px;background:var(--sg-card);border-radius:12px;box-shadow:var(--sg-pane-shadow);text-align:center}.pk-scoreboard strong{display:block;font-size:30px;font-weight:550;font-variant-numeric:tabular-nums}.pk-scoreboard span{display:block;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:5px}.pk-scoreboard .vs{font-size:11px;color:var(--muted)}.pk-prob{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}.pk-prob>div{padding:13px 14px;background:var(--sg-panel);border-radius:9px}.pk-prob b{display:block;font-size:21px;font-weight:550;font-variant-numeric:tabular-nums}.pk-prob span{font-size:11px;color:var(--muted)}.pk-factors{margin:0;padding-left:18px;font-size:12px;color:var(--muted);line-height:1.8}.pk-table{width:100%;border-collapse:collapse;font-size:12px}.pk-table th,.pk-table td{text-align:left;padding:10px 4px;border-bottom:1px solid var(--line)}.pk-table th{font-size:11px;color:var(--muted);font-weight:500}.pk-table td:last-child,.pk-table th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.pk-scoreboard>div:first-child strong{color:var(--sg-success)}.pk-scoreboard>div:last-child strong{color:var(--sg-brand)}
+.pk-verdict{padding:14px 0 16px}.pk-verdict strong{display:block;font-size:17px;font-weight:600;line-height:1.5}.pk-verdict p,.pk-freshness{font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.7}.pk-freshness[data-stale=true]{color:var(--amber)}
+.pk-lead{height:4px;display:flex;overflow:hidden;border-radius:4px;background:var(--sg-well);margin-top:12px}.pk-lead span:first-child{background:var(--sg-success)}.pk-lead span:last-child{background:var(--sg-brand)}
+.pk-chart-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:20px 0 12px}.pk-chart-head h3{margin:0;font-size:13px;font-weight:600}.pk-chart-head select{width:auto;min-height:34px;padding:5px 8px;font-size:11px}.pk-chart{height:208px;width:100%;min-width:0}.pk-chart-gap{height:152px}.pk-chart-contributions{height:220px}.pk-chart-empty{min-height:104px;display:grid;place-items:center;text-align:center;padding:16px;color:var(--muted);font-size:12px;line-height:1.7;background:var(--sg-well);border-radius:8px}
+.pk-reading{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}.pk-reading>div{padding:12px;background:var(--sg-panel);border-radius:8px}.pk-reading span{font-size:11px;color:var(--muted);display:block}.pk-reading strong{font-size:17px;font-weight:550;display:block;margin-top:5px;font-variant-numeric:tabular-nums}.pk-data-detail{margin:16px 0}.pk-data-detail summary{font-size:12px;cursor:pointer;min-height:36px;display:flex;align-items:center;color:var(--muted)}.pk-data-scroll{overflow:auto;max-height:240px}.pk-data-scroll table{min-width:280px}.pk-effect-list{font-size:12px;line-height:1.8;color:var(--muted);padding-left:18px}
 @supports not (backdrop-filter:blur(1px)){.panel{background:var(--sg-solid)}}
 @media(max-width:560px){.panel{width:calc(100vw - 20px);height:calc(100dvh - 24px);border-radius:14px}.launcher{right:12px;bottom:12px}.grid{grid-template-columns:minmax(0,1fr)}.head{padding:16px}.head h1{font-size:16px}.scroll{padding:18px 16px}.banner{padding:9px 16px}.nav{padding:0 10px 8px}.primary-nav{margin-top:10px}.subnav{gap:3px}.subnav button{font-size:11px;padding:5px 9px}.foot{padding:12px 16px}.foot small{max-width:140px}.foot .primary{min-width:116px}.row{gap:8px}.candidate{grid-template-columns:64px minmax(0,1fr)}.gift-activity{grid-template-columns:minmax(65px,1fr) minmax(75px,1.2fr) auto;gap:5px;font-size:11px}.gift-total-grid b{font-size:24px}.gift-totals{padding:14px}.settings-group{padding:14px}.log-head{flex-wrap:wrap}.head-mark{width:32px;height:32px}}
 `;
@@ -84,7 +90,7 @@ export class Panel {
     this.busyActions = new Set(); this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
-    this.root.append(this.build()); document.body.append(this.host); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.cache = new Map(); this.populate(config); this.bind(); this.restoreLauncherPosition(); this.positionPanel();
+    this.root.append(this.build()); document.body.append(this.host); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.populate(config); this.bind(); this.restoreLauncherPosition(); this.positionPanel();
   }
   input(path, label, type = 'text', hint = '') {
     return `<label class="field"><span>${label}</span><input data-field="${path}" type="${type}" ${type === 'number' ? 'step="any"' : ''}>${hint ? `<small>${hint}</small>` : ''}</label>`;
@@ -117,15 +123,27 @@ export class Panel {
             <p class="overview-note">提醒用于辅助管理员核查；无法确认的账号身份或权限会保持未知。</p>
           </section>
           <section class="page" role="tabpanel" id="page-pk" aria-labelledby="tab-pk" data-page="pk" hidden>
-            <h2>PK 预测</h2><p class="intro">实时汇总已观测比分、得分速度和送礼行为，输出可解释的模型估计。</p>
+            <h2>PK 局势看板</h2><p class="intro">比分、追分速度与贡献者，随直播推送更新。</p>
             <div class="status"><strong data-pk-state>等待 PK 事件</strong><span class="badge" data-slot="tag" data-pk-quality>数据不足</span></div>
-            <div class="pk-scoreboard"><div><strong data-pk-self-score>0</strong><span data-pk-self-name>己方</span></div><div class="vs">VS<br><small data-pk-remaining>--</small></div><div><strong data-pk-opponent-score>0</strong><span data-pk-opponent-name>对方</span></div></div>
+            <div class="pk-scoreboard"><div><strong data-pk-self-score>--</strong><span data-pk-self-name>己方</span></div><div class="vs">VS<br><small data-pk-remaining>--</small></div><div><strong data-pk-opponent-score>--</strong><span data-pk-opponent-name>对方</span></div></div>
+            <div class="pk-lead" role="img" aria-label="等待双方比分" data-pk-lead><span style="width:50%"></span><span style="width:50%"></span></div>
+            <p class="pk-freshness" data-pk-freshness>等待双方精确比分；未观测的分数保持未知。</p>
+            <div class="pk-verdict"><strong data-pk-summary>等待可分析的战局</strong><p data-pk-basis>收到比分后显示领先、追分压力与数据覆盖情况。</p></div>
+            <div class="pk-chart-head"><h3>比分走势</h3><select data-pk-window aria-label="图表时间范围"><option value="60000">近 1 分钟</option><option value="180000" selected>近 3 分钟</option><option value="0">本场全部</option></select></div>
+            <div class="pk-chart" data-pk-chart="scores" hidden role="img" aria-label="双方比分走势，实线为己方、虚线为对方"></div><p class="pk-chart-empty">等待本场比分推送，图表不会填充模拟数据。</p>
+            <div class="pk-chart-head"><h3>分差变化 <small class="choice-hint">正数为己方领先</small></h3></div>
+            <div class="pk-chart pk-chart-gap" data-pk-chart="gap" hidden role="img" aria-label="己方分差随时间变化"></div><p class="pk-chart-empty">双方精确比分就绪后，呈现分差。</p>
+            <div class="pk-reading"><div><span>按近期速度推演的终局分差</span><strong data-pk-projected>--</strong></div><div><span>己方反超所需总分速</span><strong data-pk-required-rate>--</strong></div></div>
             <div class="pk-prob"><div><b data-pk-self-win>未知</b><span>己方获胜估计</span></div><div><b data-pk-opponent-win>未知</b><span>对方获胜估计</span></div></div>
-            <div class="grid"><div><span class="choice-hint">近 15 秒速度</span><p><strong data-pk-self-speed>--</strong> / <strong data-pk-opponent-speed>--</strong></p></div><div><span class="choice-hint">近 60 秒速度</span><p><strong data-pk-self-velocity>--</strong> / <strong data-pk-opponent-velocity>--</strong></p></div><div><span class="choice-hint">置信度</span><p><strong data-pk-confidence>--</strong></p></div><div><span class="choice-hint">样本与延迟</span><p><strong data-pk-sample>--</strong></p></div></div>
+            <div class="grid"><div><span class="choice-hint">近 15 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-speed>--</strong> / <strong data-pk-opponent-speed>--</strong></p></div><div><span class="choice-hint">近 60 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-velocity>--</strong> / <strong data-pk-opponent-velocity>--</strong></p></div><div><span class="choice-hint">模型可信程度</span><p><strong data-pk-confidence>--</strong></p></div><div><span class="choice-hint">比分样本与处理延迟</span><p><strong data-pk-sample>--</strong></p></div></div>
             <section class="section"><h3>局势因素</h3><ul class="pk-factors" data-pk-factors><li>等待可用比分或礼物事件。</li></ul></section>
-            <section class="section"><h3>大额贡献者意愿</h3><table class="pk-table"><thead><tr><th>侧</th><th>活跃送礼意愿</th><th>观测用户</th><th>近窗贡献</th></tr></thead><tbody data-pk-intent><tr><td colspan="4" class="empty">暂无可估计样本</td></tr></tbody></table></section>
+            <section class="section"><h3>贡献榜 · 双方前 8 名</h3><div class="pk-chart pk-chart-contributions" data-pk-chart="contributions" hidden role="img" aria-label="已观测贡献榜前八名"></div><p class="pk-chart-empty">尚未采集贡献榜；礼物钻石不会替代 PK 贡献分。</p><details class="pk-data-detail"><summary>查看贡献者明细</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>观众</th><th>阵营</th><th>贡献分</th><th>礼物钻石</th></tr></thead><tbody data-pk-contributors><tr><td colspan="4">暂无贡献者数据</td></tr></tbody></table></div></details></section>
+            <section class="section"><h3>近期送礼活跃度</h3><table class="pk-table"><thead><tr><th>侧</th><th>活跃用户占比</th><th>观测用户</th><th>已观测钻石</th></tr></thead><tbody data-pk-intent><tr><td colspan="4" class="empty">暂无可估计样本</td></tr></tbody></table></section>
+            <section class="section"><h3>场上加成与卡片</h3><ul class="pk-effect-list" data-pk-effects><li>尚未采集明确的活动窗口。</li></ul></section>
+            <section class="section"><h3>直播活动 · 最近 10 分钟</h3><p class="choice-hint">每 10 秒汇总本页观测；暂停场控仍持续采集。</p><div class="pk-chart" data-pk-chart="activity" hidden role="img" aria-label="每10秒的弹幕、进场与礼物件数"></div><p class="pk-chart-empty">等待本页直播互动。</p><p class="choice-hint" data-live-totals>尚无互动数据</p></section>
             <section class="section"><h3>对面弹幕信号</h3><p data-pk-chat class="empty">等待已采集的对手房间弹幕。</p><div class="grid"><div><span class="choice-hint">近 60 秒样本</span><p><strong data-pk-chat-recent>--</strong></p></div><div><span class="choice-hint">求援倾向</span><p><strong data-pk-chat-request>--</strong></p></div><div><span class="choice-hint">反超倾向</span><p><strong data-pk-chat-comeback>--</strong></p></div><div><span class="choice-hint">情绪信号</span><p><strong data-pk-chat-sentiment>--</strong></p></div></div></section>
             <section class="section"><h3>活动与卡片经验记录</h3><table class="pk-table"><thead><tr><th>项目</th><th>命中 / 样本</th><th>经验频率</th><th>区间</th></tr></thead><tbody data-pk-rates><tr><td colspan="4" class="empty">尚无已记录样本</td></tr></tbody></table></section>
+            <details class="pk-data-detail"><summary>查看比分明细（最近 20 次）</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>北京时间</th><th>己方</th><th>对方</th><th>分差</th></tr></thead><tbody data-pk-score-rows><tr><td colspan="4">等待比分</td></tr></tbody></table></div></details>
             <p class="pk-note">这是基于当前页面观测和历史样本的估计，不是抖音官方胜率。3 倍加成、卡片和宝箱概率只会按你实际记录的场次给出经验频率与区间；样本不足时保持未知。</p>
           </section>
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime" hidden>
@@ -243,7 +261,7 @@ export class Panel {
             <pre data-diagnostics>点击“检查连接与发送控件”查看结果。</pre>
             <p class="hint" data-delivery-health role="status">发送队列为空。</p>
             <section class="settings-group"><h3>发送状态</h3><p class="hint">发送后自动跟踪平台回显；结果未知、发送失败或页面恢复时会自动重试。</p><div data-deliveries><p class="empty">暂无发送记录。</p></div></section>
-            <section class="settings-group"><h3>采集与存储</h3><p data-ingestion-health role="status">采集就绪，尚未检查存储用量。</p><p class="hint">礼物事实先写入日志，感谢任务独立排队。缓冲耗尽后的采集缺口无法自动补回。</p><div class="actions"><button type="button" data-action="recover-events">恢复采集与重试隔离事件</button><button type="button" data-action="export-events">导出恢复数据</button></div><p class="hint">导出可能包含观众昵称和弹幕，请妥善保管。导出不会清除原始数据。</p></section>
+            <section class="settings-group"><h3>采集与存储</h3><p data-ingestion-health role="status">采集就绪，尚未检查存储用量。</p><p class="hint">礼物事实先写入日志，感谢任务独立排队。缓冲耗尽后的采集缺口无法自动补回。</p><div class="actions"><button type="button" data-action="recover-events">恢复采集与重试隔离事件</button><button type="button" data-action="export-events">导出恢复数据</button><button type="button" data-action="import-income">导入礼物恢复数据</button></div><input class="file" data-import-income-file type="file" accept="application/json,.json"><p class="hint">导出可能包含观众昵称和弹幕，请妥善保管。导出不会清除原始数据。</p></section>
             <h3 class="subhead">账号身份</h3>
             <details data-manual-identity><summary>主播与账号识别</summary>${this.toggle('identity.autoAnchor', '自动识别主播')}${this.input('anchorId', '主播 UID（自动识别不到时填写）')}${this.toggle('identity.autoSelf', '自动识别登录账号')}${this.input('selfId', '登录账号 UID（自动识别不到时填写）')}</details>
             <h3 class="subhead">互动过滤</h3>
@@ -508,19 +526,21 @@ export class Panel {
     }
     this.node('[data-action="export-income"]').disabled = false;
   }
-  updateGiftSummary(summary, yuanPerDiamond = 0, persisted = false) {
+  updateGiftSummary(summary, yuanPerDiamond = 0, persisted = false, { pending = 0, error = '' } = {}) {
     const diamonds = Math.max(0, Number(summary?.totalDiamonds) || 0);
     const unknownCount = Math.max(0, Number(summary?.unknownCount) || 0);
     const count = Math.max(0, Number(summary?.giftCount) || 0);
     const rate = Math.max(0, Number(yuanPerDiamond) || 0);
     this.text('[data-gift-diamonds]', new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(diamonds));
     this.text('[data-gift-total-title]', persisted ? '今日礼物价值' : '本页礼物价值');
-    this.text('[data-gift-income]', persisted ? money(summary.estimatedIncome) : rate > 0
+    this.text('[data-gift-income]', persisted ? money(summary.estimatedIncome || 0) : rate > 0
       ? new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 2 }).format(diamonds * rate)
       : '未设置');
     const coverage = unknownCount ? `另有 ${unknownCount} 个礼物单价未知，未计入面值。` : count ? '所有已采集礼物均有可识别单价。' : '等待礼物事件。';
     const estimate = rate > 0 ? `按 ${rate} 元/钻估算；此数不代表平台结算或到账金额。` : '填写结算单对应的元/钻比例后显示估算收入。';
-    this.text('[data-gift-estimate-note]', persisted ? `今日已记录 ${count} 个礼物，已保存到本地账本。按收到礼物时的比例估算。${coverage}` : `本页采集 ${count} 个礼物。${estimate} ${coverage}`);
+    const disconnected = /context invalidated|扩展上下文/i.test(error);
+    const status = error ? disconnected ? '扩展已更新，当前页与后台断开。请先在连接诊断中导出恢复数据，刷新后导入礼物恢复数据。' : `账本暂不可用：${error}。正在重试。` : pending ? '正在保存到账本。' : '';
+    this.text('[data-gift-estimate-note]', persisted ? `${status}${pending ? `有 ${pending} 组礼物待入账，尚未计入以上金额。` : ''}${error || pending ? `以上为最近读取的账本数据（${count} 个礼物）。` : `今日已记录 ${count} 个礼物，已保存到本地账本。按收到礼物时的比例估算。${coverage}`}` : `本页采集 ${count} 个礼物。${estimate} ${coverage}`);
   }
   toast(message, error = false) {
     const node = this.root.querySelector('.toast'); node.textContent = message; node.classList.toggle('error', error); node.hidden = false;
@@ -559,19 +579,47 @@ export class Panel {
     }
   }
   renderPK(engine) {
-    const data = engine.pk?.current?.();
-    if (!data || !data.key) return;
+    let data = engine.pk?.current?.();
+    const activity=engine.liveMetrics?.snapshot?.();
+    if(activity) {
+      const totals=activity.buckets.reduce((sum,item)=>{for(const key of ['chat','enter','gift','like','diamonds','unknownGifts'])sum[key]+=item[key] || 0;return sum;},{chat:0,enter:0,gift:0,like:0,diamonds:0,unknownGifts:0});
+      this.text('[data-live-totals]',`弹幕 ${totals.chat} · 进场 ${totals.enter} · 点赞 ${totals.like} 次 · 礼物 ${totals.gift} 件 · 已知价值 ${totals.diamonds.toLocaleString('zh-CN')} 钻${totals.unknownGifts ? ` · ${totals.unknownGifts} 件单价未知` : ''}`);
+    }
+    if (!data || !data.key) {
+      if(this.activeTab==='pk')this.charts.render({key:'waiting',activity});
+      return;
+    }
+    data={...data,activity};
     const fmt = value => Number.isFinite(value) ? Math.round(value).toLocaleString('zh-CN') : '--';
     const pct = value => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '未知';
     this.text('[data-pk-state]', data.phase === 'active' ? 'PK 进行中' : data.phase === 'ended' ? 'PK 已结束' : '等待 PK 事件');
-    this.text('[data-pk-quality]', data.prediction.status === 'estimated' ? `置信度 ${Math.round(data.prediction.confidence * 100)}%` : '数据不足');
+    const status = {estimated:'数据可分析','low-confidence':'样本较少',stale:'比分已过期',unknown:'数据不足',final:'最终结果','awaiting-final':'等待终局确认'};
+    this.text('[data-pk-quality]', !data.selfScoreObserved || !data.opponentScoreObserved ? '等待完整比分' : status[data.prediction.status] || '数据不足');
     this.text('[data-pk-self-score]', data.selfScoreObserved ? fmt(data.selfScore) : '--'); this.text('[data-pk-opponent-score]', data.opponentScoreObserved ? fmt(data.opponentScore) : '--');
     this.text('[data-pk-self-name]', data.anchorName || '己方'); this.text('[data-pk-opponent-name]', data.opponentName || '对方');
     this.text('[data-pk-remaining]', Number.isFinite(data.remainingMs) ? `${Math.ceil(data.remainingMs / 1000)} 秒` : '--');
     this.text('[data-pk-self-win]', pct(data.prediction.selfWin)); this.text('[data-pk-opponent-win]', pct(data.prediction.opponentWin));
     this.text('[data-pk-self-speed]', fmt(data.selfSpeed)); this.text('[data-pk-opponent-speed]', fmt(data.opponentSpeed)); this.text('[data-pk-self-velocity]', fmt(data.selfVelocity60)); this.text('[data-pk-opponent-velocity]', fmt(data.opponentVelocity60));
     this.text('[data-pk-confidence]', Number.isFinite(data.prediction.confidence) ? `${Math.round(data.prediction.confidence * 100)}%` : '--');
-    this.text('[data-pk-sample]', `${data.prediction.sampleSize || 0} 场 · ${data.dataQuality.lagMs == null ? '--' : `${Math.round(data.dataQuality.lagMs)} ms`}`);
+    this.text('[data-pk-sample]', `${data.dataQuality.scoreSamples || 0} 次 · ${data.dataQuality.lagMs == null ? '--' : `${Math.round(data.dataQuality.lagMs)} ms`}`);
+    const age = value => Number.isFinite(value) ? value < 1000 ? '刚刚' : `${Math.floor(value/1000)} 秒前` : '未观测';
+    this.text('[data-pk-freshness]', `己方更新 ${age(data.dataQuality.selfScoreAgeMs)} · 对方更新 ${age(data.dataQuality.opponentScoreAgeMs)}${data.phase === 'ended' ? ' · 已结束' : ''}`);
+    this.node('[data-pk-freshness]').dataset.stale=String(Boolean(data.dataQuality.stale));
+    const lead=this.node('[data-pk-lead]'), total=data.selfScore+data.opponentScore;
+    const ratio=data.selfScoreObserved && data.opponentScoreObserved && total>0 ? data.selfScore/total*100 : 50;
+    lead.children[0].style.width=`${ratio}%`;lead.children[1].style.width=`${100-ratio}%`;
+    lead.setAttribute('aria-label',data.selfScoreObserved && data.opponentScoreObserved ? `己方比分占比 ${Math.round(ratio)}%，对方 ${Math.round(100-ratio)}%` : '等待双方比分');
+    const analysis=data.analysis || {};
+    this.text('[data-pk-summary]',analysis.summary || '等待更多比分，暂无法判断局势');
+    this.text('[data-pk-basis]',[...(analysis.risks || []),...(analysis.basis ? Array.isArray(analysis.basis) ? analysis.basis : [analysis.basis] : [])].join('；') || '基于已观测比分与近窗速度，未采集的信息保持未知。');
+    this.text('[data-pk-projected]',Number.isFinite(analysis.projectedGap) ? `${analysis.projectedGap>0 ? '+' : ''}${fmt(analysis.projectedGap)} 分` : '等待倒计时与速度');
+    this.text('[data-pk-required-rate]',Number.isFinite(analysis.requiredRate) ? `${analysis.requiredRate.toFixed(1)} 分/秒` : analysis.lead==='self' ? '当前领先' : '--');
+    const contributors=[...(data.selfUsers || []).map(user=>({...user,side:'己方'})),...(data.opponentUsers || []).map(user=>({...user,side:'对方'}))].sort((a,b)=>(b.score || 0)-(a.score || 0) || b.value-a.value).slice(0,20);
+    this.node('[data-pk-contributors]').innerHTML=contributors.length ? contributors.map(user=>`<tr><td>${esc(user.name || user.id || '观众')}</td><td>${user.side}</td><td>${fmt(user.score)}</td><td>${fmt(user.value)}</td></tr>`).join('') : '<tr><td colspan="4">暂无贡献者数据</td></tr>';
+    this.node('[data-pk-effects]').innerHTML=data.effects?.length ? data.effects.slice(-8).map(effect=>`<li>${esc(effect.name || (effect.effectType==='multiplier' ? '倍率活动' : '卡片活动'))}${Number.isFinite(effect.multiplier) ? ` · ${effect.multiplier} 倍` : ''} · ${effect.active ? '生效中' : '已观测'}${Number.isFinite(effect.endAt) ? ` · ${timeFormat.format(effect.endAt)} 结束` : ''}</li>`).join('') : '<li>尚未采集明确的活动窗口，未将未知加成计入分数。</li>';
+    const trend=data.trend || data.history.filter(item=>item.kind==='score');
+    this.node('[data-pk-score-rows]').innerHTML=trend.length ? trend.slice(-20).reverse().map(item=>`<tr><td>${timeFormat.format(item.at)}</td><td>${fmt(item.selfScore)}</td><td>${fmt(item.opponentScore)}</td><td>${Number.isFinite(item.selfScore)&&Number.isFinite(item.opponentScore) ? fmt(item.selfScore-item.opponentScore) : '--'}</td></tr>`).join('') : '<tr><td colspan="4">等待比分</td></tr>';
+    if (this.activeTab==='pk') this.charts.render(data);
     const factors = data.prediction.factors?.length ? data.prediction.factors : ['等待更多比分和速度变化']; this.node('[data-pk-factors]').innerHTML = factors.map(item => `<li>${esc(item)}</li>`).join('');
     const intent = [['己方', data.selfIntent], ['对方', data.opponentIntent]]; this.node('[data-pk-intent]').innerHTML = intent.map(([label, item]) => `<tr><td>${label}</td><td>${pct(item.probability)}</td><td>${item.sampleSize || 0}</td><td>${fmt(item.expected)}</td></tr>`).join('');
     const chat = data.chatSignals || { recent:0, opponent:{ total:0, request:0, comeback:0, positive:0, negative:0 } };
@@ -581,7 +629,7 @@ export class Panel {
     this.text('[data-pk-chat-comeback]', opponent.total ? `${Math.round((opponent.comeback || 0) / opponent.total * 100)}%` : '未知');
     const sentiment = (opponent.positive || 0) > (opponent.negative || 0) ? '偏积极' : (opponent.negative || 0) > (opponent.positive || 0) ? '偏消极' : opponent.total ? '中性' : '未知';
     this.text('[data-pk-chat-sentiment]', sentiment);
-    this.text('[data-pk-chat]', opponent.total ? `对手房间已采集 ${opponent.total} 条文本；信号仅按关键词计数，不能代表所有观众或主播真实意图。` : '等待已采集的对手房间弹幕。打开对手直播页后才会有样本。');
+    this.text('[data-pk-chat]', opponent.total ? `对手房间已采集 ${opponent.total} 条文本；信号仅按关键词计数，不能代表所有观众或主播真实意图。` : '尚未采集对手弹幕；当前页未提供的对手信息保持未知。');
     const rate = (label, item) => {
       if (!item?.trials) return `<tr><td>${label}</td><td>0 / 0</td><td>未知</td><td>--</td></tr>`;
       return `<tr><td>${label}</td><td>${item.successes} / ${item.trials}</td><td>${pct(item.rate)}</td><td>${pct(item.low)}–${pct(item.high)}</td></tr>`;
@@ -603,8 +651,10 @@ export class Panel {
       const disabled = feature && !this.root.querySelector(`[data-field="${['timersEnabled','incomeEnabled'].includes(feature) ? feature : `${feature}.enabled`}"]`)?.checked;
       node.hidden = node.dataset.page !== key || Boolean(disabled);
     }
+    if(key==='pk' && this.latest) this.renderPK(this.latest[0]);
   }
   bind() {
+    this.node('[data-pk-window]').addEventListener('change',event=>{this.charts.windowMs=Number(event.target.value);if(this.latest)this.renderPK(this.latest[0]);});
     for (const select of this.root.querySelectorAll('[data-income-room],[data-income-month]')) select.addEventListener('change', () => { this.node('[data-action="export-income"]').disabled = true; void this.callbacks.income?.(); });
     this.root.querySelector('form').addEventListener('submit', e => e.preventDefault());
     // 面板内的输入和方向键不应冒泡到直播页的播放器/发送快捷键。
@@ -692,6 +742,7 @@ export class Panel {
           finally { button.disabled = false; }
           return;
         }
+        if (action === 'import-income') return this.node('[data-import-income-file]').click();
         if (action === 'import') return this.root.querySelector('[data-import-file]').click();
         if (action === 'save' || action === 'test-ai') {
           const config = this.read(); const key = this.root.querySelector('[data-api-key]').value.trim();
@@ -720,6 +771,13 @@ export class Panel {
       const file = e.target.files[0]; if (!file) return;
       try { if (file.size > 1024 * 1024) throw new Error('配置文件超过 1 MB'); const c = validateConfig(mergeConfig(JSON.parse(await file.text()))); this.populate(c); this.markDirty(); this.toast('配置已载入，请检查后保存'); }
       catch (error) { this.toast(error.message, true); } finally { e.target.value = ''; }
+    });
+    this.node('[data-import-income-file]').addEventListener('change', async e => {
+      const file = e.target.files[0]; if (!file) return;
+      try {
+        if (file.size > 16 * 1024 * 1024) throw new Error('恢复文件超过 16 MB');
+        await this.callbacks.importIncome(JSON.parse(await file.text()));
+      } catch (error) { this.toast(error.message, true); } finally { e.target.value = ''; }
     });
     const clearKey = () => { this.root.querySelector('[data-api-key]').value = ''; this.root.querySelector('[data-key-status]').textContent = '接口已改变。新服务需单独填写密钥，不会沿用其他域名的密钥。'; };
     this.root.querySelector('[data-field="ai.endpoint"]').addEventListener('input', clearKey);
@@ -812,5 +870,5 @@ export class Panel {
     this.syncFooter(); this.renderLastReply(); this.renderOverview(engine);
     for (const action of ['identify','test-ai','diagnose']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { this.theme.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); clearTimeout(this.suppressClickTimer); window.removeEventListener('resize',this.onResize); window.removeEventListener('pointermove',this.onPointerMove); window.removeEventListener('pointerup',this.onPointerUp); window.removeEventListener('pointercancel',this.onPointerUp); this.host.remove(); }
+  destroy() { this.charts.destroy(); this.theme.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); clearTimeout(this.suppressClickTimer); window.removeEventListener('resize',this.onResize); window.removeEventListener('pointermove',this.onPointerMove); window.removeEventListener('pointerup',this.onPointerUp); window.removeEventListener('pointercancel',this.onPointerUp); this.host.remove(); }
 }

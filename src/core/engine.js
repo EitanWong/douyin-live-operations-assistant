@@ -1,7 +1,11 @@
 import { addressedToSelf, RoomBot } from './bot.js';
 import { DEFAULT_PHRASES, choosePhrase } from './phrases.js';
 import { DeliveryTracker } from '../runtime/delivery.js';
+import { LiveMetrics } from '../runtime/live-metrics.js';
 import { PKTracker, PK_EVENT_TYPES } from '../pk/model.js';
+import { milestoneThankYou, recognizeMilestone } from './milestones.js';
+
+export { recognizeMilestone };
 
 export const DEFAULTS = {
   version: 2,
@@ -126,6 +130,7 @@ export function matchesUser(user, list) {
     return user.id === item; // 未加前缀的条目只能按 UID 匹配，绝不猜昵称。
   });
 }
+
 export function welcomeDecision(user, config) {
   const w = config.welcome;
   const listed = matchesUser(user, w.listed);
@@ -179,6 +184,8 @@ export class Engine {
     this.backlogLimit = 2000;
     this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity;
     this.pk = new PKTracker({ now });
+    this.liveMetrics = new LiveMetrics({now});
+    this.pkSeen = new Map();
     this.stats = { events: 0, filtered: 0, previews: 0, submitted: 0, aiCalls: 0, retries: 0, expired: 0, overflow: 0, maxQueueWaitMs: 0 };
   }
   update(config) {
@@ -198,7 +205,7 @@ export class Engine {
       timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt),
       history: this.history.slice(-80), stats: this.stats, serial: this.serial,
       lastInteraction: this.lastInteraction, lastChat: this.lastChat,
-      inFlight: this.inFlight, deliveries:this.deliveries.snapshot()
+      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot()
       , pk: this.pk.export()
     });
   }
@@ -227,15 +234,23 @@ export class Engine {
     this.lastChat = Number.isFinite(snapshot.lastChat) ? snapshot.lastChat : this.now();
     this.deliveries.restore(snapshot.deliveries || []);
     this.pk.restore(snapshot.pk || {});
+    this.liveMetrics.restore(snapshot.liveMetrics);
     const uncertain = this.queue.filter(job => job.deliveryUncertain);
     this.queue = this.queue.filter(job => !job.deliveryUncertain);
     const tracked = new Set(this.deliveries.records.flatMap(record => record.jobs.map(job => job.id)));
     const knownFlight = this.deliveries.records.some(record=>record.id === snapshot.inFlight?.deliveryId);
     for (const job of [...(knownFlight ? [] : snapshot.inFlight?.jobs || []), ...uncertain]) if (!tracked.has(job.id)) {
       const record = this.deliveries.create(snapshot.inFlight?.text || job.text, [job], this.selfIdentity || {id:this.config.selfId});
-      this.deliveries.finish(record,'unknown','刷新前发送结果未知；自动重发'); tracked.add(job.id);
+      this.deliveries.finish(record,'unknown','刷新前发送结果未知；不自动重发'); tracked.add(job.id);
     }
-    for (const record of this.deliveries.pending()) this.retryDelivery(record, '页面恢复后自动重发');
+    // 旧版会把回显超时的消息重新放入队列；升级恢复时也不能再次点击。
+    for (const record of this.deliveries.records) if (record.state === 'retrying' && !record.retrySafe) {
+      const ids = new Set(record.retryJobIds || []);
+      this.queue = this.queue.filter(job=>!ids.has(job.id));
+      record.retryJobIds = [];
+      this.deliveries.finish(record,'unknown','旧版发送结果未知；不自动重发');
+    }
+    for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
     this.queue = this.queue.filter(job=>!job.deliveryUncertain);
     this.rebuildGiftIndex();
     this.resumeRequested = Boolean(snapshot.running);
@@ -268,8 +283,8 @@ export class Engine {
     this.stats.echoed = (this.stats.echoed || 0) + 1;
     this.log('sent',`已回显（${record.latencyMs} ms）：${record.text}`); this.changed(); return true;
   }
-  retryDelivery(record, reason = '发送结果未知；自动重发') {
-    if (!record?.jobs?.length) return false;
+  retryDelivery(record, reason = '发送未完成；稍后重试') {
+    if (!record?.jobs?.length || !['prepared','failed'].includes(record.state)) return false;
     const queued = new Set(this.queue.map(job=>job.id));
     const delay = Math.min(30000, 500 * 2 ** Math.min(record.attempts || 0, 6));
     for (const source of record.jobs) {
@@ -280,6 +295,7 @@ export class Engine {
       this.queue.push(job); this.indexGiftJob(job); queued.add(job.id);
     }
     record.retryJobIds = record.jobs.map(job=>job.id);
+    record.retrySafe = true;
     record.attempts = (record.attempts || 0) + 1;
     record.jobs = [];
     this.deliveries.finish(record,'retrying',`${reason}；${Math.ceil(delay/1000)} 秒后重试`);
@@ -298,7 +314,7 @@ export class Engine {
     if (this.running) return;
     const resuming = Boolean(this.resumeRequested);
     this.running = true; this.resumeRequested = false; this.epoch++;
-    for (const record of this.deliveries.pending()) this.retryDelivery(record, '运行恢复后自动重发');
+    for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
     if (!resuming) { this.lastChat = this.now(); this.lastInteraction = this.now(); this.timerDue.clear(); }
     this.log('system', resuming ? '场控已从上次状态恢复' : '场控已开始'); this.changed();
   }
@@ -315,7 +331,7 @@ export class Engine {
     if (preserveWork && this.inFlight?.deliveryId) {
       const record = this.deliveries.records.find(item=>item.id === this.inFlight.deliveryId);
       if (record && ['prepared','clicked'].includes(record.state)) {
-        this.deliveries.finish(record,'unknown','运行中断，结果未知；恢复后自动重发');
+        this.deliveries.finish(record,'unknown','运行中断，结果未知；不自动重发');
       }
     }
     if (!preserveWork) this.resumeRequested = false;
@@ -356,7 +372,7 @@ export class Engine {
     const now = this.now();
     const eventReplies = kind === 'gift' || kind === 'like' || kind === 'bot';
     if (!eventReplies && ((this.duplicates.get(checked.text) ?? -Infinity) + this.config.sending.duplicateSec * 1000 > now || this.queue.some(q => q.text === checked.text))) { this.filtered('重复话术已过滤'); return false; }
-    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, bot: 90, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
+    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, bot: 90, milestone: 85, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
     // 礼物是已发生的事实，不能因为普通互动积压而静默丢弃。
     // 普通互动仍受 queueLimit 约束，并优先淘汰低优先级、较旧的任务。
     const isGift = kind === 'gift' || extra.giftReply;
@@ -377,6 +393,21 @@ export class Engine {
   ingest(event) {
     try { this.ingestEvent(event); } finally { this.changed(); }
   }
+  ingestPK(event) {
+    if (!PK_EVENT_TYPES.has(event?.type) && !['room-state','gift','chat'].includes(event?.type)) return false;
+    // The read-only PK path runs before the durable interaction inbox. Use an
+    // independent bounded identity map so journal replay cannot count it twice.
+    const identity=event.id || event._journalId;
+    if (identity) {
+      const key=JSON.stringify([event.type,identity,event.battleId,event.roomId,event.anchorId,event.side,event.scores,event.selfScore,event.opponentScore,event.remainingMs,event.count,event.final,event.contributors,event.effectType,event.startAt,event.endAt]);
+      if(this.pkSeen.has(key))return false;
+      this.pkSeen.set(key,this.now());
+      while(this.pkSeen.size>5000)this.pkSeen.delete(this.pkSeen.keys().next().value);
+    }
+    const metadata=['pk-start','pk-score','pk-end','room-state'].includes(event.type);
+    this.pk.ingest({...event,...(metadata ? {anchorId:this.config.anchorId || event.anchorId} : {}),receivedAt:event.receivedAt || this.now()});
+    return true;
+  }
   ingestEvent(event) {
     this.assertCapacity(event);
     const now = this.now(); this.stats.events++;
@@ -387,7 +418,8 @@ export class Engine {
       if (this.seen.has(seenKey)) return;
       this.seen.set(seenKey, now); if (this.seen.size > 5000) this.seen.delete(this.seen.keys().next().value);
     }
-    if (PK_EVENT_TYPES.has(event?.type) || event?.type === 'room-state' || event?.type === 'gift') this.pk.ingest({ ...event, anchorId: this.config.anchorId || event.anchorId, receivedAt: event.receivedAt || now });
+    this.liveMetrics.ingest(event);
+    this.ingestPK(event);
     // 按帧实际到达时间区分历史补推；主线程解码积压不能让实时消息变成历史消息。
     const hasReceipt = Number.isFinite(event.receivedAt) && event.receivedAt <= now;
     const hasRecentReceipt = hasReceipt && now - event.receivedAt < 600000;
@@ -398,6 +430,11 @@ export class Engine {
     if (!(event.type === 'gift' && hasRecentReceipt) && event.at && (arrival - event.at > 30000 || event.at - arrival > 60000)) { this.filtered('历史或异常时间事件已忽略'); return; }
     if (!this.running) return;
     if (event.type === 'end') { this.log('system', '收到直播结束事件；场控保持运行，等待手动暂停'); return; }
+    if (event.type === 'milestone') {
+      const text = milestoneThankYou(event.milestone);
+      if (text) { this.lastInteraction = now; this.enqueue('milestone', text); }
+      return;
+    }
     const u = event.user || {};
     const isSelf = this.isSelfUser(u);
     // 登录账号可以手动接龙或回答真心话；自动发送的公屏回显仍被过滤。
@@ -405,6 +442,13 @@ export class Engine {
     if ((!u.name && event.type !== 'gift') || matchesUser(u, this.config.ignored)) return;
     if (event.type === 'chat') {
       if (!event.text || (this.selfTexts.get(event.text) || 0) > now) return;
+      const milestone = recognizeMilestone(event.text);
+      if (milestone) {
+        const text = milestoneThankYou(milestone);
+        this.lastInteraction = now;
+        this.enqueue('milestone', text);
+        return;
+      }
       this.lastChat = now; this.lastInteraction = now;
       this.history.push({ name: u.name.slice(0, 40), text: String(event.text).slice(0, 300), at: now });
       const contextAge = this.config.ai.contextAgeSec * 1000;
@@ -708,7 +752,10 @@ export class Engine {
   }
   async tick(canSend = true) {
     const expiredDeliveries = this.deliveries.expire();
-    for (const record of expiredDeliveries) this.retryDelivery(record,'等待公屏回显超时');
+    if (expiredDeliveries.length) {
+      for (const record of expiredDeliveries) this.log('system',`未收到公屏回显，不自动重发：${record.text}`);
+      this.changed();
+    }
     if (!this.running || this.busy) return;
     const now = this.now(); let stateChanged = false;
     for (const job of this.queue) if (job.aiPending && now >= job.readyAt) { job.aiPending=false; stateChanged=true; }
@@ -803,7 +850,7 @@ export class Engine {
       }
       if (this.lastRetryReason !== reason) { this.lastRetryReason = reason; this.log('system', `${reason}；消息保留，稍后继续发送`); }
     };
-    const checkpointForSend = async () => {
+    const checkpointForSend = async (required = false) => {
       let timer;
       try {
         const write = this.checkpoint();
@@ -814,8 +861,9 @@ export class Engine {
       } catch (error) {
         if (this.lastCheckpointWarning !== error.message) {
           this.lastCheckpointWarning = error.message;
-          this.log('error', `运行状态保存暂不可用，场控继续发送并将在后台重试：${error.message}`);
+          this.log('error', `运行状态保存暂不可用：${error.message}`);
         }
+        if (required) throw Object.assign(error,{retryable:true});
       } finally { clearTimeout(timer); }
     };
     try {
@@ -825,16 +873,18 @@ export class Engine {
         if (this.epoch !== epoch) return;
         this.selfTexts.set(batch.text, now + 120000);
         const result = await this.send(batch.text, () => this.running && this.epoch === epoch, {channel:q.channel || 'chat', beforeClick:async()=>{
-          this.deliveries.clicked(delivery); void checkpointForSend();
+          this.deliveries.clicked(delivery);
+          try { await checkpointForSend(true); }
+          catch (error) { this.deliveries.finish(delivery,'prepared','点击意图未保存，尚未点击'); delete delivery.clickedAt; throw error; }
         }});
         if (this.epoch !== epoch) return;
         if (result?.submitted || result?.clicked) {
           this.deliveries.clicked(delivery);
           if (result.failed) { this.deliveries.finish(delivery,'failed',result.reason); this.retryDelivery(delivery,`平台拒绝后自动重发：${result.reason || '未知原因'}`); }
-          else if (!result.submitted) { this.deliveries.finish(delivery,'unknown',result.reason || '点击后结果未知'); this.retryDelivery(delivery,'点击后结果未知，自动重发'); }
+          else if (!result.submitted) this.deliveries.finish(delivery,'unknown',result.reason || '点击后结果未知；不自动重发');
           submitted(); this.lastRetryReason = ''; this.stats.submitted++;
           const channelNote = result.channelUsed === 'admin' ? '（管理员弹幕）' : result.modeFallback ? `（普通弹幕：${result.modeFallback}）` : '';
-          this.log('sent',`${result.failed ? '平台拒绝，自动重发' : result.submitted ? '已点击，等待公屏回显' : '结果未知，自动重发'}${channelNote}：${batch.text}`);
+          this.log('sent',`${result.failed ? '平台拒绝，自动重发' : result.submitted ? '已点击，等待公屏回显' : '结果未知，不自动重发'}${channelNote}：${batch.text}`);
           void checkpointForSend();
           if (result.failed) this.log('error', `平台拒绝消息，场控保持运行：${result.reason || '未知原因'}`);
         } else {
@@ -845,7 +895,7 @@ export class Engine {
     } catch (error) {
       if (this.epoch === epoch) {
         if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
-          this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知'); this.retryDelivery(delivery,'发送异常后自动重发');
+          this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知；不自动重发');
         } else {
           if (delivery) { this.deliveries.finish(delivery,'cancelled',error.message); delivery.jobs = []; }
           retry(error.message || '发送异常');
@@ -857,7 +907,7 @@ export class Engine {
     finally {
       if (delivery && this.epoch !== epoch && ['prepared','clicked'].includes(delivery.state)) {
         if (delivery.state === 'prepared') { this.deliveries.finish(delivery,'cancelled','点击前任务已取消'); delivery.jobs = []; }
-        else this.deliveries.finish(delivery,'unknown','点击后运行中断；恢复后自动重发');
+        else this.deliveries.finish(delivery,'unknown','点击后运行中断；不自动重发');
       }
       this.inFlight = null; this.busy = false; this.changed();
     }

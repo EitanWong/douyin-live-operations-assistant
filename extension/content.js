@@ -5,7 +5,7 @@ const jsonBytes = value => {
 const room = location.pathname.match(/^\/(\d+)\/?$/)?.[1];
 if (room) {
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
-  const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged;
+  const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint;
   // MAIN 观察器的数据只用于直播事件，没有任何密钥/网络请求/DOM发送命令。
   window.addEventListener('message', e => {
     const data = e.data;
@@ -13,7 +13,7 @@ if (room) {
     if (data.type === 'event') {
       const event = data.event;
       let valid = true;
-      try { valid = Boolean(event) && ['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','room-state'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
+      try { valid = Boolean(event) && ['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
       catch { valid = false; }
       if (!valid) return;
       if (receive) receive(event);
@@ -55,6 +55,15 @@ if (room) {
     ackMany: keys => message({type:'event-ack-many',keys})
   };
   chrome.runtime.onMessage.addListener((request,sender,reply) => {
+    if (request.type === 'prepare-reload') {
+      void (async () => {
+        try {
+          if (!checkpoint) throw new Error('页面正在初始化');
+          await checkpoint(); await writes; reply({ok:true});
+        } catch (error) { reply({ok:false,error:error.message}); }
+      })();
+      return true;
+    }
     if (request.type === 'storage') { for (const [key,change] of Object.entries(request.changes)) { if (change.newValue === undefined) values.delete(key); else values.set(key,change.newValue); } }
     if (request.type === 'income-updated') incomeChanged?.();
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
@@ -79,6 +88,7 @@ if (room) {
     dispatch(event) {
       if (this.onEcho?.(event)) return Promise.resolve(true);
       event._journalId ||= crypto.randomUUID();
+      if(event.type?.startsWith('pk-'))this.onPK?.(event);
       return this.inbox.admit(event);
     }
     compactEvents() { this.inbox.compact(); }
@@ -153,5 +163,5 @@ if (room) {
     recordContribution: contribution => message({ type:'contribution-record', ...contribution }),
     report: (room, month) => message({ type:'income-report', room, month })
   };
-  boot({ page:window, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; panel.readEndpoint=()=>panel.root.querySelector('[data-field="ai.endpoint"]').value;} });
+  boot({ page:window, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>panel.root.querySelector('[data-field="ai.endpoint"]').value;} });
 }

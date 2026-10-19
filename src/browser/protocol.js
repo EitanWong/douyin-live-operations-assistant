@@ -68,7 +68,11 @@ function battleScores(m, field, finish = false) {
     const numericText = displays.find(value => /^\d+$/.test(value));
     const value = score.has(1) ? numberAt(score, 1)
       : numericText ? Number(numericText) : displays.length || (finish && numberAt(score, 11) === 1) ? null : 0;
-    return anchorId && anchorId !== '0' && Number.isSafeInteger(value) && value >= 0 ? [{ anchorId, score: value }] : [];
+    return anchorId && anchorId !== '0' && Number.isSafeInteger(value) && value >= 0 ? [{ anchorId, score: value,
+      ...(score.has(finish ? 24 : 17) ? { scoreVersion: idAt(score, finish ? 24 : 17) } : {}),
+      ...(score.has(finish ? 23 : 16) ? { contributorCount: numberAt(score, finish ? 23 : 16) } : {}),
+      ...(!finish && score.has(15) ? { buffScoreRatio: numberAt(score, 15) } : {})
+    }] : [];
   });
 }
 function battleParticipants(m, field) {
@@ -78,28 +82,77 @@ function battleParticipants(m, field) {
     return anchorId ? [{ anchorId, name: textAt(user, 2), roomId: textAt(info, 13) }] : [];
   });
 }
-function battleSettings(m) {
-  const settings = nested(m, 2), startedAt = numberAt(settings, 3), duration = numberAt(settings, 4);
-  const battleId = textAt(settings, 42) || idAt(settings, 2);
+function battleSettings(m, field = 2, dataSettings = false) {
+  // webcast.data.BattleSettings 和 webcast.im.BattleSettings 的起始字段不同。
+  const settings = nested(m, field), startedAt = numberAt(settings, dataSettings ? 2 : 3), duration = numberAt(settings, dataSettings ? 3 : 4);
+  const battleId = textAt(settings, 42) || idAt(settings, dataSettings ? 1 : 2);
   return {
     battleId: battleId === '0' ? '' : battleId,
     ...(startedAt > 0 ? { startedAt } : {}),
     ...(duration > 0 && duration <= 7200 ? { durationMs: duration * 1000, ...(startedAt > 0 ? { endsAt: startedAt + duration * 1000 } : {}) } : {})
   };
 }
+const validId = value => Boolean(value && value !== '0');
+function contributionEntries(m, field, shape) {
+  return messagesAt(m, field).flatMap(entry => {
+    const value = numberAt(entry, shape === 'linkmic' ? 1 : 2);
+    const user = shape === 'legacy'
+      ? { id: idAt(entry, 1), name: textAt(entry, 3), fanClubs: [], wealthLevel: null }
+      : decodeUser(bytesAt(entry, shape === 'linkmic' ? 4 : 1));
+    if (!user.id && shape === 'linkmic') user.id = idAt(entry, 3);
+    if (!validId(user.id) || !Number.isSafeInteger(value) || value < 0) return [];
+    const rank = shape === 'legacy' ? null : numberAt(entry, shape === 'linkmic' ? 2 : 3);
+    return [{ user, score: value, ...(rank > 0 ? { rank } : {}) }];
+  });
+}
+function contributionEvents(event, m, field, shape, settings = {}) {
+  return messagesAt(m, field).flatMap(entry => {
+    const anchorId = shape === 'v2' ? textAt(entry, 1) : idAt(entry, 1);
+    if (!validId(anchorId)) return [];
+    const info = nested(entry, 2), contributors = contributionEntries(info, 1, shape);
+    const events = [];
+    if (contributors.length) events.push({ ...event, ...settings, id: event.id ? `${event.id}:contributors:${anchorId}` : '', type: 'pk-contribution', anchorId, contributors,
+      ...(shape === 'v2' && info.has(2) ? { contributorCount: numberAt(info, 2) } : {}) });
+    if (shape === 'v2') for (const [index, cardInfo] of messagesAt(info, 3).entries()) {
+      for (const [cardIndex, card] of messagesAt(cardInfo, 2).entries()) {
+        const startAt = numberAt(card, 3), durationMs = numberAt(card, 4), cardType = numberAt(card, 1) ?? numberAt(cardInfo, 1);
+        // 已知生效卡的时间和类型；effect_json 的内部字段没有核对，不据此猜卡名或倍率。
+        if (!(startAt > 0 && durationMs > 0 && durationMs <= 7200000 && Number.isSafeInteger(startAt + durationMs))) continue;
+        events.push({ ...event, ...settings, id: event.id ? `${event.id}:card:${anchorId}:${index}:${cardIndex}` : '', type: 'pk-effect', effectType: 'card',
+          anchorId, cardType, name: '平台生效道具', startAt, endAt: startAt + durationMs, durationMs, status: 'observed' });
+      }
+    }
+    return events;
+  });
+}
 function decodeBattleMessage(method, bytes, outerId) {
   const name = String(method).replace(/^Webcast/, '');
-  if (!['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage'].includes(name)) return null;
+  const known = ['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage',
+    'LinkMicArmiesMethod','LinkMicArmies','BattleStateSyncMessage'];
+  if (!known.includes(name)) return null;
   const m = wire(bytes), common = nested(m, 1);
-  const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket', confidence: 'protocol-field' };
+  const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket', confidence: 'protocol-field', protocolMethod: method };
   if (name === 'LinkMicMethod' || name === 'LinkMicMethodMessage') {
-    const scores = battleScores(m, 17);
-    if (!scores.length) return null; // 普通连麦邀请、布局变化等不能建立 PK 战局。
-    const battleId = textAt(m, 114) || idAt(m, 104);
-    return { ...event, type: 'pk-score', battleId: battleId === '0' ? '' : battleId, scores };
+    const scores = battleScores(m, 17), rawBattleId = textAt(m, 114) || idAt(m, 104), battleId = validId(rawBattleId) ? rawBattleId : '';
+    const contributions = contributionEvents(event, m, 22, 'linkmic', { battleId });
+    if (!scores.length) return contributions.length ? contributions : null; // 普通连麦不能建立 PK 战局。
+    const startedAt = numberAt(m, 26), duration = numberAt(m, 16);
+    const results = [{ ...event, type: 'pk-score', battleId, scores,
+      ...(startedAt > 0 && duration > 0 && duration <= 7200 ? { startedAt, durationMs: duration * 1000, endsAt: startedAt + duration * 1000 } : {}),
+      ...(textAt(m, 82) ? { scoreUpdateId: textAt(m, 82) } : {}) }, ...contributions];
+    return results.length === 1 ? results[0] : results;
   }
-  const finish = /Finish/.test(name), settings = battleSettings(m);
-  const scores = finish ? battleScores(m, 4, true) : [];
+  if (name === 'LinkMicArmiesMethod' || name === 'LinkMicArmies') {
+    const rankList = nested(m, 4), settings = battleSettings(rankList, 3, true);
+    const modern = contributionEvents(event, rankList, 1, 'v2', settings);
+    // v2 和旧榜单可同时出现，优先使用带主播 key 和完整用户资料的 v2；匿名顺序列表不猜归属。
+    const results = modern.length ? modern : contributionEvents(event, m, 2, 'legacy');
+    return results.length ? results : null;
+  }
+  const settings = battleSettings(m);
+  if (name === 'BattleStateSyncMessage') return settings.battleId ? { ...event, ...settings, type: 'pk-score', scores: [],
+    ...(m.has(5) ? { scoreVersion: idAt(m, 5) } : {}) } : null;
+  const finish = /Finish/.test(name), scores = finish ? battleScores(m, 4, true) : [];
   if (!settings.battleId && !scores.length) return null;
   return { ...event, ...settings, type: finish ? 'pk-end' : 'pk-start', scores, participants: battleParticipants(m, finish ? 12 : 6) };
 }
@@ -161,7 +214,7 @@ export async function decodeFrame(data, onError = () => {}) {
     // 单条消息的字段变化/损坏不能吞掉同一帧中的其他礼物。
     try {
       const m = wire(message), body = bytesAt(m, 2); if (!body) continue;
-      const e = decodeMessage(textAt(m, 1), body, idAt(m, 3)); if (e) events.push(e);
+      const e = decodeMessage(textAt(m, 1), body, idAt(m, 3)); if (Array.isArray(e)) events.push(...e); else if (e) events.push(e);
     } catch (error) { onError(error); }
   }
   return events;

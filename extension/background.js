@@ -13,7 +13,7 @@ const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
 };
-const eventTypes = new Set(['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','room-state']);
+const eventTypes = new Set(['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state']);
 const validEvent = (event, maxBytes) => {
   try {
     const size = jsonLength(event);

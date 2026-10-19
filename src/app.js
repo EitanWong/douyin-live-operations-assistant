@@ -31,6 +31,10 @@ export function boot(options = {}) {
   // 账本写入与场控发送解耦：存储短暂失败时保留最新连击进度并自动重试，
   // 不让一次扩展后台/IndexedDB 抖动造成收入遗漏。
   const incomePending = new Map(); let incomeDrainBusy = false, incomeRetryTimer = null;
+  let incomeSummary = null, incomeFailure = '';
+  function renderIncomeSummary() {
+    if (panel && engine.config.incomeEnabled) panel.updateGiftSummary(incomeSummary || {}, engine.config.gift.yuanPerDiamond, true, { pending:incomePending.size, error:incomeFailure });
+  }
   function persistRuntime(immediate = false) {
     if (!engine || closed && !immediate) return;
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
@@ -88,8 +92,10 @@ export function boot(options = {}) {
       if (closed || request !== incomeRequest) return;
       panel.updateIncome(selected);
       const own = current || selected;
-      if (engine.config.incomeEnabled && own) panel.updateGiftSummary(own.days.find(day => day.date === giftDate()) || {totalDiamonds:0,giftCount:0,unknownCount:0,estimatedIncome:0}, engine.config.gift.yuanPerDiamond, true);
-    } catch (error) { if (!closed) { panel.incomeError(error.message); log('error', `礼物账本读取失败：${error.message}`); } }
+      incomeSummary = own.days.find(day => day.date === giftDate()) || {totalDiamonds:0,giftCount:0,unknownCount:0,estimatedIncome:0};
+      if (!incomePending.size) incomeFailure = '';
+      renderIncomeSummary();
+    } catch (error) { if (!closed) { incomeFailure = error.message; renderIncomeSummary(); panel.incomeError(error.message); log('error', `礼物账本读取失败：${error.message}`); } }
   }
   function refreshIncome() {
     if (closed || incomeTimer) return;
@@ -104,9 +110,11 @@ export function boot(options = {}) {
         if (item.nextAt > Date.now()) continue;
         try {
           await repository.record({ room, event:item.event, userKey:item.userKey, rate:item.rate, capturedAt:item.capturedAt });
+          incomeFailure = '';
           if (incomePending.get(key) === item) { incomePending.delete(key); persistRuntime(); }
           refreshIncome();
         } catch (error) {
+          incomeFailure = error.message; renderIncomeSummary();
           item.attempts++;
           item.nextAt = Date.now() + Math.min(30000, 500 * 2 ** Math.min(item.attempts, 6));
           if (item.attempts === 1 || item.attempts % 5 === 0) {
@@ -130,6 +138,9 @@ export function boot(options = {}) {
     // 同一连击只保留最新累计数；GiftStore 会按持久进度计算增量。
     const nextEvent = old && Number(old.event.count) > Number(event.count) ? old.event : event;
     incomePending.set(key, { event:nextEvent, userKey, rate:engine.config.gift.yuanPerDiamond, capturedAt:old?.capturedAt || event.capturedAt || Date.now(), attempts:old?.attempts || 0, nextAt:old?.nextAt || Date.now() });
+    // 入账排队时就保存恢复点，不能依赖引擎正在运行或后续写入成功。
+    persistRuntime();
+    renderIncomeSummary();
     void drainIncome();
   };
   async function registerProfile(name) {
@@ -188,6 +199,10 @@ export function boot(options = {}) {
   const adapter = makeAdapter({
     page,
     getConfig: () => engine.config,
+    onPK:event=>{
+      if (!engine || closed || suspended || location.pathname !== initialPath) return;
+      if (engine.ingestPK(event)) {refresh();persistRuntime();}
+    },
     onEcho:event=>engine?.observeEcho(event),
     onEvent: async event => {
       const journalKey = event?._journalKey;
@@ -231,7 +246,8 @@ export function boot(options = {}) {
       network = status; refresh(); wakeSender();
       if ((status.ingestion?.gaps || 0)+(status.bridgeGaps || 0)+(status.frameGaps || 0) !== previousGaps) persistRuntime();
     },
-    shouldReadChat: () => engine.running && ((engine.config.ai.enabled && engine.config.ai.chatEnabled) || engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled)
+    shouldReadChat: () => engine.running && ((engine.config.ai.enabled && engine.config.ai.chatEnabled) || engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
+    shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
     config, log, ai: client,
@@ -349,7 +365,24 @@ export function boot(options = {}) {
       },
       diagnose: () => adapter.diagnose(),
       recoverEvents: async () => { await drainIncome(); await journalCommitter?.flush(); await adapter.recoverEvents?.(); await adapter.checkStorage?.(); refresh(); },
-      exportEvents: async () => download(`douyin-recovery-${room}.json`,JSON.stringify({savedAt:Date.now(),runtime:engine.snapshot(),incomePending:[...incomePending],collection:adapter.exportEvents ? await adapter.exportEvents() : network},null,2)),
+      exportEvents: async () => {
+        // 后台失联时仍可导出内存里的待入账事实；不能让读取日志失败挡住自救。
+        let collection;
+        try { collection = adapter.exportEvents ? await adapter.exportEvents() : network; }
+        catch (error) { collection = {error:error.message}; }
+        download(`douyin-recovery-${room}.json`,JSON.stringify({room,savedAt:Date.now(),runtime:engine.snapshot(),incomePending:[...incomePending],collection},null,2));
+      },
+      importIncome: async data => {
+        if (!engine.config.incomeEnabled) throw new Error('请先启用收入统计');
+        if (data?.room !== room || !Array.isArray(data.incomePending) || data.incomePending.length > 2000) throw new Error('请选择当前直播间导出的礼物恢复数据');
+        const records = data.incomePending.map(entry => entry?.[1]);
+        if (records.some(item => item?.event?.type !== 'gift' || !(item.event.groupId || item.event.id) || typeof item.userKey !== 'string' || !Number.isFinite(item.capturedAt) || item.capturedAt <= 0 || !Number.isFinite(item.rate) || item.rate < 0 || item.rate > 10 || !Number.isFinite(item.event.count) || item.event.count < 1 || item.event.count > 1e9 || (item.event.unitValue != null && (!Number.isFinite(item.event.unitValue) || item.event.unitValue < 0 || item.event.unitValue > 1e9)))) throw new Error('礼物恢复记录无效');
+        for (const item of records) await repository.record({room,event:item.event,userKey:item.userKey,rate:item.rate,capturedAt:item.capturedAt});
+        for (const item of incomePending.values()) item.nextAt = Date.now();
+        await drainIncome();
+        await loadIncome();
+        panel.toast(`已恢复 ${records.length} 组礼物，重复记录自动去重`);
+      },
       exportConfig: () => download(`douyin-live-${room}.json`, JSON.stringify(engine.config, null, 2)),
       income: () => loadIncome({profiles:true}),
       exportIncome: async () => { const selection = panel.incomeSelection(); download(`douyin-income-${selection.room}-${selection.month}.json`, JSON.stringify(await repository.report(selection.room, selection.month), null, 2)); },
@@ -449,7 +482,7 @@ export function boot(options = {}) {
       refresh(); refreshGifts(); void loadIncome({profiles:true});
     });
     void drainIncome();
-    options.onReady?.({ engine, panel, adapter, stop: pause, rememberUser, refreshIncome });
+    options.onReady?.({ engine, panel, adapter, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });
   return engine;

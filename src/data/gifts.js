@@ -126,7 +126,7 @@ export class GiftStore {
         try {
           // 重读持久进度再试：写入已成功但调用报错时也不能重复入账。
           const ledger = new GiftLedger({ state: await this.get(key, null), now: this.now });
-          const changed = ledger.observe(event, room, String(userKey).slice(0, 200), rate);
+          const changed = ledger.observe({...event, capturedAt:receivedAt}, room, String(userKey).slice(0, 200), rate);
           if (changed) await this.set(key, ledger.serialize());
           return changed;
         } catch (error) {

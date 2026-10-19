@@ -26,6 +26,11 @@ export function installDevelopmentReload({ chrome, revision, endpoint, beforeRel
       const build = await response.json();
       if (!/^[a-f0-9]{64}$/.test(build.revision) || build.revision === revision) return;
       const tabs = (await chrome.tabs.query({url:'https://live.douyin.com/*'})).filter(tab => roomURL(tab.url)).map(tab => ({id:tab.id,url:tab.url}));
+      // 后台队列不包含页面尚未提交的礼物。先让每个页面落下待入账恢复点。
+      for (const tab of tabs) {
+        const prepared = await chrome.tabs.sendMessage(tab.id,{type:'prepare-reload'});
+        if (!prepared?.ok) throw new Error('直播页尚未保存恢复点，暂缓开发更新');
+      }
       // 已提交到后台的礼物写入完成后才重载，不清空任何配置或账本。
       await beforeReload();
       await chrome.storage.local.set({[pendingKey]:{from:revision,tabs}});

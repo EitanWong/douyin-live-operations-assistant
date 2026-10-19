@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, copy, Engine, welcomeDecision, matchesUser, validateConfig, mergeConfig, inTimeWindow } from '../../src/core/engine.js';
+import { DEFAULTS, copy, Engine, welcomeDecision, matchesUser, validateConfig, mergeConfig, inTimeWindow, recognizeMilestone } from '../../src/core/engine.js';
 
 const user = { id: '9007199254740993123', name: '青山', wealthLevel: 35, fanClubs: [{ anchorId: '1234567890', level: 8, status: 1 }] };
 function harness(change = () => {}) {
@@ -10,6 +10,26 @@ function harness(change = () => {}) {
   e.start(); return { e, sent, logs, advance: ms => { time += ms; }, time: () => time };
 }
 const gift = (override = {}) => ({ type: 'gift', user, giftId: '123', giftName: '星星', unitValue: 50, count: 1, groupId: 'group', ...override });
+
+test('识别星守护和本场 1000 贡献榜系统播报', () => {
+  assert.deepEqual(recognizeMilestone('恭喜 [图片] 孤独患者成为星守护'), { kind:'guardian', name:'孤独患者' });
+  assert.deepEqual(recognizeMilestone('恭喜 孤独患者成为No.2本场1000贡献用户'), { kind:'contribution', name:'孤独患者', rank:2 });
+  assert.deepEqual(recognizeMilestone('恭喜 孤独患者成为本场 No.2 1000 贡献用户'), { kind:'contribution', name:'孤独患者', rank:2 });
+  assert.deepEqual(recognizeMilestone('感谢岁小孩LILAC成为本场No.1、1000票贡献用户！'), { kind:'contribution', name:'岁小孩LILAC', rank:1 });
+  assert.equal(recognizeMilestone('恭喜大家晚上好'), null);
+});
+
+test('系统播报会分别排入星守护和 1000 票贡献榜感谢', () => {
+  const { e } = harness();
+  e.ingest({ type:'chat', id:'guardian', user:{id:'system',name:'系统'}, text:'恭喜 [图片] 孤独患者成为星守护' });
+  e.ingest({ type:'chat', id:'rank', user:{id:'system',name:'系统'}, text:'恭喜 孤独患者成为No.2本场1000贡献用户' });
+  e.ingest({ type:'chat', id:'fan-badge-rank', user:{id:'system',name:'系统'}, text:'感谢岁小孩LILAC成为本场No.1、1000票贡献用户！' });
+  assert.deepEqual(e.queue.filter(item => item.kind === 'milestone').map(item => item.text), [
+    '感谢孤独患者开通星守护，欢迎加入！',
+    '感谢孤独患者成为本场No.2、1000票贡献用户！',
+    '感谢岁小孩LILAC成为本场No.1、1000票贡献用户！'
+  ]);
+});
 
 test('复用消息 ID 的连击更新和结束消息仍结算到最新累计数量', async () => {
   const {e, logs} = harness();
@@ -128,7 +148,7 @@ test('聊天提前返回与游戏提交仍通知持久化', () => {
   assert.equal(persisted.history.at(-1).text, '@场控 猜数字');
   assert.equal(persisted.bot.type, 'guess');
 });
-test('发送中快照恢复为结果未知并自动重发', async () => {
+test('尚未进入点击钩子的发送快照恢复后可安全重试', async () => {
   const { e, time } = harness(); let resolveSend;
   e.config.mode = 'auto'; e.send = () => new Promise(resolve => { resolveSend = resolve; });
   e.enqueue('gift','感谢青山！',{giftReply:{userKey:'uid:9',user:{name:'青山'},items:[],template:'谢谢'}});
@@ -139,7 +159,7 @@ test('发送中快照恢复为结果未知并自动重发', async () => {
   assert.equal(restored.queue.length,1); assert.equal(restored.deliveries.records[0].state,'retrying');
   resolveSend({submitted:true}); await pending;
 });
-test('运行快照写入挂起时发送仍会继续，页面离开时保留在途任务供恢复重发', async () => {
+test('适配器尚未返回时页面离开，保留未知状态且迟到结果不覆盖', async () => {
   const { e } = harness(c => { c.mode = 'auto'; });
   let checkpointed = false, sendCalls = 0;
   e.checkpoint = async () => { assert.equal(e.snapshot().inFlight.jobs.length,1); checkpointed = true; };
@@ -154,9 +174,9 @@ test('运行快照写入挂起时发送仍会继续，页面离开时保留在�
   const sending = e.tick(); await new Promise(setImmediate);
   assert.equal(sendCalls,1);
   e.stop('刷新',{preserveWork:true});
-  assert.equal(e.queue.length,0); assert.equal(e.deliveries.pending().at(-1).state,'unknown');
+  assert.equal(e.queue.length,0); assert.equal(e.deliveries.records.at(-1).state,'unknown');
   finish({submitted:true}); await sending;
-  assert.equal(e.queue.length,0); assert.equal(e.deliveries.pending().at(-1).state,'unknown');
+  assert.equal(e.queue.length,0); assert.equal(e.deliveries.records.at(-1).state,'unknown');
 });
 test('礼物回复不因相同文本去重丢失，其他类别仍保留重复过滤', () => {
   const { e } = harness();

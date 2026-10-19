@@ -16,6 +16,10 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "esbuild": "^0.25.12",
     "jsdom": "^26.1.0"
+  },
+  "dependencies": {
+    "echarts": "^6.1.0"
   }
 }
