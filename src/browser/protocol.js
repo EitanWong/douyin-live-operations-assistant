@@ -17,6 +17,28 @@ export function wire(input) {
     }
     throw new Error('protobuf varint 过长');
   }
+  function skipGroup(startField) {
+    const stack = [startField]; let count = 0;
+    while (stack.length) {
+      if (++count > 100000) throw new Error('protobuf group 字段数量过多');
+      const tag = varint(), fieldBig = tag >> 3n, wireType = Number(tag & 7n);
+      if (fieldBig < 1n || fieldBig > 0x1fffffffn) throw new Error('protobuf group 字段编号无效');
+      const field = Number(fieldBig);
+      if (wireType === 0) varint();
+      else if (wireType === 1 || wireType === 5) {
+        const length = wireType === 1 ? 8 : 4;
+        if (pos + length > bytes.length) throw new Error('protobuf group 定长字段不完整');
+        pos += length;
+      } else if (wireType === 2) {
+        const length = Number(varint());
+        if (!Number.isSafeInteger(length) || pos + length > bytes.length) throw new Error('protobuf group 消息长度无效');
+        pos += length;
+      } else if (wireType === 3) stack.push(field);
+      else if (wireType === 4) {
+        if (stack.pop() !== field) throw new Error('protobuf group 结束字段不匹配');
+      } else throw new Error(`不支持 protobuf group wire type ${wireType}`);
+    }
+  }
   while (pos < bytes.length) {
     if (++count > 100000) throw new Error('protobuf 字段数量过多');
     const tag = varint(), numberBig = tag >> 3n;
@@ -31,7 +53,9 @@ export function wire(input) {
     } else if (type === 1 || type === 5) {
       const length = type === 1 ? 8 : 4; if (pos + length > bytes.length) throw new Error('protobuf 定长字段不完整');
       value = bytes.subarray(pos, pos + length); pos += length;
-    } else throw new Error(`不支持 protobuf wire type ${type}`);
+    } else if (type === 3) { skipGroup(number); continue; }
+    else if (type === 4) throw new Error('protobuf group 缺少起始字段');
+    else throw new Error(`不支持 protobuf wire type ${type}`);
     if (!fields.has(number)) fields.set(number, []);
     fields.get(number).push(value);
   }
@@ -127,9 +151,7 @@ function contributionEvents(event, m, field, shape, settings = {}) {
 }
 function decodeBattleMessage(method, bytes, outerId) {
   const name = String(method).replace(/^Webcast/, '');
-  const known = ['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage',
-    'LinkMicArmiesMethod','LinkMicArmies','BattleStateSyncMessage'];
-  if (!known.includes(name)) return null;
+  if (!KNOWN_BATTLE_METHODS.has(name)) return null;
   const m = wire(bytes), common = nested(m, 1);
   const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket', confidence: 'protocol-field', protocolMethod: method };
   if (name === 'LinkMicMethod' || name === 'LinkMicMethodMessage') {
@@ -156,11 +178,339 @@ function decodeBattleMessage(method, bytes, outerId) {
   if (!settings.battleId && !scores.length) return null;
   return { ...event, ...settings, type: finish ? 'pk-end' : 'pk-start', scores, participants: battleParticipants(m, finish ? 12 : 6) };
 }
+function decodeRoomUserSeq(m, event) {
+  const contributors = field => messagesAt(m, field).slice(0, 20).flatMap(row => {
+    const userBytes = bytesAt(row, 2), user = userBytes ? decodeUser(userBytes) : null;
+    if (!user || (!user.id && !user.name)) return [];
+    return [{ user, score:numberAt(row, 1), rank:numberAt(row, 3), delta:numberAt(row, 4) }];
+  });
+  return {
+    ...event, type:'room-audience',
+    onlineCount:numberAt(m, 3), popularity:idAt(m, 6), cumulativeUsers:idAt(m, 7),
+    onlineDisplay:textAt(m, 9), cumulativeUsersDisplay:textAt(m, 8),
+    anchorOnlineDisplay:textAt(m, 10), anchorPageViewsDisplay:textAt(m, 11),
+    ranks:contributors(2), seats:contributors(5)
+  };
+}
+function decodeGiftMenuItem(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const rawId = item.id ?? item.gift_id;
+  const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId) : '';
+  const name = typeof item.name === 'string' ? item.name.slice(0, 100) : '';
+  if (!id || id === '0' || id.length > 128 || !name) return null;
+  const rawPrice = item.price ?? item.diamond_count;
+  const price = Number.isSafeInteger(rawPrice) && rawPrice >= 0 && rawPrice <= 1e9 ? rawPrice : null;
+  const icon = typeof item.icon === 'string' && item.icon.length <= 2048 ? item.icon : '';
+  return { id, name, price, ...(icon ? { icon } : {}) };
+}
+function decodeGroupLiveGiftMenu(m, event) {
+  const containers = messagesAt(m, 1).filter(row => numberAt(row, 1) === 6);
+  return containers.flatMap((row, index) => {
+    let payload;
+    try { payload = JSON.parse(textAt(row, 3)); } catch { return []; }
+    if (!Array.isArray(payload?.data)) return [];
+    const items = payload.data.slice(0, 100).map(decodeGiftMenuItem).filter(Boolean);
+    return [{ ...event, id:event.id ? `${event.id}:gift-menu:${index}` : '', type:'gift-catalog',
+      catalogSource:'group-live-menu', containerType:6, position:textAt(row, 4), itemCount:items.length, items }];
+  });
+}
+function decodeBattleBonus(m, event) {
+  const mvp = nested(m, 2);
+  const players = messagesAt(m, 3).slice(0, 20).map(row => ({
+    user:{ id:idAt(row, 1), name:textAt(row, 2) }, diamondCount:idAt(row, 3)
+  })).filter(row => row.user.id || row.user.name);
+  const prop = nested(mvp, 3);
+  const result = { ...event, type:'battle-bonus',
+    mvp:{ user:{id:idAt(mvp, 1),name:textAt(mvp, 2)}, prop:prop.has(4) || prop.has(10) ? { id:idAt(prop, 4), name:textAt(prop, 10), count:numberAt(prop, 9), diamond:idAt(prop, 6) } : null },
+    players };
+  if (!result.mvp.user.id && !result.mvp.user.name && !players.length) return null;
+  return result;
+}
+function decodeBattleProperty(m, event) {
+  const rooms = messagesAt(m, 2).slice(0, 10).map(room => ({
+    roomId:idAt(room, 1), properties:messagesAt(room, 2).slice(0, 20).map(row => {
+      const prop = nested(row, 1);
+      return { id:idAt(prop, 4), name:textAt(prop, 10), count:numberAt(prop, 9), diamond:idAt(prop, 6),
+        startAt:idAt(row, 2), durationMs:idAt(row, 3) };
+    }).filter(row => row.id || row.name)
+  })).filter(room => room.properties.length);
+  return rooms.length ? { ...event, type:'battle-property', rooms } : null;
+}
+function decodeBattleSeasonHonor(m, event) {
+  const honors = messagesAt(m, 4).slice(0, 20).map(row => {
+    const user = bytesAt(row, 9);
+    return { honorType:numberAt(row, 1), name:textAt(row, 2), current:numberAt(row, 5), total:numberAt(row, 6),
+      unlocked:numberAt(row, 13) === 1, topUser:user ? decodeUser(user) : null };
+  }).filter(row => row.honorType !== null || row.name);
+  return honors.length ? { ...event, type:'battle-season-honor', honors } : null;
+}
+function decodePopularCard(m, event) {
+  const info = nested(m, 2);
+  return info.size ? { ...event, type:'popular-card', status:numberAt(info, 1), startAt:idAt(info, 2),
+    endAt:idAt(info, 3), enterNumber:numberAt(info, 4) } : null;
+}
+function decodeGroupLiveMembers(m, event) {
+  const members = messagesAt(m, 2).slice(0, 100).flatMap(row => {
+    const userBytes = bytesAt(row, 1), user = userBytes ? decodeUser(userBytes) : null;
+    return user && (user.id || user.name) ? [{user,score:idAt(row, 2),showScore:numberAt(row, 3) === 1}] : [];
+  });
+  return members.length ? { ...event, type:'group-live-members', members } : null;
+}
+function decodeGroupLiveIncome(m, event) {
+  const members = messagesAt(m, 2).slice(0, 100).flatMap(row => {
+    const userBytes = bytesAt(row, 1), user = userBytes ? decodeUser(userBytes) : null;
+    if (!user || (!user.id && !user.name)) return [];
+    return [{user,income:idAt(row, 2),otherIncome:idAt(row, 3),giftIncome:idAt(row, 4),
+      starGuardIncome:idAt(row, 5),starGuardActivatedUsers:idAt(row, 7)}];
+  });
+  return members.length ? { ...event, type:'group-live-income', calculatedAt:idAt(m, 3), members } : null;
+}
+function decodeLinkMicPositions(m, event) {
+  const content=nested(m, 3), verify=nested(m, 4);
+  const positions=messagesAt(content, 1).slice(0, 24).map(row => ({
+    position:idAt(row, 1), status:numberAt(row, 2), activeName:textAt(row, 3),
+    verifyStatus:numberAt(row, 4), positionType:numberAt(row, 5), clientPosition:idAt(row, 6),
+    masked:numberAt(row, 7) === 1, hideStatus:numberAt(row, 8), hiddenName:textAt(row, 9)
+  }));
+  const verifyPositions=messagesAt(verify, 2).slice(0, 24).map(row => ({
+    position:idAt(row, 1), name:textAt(row, 2), status:numberAt(row, 3), positionType:numberAt(row, 4)
+  }));
+  const finalPositions=messagesAt(verify, 3).slice(0, 24).map(row => ({
+    position:idAt(row, 1), status:numberAt(row, 2), activeName:textAt(row, 3),
+    verifyStatus:numberAt(row, 4), positionType:numberAt(row, 5), masked:numberAt(row, 7) === 1
+  }));
+  return positions.length || verifyPositions.length || finalPositions.length
+    ? { ...event, type:'linkmic-positions', messageType:numberAt(m, 2), currentVerifyPosition:idAt(verify, 1), positions, verifyPositions, finalPositions }
+    : null;
+}
+function decodeGuestLink(m, event) {
+  const messageType=numberAt(m, 2), update=nested(m, 54), channel=nested(update, 1), join=nested(m, 56);
+  const linkedUsers=messagesAt(channel, 2).slice(0, 24).flatMap(row => {
+    const userBytes=bytesAt(row, 1), user=userBytes ? decodeUser(userBytes) : null;
+    return user && (user.id || user.name) ? [{user,score:idAt(row, 2),userRole:numberAt(row, 3),audienceRole:numberAt(row, 4),scoreDisplay:textAt(row, 5),linkType:numberAt(row, 7)}] : [];
+  });
+  const channelUsers=(channel.get(3) || []).filter(value => value instanceof Uint8Array).slice(0, 24).flatMap(userBytes => {
+    const user=decodeUser(userBytes);
+    return user.id || user.name ? [user] : [];
+  });
+  const data={channelId:idAt(channel, 1) || idAt(join, 1), messageType, linkedUsers, channelUsers,
+    score:idAt(channel, 4) || idAt(join, 4), callDuration:idAt(channel, 5) || idAt(join, 5),
+    startedAt:idAt(channel, 6), channelUserCount:idAt(channel, 9), scoreDisplay:textAt(channel, 10)};
+  return data.channelId || linkedUsers.length || channelUsers.length || data.callDuration
+    ? { ...event, type:'guest-link-state', ...data }
+    : null;
+}
+function decodeRoomSyncDetails(syncType, bytes) {
+  if (!bytes || !['LotteryInfoSyncData','RoomChannelSettingsSyncData','DoubleLikeSyncData','RoomLinkMicSyncData','RoomLinkMicAnchorSettingsSyncData','AudienceGiftSyncData','InteractEffectSyncData'].includes(syncType)) return null;
+  let m;
+  try { m=wire(bytes); } catch { return null; }
+  if (syncType === 'LotteryInfoSyncData') return {
+    lotteryId:idAt(m, 1), lotteryType:idAt(m, 5), luckyCount:idAt(m, 2), prizeCount:idAt(m, 6),
+    candidateCount:idAt(m, 3), startedAt:idAt(m, 7), drawAt:idAt(m, 8),
+    dilutionEnabled:numberAt(m, 9), dilutionActive:numberAt(m, 11) === 1,
+    prizeCountBeforeDilution:idAt(m, 12), luckyCountBeforeDilution:idAt(m, 13)
+  };
+  if (syncType === 'RoomChannelSettingsSyncData') return {
+    channelId:idAt(m, 1), linkMicEnabled:numberAt(m, 2) === 1,
+    entryApprovalEnabled:numberAt(m, 3) === 1, memberInviteEnabled:numberAt(m, 4) === 1
+  };
+  if (syncType === 'DoubleLikeSyncData') {
+    const status=nested(m, 1);
+    return { doubleLikeEnabled:numberAt(status, 1) === 1, sequence:numberAt(status, 2), renewals:numberAt(status, 3), triggers:numberAt(status, 4) };
+  }
+  if (syncType === 'RoomLinkMicSyncData') {
+    const users=messagesAt(m, 1).slice(0, 24).flatMap(row => {
+      const userBytes=bytesAt(row, 1), user=userBytes ? decodeUser(userBytes) : null;
+      return user && (user.id || user.name) ? [{user,linkStatus:numberAt(row, 4),linkType:numberAt(row, 5),position:numberAt(row, 6),silenceStatus:numberAt(row, 7),role:numberAt(row, 10)}] : [];
+    });
+    const positionRows=field => messagesAt(m, field).slice(0, 24).map(row => ({
+      position:idAt(row, 1), status:numberAt(row, 2), activeName:textAt(row, 3),
+      verifyStatus:numberAt(row, 4), positionType:numberAt(row, 5), masked:numberAt(row, 7) === 1
+    }));
+    return { users, lockedPositions:positionRows(4), positions:positionRows(5), version:idAt(m, 8) };
+  }
+  if (syncType === 'RoomLinkMicAnchorSettingsSyncData') return {
+    settings:messagesAt(m, 1).slice(0, 50).map(row => ({key:numberAt(row, 1),value:numberAt(row, 2)}))
+  };
+  if (syncType === 'AudienceGiftSyncData') return {
+    syncType:idAt(m, 2), recipients:messagesAt(m, 1).slice(0, 24).flatMap(row => {
+      const userBytes=bytesAt(row, 1), user=userBytes ? decodeUser(userBytes) : null;
+      return user && (user.id || user.name) ? [{user,score:idAt(row, 2),giftAllowed:numberAt(row, 3) === 1,reason:textAt(row, 4).slice(0, 160)}] : [];
+    })
+  };
+  if (syncType === 'InteractEffectSyncData') return {
+    anchorId:textAt(m, 1), roomId:textAt(m, 2), stickers:messagesAt(m, 3).slice(0, 50).flatMap(entry => {
+      const key=textAt(entry, 1), value=bytesAt(entry, 2);
+      return value ? messagesAt(wire(value), 1).slice(0, 50).map(row => ({
+        key, effectId:idAt(row, 1), enabled:numberAt(row, 2) === 1, rendering:numberAt(row, 3) === 1
+      })).filter(row => row.effectId) : [];
+    })
+  };
+  return null;
+}
+function richText(bytes) {
+  if (!bytes) return '';
+  const m = wire(bytes), pieces = [];
+  for (const piece of messagesAt(m, 4).slice(0, 100)) {
+    const userRef = nested(piece, 4), userBytes = bytesAt(userRef, 1);
+    const imageRef = nested(piece, 8), imageBytes = bytesAt(imageRef, 1);
+    const imageContent = imageBytes ? nested(imageBytes, 8) : new Map();
+    const value = textAt(piece, 3) || (userBytes ? decodeUser(userBytes).name : '')
+      || textAt(nested(piece, 7), 2) || textAt(imageContent, 4);
+    pieces.push(value);
+  }
+  return pieces.join('').slice(0, 10000) || textAt(m, 2).slice(0, 10000);
+}
+function decodeProtocolEvent(method, m, event) {
+  if (method === 'GroupLiveContainerChangeMessage') return decodeGroupLiveGiftMenu(m, event);
+  if (method === 'WebcastBattleBonusMessage') return decodeBattleBonus(m, event);
+  if (method === 'WebcastBattlePropertyMessage') return decodeBattleProperty(m, event);
+  if (method === 'BattleSeasonHonorMessage') return decodeBattleSeasonHonor(m, event);
+  if (method === 'PopularCardMessage' || method === 'WebcastPopularCardMessage') return decodePopularCard(m, event);
+  if (method === 'FansclubStatisticsMessage') return {
+    ...event, type:'fansclub-statistics', name:textAt(m, 2), fansCount:idAt(m, 3)
+  };
+  if (method === 'GroupLiveMemberChangeMessage') return decodeGroupLiveMembers(m, event);
+  if (method === 'GroupLiveIncomeChangeMessage') return decodeGroupLiveIncome(m, event);
+  if (method === 'LinkMicPositionMessage') return decodeLinkMicPositions(m, event);
+  if (method === 'LinkmicGuestLinkMessage') return decodeGuestLink(m, event);
+  if (method === 'FansclubV1PushMessage') return {
+    ...event, type:'fansclub-push', content:textAt(m, 2).slice(0, 500),
+    actionContent:textAt(m, 6).slice(0, 500), actionType:idAt(m, 7), displayDuration:idAt(m, 8), source:textAt(m, 12).slice(0, 100)
+  };
+  if (method === 'RoomTicketMessage') return {
+    ...event, type:'room-ticket', actionType:numberAt(m, 2), lastDuration:numberAt(m, 3), ticketId:idAt(m, 4),
+    ownerId:idAt(m, 9), bringProductSwitchStatus:numberAt(m, 11)
+  };
+  if (method === 'WebcastRoomStatsMessage') return {
+    ...event, type:'room-stats', metricType:numberAt(m, 10), displayValue:numberAt(m, 5) ?? numberAt(m, 9),
+    displayShort:textAt(m, 2), displayMiddle:textAt(m, 3), displayLong:textAt(m, 4),
+    displayVersion:idAt(m, 6), incremental:numberAt(m, 7) === 1, hidden:numberAt(m, 8) === 1
+  };
+  if (method === 'WebcastRoomUserSeqMessage') return decodeRoomUserSeq(m, event);
+  if (method === 'WebcastSocialMessage') {
+    const action = numberAt(m, 4);
+    return { ...event, type:'social', user:bytesAt(m, 2) ? decodeUser(bytesAt(m, 2)) : null,
+      action, actionName:action === 1 ? 'follow' : action === 2 ? 'share' : '',
+      shareType:numberAt(m, 3), shareTarget:textAt(m, 5), followCount:numberAt(m, 6),
+      shareDisplayStyle:numberAt(m, 7), shareCount:numberAt(m, 8) };
+  }
+  if (method === 'WebcastFansclubMessage') {
+    const action = numberAt(m, 2);
+    return { ...event, type:'fansclub', user:bytesAt(m, 4) ? decodeUser(bytesAt(m, 4)) : null,
+      action, actionName:action === 1 ? 'upgrade' : action === 2 ? 'join' : '', description:textAt(m, 3) };
+  }
+  if (method === 'WebcastEmojiChatMessage') return {
+    ...event, type:'emoji-chat', user:bytesAt(m, 2) ? decodeUser(bytesAt(m, 2)) : null,
+    emojiId:idAt(m, 3), text:richText(bytesAt(m, 4)) || textAt(m, 5), fromIntercom:numberAt(m, 7) === 1
+  };
+  if (method === 'WebcastScreenChatMessage' || method === 'WebcastPrivilegeScreenChatMessage') {
+    const content = textAt(m, 3) || textAt(m, 4);
+    const rtf = richText(bytesAt(m, 32));
+    return { ...event, type:'screen-chat', user:bytesAt(m, 2) ? decodeUser(bytesAt(m, 2)) : null,
+      text:content || rtf, eventTime:idAt(m, m.get(4)?.[0] instanceof Uint8Array ? 3 : 4),
+      priorityScore:idAt(m, 12), privilege:method === 'WebcastPrivilegeScreenChatMessage' };
+  }
+  if (method === 'WebcastRoomMessage') return {
+    ...event, type:'room-notice', text:textAt(m, 2), source:numberAt(m, 4), welcome:numberAt(m, 7) === 1,
+    durationMs:numberAt(m, 9), subScene:textAt(m, 10)
+  };
+  if (method === 'WebcastRoomRankMessage') return {
+    ...event, type:'room-rank', ranks:messagesAt(m, 2).slice(0, 20).flatMap(row => {
+      const userBytes=bytesAt(row, 1), user=userBytes ? decodeUser(userBytes) : null;
+      return user && (user.id || user.name) ? [{user,score:textAt(row, 2),profileHidden:numberAt(row, 3) === 1}] : [];
+    })
+  };
+  if (method === 'WebcastRankUpdateMessage') return {
+    ...event, type:'rank-update', groupType:numberAt(m, 3), priority:numberAt(m, 5),
+    updates:messagesAt(m, 2).slice(0, 20).map(row => ({rankType:numberAt(row, 1),ownerRank:numberAt(row, 2),text:richText(bytesAt(row, 3)),countdown:numberAt(row, 6)}))
+  };
+  if (method === 'WebcastRoomNotifyMessage') {
+    const field2 = textAt(m, 2), scheme = /^(?:sslocal|https?):\/\//.test(field2) ? field2 : '';
+    return { ...event, type:'room-notify', scheme, notifyType:numberAt(m, 3), notifySubType:textAt(m, 4),
+      extraBytes:(bytesAt(m, 6)?.length || 0) + (scheme ? 0 : bytesAt(m, 2)?.length || 0) };
+  }
+  if (method === 'WebcastRoomDataSyncMessage' || method === 'RoomDataSyncMessage') return {
+    ...event, type:'room-sync', syncType:textAt(m, 3), traceId:textAt(m, 4), requestId:textAt(m, 6),
+    syncDataBytes:bytesAt(m, 5)?.length || 0,
+    syncDetails:decodeRoomSyncDetails(textAt(m, 3), bytesAt(m, 5))
+  };
+  if (method === 'WebcastAudioChatMessage') return {
+    ...event, type:'audio-chat', user:bytesAt(m, 2) ? decodeUser(bytesAt(m, 2)) : null,
+    text:textAt(m, 3), durationRaw:idAt(m, 5), hasAudio:Boolean(textAt(m, 4))
+  };
+  if (method === 'WebcastHighlightCommentMessage') {
+    const author = nested(m, 8);
+    return { ...event, type:'highlight-comment', messageId:idAt(m, 2), text:textAt(m, 7),
+      user:{id:idAt(author, 1),name:textAt(author, 3)}, displayStart:idAt(m, 10), displayEnd:idAt(m, 11) };
+  }
+  if (method === 'WebcastLightGiftMessage') {
+    const gift = nested(m, 7);
+    return { ...event, type:'light-gift', userId:idAt(m, 5), messageType:numberAt(m, 2),
+      giftId:idAt(gift, 1), unitValue:numberAt(gift, 3), count:numberAt(m, 10), displayStyle:numberAt(m, 9) };
+  }
+  if (method === 'WebcastLiveShoppingMessage') return {
+    ...event, type:'live-shopping', messageType:numberAt(m, 2), promotionId:idAt(m, 4)
+  };
+  if (method === 'WebcastProductChangeMessage') return {
+    ...event, type:'product-change', updateTimestamp:idAt(m, 2), text:textAt(m, 3), total:numberAt(m, 5),
+    products:messagesAt(m, 4).slice(0, 20).map(row => ({promotionId:idAt(row, 1),index:numberAt(row, 2),targetFlashIds:(row.get(3)||[]).filter(v=>typeof v==='bigint').slice(0,20).map(v=>v.toString()),explainType:idAt(row, 4)})),
+    categories:messagesAt(m, 8).slice(0, 20).map(row => ({id:numberAt(row, 1),name:textAt(row, 2),promotionIds:(row.get(3)||[]).filter(v=>typeof v==='bigint').slice(0,20).map(v=>v.toString()),type:textAt(row, 4)}))
+  };
+  if (method === 'WebcastInRoomBannerMessage') return {
+    ...event, type:'room-banner', bannerType:numberAt(m, 3), bannerBytes:bytesAt(m, 2)?.length || 0
+  };
+  if (method === 'WebcastRanklistAwardMessage') return {
+    ...event, type:'rank-award', rank:numberAt(m, 2), awardType:numberAt(m, 3), category:numberAt(m, 4), value:numberAt(m, 9)
+  };
+  if (method === 'WebcastChatLikeMessage') return {
+    ...event, type:'chat-like', entries:messagesAt(m, 2).slice(0, 100).map(row => ({
+      messageId:idAt(row, 1), count:idAt(nested(row, 2), 1), timestamp:idAt(nested(row, 2), 2)
+    }))
+  };
+  if (method === 'WebcastUpdateFanTicketMessage') return {
+    ...event, type:'fan-ticket', display:textAt(m, 2), total:idAt(m, 3), forceUpdate:numberAt(m, 4) === 1
+  };
+  if (method === 'WebcastProfitGameStatusMessage') {
+    let title = '';
+    try { title = JSON.parse(textAt(m, 10)).title || ''; } catch {}
+    return { ...event, type:'room-activity-state', status:numberAt(m, 2), title,
+      properties:messagesAt(m, 18).slice(0, 20).map(row => ({key:textAt(row, 1),value:textAt(row, 2)})).filter(row => row.key) };
+  }
+  if (method === 'WebcastGiftSortMessage') {
+    const sceneBytes=bytesAt(m, 4), directScene=sceneBytes ? decoder.decode(sceneBytes) : '';
+    const scene=/^[\p{L}\p{N}_-]{1,100}$/u.test(directScene) ? directScene : textAt(nested(m, 4), 1);
+    return { ...event, type:'gift-panel-state', sortType:numberAt(m, 2), scene };
+  }
+  if (method === 'WebcastRoomIndicatorMessage') return {
+    ...event, type:'room-indicator', indicatorType:numberAt(m, 2), subType:numberAt(m, 3), dataBytes:bytesAt(m, 4)?.length || 0
+  };
+  if (method === 'WebcastPreviewCjRpMessage') {
+    const packet = nested(m, 1);
+    return { ...event, type:'red-packet', packetId:textAt(packet, 1), startTime:idAt(packet, 2), endTime:idAt(packet, 3),
+      count:numberAt(packet, 4), packetType:numberAt(packet, 5), currency:textAt(packet, 6), status:textAt(packet, 8),
+      totalAmount:numberAt(packet, 9), unitAmount:numberAt(packet, 11) };
+  }
+  const activityKinds = {
+    WebcastLotteryDrawResultEventMessage:'lottery-result', WebcastLotteryEventNewMessage:'lottery-start',
+    WebcastLuckyBoxMessage:'lucky-box', WebcastLuckyBoxEndMessage:'lucky-box-end',
+    WebcastLuckyBoxRewardMessage:'lucky-box-reward', WebcastLuckyBoxTempStatusMessage:'lucky-box-status'
+  };
+  if (activityKinds[method]) return { ...event, type:'activity-signal', activityKind:activityKinds[method] };
+  if (method === 'WebcastPrizeNoticeMessage') return { ...event, type:'activity-signal', activityKind:'prize-notice',
+    prizeType:numberAt(m, 2), field6:numberAt(m, 6), field8:numberAt(m, 8) };
+  return null;
+}
+const KNOWN_BATTLE_METHODS = new Set(['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage','LinkMicArmiesMethod','LinkMicArmies','BattleStateSyncMessage']);
+const KNOWN_PROTOCOL_METHODS = new Set(['WebcastChatMessage','WebcastGiftMessage','WebcastLikeMessage','WebcastMemberMessage','WebcastControlMessage','WebcastRoomStatsMessage','WebcastRoomUserSeqMessage','WebcastSocialMessage','WebcastFansclubMessage','WebcastEmojiChatMessage','WebcastScreenChatMessage','WebcastPrivilegeScreenChatMessage','WebcastRoomMessage','WebcastRoomRankMessage','WebcastRankUpdateMessage','WebcastRoomNotifyMessage','WebcastRoomDataSyncMessage','RoomDataSyncMessage','WebcastAudioChatMessage','WebcastHighlightCommentMessage','WebcastLightGiftMessage','WebcastLiveShoppingMessage','WebcastProductChangeMessage','WebcastInRoomBannerMessage','WebcastRanklistAwardMessage','WebcastPreviewCjRpMessage','WebcastLotteryDrawResultEventMessage','WebcastLotteryEventNewMessage','WebcastLuckyBoxMessage','WebcastLuckyBoxEndMessage','WebcastLuckyBoxRewardMessage','WebcastLuckyBoxTempStatusMessage','WebcastPrizeNoticeMessage','WebcastChatLikeMessage','WebcastUpdateFanTicketMessage','WebcastProfitGameStatusMessage','WebcastGiftSortMessage','WebcastRoomIndicatorMessage','GroupLiveContainerChangeMessage','WebcastBattleBonusMessage','WebcastBattlePropertyMessage','BattleSeasonHonorMessage','PopularCardMessage','WebcastPopularCardMessage','FansclubStatisticsMessage','GroupLiveMemberChangeMessage','GroupLiveIncomeChangeMessage','RoomTicketMessage','LinkMicPositionMessage','LinkmicGuestLinkMessage','FansclubV1PushMessage']);
+const knownProtocolMethod = method => KNOWN_PROTOCOL_METHODS.has(method) || KNOWN_BATTLE_METHODS.has(String(method).replace(/^Webcast/, ''));
 export function decodeMessage(method, bytes, outerId = '') {
-  if (/^(?:Webcast)?(?:LinkMic|Linkmic|Battle)/.test(method)) return decodeBattleMessage(method, bytes, outerId);
-  if (!['WebcastChatMessage', 'WebcastGiftMessage', 'WebcastLikeMessage', 'WebcastMemberMessage', 'WebcastControlMessage'].includes(method)) return null;
-  const m = wire(bytes), common = nested(m, 1);
+  if (KNOWN_BATTLE_METHODS.has(method) || KNOWN_BATTLE_METHODS.has(String(method).replace(/^Webcast/, ''))) return decodeBattleMessage(method, bytes, outerId);
+  if (!KNOWN_PROTOCOL_METHODS.has(method)) return null;
+  const m = wire(bytes), common = nested(m, method === 'WebcastPreviewCjRpMessage' ? 2 : 1);
   const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket' };
+  const observed = decodeProtocolEvent(method, m, event);
+  if (observed) return observed;
   if (method === 'WebcastChatMessage') {
     const atUser = bytesAt(m, 12) ? decodeUser(bytesAt(m, 12)) : null;
     return { ...event, type: 'chat', user: decodeUser(bytesAt(m, 2)), text: textAt(m, 3), atUser, mentions: atUser?.id ? [atUser.id] : [] };
@@ -198,23 +548,37 @@ async function inflate(bytes, encoding) {
   for (const chunk of chunks) { result.set(chunk, at); at += chunk.length; }
   return result;
 }
-export async function decodeFrame(data, onError = () => {}) {
+export async function decodeFrame(data, onError = () => {}, onUnknownMethod = () => {}, onMessage = () => {}) {
   let bytes;
   if (typeof data === 'string') return []; // 不解析其他业务 socket 的 JSON。
   if (data && typeof data.arrayBuffer === 'function') bytes = new Uint8Array(await data.arrayBuffer());
   else if (ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   else bytes = new Uint8Array(data);
   const frame = wire(bytes), payload = bytesAt(frame, 8);
-  if (!payload || (textAt(frame, 7) && textAt(frame, 7) !== 'msg')) return [];
-  const headers = new Map((frame.get(5) || []).filter(v => v instanceof Uint8Array).map(v => { const h = wire(v); return [textAt(h, 1), textAt(h, 2)]; }));
-  const encoding = textAt(frame, 6) || headers.get('compress_type') || '';
-  const response = wire(await inflate(payload, encoding)), events = [];
+  let responseBytes = bytes, encoding = '';
+  if (payload) {
+    if (textAt(frame, 7) && textAt(frame, 7) !== 'msg') return [];
+    const headers = new Map((frame.get(5) || []).filter(v => v instanceof Uint8Array).map(v => { const h = wire(v); return [textAt(h, 1), textAt(h, 2)]; }));
+    responseBytes = payload;
+    encoding = textAt(frame, 6) || headers.get('compress_type') || '';
+  }
+  // WebSocket uses PushFrame.payload; /webcast/im/fetch/ returns the inner Response directly.
+  const response = wire(await inflate(responseBytes, encoding)), events = [];
   for (const message of response.get(1) || []) {
     if (!(message instanceof Uint8Array)) continue;
     // 单条消息的字段变化/损坏不能吞掉同一帧中的其他礼物。
     try {
       const m = wire(message), body = bytesAt(m, 2); if (!body) continue;
-      const e = decodeMessage(textAt(m, 1), body, idAt(m, 3)); if (Array.isArray(e)) events.push(...e); else if (e) events.push(e);
+      const method = textAt(m, 1), messageId = idAt(m, 3);
+      let e;
+      try { e = decodeMessage(method, body, messageId); }
+      catch (error) {
+        try { onMessage({ method, messageId, decodeError:String(error?.message || error).slice(0, 240), decodedTypes:[] }); } catch {}
+        throw error;
+      }
+      if (!knownProtocolMethod(method) && /^[A-Za-z0-9_]{1,120}$/.test(method)) try { onUnknownMethod(method); } catch {}
+      try { onMessage({ method, messageId, decodedTypes:(Array.isArray(e) ? e : e ? [e] : []).map(event => event.type).filter(type => typeof type === 'string').slice(0, 16) }); } catch {}
+      if (Array.isArray(e)) events.push(...e); else if (e) events.push(e);
     } catch (error) { onError(error); }
   }
   return events;

@@ -5,15 +5,16 @@ const jsonBytes = value => {
 const room = location.pathname.match(/^\/(\d+)\/?$/)?.[1];
 if (room) {
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
-  const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint;
-  // MAIN 观察器的数据只用于直播事件，没有任何密钥/网络请求/DOM发送命令。
+  const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint, activeAdapter;
+  let captureWrites = Promise.resolve(), capturePending = 0, capturePendingBytes = 0, captureSaved = 0, captureGaps = 0, captureErrors = 0;
+  // 事件桥不传递密钥；发送桥仅允许本房普通/管理员弹幕及精简结果。
   window.addEventListener('message', e => {
     const data = e.data;
     if (e.source !== window || e.origin !== location.origin || data?.source !== 'live-assistant-page-v1' || data.room !== room) return;
     if (data.type === 'event') {
       const event = data.event;
       let valid = true;
-      try { valid = Boolean(event) && ['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
+      try { valid = Boolean(event) && ['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
       catch { valid = false; }
       if (!valid) return;
       if (receive) receive(event);
@@ -22,6 +23,18 @@ if (room) {
         if (bytes != null && events.length < 4096 && eventsBytes + bytes <= 8*1024*1024) { events.push(event); eventsBytes += bytes; }
         else initialGaps++;
       }
+    }
+    if (data.type === 'protocol-frame') {
+      const record = data.record, bytes = jsonBytes(record);
+      if (bytes == null || bytes > 1800000 || capturePending >= 256 || capturePendingBytes + bytes > 8*1024*1024) {
+        captureGaps++; activeAdapter?.sync(); return;
+      }
+      capturePending++; capturePendingBytes += bytes; activeAdapter?.sync();
+      captureWrites = captureWrites.then(async () => {
+        try { await message({type:'protocol-append',id:crypto.randomUUID(),record}); captureSaved++; }
+        catch { captureGaps++; captureErrors++; }
+        finally { capturePending--; capturePendingBytes -= bytes; activeAdapter?.sync(); }
+      });
     }
     if (data.type === 'status' && data.status) liveStatus = { ...data.status };
   });
@@ -71,7 +84,8 @@ if (room) {
   });
   class ExtensionAdapter extends DouyinAdapter {
     constructor(options) {
-      super(options); this.replayPromise = null;
+      super(options); this.replayPromise = null; activeAdapter = this;
+      this.requestSender = new RequestBridgeClient(window);
       this.inbox = new EventInbox({handle:event=>this.onEvent(event),onStatus:health=>{
         this.ingestion = health; this.sync();
         const paused = Boolean(this.replayPromise) || health.blocked || health.state === 'buffering';
@@ -83,7 +97,7 @@ if (room) {
     restoreCollection(saved) {
       if (!saved) return;
       this.inbox.health.gaps = Number(saved.gaps) || 0; this.inbox.health.giftGaps = Number(saved.giftGaps) || 0;
-      this.priorBridgeGaps = Number(saved.bridgeGaps) || 0; this.priorFrameGaps = Number(saved.frameGaps) || 0;
+      this.priorBridgeGaps = Number(saved.bridgeGaps) || 0; this.priorFrameGaps = Number(saved.frameGaps) || 0; this.priorCaptureGaps = Number(saved.captureGaps) || 0;
     }
     dispatch(event) {
       if (this.onEcho?.(event)) return Promise.resolve(true);
@@ -128,7 +142,15 @@ if (room) {
         if (records.length < 256) break;
         const last = records.at(-1); after = {savedAt:last.savedAt,key:last.key};
       }
-      return {...this.inbox.export(),journal:journalRecords};
+      await captureWrites;
+      const protocolRecords = []; let protocolAfter;
+      for (;;) {
+        const records = await message({type:'protocol-list',after:protocolAfter,limit:100}); protocolRecords.push(...records);
+        if (records.length < 100) break;
+        const last = records.at(-1); protocolAfter = {savedAt:last.savedAt,key:last.key};
+      }
+      return {...this.inbox.export(),journal:journalRecords,protocolFrames:protocolRecords,
+        protocolCapture:{saved:captureSaved,pending:capturePending,gaps:captureGaps,errors:captureErrors}};
     }
     async checkStorage() {
       this.storage = await message({type:'storage-status'}); this.sync(); return this.storage;
@@ -144,7 +166,7 @@ if (room) {
       for (const event of events.splice(0)) receive(event); eventsBytes = 0;
       window.postMessage({source:'live-assistant-content-v1',type:'hello'},location.origin);
     }
-    sync() { this.status = {...liveStatus,bridgeGaps:(this.priorBridgeGaps || 0)+(liveStatus.bridgeGaps || 0),frameGaps:(this.priorFrameGaps || 0)+(liveStatus.frameGaps || 0),ingestion:this.inbox.status(),storage:this.storage}; this.emitStatus(); }
+    sync() { this.status = {...liveStatus,bridgeGaps:(this.priorBridgeGaps || 0)+(liveStatus.bridgeGaps || 0),frameGaps:(this.priorFrameGaps || 0)+(liveStatus.frameGaps || 0),capture:{saved:captureSaved,pending:capturePending,gaps:(this.priorCaptureGaps || 0)+captureGaps+(liveStatus.captureBridgeGaps || 0),errors:captureErrors},ingestion:this.inbox.status(),storage:this.storage}; this.emitStatus(); }
   }
 
   const request = details => {

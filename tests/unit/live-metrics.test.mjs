@@ -40,6 +40,18 @@ test('图表保留未知侧空值、精确分差和时间窗口的前一基线',
   assert.equal(partial.scores.tooltip.renderMode,'richText');
 });
 
+test('多人比分图按每位参战主播绘制独立走势并保留未知分数空值',()=>{
+  const now=1000000;
+  const options=pkChartOptions({competitors:[{anchorId:'a',name:'甲'},{anchorId:'b',name:'乙'},{anchorId:'c',name:'丙'}],trend:[
+    {at:now-1000,competitorScores:{a:100,b:80}},
+    {at:now,competitorScores:{a:120,b:90,c:75}}
+  ]},{now,windowMs:60000});
+  assert.equal(options.scores.series.length,3);
+  assert.deepEqual(options.scores.series.map(series=>series.name),['甲','乙','丙']);
+  assert.deepEqual(options.scores.series[2].data,[[now-1000,null],[now,75]]);
+  assert.deepEqual(options.gap.series[0].data,[[now-1000,null],[now,null]]);
+});
+
 test('没有PK时活动图仍使用自身时间轴，贡献分排序不使用礼物钻石替代',()=>{
   const now=1000000;
   const options=pkChartOptions({activity:{buckets:[{at:now-20000,chat:3,enter:1,gift:2}]},selfUsers:[{id:'gift-only',value:10000},{id:'score',name:'实名',score:20,value:0}],opponentUsers:[{name:'对方',score:50}]},{now});

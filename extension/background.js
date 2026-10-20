@@ -13,7 +13,7 @@ const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
 };
-const eventTypes = new Set(['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state']);
+const eventTypes = new Set(['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push']);
 const validEvent = (event, maxBytes) => {
   try {
     const size = jsonLength(event);
@@ -21,6 +21,25 @@ const validEvent = (event, maxBytes) => {
       (event.text == null || typeof event.text === 'string') &&
       (event.user?.name == null || typeof event.user.name === 'string') &&
       (event.user?.fanClubs == null || Array.isArray(event.user.fanClubs));
+  } catch { return false; }
+};
+const validProtocolFrame = record => {
+  try {
+    const size = jsonLength(record);
+    const rawValid = record?.captureError === 'FRAME_TOO_LARGE'
+      ? record.rawBase64 == null && record.rawBytes > 512 * 1024
+      : record?.rawBytes <= 512 * 1024 && typeof record.rawBase64 === 'string' && record.rawBase64.length === Math.ceil(record.rawBytes / 3) * 4;
+    return Boolean(record) && record.protocolVersion === 1 && ['socket','http-poll'].includes(record.transport) &&
+      Number.isFinite(record.receivedAt) && record.receivedAt > 0 && Number.isSafeInteger(record.rawBytes) && record.rawBytes >= 0 &&
+      size != null && size <= 900000 && Array.isArray(record.messages) && record.messages.length <= 500 &&
+      record.messages.every(item => item && typeof item.method === 'string' && /^[A-Za-z0-9_]{1,120}$/.test(item.method) &&
+        (item.messageId == null || typeof item.messageId === 'string' && item.messageId.length <= 80) &&
+        Array.isArray(item.decodedTypes) && item.decodedTypes.length <= 16 && item.decodedTypes.every(type => typeof type === 'string' && /^[a-z0-9-]{1,64}$/.test(type))) &&
+      (record.messagesOmitted == null || Number.isSafeInteger(record.messagesOmitted) && record.messagesOmitted >= 0 && record.messagesOmitted <= 100000) &&
+      rawValid && (record.rawBase64 == null || record.rawBase64.length <= 700000 && /^[A-Za-z0-9+/]*={0,2}$/.test(record.rawBase64)) &&
+      (record.rawEncoding == null || record.rawEncoding === 'utf8-text') &&
+      (record.parseError == null || typeof record.parseError === 'string' && record.parseError.length <= 240) &&
+      (record.captureError == null || record.captureError === 'FRAME_TOO_LARGE');
   } catch { return false; }
 };
 async function storageUsage() {
@@ -58,6 +77,25 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           const durableEvent = event.id ? event : {...event,id:`journal:${id}`};
           await chrome.storage.local.set({[key]:{event:durableEvent,savedAt:Date.now()}}); return {key};
         });
+      }
+      else if (message.type === 'protocol-append' && isRoom(sender)) {
+        const room = sender.tab.url.match(/^https:\/\/live\.douyin\.com\/(\d+)/)[1], record = message.record;
+        if (!validProtocolFrame(record)) throw Object.assign(new Error('协议帧记录无效或超过单条上限'),{code:'INVALID_PROTOCOL_FRAME'});
+        const id = typeof message.id === 'string' && /^[a-z\d-]{16,64}$/i.test(message.id) ? message.id : crypto.randomUUID();
+        const key = `live-assistant:protocol:${room}:${id}`;
+        value = await giftStore.transaction(async()=>{
+          if ((await chrome.storage.local.get(key))[key]) return {key};
+          const usage = await storageUsage();
+          if (usage.ratio != null && usage.ratio >= .8) throw Object.assign(new Error('本地存储已达80%，已停止新增协议帧；请先导出恢复数据并释放空间'),{code:'STORAGE_PRESSURE'});
+          await chrome.storage.local.set({[key]:{record,savedAt:Date.now()}}); return {key};
+        });
+      }
+      else if (message.type === 'protocol-list' && isRoom(sender)) {
+        const room = sender.tab.url.match(/^https:\/\/live\.douyin\.com\/(\d+)/)[1], prefix = `live-assistant:protocol:${room}:`;
+        value = Object.entries(await chrome.storage.local.get(null)).filter(([key])=>key.startsWith(prefix)).map(([key,entry])=>({key,...entry})).sort((a,b)=>a.savedAt-b.savedAt || a.key.localeCompare(b.key));
+        const cursor = message.after;
+        if (cursor) value = value.filter(entry=>entry.savedAt > cursor.savedAt || entry.savedAt === cursor.savedAt && entry.key.localeCompare(String(cursor.key)) > 0);
+        value = value.slice(0,Math.min(100,Math.max(1,Number(message.limit) || 100)));
       }
       else if (message.type === 'event-list' && isRoom(sender)) {
         const room = sender.tab.url.match(/^https:\/\/live\.douyin\.com\/(\d+)/)[1], prefix = `live-assistant:event:${room}:`;

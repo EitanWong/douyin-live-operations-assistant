@@ -7,6 +7,7 @@ import { JSDOM } from 'jsdom';
 import { validateEndpoint } from '../../src/services/ai.js';
 import { GiftStore } from '../../src/data/gifts.js';
 import { EventInbox } from '../../src/runtime/inbox.js';
+import { RequestBridgeClient } from '../../src/browser/request-sender.js';
 import { webLocks } from '../helpers/web-locks.mjs';
 import { buildFixture } from '../helpers/build.mjs';
 const {dist:testDist, cleanup} = await buildFixture();
@@ -43,6 +44,28 @@ test('MAIN 观察器在 content 握手之前完整缓存事件，握手只回放
     hello(); hello(); await new Promise(r=>setTimeout(r,20));
     assert.equal(received.length,160); assert.equal(received[159].id,'159'); assert.equal(received.filter(e=>e.type==='chat').length,80);
   } finally {dom.window.close();}
+});
+test('隔离脚本把 MAIN 原始协议帧送入独立持久化通道', async () => {
+  const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+  const saved=[];
+  Object.assign(dom.window,{TextDecoder,TextEncoder,chrome:{runtime:{
+    sendMessage:async request=>{
+      if(request.type==='init')return {ok:true,value:{}};
+      if(request.type==='protocol-append'){saved.push(request);return {ok:true,value:{key:'stored'}};}
+      if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
+      return {ok:true,value:true};
+    },onMessage:{addListener(){}}
+  }}});
+  try {
+    dom.window.eval(await readFile(file('content.js'),'utf8'));
+    await new Promise(resolve=>setTimeout(resolve,100));
+    const record={protocolVersion:1,transport:'socket',receivedAt:Date.now(),rawBytes:2,rawBase64:'CAI=',messages:[{method:'WebcastMysteryMessage',messageId:'2',decodedTypes:[]}]};
+    dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-page-v1',room:'1',type:'protocol-frame',record}}));
+    const deadline=Date.now()+1000;
+    while(Date.now()<deadline&&!saved.length)await new Promise(resolve=>setTimeout(resolve,10));
+    assert.equal(saved.length,1);assert.deepEqual(saved[0].record.messages[0],record.messages[0]);
+    assert.equal(saved[0].record.rawBase64,'CAI=');
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 test('MAIN 桥接遇到不可 JSON 序列化事件时记录缺口，不中断后续事件', async () => {
   let captured, status;
@@ -100,6 +123,10 @@ test('事件日志先持久化、后台重启后可回放，并严格隔离主�
   const batch=await restarted.send({type:'event-append',id:'event-uuid-00000002',event:{...event,id:'gift-event-2'}});
   const second=await restarted.send({type:'event-append',id:'event-uuid-00000003',event:{...event,id:'gift-event-3'}});
   assert.equal((await restarted.send({type:'event-ack-many',keys:[batch.value.key,second.value.key]})).ok,true);
+  const observed=await restarted.send({type:'event-append',id:'event-uuid-00000004',event:{type:'room-sync',id:'sync-1',syncType:'InteractEffectSyncData',syncDataBytes:128}});
+  assert.equal(observed.ok,true,'只读 schema 观察事件也可持久化回放');
+  assert.equal((await restarted.send({type:'event-list'})).value[0].event.type,'room-sync');
+  assert.equal((await restarted.send({type:'event-ack',key:observed.value.key})).ok,true);
   assert.equal((await restarted.send({type:'event-list'})).value.length,0);
   assert.equal((await restarted.send({type:'event-ack-many',keys:['live-assistant:event:2:foreign-000000000000']})).ok,false);
   assert.equal((await restarted.send({type:'event-ack-many',keys:Array(101).fill(batch.value.key)})).ok,false);
@@ -134,6 +161,25 @@ test('持久日志分页按保存时间与键稳定排序，避免回放时一�
   const invalid=await w.send({type:'event-append',event:{type:'chat',user:{name:{}},text:'x'}});
   assert.equal(invalid.code,'INVALID_EVENT');
 });
+test('原始协议帧按房间持久保存未知 method，并可分页导出且受存储水位保护',async()=>{
+  const w=await worker(),other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
+  const record={protocolVersion:1,transport:'socket',receivedAt:1792000000000,rawBytes:4,rawBase64:'CAECBA==',
+    messages:[{method:'WebcastMysteryMessage',messageId:'9007199254740993999',decodedTypes:[]}]};
+  const first=await w.send({type:'protocol-append',id:'protocol-frame-0001',record});
+  assert.equal(first.ok,true);
+  assert.equal((await w.send({type:'protocol-append',id:'protocol-frame-0001',record})).ok,true,'重复投递幂等');
+  assert.equal((await w.send({type:'protocol-list'},other)).value.length,0);
+  const restored=await worker(w.values),records=(await restored.send({type:'protocol-list'})).value;
+  assert.equal(records.length,1);assert.equal(records[0].record.messages[0].method,'WebcastMysteryMessage');
+  assert.equal(Buffer.from(records[0].record.rawBase64,'base64').toString('hex'),'08010204');
+  const invalid=await restored.send({type:'protocol-append',record:{...record,rawBase64:'not base64!'}});
+  assert.equal(invalid.ok,false);assert.equal(invalid.code,'INVALID_PROTOCOL_FRAME');
+  const oversized=await restored.send({type:'protocol-append',id:'protocol-frame-large',record:{...record,rawBytes:512*1024+1,rawBase64:undefined,captureError:'FRAME_TOO_LARGE'}});
+  assert.equal(oversized.ok,true,'超限原帧明确保留元数据状态');
+  restored.usage(5*1024*1024*.81);
+  const blocked=await restored.send({type:'protocol-append',id:'protocol-frame-0002',record});
+  assert.equal(blocked.ok,false);assert.equal(blocked.code,'STORAGE_PRESSURE');
+});
 test('积压运行快照超过1MiB仍保存，普通配置保留大小校验', async () => {
   const w = await worker(), payload = {version:1, queue:[{text:'x'.repeat(1100000)}]};
   assert.equal((await w.send({type:'set',key:'live-assistant:runtime:1',value:payload})).ok, true);
@@ -147,6 +193,7 @@ test('内容脚本持续突发按序交接并回收已消费槽位，回放不�
   const replayGate = new Promise(resolve => { replayRelease = resolve; });
   Object.assign(dom.window, {
     EventInbox,
+    RequestBridgeClient,
     DouyinAdapter:class { constructor(options) { Object.assign(this, options); } emitStatus() {} },
     IdentityReader:class {},
     chrome:{runtime:{sendMessage:async message => ({ok:true,value:message.type === 'init' ? {} : message.type === 'event-list' ? await replayGate : true}),onMessage:{addListener() {}}}},
@@ -188,6 +235,7 @@ test('存储水位阻塞的新事件不会挡住持久日志恢复与释放容�
   let adapter,recovered=false;const handled=[];
   Object.assign(dom.window,{
     EventInbox,
+    RequestBridgeClient,
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     IdentityReader:class {},
     chrome:{runtime:{sendMessage:async message=>({ok:true,value:message.type==='init'?{}:message.type==='event-list'?[{key:'durable',savedAt:1,event:{type:'gift',id:'durable'}}]:true}),onMessage:{addListener(){}}}},
@@ -237,7 +285,7 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
     const root = dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot;
     assert.ok(root);
     const emit = event => dom.window.dispatchEvent(new dom.window.MessageEvent('message', {source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-page-v1',room:'1',type:'event',event}}));
-    emit({type:'pk-score',id:'pk-score-1',roomId:'server-room',scores:[{anchorId:'12345',score:0},{anchorId,score:65249}]});
+    emit({type:'pk-score',id:'pk-score-1',battleId:'two-battle',roomId:'server-room',scores:[{anchorId:'12345',score:0},{anchorId,score:65249}]});
     const deadline = Date.now()+2000;
     while (Date.now()<deadline && root.querySelector('[data-pk-self-score]').textContent !== '65,249') await new Promise(resolve=>setTimeout(resolve,25));
     assert.equal(root.querySelector('[data-pk-self-score]').textContent, '65,249');
@@ -246,6 +294,17 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
     assert.equal(root.querySelector('[data-pk-self-speed]').textContent, '0');
     assert.notEqual(root.querySelector('[data-pk-self-win]').textContent, '未知');
     assert.equal(values['live-assistant:runtime:1']?.wasRunning || false, false);
+    emit({type:'pk-start',id:'multi-start',battleId:'multi-battle',roomId:'server-room',anchorId,anchorName:'己方',remainingMs:90000,
+      participants:[{anchorId,name:'己方',roomId:'server-room'},{anchorId:'rival-b',name:'主播乙',roomId:'room-b'},{anchorId:'rival-c',name:'主播丙',roomId:'room-c'}]});
+    emit({type:'pk-score',id:'multi-score',battleId:'multi-battle',roomId:'server-room',anchorId,
+      scores:[{anchorId,score:65249},{anchorId:'rival-b',score:50000},{anchorId:'rival-c',score:71000}],remainingMs:85000});
+    const multiDeadline=Date.now()+2000;
+    while(Date.now()<multiDeadline && root.querySelectorAll('[data-pk-competitors] tr').length!==3) await new Promise(resolve=>setTimeout(resolve,25));
+    assert.equal(root.querySelector('[data-pk-multi]').hidden,false);
+    assert.equal(root.querySelector('.pk-scoreboard').hidden,true);
+    assert.equal(root.querySelectorAll('[data-pk-competitors] tr').length,3);
+    assert.match(root.querySelector('[data-pk-competitors]').textContent,/主播丙/);
+    assert.equal(root.querySelectorAll('[data-pk-score-header] th').length,4);
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 

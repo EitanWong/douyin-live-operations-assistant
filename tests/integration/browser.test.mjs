@@ -117,6 +117,43 @@ test('WebSocket hook 保留原型、常量和页面帧，只观察抖音直播�
   socket.dispatchEvent(new dom.window.MessageEvent('message', { data: frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) }));
   await a.chain; assert.equal(a.status.frames, 1); assert.equal(events[0].type, 'end'); socket.dispatchEvent(new dom.window.Event('close')); assert.equal(a.status.connected, false); dom.window.close();
 });
+test('仅观察同源直播 IM 长轮询，解码二进制响应并抑制跨传输重复事件', async () => {
+  const dom = setup();
+  class FakeSocket extends dom.window.EventTarget { static OPEN = 1; }
+  class FakeXHR extends dom.window.EventTarget {
+    open(method, url) { this.method = method; this.url = url; }
+    send() { this.status = 200; this.responseType = this.forceUnsupported ? 'json' : 'arraybuffer'; const body = this.forceUnsupported ? null : this.body || (this.forceUnknown ? unknownResponse : frame); this.response = this.forceUnsupported ? {ok:true} : body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength); this.dispatchEvent(new dom.window.Event('load')); }
+  }
+  const v = value => { let n = BigInt(value), out = []; while (n > 127n) { out.push(Number(n & 127n) | 128); n >>= 7n; } out.push(Number(n)); return Buffer.from(out); };
+  const bytes = (field, value) => { const data = Buffer.from(value); return Buffer.concat([v(field * 8 + 2), v(data.length), data]); };
+  const integer = (field, value) => Buffer.concat([v(field * 8), v(value)]);
+  const common = integer(2, 987654), control = Buffer.concat([bytes(1, common), integer(2, 3)]);
+  const message = Buffer.concat([bytes(1, 'WebcastControlMessage'), bytes(2, control), integer(3, 123)]);
+  const response = bytes(1, message), frame = Buffer.concat([bytes(7, 'msg'), bytes(8, response)]);
+  const unknownMessage = Buffer.concat([bytes(1, 'WebcastMysteryMessage'), bytes(2, Buffer.from([0]))]);
+  const unknownResponse = bytes(1, unknownMessage);
+  dom.window.WebSocket = FakeSocket; dom.window.XMLHttpRequest = FakeXHR;
+  const events = [], captures = [], a = new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:event=>events.push(event),onCapture:record=>captures.push(record),onLog:()=>{},onStatus:()=>{}});
+  try {
+    a.hook();
+    const ignored = new dom.window.XMLHttpRequest(); ignored.open('GET', '/webcast/user/'); ignored.send();
+    const socket = new dom.window.WebSocket('wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/');
+    socket.dispatchEvent(new dom.window.MessageEvent('message', {data:frame}));
+    const poll = new dom.window.XMLHttpRequest(); poll.body = response; poll.open('GET', '/webcast/im/fetch/?resp_content_type=protobuf&cursor=redacted'); poll.send();
+    const unknown = new dom.window.XMLHttpRequest(); unknown.body = unknownResponse; unknown.open('GET', '/webcast/im/fetch/'); unknown.send();
+    const unsupported = new dom.window.XMLHttpRequest(); unsupported.forceUnsupported = true; unsupported.open('GET', '/webcast/im/fetch/'); unsupported.send();
+    await a.chain;
+    assert.equal(a.status.pollHook, true); assert.equal(a.status.pollRequests, 3); assert.equal(a.status.pollResponses, 2); assert.equal(a.status.pollUnsupported, 1);
+    assert.equal(a.status.pollFrames, 2); assert.equal(a.status.duplicateEvents, 1);
+    assert.equal(a.status.unknownMethods.WebcastMysteryMessage, 1);
+    assert.deepEqual(events.map(event=>event.type), ['end']); assert.equal(events[0].source, 'socket');
+    assert.equal(captures.length,3,'帧日志包含重复业务帧和未知 method 帧');
+    assert.equal(captures[0].transport,'socket');
+    assert.equal(captures[0].messages[0].decodedTypes[0],'end');
+    assert.deepEqual(captures[2].messages[0],{method:'WebcastMysteryMessage',messageId:'',decodedTypes:[]});
+    assert.equal(Buffer.from(captures[0].rawBase64,'base64').toString('hex'),frame.toString('hex'));
+  } finally { dom.window.close(); }
+});
 test('浏览器锁阻止多标签页同时运行，释放后允许接管', async () => {
   setup(); const options = { room: '1' };
   const a = new RoomLock(options), b = new RoomLock(options); assert.equal(await a.acquire(), true); assert.equal(await b.acquire(), false);
@@ -508,7 +545,7 @@ test('ARIA 角色型抖音编辑器和相邻图标也能被准确定位', async 
 });
 
 test('高价值欢迎发送时临时启用管理员弹幕并恢复用户原状态', async () => {
-  const dom=setup('<div id="chatInput"><label><input id="admin-mode" type="checkbox" role="switch"></label><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
+  const dom=setup('<div id="chatInput"><label><input id="admin-mode" type="checkbox" role="switch" aria-label="管理员弹幕"></label><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
   const input=dom.window.document.querySelector('textarea'), toggle=dom.window.document.querySelector('#admin-mode'), button=dom.window.document.querySelector('button');
   let modeAtSend;
   button.addEventListener('click',()=>{modeAtSend=toggle.checked;input.value='';});
@@ -523,12 +560,89 @@ test('高价值欢迎发送时临时启用管理员弹幕并恢复用户原状�
 });
 
 test('管理员弹幕开关不可用时安全回退普通弹幕', async () => {
-  const dom=setup('<div id="chatInput"><input type="checkbox" role="switch" disabled><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
+  const dom=setup('<div id="chatInput"><input type="checkbox" role="switch" aria-label="管理员弹幕" disabled><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
   const input=dom.window.document.querySelector('textarea'),button=dom.window.document.querySelector('button');let clicks=0;
   button.addEventListener('click',()=>{clicks++;input.value='';});
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
   try { const result=await adapter.send('欢迎贵宾',()=>true,{channel:'admin'});assert.equal(result.submitted,true);assert.equal(result.channelUsed,'chat');assert.match(result.modeFallback,/不可用/);assert.equal(clicks,1); }
   finally {dom.window.close();}
+});
+
+function privilegeComposer({admin = true} = {}) {
+  const dom = setup(`<pace-island id="island_random"><div class="webcast-chatroom"><div id="chatInput"><div data-e2e="live-chatting"><div class="semi-switch"><input type="checkbox" role="switch" aria-checked="false"></div><textarea placeholder="与大家互动一下"></textarea></div><button>发送</button></div><div class="FJl3IMTf" style="display:none"><div><div class="RfKNBPEF cw6Usapi"><img src="https://cdn/privilege_screen_chat_supreme_v2.png"></div>${admin ? '<div class="RfKNBPEF"><img src="https://cdn/privilege_screen_chat_admin_v2.png"></div>' : ''}</div></div></div></pace-island>`);
+  const doc = dom.window.document, input = doc.querySelector('textarea'), toggle = doc.querySelector('[role=switch]'), menu = doc.querySelector('.FJl3IMTf');
+  for (const option of menu.querySelectorAll('.RfKNBPEF')) option.getClientRects = () => menu.style.display === 'none' ? [] : [{width:100,height:30}];
+  let selected = 'supreme', paidClicks = 0, sentMode = null, sends = 0;
+  const sync = () => { toggle.setAttribute('aria-checked', String(toggle.checked)); input.placeholder = toggle.checked ? selected === 'admin' ? '发送管理员弹幕' : '发送至尊弹幕（366钻/条）' : '与大家互动一下'; };
+  toggle.addEventListener('click',()=>{
+    sync();
+    if (toggle.checked) dom.window.setTimeout(()=>{menu.style.display=toggle.checked?'block':'none';},150);
+    else menu.style.display='none';
+  });
+  doc.querySelectorAll('.RfKNBPEF').forEach(option=>option.addEventListener('click',()=>{
+    selected = option.querySelector('img').src.includes('_admin_') ? 'admin' : 'supreme';
+    if (selected === 'supreme') paidClicks++;
+    doc.querySelectorAll('.RfKNBPEF').forEach(el=>el.classList.toggle('cw6Usapi',el===option));
+    toggle.checked=true; sync();
+  }));
+  doc.querySelector('button').addEventListener('click',()=>{sentMode = toggle.checked ? selected : 'chat'; sends++; input.value='';});
+  const adapter = new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}}); adapter.status.connected=true;
+  return {dom,adapter,input,toggle,sync,state:()=>({paidClicks,sentMode,sends})};
+}
+test('真实抖音结构按管理员图片定位，选中至尊样式不会被误认为管理员', async () => {
+  const f = privilegeComposer();
+  try {
+    const result = await f.adapter.send('欢迎新朋友',()=>true,{channel:'admin'});
+    assert.equal(result.channelUsed,'admin'); assert.deepEqual(f.state(),{paidClicks:0,sentMode:'admin',sends:1});
+    assert.equal(f.toggle.checked,false); assert.equal(f.input.placeholder,'与大家互动一下');
+  } finally { f.dom.window.close(); }
+});
+test('管理员富文本写入后占位提示消失，仍校验当前选中的管理员类型', async () => {
+  const f = privilegeComposer();
+  try {
+    const result=await f.adapter.send('欢迎贵宾',()=>true,{channel:'admin',beforeClick:async()=>f.input.removeAttribute('placeholder')});
+    assert.equal(result.channelUsed,'admin'); assert.equal(f.state().sentMode,'admin');
+  } finally { f.dom.window.close(); }
+});
+test('请求发送不依赖UI控件，暂停和人工草稿仍阻止提交；未知结果不走UI重发',async()=>{
+  const dom=setup('<div id="chatInput"><textarea></textarea></div>'); let commits=0,active=true;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
+  adapter.requestSender={prepare:async()=>({available:true,token:'ticket'}),commit:async()=>{commits++;return {submitted:false,clicked:true,transport:'request',reason:'未知'};}};
+  try {
+    const cancelled=await adapter.send('欢迎',()=>active,{beforeClick:async()=>{active=false;}}); assert.equal(cancelled.clicked,undefined); assert.equal(commits,0);
+    active=true; dom.window.document.querySelector('textarea').value='人工草稿';
+    await assert.rejects(adapter.send('欢迎',()=>true),/手动草稿/); assert.equal(commits,0);
+    dom.window.document.querySelector('textarea').value='';
+    const unknown=await adapter.send('欢迎',()=>true); assert.equal(unknown.transport,'request'); assert.equal(unknown.clicked,true); assert.equal(commits,1);
+  } finally {dom.window.close();}
+});
+test('管理员选项缺失时只发普通弹幕，不开启默认至尊弹幕', async () => {
+  const f = privilegeComposer({admin:false});
+  try {
+    const result = await f.adapter.send('欢迎新朋友',()=>true,{channel:'admin'});
+    assert.equal(result.channelUsed,'chat'); assert.match(result.modeFallback,/选项不可用/);
+    assert.deepEqual(f.state(),{paidClicks:0,sentMode:'chat',sends:1}); assert.equal(f.toggle.checked,false);
+  } finally { f.dom.window.close(); }
+});
+test('发送期间模式变为至尊弹幕时阻止点击发送', async () => {
+  const f = privilegeComposer();
+  try {
+    await assert.rejects(f.adapter.send('欢迎新朋友',()=>true,{beforeClick:async()=>{f.toggle.checked=true;f.sync();}}),/弹幕类型在发送前发生变化/);
+    assert.equal(f.state().sends,0);
+  } finally { f.dom.window.close(); }
+});
+test('面板灯牌门槛可保存，低于基础欢迎时定位错误字段并保留输入', () => {
+  const dom=setup(), c=copy(DEFAULTS); c.welcome.admin.enabled=true;
+  const p=new Panel({config:c,room:'1',callbacks:{}});
+  try {
+    const field=key=>p.node(`[data-field="welcome.${key}"]`);
+    field('minFanLevel').value='8'; field('admin.minFanLevel').value='7'; p.syncControls();
+    assert.equal(field('admin.minFanLevel').min,'8');
+    assert.throws(()=>p.read(),/灯牌.*不能低于基础欢迎/);
+    assert.equal(field('admin.minFanLevel').getAttribute('aria-invalid'),'true'); assert.equal(field('admin.minFanLevel').value,'7');
+    field('admin.minFanLevel').value='9'; assert.equal(p.read().welcome.admin.minFanLevel,9);
+    field('minWealth').value='61'; assert.throws(()=>p.read(),/荣誉.*不能低于基础欢迎/);
+  } finally { dom.window.close(); }
 });
 
 test('抖音重绘后旧的手动选择器失效时回退到当前控件', () => {
@@ -633,19 +747,20 @@ test('发送后编辑器被替换时读取新编辑器的提交结果', async ()
   } finally {dom.window.close();}
 });
 
-test('富文本清理失败后仍识别脚本草稿，恢复时直接发送而不重复粘贴', async () => {
+test('富文本清理失败时不发送；恢复清空后重新写入再提交', async () => {
   const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么"></div><button>发送</button></div>');
   const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
   adapter.status.connected=true;
-  document.execCommand=(command,unused,text)=>{if(command==='delete')return false;inserts++;input.textContent+=text;return true;};
+  let deletes=0;
+  document.execCommand=(command,unused,text)=>{if(command==='delete'){if(++deletes===1)return false;input.textContent='';return true;}inserts++;input.textContent+=text;return true;};
   button.addEventListener('click',()=>{if(++clicks===2)input.textContent='';});
   try {
     assert.equal((await adapter.send('感谢支持',()=>true)).submitted,false);
     assert.equal(input.textContent,'感谢支持');assert.equal(adapter.ownedDraft?.text,'感谢支持');
     adapter.ownedDraft.at=Date.now()-180000;
     assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
-    assert.equal(inserts,1);assert.equal(clicks,2);
+    assert.equal(inserts,2);assert.equal(clicks,2);
   } finally {dom.window.close();}
 });
 
@@ -654,7 +769,7 @@ test('残留脚本草稿改发另一条回复时通过编辑器选区替换', as
   const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
   adapter.status.connected=true;adapter.ownedDraft={text:'旧回复',at:Date.now()-180000};
-  document.execCommand=(command,unused,text)=>{assert.equal(command,'insertText');assert.equal(dom.window.getSelection().toString(),'旧回复');inserts++;input.textContent=text;return true;};
+  document.execCommand=(command,unused,text)=>{if(command==='delete'){input.textContent='';return true;}assert.equal(command,'insertText');inserts++;input.textContent=text;return true;};
   button.addEventListener('click',()=>{clicks++;assert.equal(input.textContent,'新回复');input.textContent='';});
   try {
     assert.deepEqual(await adapter.send('新回复',()=>true),{submitted:true,clicked:true});assert.equal(inserts,1);assert.equal(clicks,1);

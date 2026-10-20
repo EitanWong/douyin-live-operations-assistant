@@ -75,6 +75,7 @@ summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-hei
 .income-hero{padding:18px;background:var(--sg-card);border-radius:12px;box-shadow:var(--sg-pane-shadow);margin:4px 0 18px}.income-hero>span{font-size:12px;color:var(--muted)}.income-hero>b{display:block;font-size:32px;line-height:1.4;letter-spacing:-.5px;margin:6px 0 14px;font-weight:550}.income-meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted)}.income-meta strong{color:var(--ink);font-weight:600}.income-hero b,.income-meta strong,.income-table{font-variant-numeric:tabular-nums}.income-hero .hint{margin-bottom:0}.income-table{width:100%;border-collapse:collapse;font-size:12px}.income-table th,.income-table td{text-align:right;padding:11px 6px;border-bottom:1px solid var(--line)}.income-table th{font-size:11px;color:var(--muted);font-weight:500}.income-table th:first-child,.income-table td:first-child{text-align:left;padding-left:0;white-space:nowrap}.income-table-wrap{overflow-x:auto}.income-error{color:var(--danger);font-size:12px}
 .profile-card{padding:14px 0;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.profile-card strong,.profile-card small{display:block;overflow-wrap:anywhere}.profile-card strong{font-size:13px}.profile-card small{font-size:11px;color:var(--muted);margin-top:4px}.profile-card a{color:var(--ink);font-size:12px;white-space:nowrap;text-decoration:none;padding:10px 0}.profile-card a:hover{text-decoration:underline}.income-toolbar{margin:18px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}.income-toolbar h3{font-size:13px;margin:0}
 .pk-scoreboard{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:12px;align-items:center;padding:20px 12px;background:var(--sg-card);border-radius:12px;box-shadow:var(--sg-pane-shadow);text-align:center}.pk-scoreboard strong{display:block;font-size:30px;font-weight:550;font-variant-numeric:tabular-nums}.pk-scoreboard span{display:block;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:5px}.pk-scoreboard .vs{font-size:11px;color:var(--muted)}.pk-prob{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}.pk-prob>div{padding:13px 14px;background:var(--sg-panel);border-radius:9px}.pk-prob b{display:block;font-size:21px;font-weight:550;font-variant-numeric:tabular-nums}.pk-prob span{font-size:11px;color:var(--muted)}.pk-factors{margin:0;padding-left:18px;font-size:12px;color:var(--muted);line-height:1.8}.pk-table{width:100%;border-collapse:collapse;font-size:12px}.pk-table th,.pk-table td{text-align:left;padding:10px 4px;border-bottom:1px solid var(--line)}.pk-table th{font-size:11px;color:var(--muted);font-weight:500}.pk-table td:last-child,.pk-table th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.pk-multi{margin:14px 0}.pk-multi table{table-layout:fixed}.pk-multi th:first-child,.pk-multi td:first-child{width:38%}.pk-multi th:nth-child(2),.pk-multi td:nth-child(2){text-align:right}.pk-multi td:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pk-multi tr[data-self=true] td:first-child{font-weight:650;color:var(--sg-success)}
 .pk-scoreboard>div:first-child strong{color:var(--sg-success)}.pk-scoreboard>div:last-child strong{color:var(--sg-brand)}
 .pk-verdict{padding:14px 0 16px}.pk-verdict strong{display:block;font-size:17px;font-weight:600;line-height:1.5}.pk-verdict p,.pk-freshness{font-size:11px;color:var(--muted);margin:6px 0 0;line-height:1.7}.pk-freshness[data-stale=true]{color:var(--amber)}
 .pk-lead{height:4px;display:flex;overflow:hidden;border-radius:4px;background:var(--sg-well);margin-top:12px}.pk-lead span:first-child{background:var(--sg-success)}.pk-lead span:last-child{background:var(--sg-brand)}
@@ -126,11 +127,12 @@ export class Panel {
             <h2>PK 局势看板</h2><p class="intro">比分、追分速度与贡献者，随直播推送更新。</p>
             <div class="status"><strong data-pk-state>等待 PK 事件</strong><span class="badge" data-slot="tag" data-pk-quality>数据不足</span></div>
             <div class="pk-scoreboard"><div><strong data-pk-self-score>--</strong><span data-pk-self-name>己方</span></div><div class="vs">VS<br><small data-pk-remaining>--</small></div><div><strong data-pk-opponent-score>--</strong><span data-pk-opponent-name>对方</span></div></div>
+            <section class="pk-multi" data-pk-multi hidden><h3>多人 PK 排名与夺冠估计</h3><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>主播</th><th>比分</th><th>夺冠估计</th></tr></thead><tbody data-pk-competitors><tr><td colspan="3">等待完整比分</td></tr></tbody></table></div></section>
             <div class="pk-lead" role="img" aria-label="等待双方比分" data-pk-lead><span style="width:50%"></span><span style="width:50%"></span></div>
             <p class="pk-freshness" data-pk-freshness>等待双方精确比分；未观测的分数保持未知。</p>
             <div class="pk-verdict"><strong data-pk-summary>等待可分析的战局</strong><p data-pk-basis>收到比分后显示领先、追分压力与数据覆盖情况。</p></div>
             <div class="pk-chart-head"><h3>比分走势</h3><select data-pk-window aria-label="图表时间范围"><option value="60000">近 1 分钟</option><option value="180000" selected>近 3 分钟</option><option value="0">本场全部</option></select></div>
-            <div class="pk-chart" data-pk-chart="scores" hidden role="img" aria-label="双方比分走势，实线为己方、虚线为对方"></div><p class="pk-chart-empty">等待本场比分推送，图表不会填充模拟数据。</p>
+            <div class="pk-chart" data-pk-chart="scores" hidden role="img" aria-label="PK参战方比分走势"></div><p class="pk-chart-empty">等待本场比分推送，图表不会填充模拟数据。</p>
             <div class="pk-chart-head"><h3>分差变化 <small class="choice-hint">正数为己方领先</small></h3></div>
             <div class="pk-chart pk-chart-gap" data-pk-chart="gap" hidden role="img" aria-label="己方分差随时间变化"></div><p class="pk-chart-empty">双方精确比分就绪后，呈现分差。</p>
             <div class="pk-reading"><div><span>按近期速度推演的终局分差</span><strong data-pk-projected>--</strong></div><div><span>己方反超所需总分速</span><strong data-pk-required-rate>--</strong></div></div>
@@ -143,7 +145,7 @@ export class Panel {
             <section class="section"><h3>直播活动 · 最近 10 分钟</h3><p class="choice-hint">每 10 秒汇总本页观测；暂停场控仍持续采集。</p><div class="pk-chart" data-pk-chart="activity" hidden role="img" aria-label="每10秒的弹幕、进场与礼物件数"></div><p class="pk-chart-empty">等待本页直播互动。</p><p class="choice-hint" data-live-totals>尚无互动数据</p></section>
             <section class="section"><h3>对面弹幕信号</h3><p data-pk-chat class="empty">等待已采集的对手房间弹幕。</p><div class="grid"><div><span class="choice-hint">近 60 秒样本</span><p><strong data-pk-chat-recent>--</strong></p></div><div><span class="choice-hint">求援倾向</span><p><strong data-pk-chat-request>--</strong></p></div><div><span class="choice-hint">反超倾向</span><p><strong data-pk-chat-comeback>--</strong></p></div><div><span class="choice-hint">情绪信号</span><p><strong data-pk-chat-sentiment>--</strong></p></div></div></section>
             <section class="section"><h3>活动与卡片经验记录</h3><table class="pk-table"><thead><tr><th>项目</th><th>命中 / 样本</th><th>经验频率</th><th>区间</th></tr></thead><tbody data-pk-rates><tr><td colspan="4" class="empty">尚无已记录样本</td></tr></tbody></table></section>
-            <details class="pk-data-detail"><summary>查看比分明细（最近 20 次）</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>北京时间</th><th>己方</th><th>对方</th><th>分差</th></tr></thead><tbody data-pk-score-rows><tr><td colspan="4">等待比分</td></tr></tbody></table></div></details>
+            <details class="pk-data-detail"><summary data-pk-score-summary>查看比分明细（最近 20 次）</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr data-pk-score-header><th>北京时间</th><th>己方</th><th>对方</th><th>分差</th></tr></thead><tbody data-pk-score-rows><tr><td colspan="4">等待比分</td></tr></tbody></table></div></details>
             <p class="pk-note">这是基于当前页面观测和历史样本的估计，不是抖音官方胜率。3 倍加成、卡片和宝箱概率只会按你实际记录的场次给出经验频率与区间；样本不足时保持未知。</p>
           </section>
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime" hidden>
@@ -204,7 +206,7 @@ export class Panel {
             ${this.select('welcome.mode', '欢迎范围', [['qualified-or-listed', '达标用户 + 指定名单'], ['qualified', '只欢迎达标用户'], ['listed', '只欢迎指定名单']])}
             <div data-qualified><div class="grid">${this.input('welcome.minWealth', '最低荣誉等级', 'number')}${this.input('welcome.minFanLevel', '最低粉丝团等级', 'number')}</div>
             ${this.toggle('welcome.requireFan', '必须加入本直播间粉丝团')}${this.toggle('welcome.requireLit', '粉丝牌必须已点亮')}</div>
-            <details class="section"><summary>高价值欢迎</summary>${this.toggle('welcome.admin.enabled', '达到等级后使用管理员弹幕')}${this.input('welcome.admin.minWealth', '管理员弹幕最低荣誉等级', 'number')}<p class="hint">仅对已核实荣誉等级达到阈值的进场用户启用。账号没有管理员弹幕权限或页面开关不可用时，自动使用普通弹幕。</p></details>
+            <details class="section"><summary>管理员弹幕欢迎</summary>${this.toggle('welcome.admin.enabled', '达到等级后使用管理员弹幕')}<div class="grid">${this.input('welcome.admin.minWealth', '管理员弹幕最低荣誉等级', 'number')}${this.input('welcome.admin.minFanLevel', '管理员弹幕最低灯牌等级', 'number')}</div><p class="hint">荣誉与本房灯牌须同时达到门槛，且均不能低于基础欢迎；点亮要求沿用基础欢迎。指定名单也须满足这些条件。管理员弹幕选项不可用时使用普通弹幕。</p></details>
             <details data-welcome-list><summary>指定欢迎的人</summary><div class="inline"><select data-viewer-picker aria-label="最近观众"><option value="">等待观众出现…</option></select><button type="button" data-action="add-viewer">加入欢迎名单</button></div><p class="hint">优先按账号识别；仅有昵称的备用弹幕可能重名。</p><div data-list="listed"></div><button type="button" class="list-add" data-add="listed">手动添加用户</button></details>
             ${this.area('welcome.templates', '欢迎话术（每行一条）', 'lines', '变量：{user}、{level} 荣誉等级、{fanLevel} 粉丝团等级。')}
             <div class="notice">无法核实主播 UID、粉丝团或等级时，条件筛选不会通过。指定名单仍可按明确身份匹配。</div>
@@ -393,7 +395,7 @@ export class Panel {
     const listedCount = this.root.querySelectorAll('[data-list="listed"] [data-list-row="listed"]').length;
     const fanRule = get('welcome.requireFan').checked ? `本房粉丝团 ≥ ${get('welcome.minFanLevel').value} 级${get('welcome.requireLit').checked ? '且已点亮' : ''}` : '不限制粉丝团';
     const welcomeRule = welcomeMode === 'listed' ? `仅欢迎指定名单（${listedCount} 人）` : `荣誉 ≥ ${get('welcome.minWealth').value} 级 · ${fanRule}${welcomeMode === 'qualified-or-listed' ? ` · 或名单 ${listedCount} 人` : ''}`;
-    const adminRule = get('welcome.admin.enabled').checked ? ` · 高价值用户 ≥ ${get('welcome.admin.minWealth').value} 级用管理员弹幕` : '';
+    const adminRule = get('welcome.admin.enabled').checked ? ` · 管理员弹幕：荣誉 ≥ ${get('welcome.admin.minWealth').value} 级且本房灯牌 ≥ ${get('welcome.admin.minFanLevel').value} 级` : '';
     const aiReady = get('ai.enabled').checked;
     for (const option of this.root.querySelectorAll('[data-ai-choice]')) option.hidden = !aiReady;
     for (const select of this.root.querySelectorAll('[data-field$=".responseMode"], [data-item="responseMode"]')) {
@@ -439,6 +441,10 @@ export class Panel {
     const fan = get('welcome.requireFan').checked;
     get('welcome.requireLit').disabled = !fan; get('welcome.minFanLevel').disabled = !fan;
     get('welcome.admin.minWealth').disabled = !get('welcome.admin.enabled').checked;
+    get('welcome.admin.minFanLevel').disabled = !get('welcome.admin.enabled').checked;
+    get('welcome.admin.minWealth').min = Math.max(1, Number(get('welcome.minWealth').value) || 0);
+    get('welcome.admin.minFanLevel').min = Number(get('welcome.minFanLevel').value) || 0;
+    get('welcome.admin.minWealth').max = get('welcome.admin.minFanLevel').max = 100;
     get('anchorId').readOnly = get('identity.autoAnchor').checked && Boolean(this.identity?.anchor);
     get('selfId').readOnly = get('identity.autoSelf').checked && Boolean(this.identity?.self);
     this.applyFeatureVisibility();
@@ -459,6 +465,14 @@ export class Panel {
     if (new Set(prices.map(p=>p.key)).size !== prices.length) throw new Error('礼物价格有重复名称或 ID，请合并');
     result.gift.prices = Object.fromEntries(prices.map(p=>[p.key,p.value]));
     result.keyword.rules = this.readList('keywords'); result.welcome.listed = [...new Set(this.readList('listed'))]; result.timers = this.readList('timers');
+    if (result.welcome.admin.enabled) {
+      for (const [admin, basic, label] of [['minWealth','minWealth','荣誉'], ['minFanLevel','minFanLevel','灯牌']]) {
+        if (result.welcome.admin[admin] < result.welcome[basic]) {
+          this.revealError(this.node(`[data-field="welcome.admin.${admin}"]`), 'welcome');
+          throw new Error(`管理员弹幕最低${label}等级不能低于基础欢迎，请设为 ${result.welcome[basic]} 级或以上`);
+        }
+      }
+    }
     const validated = validateConfig(mergeConfig(result)); if (validated.ai.enabled || this.node('[data-api-key]').value.trim()) validateEndpoint(validated.ai.endpoint);
     for (const [key, selector] of Object.entries(validated.adapter)) if (selector) { try { document.querySelector(selector); } catch { throw new Error(`${key} 选择器无效`); } }
     return validated;
@@ -594,7 +608,19 @@ export class Panel {
     const pct = value => Number.isFinite(value) ? `${Math.round(value * 100)}%` : '未知';
     this.text('[data-pk-state]', data.phase === 'active' ? 'PK 进行中' : data.phase === 'ended' ? 'PK 已结束' : '等待 PK 事件');
     const status = {estimated:'数据可分析','low-confidence':'样本较少',stale:'比分已过期',unknown:'数据不足',final:'最终结果','awaiting-final':'等待终局确认'};
-    this.text('[data-pk-quality]', !data.selfScoreObserved || !data.opponentScoreObserved ? '等待完整比分' : status[data.prediction.status] || '数据不足');
+    const multi = (data.competitors || []).length >= 3;
+    const complete = multi ? data.competitors.every(item=>item.scoreObserved) : data.selfScoreObserved && data.opponentScoreObserved;
+    this.text('[data-pk-quality]', !complete ? '等待完整比分' : status[data.prediction.status] || '数据不足');
+    this.node('[data-pk-multi]').hidden=!multi;
+    this.node('.pk-scoreboard').hidden=multi; this.node('[data-pk-lead]').hidden=multi;
+    this.node('.pk-prob').hidden=multi;
+    if (multi) {
+      const predictions=new Map((data.prediction.competitors || []).map(item=>[item.anchorId,item]));
+      this.node('[data-pk-competitors]').innerHTML=data.competitors.map(item=>{
+        const prediction=predictions.get(item.anchorId);
+        return `<tr data-self="${item.anchorId===data.anchorId}"><td>${esc(item.name || (item.anchorId===data.anchorId?'己方':item.anchorId))}${item.anchorId===data.anchorId?' · 己方':''}</td><td>${item.scoreObserved?fmt(item.score):'--'}</td><td>${pct(prediction?.win)}</td></tr>`;
+      }).join('') || '<tr><td colspan="3">等待参战方名单</td></tr>';
+    }
     this.text('[data-pk-self-score]', data.selfScoreObserved ? fmt(data.selfScore) : '--'); this.text('[data-pk-opponent-score]', data.opponentScoreObserved ? fmt(data.opponentScore) : '--');
     this.text('[data-pk-self-name]', data.anchorName || '己方'); this.text('[data-pk-opponent-name]', data.opponentName || '对方');
     this.text('[data-pk-remaining]', Number.isFinite(data.remainingMs) ? `${Math.ceil(data.remainingMs / 1000)} 秒` : '--');
@@ -603,22 +629,45 @@ export class Panel {
     this.text('[data-pk-confidence]', Number.isFinite(data.prediction.confidence) ? `${Math.round(data.prediction.confidence * 100)}%` : '--');
     this.text('[data-pk-sample]', `${data.dataQuality.scoreSamples || 0} 次 · ${data.dataQuality.lagMs == null ? '--' : `${Math.round(data.dataQuality.lagMs)} ms`}`);
     const age = value => Number.isFinite(value) ? value < 1000 ? '刚刚' : `${Math.floor(value/1000)} 秒前` : '未观测';
-    this.text('[data-pk-freshness]', `己方更新 ${age(data.dataQuality.selfScoreAgeMs)} · 对方更新 ${age(data.dataQuality.opponentScoreAgeMs)}${data.phase === 'ended' ? ' · 已结束' : ''}`);
+    this.text('[data-pk-freshness]', multi
+      ? `参战方 ${data.competitors.length} 人 · ${data.competitors.filter(item=>item.scoreObserved).length}/${data.competitors.length} 人有比分 · 最近更新 ${age(data.dataQuality.scoreAgeMs)}${data.phase === 'ended' ? ' · 已结束' : ''}`
+      : `己方更新 ${age(data.dataQuality.selfScoreAgeMs)} · 对方更新 ${age(data.dataQuality.opponentScoreAgeMs)}${data.phase === 'ended' ? ' · 已结束' : ''}`);
     this.node('[data-pk-freshness]').dataset.stale=String(Boolean(data.dataQuality.stale));
     const lead=this.node('[data-pk-lead]'), total=data.selfScore+data.opponentScore;
     const ratio=data.selfScoreObserved && data.opponentScoreObserved && total>0 ? data.selfScore/total*100 : 50;
     lead.children[0].style.width=`${ratio}%`;lead.children[1].style.width=`${100-ratio}%`;
     lead.setAttribute('aria-label',data.selfScoreObserved && data.opponentScoreObserved ? `己方比分占比 ${Math.round(ratio)}%，对方 ${Math.round(100-ratio)}%` : '等待双方比分');
     const analysis=data.analysis || {};
-    this.text('[data-pk-summary]',analysis.summary || '等待更多比分，暂无法判断局势');
-    this.text('[data-pk-basis]',[...(analysis.risks || []),...(analysis.basis ? Array.isArray(analysis.basis) ? analysis.basis : [analysis.basis] : [])].join('；') || '基于已观测比分与近窗速度，未采集的信息保持未知。');
-    this.text('[data-pk-projected]',Number.isFinite(analysis.projectedGap) ? `${analysis.projectedGap>0 ? '+' : ''}${fmt(analysis.projectedGap)} 分` : '等待倒计时与速度');
-    this.text('[data-pk-required-rate]',Number.isFinite(analysis.requiredRate) ? `${analysis.requiredRate.toFixed(1)} 分/秒` : analysis.lead==='self' ? '当前领先' : '--');
+    const standings=(data.competitors || []).filter(item=>item.scoreObserved);
+    const topScore=standings.length?Math.max(...standings.map(item=>item.score)):null;
+    const leaders=standings.filter(item=>item.score===topScore);
+    this.text('[data-pk-summary]',multi
+      ? !complete ? `多人 PK：等待全部 ${data.competitors.length} 位主播的比分` : leaders.length>1 ? `${leaders.length} 位主播当前并列领先` : `${leaders[0]?.name || '领先主播'} 当前领先 ${fmt(topScore)} 分`
+      : analysis.summary || '等待更多比分，暂无法判断局势');
+    this.text('[data-pk-basis]',multi
+      ? [...(data.prediction.factors || []),`已观测 ${standings.length}/${data.competitors.length} 位主播；多人夺冠概率按参战方分别估计`].join('；')
+      : [...(analysis.risks || []),...(analysis.basis ? Array.isArray(analysis.basis) ? analysis.basis : [analysis.basis] : [])].join('；') || '基于已观测比分与近窗速度，未采集的信息保持未知。');
+    this.text('[data-pk-projected]',multi?'多人场次见排名表':Number.isFinite(analysis.projectedGap) ? `${analysis.projectedGap>0 ? '+' : ''}${fmt(analysis.projectedGap)} 分` : '等待倒计时与速度');
+    this.text('[data-pk-required-rate]',multi?'--':Number.isFinite(analysis.requiredRate) ? `${analysis.requiredRate.toFixed(1)} 分/秒` : analysis.lead==='self' ? '当前领先' : '--');
     const contributors=[...(data.selfUsers || []).map(user=>({...user,side:'己方'})),...(data.opponentUsers || []).map(user=>({...user,side:'对方'}))].sort((a,b)=>(b.score || 0)-(a.score || 0) || b.value-a.value).slice(0,20);
     this.node('[data-pk-contributors]').innerHTML=contributors.length ? contributors.map(user=>`<tr><td>${esc(user.name || user.id || '观众')}</td><td>${user.side}</td><td>${fmt(user.score)}</td><td>${fmt(user.value)}</td></tr>`).join('') : '<tr><td colspan="4">暂无贡献者数据</td></tr>';
     this.node('[data-pk-effects]').innerHTML=data.effects?.length ? data.effects.slice(-8).map(effect=>`<li>${esc(effect.name || (effect.effectType==='multiplier' ? '倍率活动' : '卡片活动'))}${Number.isFinite(effect.multiplier) ? ` · ${effect.multiplier} 倍` : ''} · ${effect.active ? '生效中' : '已观测'}${Number.isFinite(effect.endAt) ? ` · ${timeFormat.format(effect.endAt)} 结束` : ''}</li>`).join('') : '<li>尚未采集明确的活动窗口，未将未知加成计入分数。</li>';
     const trend=data.trend || data.history.filter(item=>item.kind==='score');
-    this.node('[data-pk-score-rows]').innerHTML=trend.length ? trend.slice(-20).reverse().map(item=>`<tr><td>${timeFormat.format(item.at)}</td><td>${fmt(item.selfScore)}</td><td>${fmt(item.opponentScore)}</td><td>${Number.isFinite(item.selfScore)&&Number.isFinite(item.opponentScore) ? fmt(item.selfScore-item.opponentScore) : '--'}</td></tr>`).join('') : '<tr><td colspan="4">等待比分</td></tr>';
+    const scoreHeader=this.node('[data-pk-score-header]');
+    if(multi){
+      this.text('[data-pk-score-summary]','查看多人比分明细（最近 20 次）');
+      scoreHeader.innerHTML=`<th>北京时间</th>${data.competitors.map(item=>`<th>${esc(item.name || item.anchorId)}</th>`).join('')}`;
+      this.node('[data-pk-score-rows]').innerHTML=trend.length?trend.slice(-20).reverse().map(item=>`<tr><td>${timeFormat.format(item.at)}</td>${data.competitors.map(competitor=>`<td>${Number.isFinite(item.competitorScores?.[competitor.anchorId])?fmt(item.competitorScores[competitor.anchorId]):'--'}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${data.competitors.length+1}">等待比分</td></tr>`;
+      this.node('[data-pk-chart="scores"]').setAttribute('aria-label',`多人 PK ${data.competitors.length} 位参战主播比分走势`);
+    }else{
+      this.text('[data-pk-score-summary]','查看比分明细（最近 20 次）');
+      scoreHeader.innerHTML='<th>北京时间</th><th>己方</th><th>对方</th><th>分差</th>';
+      this.node('[data-pk-score-rows]').innerHTML=trend.length ? trend.slice(-20).reverse().map(item=>`<tr><td>${timeFormat.format(item.at)}</td><td>${fmt(item.selfScore)}</td><td>${fmt(item.opponentScore)}</td><td>${Number.isFinite(item.selfScore)&&Number.isFinite(item.opponentScore) ? fmt(item.selfScore-item.opponentScore) : '--'}</td></tr>`).join('') : '<tr><td colspan="4">等待比分</td></tr>';
+      this.node('[data-pk-chart="scores"]').setAttribute('aria-label','双方比分走势，实线为己方、虚线为对方');
+    }
+    if (multi) {
+      for(const selector of ['[data-pk-self-speed]','[data-pk-opponent-speed]','[data-pk-self-velocity]','[data-pk-opponent-velocity]'])this.text(selector,'--');
+    }
     if (this.activeTab==='pk') this.charts.render(data);
     const factors = data.prediction.factors?.length ? data.prediction.factors : ['等待更多比分和速度变化']; this.node('[data-pk-factors]').innerHTML = factors.map(item => `<li>${esc(item)}</li>`).join('');
     const intent = [['己方', data.selfIntent], ['对方', data.opponentIntent]]; this.node('[data-pk-intent]').innerHTML = intent.map(([label, item]) => `<tr><td>${label}</td><td>${pct(item.probability)}</td><td>${item.sampleSize || 0}</td><td>${fmt(item.expected)}</td></tr>`).join('');
@@ -827,9 +876,19 @@ export class Panel {
     if (follow) box.scrollTop = box.scrollHeight;
   }
   showDiagnostics(status) {
+    const unknownMethods = Object.entries(status.unknownMethods || {}).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    const roomStats = status.roomData?.stats, audience = status.roomData?.audience;
+    const domSnapshot = status.domSnapshot;
+    const leaders = (audience?.ranks || []).slice(0,5).map(row=>`${row.rank ?? '?'} ${row.user?.name || '观众'} ${row.score ?? '?'}分`).join('；');
     this.root.querySelector('[data-diagnostics]').textContent = [
       `连接观察器：${status.hook ? '已安装' : '未安装'}`, `捕获连接：${status.sockets}；连接${status.connected ? '在线' : '离线'}`,
       `解析消息帧：${status.frames}；结构化事件：${status.events}；解析失败：${status.errors}`,
+      `IM 长轮询：观察器${status.pollHook ? '已安装' : '未安装'}；响应 ${status.pollResponses || 0}；解码帧 ${status.pollFrames || 0}；事件 ${status.pollEvents || 0}；不支持响应 ${status.pollUnsupported || 0}；跨通道重复 ${status.duplicateEvents || 0}`,
+      `未识别协议 method：${unknownMethods.length ? unknownMethods.map(([method,count])=>`${method} ×${count}`).join('、') : '暂无'}`,
+      `房间统计：${roomStats ? roomStats.hidden ? '平台标记隐藏' : roomStats.displayLong || roomStats.displayMiddle || roomStats.displayShort || (roomStats.displayValue ?? '已收到') : '尚未收到'}`,
+      `观众序列：${audience ? `在线 ${audience.onlineDisplay || (audience.onlineCount ?? '未知')}；累计 ${audience.cumulativeUsersDisplay || (audience.cumulativeUsers ?? '未知')}；榜单 ${audience.ranks?.length || 0} 人${leaders ? `；${leaders}` : ''}` : '尚未收到'}`,
+      `页面 DOM 快照：${domSnapshot ? `在线 ${domSnapshot.onlineCount ?? '未知'}；本场点赞 ${domSnapshot.likeTotal ?? '未知'}；可见贡献榜 ${domSnapshot.visibleContributionRows} 行` : '不可用'}`,
+      `近期只读房间活动：${status.roomData?.activities?.length || 0}`,
       `捕获礼物事件：${status.giftEvents || 0}`,
       status.lastGift ? `最近礼物：${status.lastGift.giftName} ×${status.lastGift.count}；单价 ${status.lastGift.unitValue ?? '未知'} 钻${status.lastGift.timestampSkewMs == null ? '' : `；平台时间偏差 ${Math.round(status.lastGift.timestampSkewMs / 1000)} 秒`}` : '最近礼物：尚未捕获',
       `待解码帧：${status.pendingFrames || 0}`,
@@ -849,9 +908,9 @@ export class Panel {
       this.node('[data-deliveries]').innerHTML = records.length ? [...pending,...records.filter(record=>!pending.includes(record)).slice(-10).reverse()].map(record=>`<div class="section"><strong>${esc(states[record.state] || record.state)}</strong><p>${esc(record.text)}</p><p class="hint">${esc(record.reason || (record.state === 'echoed' ? `回显延迟 ${record.latencyMs} ms${record.messageId ? ` · 消息 ${record.messageId}` : ''}` : '等待本人账号的公屏回显'))}</p></div>`).join('') : '<p class="empty">暂无发送记录。</p>';
     }
     const health = network.ingestion || {}, storage = network.storage;
-    const gaps = (health.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0);
+    const capture = network.capture || {}, gaps = (health.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(capture.gaps || 0);
     const storageText = storage?.used != null ? `存储 ${(storage.used/1024/1024).toFixed(2)} / ${(storage.quota/1024/1024).toFixed(0)} MB` : '存储用量尚未取得';
-    this.text('[data-ingestion-health]',`${health.blocked ? '采集交接受阻（场控仍保持运行）' : health.quarantined ? '有隔离事件待处理' : '采集交接正常'} · 待处理 ${health.pending || 0} 条 · 隔离 ${health.quarantined || 0} 条 · 已知缺口 ${gaps}（事件或帧） · ${storageText}${health.reason ? `。${health.reason}` : ''}`);
+    this.text('[data-ingestion-health]',`${health.blocked ? '采集交接受阻（场控仍保持运行）' : health.quarantined ? '有隔离事件待处理' : '采集交接正常'} · 本次协议帧已保存 ${capture.saved || 0} 条 / 等待 ${capture.pending || 0} 条 · 隔离 ${health.quarantined || 0} 条 · 已知缺口 ${gaps}（事件或帧） · ${storageText}${health.reason ? `。${health.reason}` : ''}`);
     const alert = health.blocked || health.quarantined || gaps || storage?.ratio >= .8;
     this.hidden('[data-runtime-alert]', !alert);
     if (alert) this.text('[data-runtime-alert-text]',`${health.blocked ? '采集交接受阻，场控仍保持运行。' : ''}${gaps ? '采集存在缺口。' : ''}${health.quarantined ? '有隔离事件待重试。' : ''}${storage?.ratio >= .8 ? '本地存储接近上限。' : ''}`);

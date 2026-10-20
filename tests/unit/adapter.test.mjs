@@ -1,7 +1,36 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
-import {readAudienceContributions} from '../../src/browser/adapter.js';
+import {readAudienceContributions,readRoomSnapshot} from '../../src/browser/adapter.js';
+
+test('读取直播间主文档的在线人数与点赞总数，并只统计可见贡献榜行数', () => {
+  const dom = new JSDOM(`<div id="chatroom">
+    <div><span>在线观众</span><span>·</span><span>1.2万</span></div>
+    <p>1000贡献用户(2)</p>
+    <div><div class="LyAdeVIF sBRqUw32"><div></div><div></div><div><div><div><div><div>
+      <div><span>1</span><span>观众甲</span><span>1,200</span></div>
+      <div><span>2</span><span>观众乙</span><span>1,000</span></div>
+    </div></div></div></div></div></div></div>
+  </div><div><span>6,553本场点赞</span></div>`);
+  const snapshot = readRoomSnapshot(dom.window.document);
+  assert.equal(snapshot.source, 'dom');
+  assert.equal(snapshot.onlineCount, 12000);
+  assert.equal(snapshot.likeTotal, 6553);
+  assert.equal(snapshot.visibleContributionRows, 2);
+  assert.ok(Number.isFinite(snapshot.capturedAt));
+  dom.window.close();
+});
+
+test('DOM 快照遇到重复或不完整指标时保留未知，不跨区域猜测', () => {
+  const dom = new JSDOM(`<div id="chatroom"><div><span>在线观众</span><span>未公开</span></div></div>
+    <div><span>100本场点赞</span><span>101本场点赞</span></div>`);
+  const snapshot = readRoomSnapshot(dom.window.document);
+  assert.equal(snapshot.onlineCount, null);
+  assert.equal(snapshot.likeTotal, null);
+  assert.equal(snapshot.visibleContributionRows, 0);
+  assert.equal(readRoomSnapshot(new JSDOM('<div>offline</div>').window.document), null);
+  dom.window.close();
+});
 
 test('读取在线贡献榜行的昵称与最高分，不把榜单总人数当成用户贡献', () => {
   const dom = new JSDOM(`<div id="chatroom">

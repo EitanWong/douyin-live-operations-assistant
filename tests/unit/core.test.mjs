@@ -30,6 +30,87 @@ test('系统播报会分别排入星守护和 1000 票贡献榜感谢', () => {
     '感谢岁小孩LILAC成为本场No.1、1000票贡献用户！'
   ]);
 });
+test('房间状态、关注分享和粉丝团事件只记录，不触发自动发送', () => {
+  const logs = [], sent = [], e = new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  e.ingest({type:'room-stats',id:'stats-1',metricType:1,displayValue:10764,displayLong:'10,764 在线观众'});
+  e.ingest({type:'room-stats',id:'stats-2',metricType:1,displayValue:10764,displayLong:'10,764 在线观众'});
+  e.ingest({type:'room-audience',id:'audience-1',onlineCount:18,cumulativeUsers:'1234',ranks:[{user:{id:'7',name:'榜单用户'},score:100,rank:1}]});
+  e.ingest({type:'social',id:'follow-1',action:1,actionName:'follow',user:{id:'8',name:'关注用户'},followCount:99});
+  e.ingest({type:'fansclub',id:'club-1',action:2,actionName:'join',description:'成员加入粉丝团',user:{id:'9',name:'粉丝'} });
+  assert.equal(logs.filter(item=>item.text.startsWith('直播间统计')).length,1,'相同统计快照不重复记日志');
+  assert.ok(logs.some(item=>item.text.includes('在线 18')));
+  assert.ok(logs.some(item=>item.text.includes('关注用户 关注了主播')));
+  assert.ok(logs.some(item=>item.text.includes('成员加入粉丝团')));
+  assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+  const restored = new Engine({config:copy(DEFAULTS),now:()=>1800000000000});
+  assert.equal(restored.restore(e.snapshot()),true);
+  assert.equal(restored.roomData.stats.displayValue,10764);
+  assert.equal(restored.roomData.audience.ranks[0].user.name,'榜单用户');
+  assert.equal(restored.roomData.activities.length,2);
+});
+test('表情、醒目留言、公告、排行、通知和 WRDS 仅作有界观察数据', () => {
+  const sent=[], logs=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  for (let index=0;index<105;index++) e.ingest({type:index%2?'screen-chat':'emoji-chat',id:`observed-${index}`,user:{id:String(index),name:'观众'},text:'只读内容'});
+  e.ingest({type:'room-notice',id:'notice',text:'房间公告'});
+  e.ingest({type:'room-rank',id:'rank',ranks:[{score:'520'}]});
+  e.ingest({type:'rank-update',id:'rank-update',updates:[{text:'榜单更新'}]});
+  e.ingest({type:'room-notify',id:'notify',notifySubType:'live_gift_notify'});
+  e.ingest({type:'room-sync',id:'sync',syncType:'InteractEffectSyncData',syncDataBytes:128});
+  e.ingest({type:'audio-chat',id:'audio',text:'谢谢主播'});
+  e.ingest({type:'product-change',id:'products',products:[{promotionId:'12345'}]});
+  e.ingest({type:'highlight-comment',id:'highlight',text:'置顶内容'});
+  e.ingest({type:'activity-signal',id:'lottery',activityKind:'lottery-result'});
+  e.ingest({type:'red-packet',id:'red',status:'发放中',count:5});
+  e.ingest({type:'chat-like',id:'chat-likes',entries:[{messageId:'123',count:'5'}]});
+  e.ingest({type:'fan-ticket',id:'tickets',display:'1.2万',total:'12000'});
+  e.ingest({type:'room-activity-state',id:'game',title:'小游戏进行中'});
+  assert.equal(e.roomData.activities.length,100); assert.ok(logs.some(row=>row.text.includes('房间公告')));
+  assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+});
+test('新增团播礼物目录和 PK 元数据在暂停时只读记录', () => {
+  const sent=[], logs=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  e.ingest({type:'gift-catalog',id:'menu',itemCount:2,items:[{id:'77',name:'熱氣球',price:520}]});
+  e.ingest({type:'battle-bonus',id:'bonus',mvp:{user:{name:'MVP'}}});
+  e.ingest({type:'battle-property',id:'props',rooms:[{roomId:'7',properties:[{name:'PK 宝箱'}]}]});
+  e.ingest({type:'battle-season-honor',id:'honor',honors:[{name:'赛季荣誉'}]});
+  e.ingest({type:'popular-card',id:'popular',enterNumber:12});
+  assert.equal(e.roomData.activities.length,5);
+  assert.ok(logs.some(row=>row.text.includes('团播礼物目录候选')));
+  assert.ok(logs.some(row=>row.text.includes('PK 奖励')));
+  assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+  const restored=new Engine({config:copy(DEFAULTS),now:()=>1800000000000});
+  assert.equal(restored.restore(e.snapshot()),true); assert.equal(restored.roomData.activities.length,5);
+});
+test('粉丝团与团播成员/收益、房票状态在暂停时只读持久化', () => {
+  const sent=[], logs=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  for (const [type,id] of [['fansclub-statistics','club'],['group-live-members','members'],['group-live-income','income'],['room-ticket','ticket']]) e.ingest({type,id});
+  assert.equal(e.roomData.activities.length,4); assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+  assert.ok(logs.some(row=>row.text.includes('团播成员收益')));
+  const restored=new Engine({config:copy(DEFAULTS),now:()=>1800000000000});
+  assert.equal(restored.restore(e.snapshot()),true); assert.equal(restored.roomData.activities.length,4);
+});
+test('连麦席位、嘉宾状态与粉丝团播报暂停时只读持久化', () => {
+  const sent=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};}});
+  for (const [type,id] of [['linkmic-positions','positions'],['guest-link-state','guest-link'],['fansclub-push','fan-push']]) e.ingest({type,id});
+  assert.equal(e.roomData.activities.length,3); assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+});
+test('1000票播报跨 socket 弹幕与 DOM milestone 去重，并在恢复后保留去重状态', async () => {
+  const {e, advance} = harness();
+  const message = '感谢岁小孩LILAC成为本场No.1、1000票贡献用户！';
+  e.ingest({type:'chat',id:'socket-row-1',user:{id:'system',name:'系统'},text:message,source:'socket'});
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:2},source:'dom'});
+  assert.equal(e.queue.filter(job=>job.kind==='milestone').length,2,'相同排名只感谢一次，不同排名保留');
+  const restored = new Engine({config:e.config,now:e.now});
+  restored.restore(e.snapshot());
+  restored.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  assert.equal(restored.queue.filter(job=>job.kind==='milestone').length,2,'刷新后迟到的另一来源不重复入队');
+  await e.tick(); await e.tick();
+  advance(600001);
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  assert.equal(e.queue.filter(job=>job.kind==='milestone').length,1,'去重窗口过期后允许新的一次播报');
+});
 
 test('复用消息 ID 的连击更新和结束消息仍结算到最新累计数量', async () => {
   const {e, logs} = harness();
@@ -224,12 +305,32 @@ test('欢迎必须同时满足荣誉等级、本主播粉丝团和点亮状态',
   c.anchorId = ''; assert.equal(welcomeDecision(user, c).pass, false);
 });
 
-test('只有明确启用且达到荣誉门槛的欢迎使用管理员弹幕', () => {
-  const e = new Engine({ config:copy(DEFAULTS) });
-  e.config.welcome.admin.enabled = true; e.config.welcome.admin.minWealth = 60;
-  assert.equal(e.welcomeChannel({wealthLevel:59}), 'chat');
-  assert.equal(e.welcomeChannel({wealthLevel:null}), 'chat');
-  assert.equal(e.welcomeChannel({wealthLevel:60}), 'admin');
+test('管理员弹幕欢迎必须启用并同时满足荣誉与本房粉丝团门槛', () => {
+  const config = copy(DEFAULTS); config.anchorId = '1234567890';
+  const e = new Engine({ config });
+  e.config.welcome.admin.enabled = true; e.config.welcome.admin.minWealth = 60; e.config.welcome.admin.minFanLevel = 1;
+  const qualified = {wealthLevel:60,fanClubs:[{anchorId:config.anchorId,level:1,status:1}]};
+  assert.equal(e.welcomeChannel({...qualified,wealthLevel:59}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,wealthLevel:null}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,fanClubs:[]}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,fanClubs:[{anchorId:'other',level:8,status:1}]}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,fanClubs:[{anchorId:config.anchorId,level:1,status:2}]}), 'chat');
+  assert.equal(e.welcomeChannel(qualified), 'admin');
+});
+test('管理员欢迎等级不得低于基础欢迎；旧配置补齐灯牌下限', () => {
+  const c = copy(DEFAULTS); c.welcome.admin.enabled = true;
+  c.welcome.minWealth = 61; assert.throws(()=>validateConfig(c), /不能低于基础欢迎/);
+  c.welcome.admin.minWealth = 61; c.welcome.minFanLevel = 9; assert.throws(()=>validateConfig(c), /灯牌.*不能低于基础欢迎/);
+  c.welcome.admin.minFanLevel = 9; assert.equal(validateConfig(c), c);
+  const old = mergeConfig({ welcome:{minWealth:70,minFanLevel:10,admin:{enabled:true,minWealth:60}} });
+  assert.equal(old.welcome.admin.minWealth,70); assert.equal(old.welcome.admin.minFanLevel,10); validateConfig(old);
+});
+test('排队的管理员欢迎在发送时重新核验新门槛', async () => {
+  const {e} = harness(c=>{c.mode='auto';c.welcome.admin={enabled:true,minWealth:35,minFanLevel:8};});
+  let channel; e.send = async (_text,_current,options)=>{channel=options.channel;return {submitted:true};};
+  e.ingest({type:'enter',id:'admin-welcome',user}); assert.equal(e.queue[0].channel,'admin');
+  e.config.welcome.admin.minFanLevel = 9;
+  await e.tick(); assert.equal(channel,'chat');
 });
 test('指定名单可独立欢迎；昵称只接受显式 name 前缀', () => {
   const c = copy(DEFAULTS); c.welcome.listed = ['uid:9007199254740993123'];
@@ -297,6 +398,30 @@ test('两笔亲吻各一份的平台时间偏差不漏感谢，重复推送不�
   assert.equal(e.stats.previews,1);
   assert.equal(logs.find(item=>item.category==='preview')?.text,'( ✘_✘ )↯：亲吻×2，198钻石');
   assert.equal(e.stats.filtered,0);
+});
+test('逐个点击的小心心按用户与礼物短窗口累计，延迟帧与重复帧不刷感谢', async () => {
+  const {e, advance, logs} = harness();
+  const single = (id, at, extra = {}) => gift({id, giftId:'heart',giftName:'小心心',unitValue:1,count:1,groupId:`single:${id}`,final:true,receivedAt:at,...extra});
+  const start = 1800000000000;
+  e.ingest(single('heart-1',start));
+  advance(700); e.ingest(single('heart-2',start+700));
+  advance(600); e.ingest(single('heart-1',start,{count:1})); // 重复延迟帧
+  advance(700); e.ingest(single('heart-3',start+2000));
+  advance(1999); await e.tick(); assert.equal(e.stats.previews,0);
+  advance(1); await e.tick();
+  assert.equal(e.stats.previews,1);
+  assert.match(logs.find(item=>item.category==='preview').text,/小心心×3，3钻石/);
+  assert.equal([...e.gifts.values()][0].count,3);
+});
+test('单独礼物的累计进度乱序不回退，静默窗口后新点击可以再次结算', async () => {
+  const {e, advance, logs} = harness();
+  const one = (id, count = 1) => gift({id, giftId:'heart',giftName:'小心心',unitValue:1,count,groupId:`single:${id}`,final:true});
+  e.ingest(one('heart-combo',2)); advance(100); e.ingest(one('heart-combo',1));
+  e.ingest(one('heart-2')); advance(2000); await e.tick();
+  assert.equal(e.stats.previews,1);
+  assert.match(logs.find(item=>item.category==='preview').text,/小心心×3，3钻石/);
+  e.ingest(one('heart-3')); advance(2000); await e.tick();
+  assert.equal(e.stats.previews,2);
 });
 test('礼物捕获时间超过十分钟仍拒绝补发，缺少捕获时间不豁免历史检查', async () => {
   for (const receipt of ['stale','missing']) {

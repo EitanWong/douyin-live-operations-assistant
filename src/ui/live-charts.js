@@ -25,8 +25,13 @@ export function pkChartOptions(data, {windowMs = 180000, now = Date.now(), color
     yAxis:{type:'value',axisLabel:{color:colors.text,formatter:value=>Math.abs(value)>=10000 ? `${+(value/10000).toFixed(1)}万` : value},splitLine:{lineStyle:{color:colors.line,type:'dashed'}}}
   };
   const line = (name, values, extra={}) => ({name,type:'line',data:values,showSymbol:points.length<3,symbolSize:5,connectNulls:false,lineStyle:{width:2},...extra});
-  const scores = {...base,series:[line('己方比分',points.map(p=>[p.at,number(p.selfScore)]),{step:'end'}),line('对方比分',points.map(p=>[p.at,number(p.opponentScore)]),{step:'end',lineStyle:{width:2,type:'dashed'}})]};
-  const gap = {...base,legend:{show:false},series:[line('己方分差',points.map(p=>[p.at,Number.isFinite(p.selfScore)&&Number.isFinite(p.opponentScore) ? p.selfScore-p.opponentScore : null]),{step:'end',areaStyle:{opacity:.08},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:colors.text,type:'dashed'},data:[{yAxis:0}]}})]};
+  const competitors=data.competitors || [];
+  const multi=competitors.length>=3;
+  const palette=['#007f78','#c4475b','#4267a8','#aa6b16','#7954a1','#277f9e','#b1458d','#6c7d21'];
+  const scores = {...base,legend:multi?{...base.legend,type:'scroll',left:0,right:0}:base.legend,series:multi
+    ? competitors.map((item,index)=>line(item.name || (item.anchorId===data.anchorId?'己方':item.anchorId),points.map(p=>[p.at,number(p.competitorScores?.[item.anchorId])]),{step:'end',itemStyle:{color:palette[index%palette.length]},lineStyle:{width:item.anchorId===data.anchorId?3:2,type:item.anchorId===data.anchorId?'solid':'dashed'}}))
+    : [line('己方比分',points.map(p=>[p.at,number(p.selfScore)]),{step:'end'}),line('对方比分',points.map(p=>[p.at,number(p.opponentScore)]),{step:'end',lineStyle:{width:2,type:'dashed'}})]};
+  const gap = {...base,legend:{show:false},series:[line('己方分差',points.map(p=>[p.at,!multi&&Number.isFinite(p.selfScore)&&Number.isFinite(p.opponentScore) ? p.selfScore-p.opponentScore : null]),{step:'end',areaStyle:{opacity:.08},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:colors.text,type:'dashed'},data:[{yAxis:0}]}})]};
   const users = [...(data.selfUsers || []).map(user=>({...user,side:'己方',color:colors.self})),...(data.opponentUsers || []).map(user=>({...user,side:'对方',color:colors.opponent}))]
     .filter(user=>Number.isFinite(user.score) && user.score>0).sort((a,b)=>b.score-a.score).slice(0,8).reverse();
   const contributions = {...base,legend:{show:false},grid:{left:0,right:44,top:8,bottom:8,containLabel:true},

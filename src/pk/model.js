@@ -15,6 +15,7 @@ export const PK_EVENT_TYPES = new Set(['pk-start', 'pk-score', 'pk-end', 'pk-con
 export function emptyPKState(key = '') {
   return {
     key, provisional: false, roomId: '', anchorId: '', anchorName: '', opponentId: '', opponentName: '',
+    competitors: {},
     startedAt: 0, endedAt: 0, remainingMs: null, remainingUpdatedAt: 0, phase: 'idle',
     selfScore: 0, opponentScore: 0, selfSpeed: 0, opponentSpeed: 0,
     selfScoreObserved: false, opponentScoreObserved: false,
@@ -48,6 +49,11 @@ function ensureState(state, event) {
 
 function orientScores(state, event) {
   const participants = Array.isArray(event.participants) ? event.participants : [];
+  for (const item of participants) {
+    if (!item?.anchorId) continue;
+    const id = String(item.anchorId), old = state.competitors[id] || { anchorId:id, score:0, scoreObserved:false, scoreAt:null, scoreMeta:{} };
+    state.competitors[id] = { ...old, name:String(item.name || old.name || '').slice(0,80), roomId:String(item.roomId || old.roomId || ''), isSelf:id === String(state.anchorId || event.anchorId || '') };
+  }
   const self = participants.find(item => item.anchorId && String(item.anchorId) === state.anchorId)
     || participants.find(item => item.roomId && String(item.roomId) === state.roomId);
   if (!state.anchorId && self) state.anchorId = String(self.anchorId || '');
@@ -65,7 +71,46 @@ function orientScores(state, event) {
     || (ownScore && others.length === 1 ? others[0] : null);
   if (otherScore && !state.opponentId) state.opponentId = String(otherScore.anchorId);
   const meta = item => Object.fromEntries(['scoreVersion', 'contributorCount', 'buffScoreRatio'].filter(field => item[field] != null).map(field => [field, item[field]]));
-  return { ...event, ...(ownScore ? { selfScore: ownScore.score, selfScoreMeta: meta(ownScore) } : {}), ...(otherScore ? { opponentScore: otherScore.score, opponentScoreMeta: meta(otherScore) } : {}) };
+  const names = new Map(participants.map(item => [String(item.anchorId), item.name || '']));
+  const competitorScores = scores.filter(item => item?.anchorId && Number.isFinite(item.score) && item.score >= 0).map(item => ({
+    anchorId:String(item.anchorId), name:names.get(String(item.anchorId)) || state.competitors[String(item.anchorId)]?.name || '',
+    score:item.score, scoreMeta:meta(item), isSelf:String(item.anchorId) === String(state.anchorId || event.anchorId || '')
+  }));
+  return { ...event, ...(competitorScores.length ? { competitorScores } : {}), ...(ownScore ? { selfScore: ownScore.score, selfScoreMeta: meta(ownScore) } : {}), ...(otherScore ? { opponentScore: otherScore.score, opponentScoreMeta: meta(otherScore) } : {}) };
+}
+
+function multiPrediction(state, now, sampleSize) {
+  const competitors = Object.values(state.competitors).filter(item => item.scoreObserved);
+  const all = Object.values(state.competitors);
+  if (all.length < 3) return null;
+  const base = { selfWin:null, opponentWin:null, draw:null, confidence:0, sampleSize, factors:[], status:'unknown', competitors:[] };
+  if (state.phase === 'active' && state.remainingMs === 0) return { ...base, status:'awaiting-final', factors:['倒计时已归零，等待平台终局确认'] };
+  if (competitors.length < 3 || competitors.length !== all.length) return { ...base, factors:['等待所有参战主播的实时比分'] };
+  const age = Math.max(...competitors.map(item => Math.max(0, now - item.scoreAt)));
+  if (state.phase !== 'ended' && age > 60000) return { ...base, factors:['多人比分已过期，等待实时更新'] };
+  if (state.phase === 'ended') {
+    const max = Math.max(...competitors.map(item => item.score));
+    const winners = competitors.filter(item => item.score === max);
+    const results = competitors.map(item => ({ anchorId:item.anchorId, name:item.name || item.anchorId, win:winners.some(winner => winner.anchorId === item.anchorId) ? 1 / winners.length : 0 }));
+    return { ...base, selfWin:results.find(item => item.anchorId === state.anchorId)?.win ?? null, opponentWin:null, draw:winners.length > 1 ? 1 : 0,
+      confidence:1, status:'final', factors:['已观测全部参战主播的终局比分'], competitors:results };
+  }
+  const remaining = Number.isFinite(state.remainingMs) ? Math.max(0,state.remainingMs / 1000) : 0;
+  const projected = competitors.map(item => {
+    const prior = [...state.history].reverse().find(point => point.competitorScores?.[item.anchorId] != null && point.at <= now - 15000);
+    const latest = [...state.history].reverse().find(point => point.competitorScores?.[item.anchorId] != null && point.at <= now);
+    const interval = prior && latest ? Math.max(1,(latest.at-prior.at)/1000) : 0;
+    const rate = interval ? Math.max(0,(latest.competitorScores[item.anchorId]-prior.competitorScores[item.anchorId])/interval) : 0;
+    return { ...item, projected:item.score + rate * remaining };
+  });
+  const max = Math.max(...projected.map(item => item.projected));
+  const scale = Math.max(1, ...projected.map(item => Math.abs(item.projected-max) * .12), max * .04);
+  const weights = projected.map(item => Math.exp(Math.max(-30,Math.min(0,(item.projected-max)/scale))));
+  const total = weights.reduce((sum,value)=>sum+value,0);
+  const confidence = clamp((.2 + Math.min(.55, finite(state.dataQuality.scoreSamples) / 20)) * clamp(1-age/60000) * (Number.isFinite(state.remainingMs) ? 1 : .45));
+  const results = projected.map((item,index)=>({anchorId:item.anchorId,name:item.name || item.anchorId,score:item.score,projectedScore:item.projected,win:weights[index]/total}));
+  return { ...base, selfWin:results.find(item=>item.anchorId===state.anchorId)?.win ?? null, opponentWin:null, draw:0, confidence,
+    status:confidence < .35 ? 'low-confidence' : 'estimated', factors:['按各主播当前比分与观测速度估算夺冠概率；多人场次概率总和为 100%','参战方比分覆盖完整'], competitors:results };
 }
 
 function chatSide(state, event) {
@@ -179,6 +224,14 @@ function contributionIntent(users, now) {
 }
 
 function scoreQuality(state, now) {
+  const competitors=Object.values(state.competitors || {});
+  if (competitors.length >= 3) {
+    const observed=competitors.filter(item=>item.scoreObserved && Number.isFinite(item.scoreAt));
+    const complete=observed.length===competitors.length;
+    const scoreAgeMs=complete ? Math.max(...observed.map(item=>Math.max(0,now-item.scoreAt))) : null;
+    return { ...state.dataQuality, selfScoreAgeMs:state.anchorId ? Math.max(0,now-(state.competitors[state.anchorId]?.scoreAt ?? now)) : null,
+      opponentScoreAgeMs:scoreAgeMs, scoreAgeMs, stale:state.phase!=='ended' && (!complete || scoreAgeMs>15000), complete, remainingKnown:Number.isFinite(state.remainingMs) };
+  }
   const age = side => state[`${side}ScoreObserved`] && Number.isFinite(state[`${side}ScoreAt`]) ? Math.max(0, now - state[`${side}ScoreAt`]) : null;
   const selfScoreAgeMs = age('self'), opponentScoreAgeMs = age('opponent');
   const complete = selfScoreAgeMs !== null && opponentScoreAgeMs !== null;
@@ -204,6 +257,16 @@ function recordScores(state, event, at) {
   const point = { kind: 'score', at, selfDelta: 0, opponentDelta: 0,
     selfScore: state.selfScoreObserved && state.selfScoreAt <= at ? state.selfScore : null,
     opponentScore: state.opponentScoreObserved && state.opponentScoreAt <= at ? state.opponentScore : null };
+  for (const item of event.competitorScores || []) {
+    const id = String(item.anchorId || '');
+    if (!id || !Number.isFinite(item.score) || item.score < 0) continue;
+    const old = state.competitors[id] || { anchorId:id, name:'', roomId:'', score:0, scoreObserved:false, scoreAt:null, scoreMeta:{} };
+    const timestamp = Number.isFinite(item.scoreAt) ? Math.min(at,item.scoreAt) : at;
+    if (old.scoreObserved && ((old.scoreAt != null && timestamp < old.scoreAt) || item.score < old.score)) { state.dataQuality.rejectedScoreEvents += 1; continue; }
+    state.competitors[id] = { ...old, name:String(item.name || old.name || '').slice(0,80), isSelf:Boolean(item.isSelf || id === String(state.anchorId || '')),
+      score:item.score, scoreObserved:true, scoreAt:timestamp, scoreMeta:{...old.scoreMeta,...(item.scoreMeta || {})} };
+    accepted = true;
+  }
   for (const side of ['self', 'opponent']) {
     const value = event[`${side}Score`] ?? (event.side === side || (side === 'self' && !event.side) ? event.score : undefined);
     if (!Number.isFinite(value) || value < 0) continue;
@@ -220,6 +283,7 @@ function recordScores(state, event, at) {
     point[`${side}Score`] = value; accepted = true;
   }
   if (!accepted) return false;
+  point.competitorScores = Object.fromEntries(Object.values(state.competitors).filter(item=>item.scoreObserved).map(item=>[item.anchorId,item.score]));
   if (eventId) state.scoreEventIds = [...state.scoreEventIds, eventId].slice(-500);
   // A point records what was known at this instant; an unobserved side is never a zero.
   state.history.push(point); state.history = state.history.slice(-600);
@@ -258,6 +322,8 @@ function analyzePK(state) {
 export function predictPK(state, now = Date.now(), history = []) {
   // history 是 tracker 级别的已结束场次；当前状态的 pk-end 不再重复计入。
   const sampleSize = history.length;
+  const multi = multiPrediction(state, now, sampleSize);
+  if (multi) return multi;
   const total = state.selfScore + state.opponentScore;
   const elapsed = state.startedAt ? Math.max(1, (Math.min(now, state.endedAt || now) - state.startedAt) / 1000) : 0;
   const quality = scoreQuality(state, now);
@@ -367,7 +433,7 @@ export class PKTracker {
       recordScores(state, event, scoreAt);
       this.activeKey = state.key;
     } else if (['pk-score', 'room-state', 'pk-contribution'].includes(event.type)) {
-      const hasScore = [event.selfScore, event.opponentScore, event.score].some(Number.isFinite);
+      const hasScore = [event.selfScore, event.opponentScore, event.score].some(Number.isFinite) || (event.competitorScores || []).some(item=>Number.isFinite(item.score));
       if (hasScore) {
         if (state.phase === 'idle') { state.phase = 'active'; state.startedAt = event.startedAt || now; this.activeKey = state.key; }
         const accepted = recordScores(state, event, scoreAt);
@@ -414,7 +480,12 @@ export class PKTracker {
       recordScores(state, event, scoreAt);
       state.phase = 'ended'; state.endedAt = now; state.remainingMs = 0; state.remainingUpdatedAt = now;
       if (!this.activeKey) this.activeKey = state.key;
-      if (state.selfScoreObserved && state.opponentScoreObserved) {
+      if (Object.keys(state.competitors).length >= 3 && Object.values(state.competitors).every(item=>item.scoreObserved)) {
+        const scores = Object.values(state.competitors), high = Math.max(...scores.map(item=>item.score));
+        const winners = scores.filter(item=>item.score===high).map(item=>item.anchorId);
+        this.results.push({key:state.key,at:now,winner:winners.length===1 ? winners[0] : 'draw',winnerIds:winners,scores:Object.fromEntries(scores.map(item=>[item.anchorId,item.score]))});
+        this.results=this.results.slice(-200); state.history.push({kind:'pk-end',at:now,winner:winners.length===1 ? winners[0] : 'draw',winnerIds:winners});
+      } else if (state.selfScoreObserved && state.opponentScoreObserved) {
         const winner = state.selfScore === state.opponentScore ? 'draw' : state.selfScore > state.opponentScore ? 'self' : 'opponent';
         this.results.push({ key: state.key, at: now, winner, selfScore: state.selfScore, opponentScore: state.opponentScore });
         this.results = this.results.slice(-200); state.history.push({ kind: 'pk-end', at: now, winner });
@@ -441,8 +512,9 @@ export class PKTracker {
       const endAt = Number.isFinite(effect.endAt) ? effect.endAt : Number.isFinite(effect.startAt) && Number.isFinite(effect.durationMs) ? effect.startAt + effect.durationMs : null;
       return { ...effect, endAt, active: endAt != null && endAt > now && (!Number.isFinite(effect.startAt) || effect.startAt <= now) && effect.status !== 'ended' };
     });
-    const trend = state.history.filter(item => item.kind === 'score').map(({at,selfScore,opponentScore}) => ({at,selfScore,opponentScore})).sort((a,b)=>a.at-b.at);
-    return { ...view, effects, trend, selfUsers: rankUsers(state.selfUsers), opponentUsers: rankUsers(state.opponentUsers), opponentRoomIds: [...state.opponentRoomIds], chatSignals, chatHistory: state.chatHistory.slice(-30), selfIntent, opponentIntent, multiplierStats: empirical(this.multiplier), cardStats: empirical(this.cards), results: this.results.slice(-50), multipliers: this.multiplier.slice(-100), cards: this.cards.slice(-100) };
+    const trend = state.history.filter(item => item.kind === 'score').map(({at,selfScore,opponentScore,competitorScores}) => ({at,selfScore,opponentScore,competitorScores})).sort((a,b)=>a.at-b.at);
+    const competitors = Object.values(state.competitors).map(item=>({ ...item, scoreAgeMs:item.scoreObserved ? Math.max(0,now-item.scoreAt) : null })).sort((a,b)=>(b.scoreObserved ? b.score : -1)-(a.scoreObserved ? a.score : -1));
+    return { ...view, competitors, effects, trend, selfUsers: rankUsers(state.selfUsers), opponentUsers: rankUsers(state.opponentUsers), opponentRoomIds: [...state.opponentRoomIds], chatSignals, chatHistory: state.chatHistory.slice(-30), selfIntent, opponentIntent, multiplierStats: empirical(this.multiplier), cardStats: empirical(this.cards), results: this.results.slice(-50), multipliers: this.multiplier.slice(-100), cards: this.cards.slice(-100) };
   }
   current() { return this.snapshot(this.activeKey); }
   all() { return [...this.states.values()].map(state => this.snapshot(state.key)); }

@@ -37,7 +37,7 @@ const header = `// ==UserScript==
 // ==/UserScript==
 `;
 const chartBundle = (await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,write:false,format:'iife',globalName:'LiveAssistantCharts',minify:true,legalComments:'inline',target:'chrome111'})).outputFiles[0].text + '\nconst { LiveCharts } = LiveAssistantCharts;\n';
-const files = ['runtime/journal', 'runtime/delivery', 'runtime/inbox', 'runtime/live-metrics', 'data/interaction-questions', 'core/bot', 'core/phrases', 'core/milestones', 'pk/model', 'core/engine', 'browser/protocol', 'services/ai', 'browser/identity', 'browser/adapter', 'ui/solid-glass', 'ui/theme', 'ui/live-charts', 'ui/panel', 'data/gifts', 'app'];
+const files = ['runtime/journal', 'runtime/delivery', 'runtime/inbox', 'runtime/live-metrics', 'data/interaction-questions', 'core/bot', 'core/phrases', 'core/milestones', 'pk/model', 'core/engine', 'browser/protocol', 'services/ai', 'browser/identity', 'browser/request-sender', 'browser/adapter', 'ui/solid-glass', 'ui/theme', 'ui/live-charts', 'ui/panel', 'data/gifts', 'app'];
 let body = '';
 for (const name of files) {
   let source = name === 'ui/live-charts' ? chartBundle : await readFile(`${root}src/${name}.js`, 'utf8');
@@ -62,7 +62,7 @@ async function bundle(names, entry, async = false) {
   for (const name of names) code += (name === 'ui/live-charts' ? chartBundle : await readFile(`${root}src/${name}.js`,'utf8')).replace(/^import\s+.*?;\s*$/gm,'').replace(/^export\s+/gm,'') + '\n';
   return `(${async ? 'async ' : ''}() => {\n'use strict';\n${code}\n${await readFile(`${root}extension/${entry}.js`,'utf8')}\n})();\n`;
 }
-await writeFile(`${ext}/page.js`,await bundle(['runtime/delivery','runtime/live-metrics','data/interaction-questions', 'core/bot','core/phrases','core/milestones','pk/model','core/engine','browser/protocol','browser/adapter'],'page'));
+await writeFile(`${ext}/page.js`,await bundle(['runtime/delivery','runtime/live-metrics','data/interaction-questions', 'core/bot','core/phrases','core/milestones','pk/model','core/engine','browser/protocol','browser/request-sender','browser/adapter'],'page'));
 await writeFile(`${ext}/content.js`,await bundle(files,'content',true));
 await mkdir(`${ext}/icons`,{recursive:true});
 for (const size of [16,48,128]) await writeFile(`${ext}/icons/${size}.png`,await readFile(`${root}extension/icons/${size}.png`));

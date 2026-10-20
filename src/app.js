@@ -39,7 +39,7 @@ export function boot(options = {}) {
     if (!engine || closed && !immediate) return;
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
     const save = () => {
-      const snapshot = { ...engine.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0} : runtimeSnapshot?.collection || null };
+      const snapshot = { ...engine.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || null };
       const write = runtimeWriter.save(snapshot);
       const reported = write.catch(error => log('error', `运行状态保存失败：${error.message}`));
       return immediate ? write : reported;
@@ -215,7 +215,8 @@ export function boot(options = {}) {
         return;
       }
       let journalWrite = null;
-      if ((engine.running || liveEvent.type === 'gift') && options.journal && !journalKey) {
+      const passiveDataEvent = ['room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push'].includes(liveEvent.type);
+      if ((engine.running || liveEvent.type === 'gift' || passiveDataEvent) && options.journal && !journalKey) {
         // Incoming messages are structured-cloned in the extension, but direct
         // integrations/tests may provide frozen objects. Work on a shallow copy
         // before attaching recovery metadata so a read-only event cannot abort
@@ -228,7 +229,12 @@ export function boot(options = {}) {
       } else event = {...liveEvent,...(journalKey ? {_journalKey:journalKey,_journalSavedAt} : {})};
       if (closed || suspended || location.pathname !== initialPath) return;
       // 账本/侧栏错误不能中断场控回复，也不能阻塞同帧中后续的消息。
-      try { rememberUser(event); } catch (error) { log('error', `互动资料更新失败：${error.message}`); }
+      try {
+        rememberUser(event);
+        if (event.type === 'room-audience') for (const row of [...(event.ranks || []),...(event.seats || [])]) {
+          if (row.user) rememberUser({...event,type:'audience-rank',user:row.user});
+        }
+      } catch (error) { log('error', `互动资料更新失败：${error.message}`); }
       engine.ingest(event);
       if (journalWrite) {
         void (async () => {
@@ -363,7 +369,7 @@ export function boot(options = {}) {
         const output = await client({ persona: c.ai.persona, knowledge: c.ai.knowledge, context: [], target: { name: '连接测试', text: '你好，请用一句话打招呼。' }, maxLength: c.sending.maxLength }, c.ai);
         log('ai', `连接测试通过：${output.slice(0, 300)}`); panel.toast('AI 连接测试通过。测试内容不会发送到公屏。');
       },
-      diagnose: () => adapter.diagnose(),
+      diagnose: () => ({...adapter.diagnose(),roomData:engine.roomData}),
       recoverEvents: async () => { await drainIncome(); await journalCommitter?.flush(); await adapter.recoverEvents?.(); await adapter.checkStorage?.(); refresh(); },
       exportEvents: async () => {
         // 后台失联时仍可导出内存里的待入账事实；不能让读取日志失败挡住自救。

@@ -155,7 +155,7 @@ test('比分临时战局补到真实 ID 后保留数据，重复开始不清空�
   assert.equal(tracker.current().remainingMs, 239000);
 });
 
-test('主播未知或多人比分无法确认对手时不按顺序猜测双方', () => {
+test('多人比分按明确主播 UID 分别预测，不按顺序伪装成单个对手', () => {
   const tracker = new PKTracker({now:()=>7_000_000});
   tracker.ingest({type:'pk-start',battleId:'b',roomId:'r'});
   const scores = [{anchorId:'third',score:300},{anchorId:'self',score:100},{anchorId:'rival',score:200}];
@@ -164,9 +164,11 @@ test('主播未知或多人比分无法确认对手时不按顺序猜测双方',
   tracker.ingest({type:'pk-score',battleId:'b',anchorId:'self',scores});
   assert.equal(tracker.current().selfScore, 100);
   assert.equal(tracker.current().opponentScoreObserved, false);
-  assert.equal(tracker.current().prediction.status, 'unknown');
+  assert.equal(tracker.current().prediction.competitors.length,3);
+  assert.equal(tracker.current().prediction.competitors.reduce((sum,item)=>sum+item.win,0),1);
   tracker.ingest({type:'pk-end',battleId:'b'});
-  assert.equal(tracker.results.length, 0);
+  assert.equal(tracker.results.length, 1);
+  assert.equal(tracker.results[0].winner,'third');
 });
 
 test('主播可从参与者房间匹配，终局不重复结算且不被迟到比分复活', () => {
@@ -179,6 +181,26 @@ test('主播可从参与者房间匹配，终局不重复结算且不被迟到�
   assert.equal(tracker.current().phase, 'ended'); assert.equal(tracker.current().remainingMs, 0);
   assert.equal(tracker.results.length, 1); assert.equal(tracker.results[0].winner, 'self');
   assert.ok(Number.isFinite(tracker.current().selfVelocity60));
+});
+
+test('三人及四人 PK 分别追踪各主播比分并输出总和为 100% 的夺冠概率', () => {
+  let now=8_500_000;
+  const tracker=new PKTracker({now:()=>now});
+  const participants=[{anchorId:'self',name:'己方'},{anchorId:'b',name:'主播乙'},{anchorId:'c',name:'主播丙'},{anchorId:'d',name:'主播丁'}];
+  tracker.ingest({type:'pk-start',battleId:'four-way',roomId:'r',anchorId:'self',participants,remainingMs:60000,receivedAt:now});
+  tracker.ingest({type:'pk-score',battleId:'four-way',anchorId:'self',scores:[{anchorId:'self',score:1000},{anchorId:'b',score:800},{anchorId:'c',score:600},{anchorId:'d',score:400}],remainingMs:50000,receivedAt:now});
+  now+=5000;
+  tracker.ingest({type:'pk-score',battleId:'four-way',anchorId:'self',scores:[{anchorId:'self',score:1100},{anchorId:'b',score:900},{anchorId:'c',score:850},{anchorId:'d',score:500}],remainingMs:45000,receivedAt:now});
+  const live=tracker.current();
+  assert.equal(live.competitors.length,4);
+  assert.deepEqual(live.competitors.map(item=>item.name),['己方','主播乙','主播丙','主播丁']);
+  assert.equal(live.prediction.status,'low-confidence');
+  assert.ok(Math.abs(live.prediction.competitors.reduce((sum,item)=>sum+item.win,0)-1)<1e-12);
+  assert.ok(live.prediction.competitors.find(item=>item.anchorId==='self').win>0);
+  tracker.ingest({type:'pk-end',battleId:'four-way',anchorId:'self',scores:[{anchorId:'self',score:1200},{anchorId:'b',score:1000},{anchorId:'c',score:950},{anchorId:'d',score:550}],receivedAt:now+1000});
+  assert.equal(tracker.current().prediction.status,'final');
+  assert.equal(tracker.current().prediction.competitors.find(item=>item.anchorId==='self').win,1);
+  assert.deepEqual(tracker.results.at(-1).winnerIds,['self']);
 });
 
 test('无 ID 比分按房间并入已知战局，不串到最近打开的另一房间', () => {
