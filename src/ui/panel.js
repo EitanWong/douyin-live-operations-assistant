@@ -1,3 +1,10 @@
+import { icon, decorateActionIcons } from './icons.js';
+import { Navigation, navigationTemplate } from './navigation.js';
+import { NAVIGATION_CSS } from './navigation-styles.js';
+import { AdaptiveLayout } from './adaptive-layout.js';
+import { ADAPTIVE_LAYOUT_CSS } from './adaptive-styles.js';
+import { FloatingWindow } from './floating-window.js';
+import { FLOATING_WINDOW_CSS } from './floating-styles.js';
 import { SOLID_GLASS_CSS } from './solid-glass.js';
 import { installTheme } from './theme.js';
 import { AnchorDashboard } from './anchor-dashboard.js';
@@ -94,9 +101,7 @@ summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-hei
 .scroll{padding:18px 20px}.page h2{font-size:19px;line-height:1.35}.page>.intro{margin:4px 0 14px;max-width:64ch}.settings-group{margin:0;padding:14px 0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;box-shadow:none}.settings-group+.settings-group{margin-top:0}.rule-summary{padding:10px 12px;background:var(--sg-well);border-radius:7px;box-shadow:none}
 .income-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end}.income-controls .field{margin:0 0 10px}.income-hero{padding:16px 0 12px;background:transparent;border-block:1px solid var(--line);border-radius:0;box-shadow:none}.income-hero>b{font-size:30px;line-height:1.2;font-variant-numeric:tabular-nums}.income-toolbar{margin:14px 0 8px}.income-toolbar h3{font-size:13px}.income-error{padding:9px 11px;border-radius:6px}
 .foot{padding:11px 18px;background:var(--sg-background);box-shadow:none}.foot .primary{min-height:38px}
-.panel:not([hidden]){animation:panel-enter 180ms cubic-bezier(.16,1,.3,1) both;transform-origin:bottom right}.subnav button,.primary-nav button,.switch span:after{transition:background-color 140ms ease-out,color 140ms ease-out,transform 140ms ease-out}
-@keyframes panel-enter{from{opacity:.7;transform:translateY(6px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
-@media(prefers-reduced-motion:reduce){.panel:not([hidden]){animation:none}}
+.subnav button,.primary-nav button,.switch span:after{transition:background-color 140ms ease-out,color 140ms ease-out,transform 140ms ease-out}
 @supports not (backdrop-filter:blur(1px)){.panel{background:var(--sg-solid)}}
 @media(max-width:560px){.panel{width:calc(100vw - 20px);height:calc(100dvh - 24px);border-radius:14px}.launcher{right:12px;bottom:12px}.grid{grid-template-columns:minmax(0,1fr)}.head{padding:16px}.head h1{font-size:16px}.scroll{padding:18px 16px}.banner{padding:9px 16px}.nav{padding:0 10px 8px}.primary-nav{margin-top:10px}.subnav{gap:3px}.subnav button{font-size:11px;padding:5px 9px}.foot{padding:12px 16px}.foot small{max-width:140px}.foot .primary{min-width:116px}.row{gap:8px}.candidate{grid-template-columns:64px minmax(0,1fr)}.gift-activity{grid-template-columns:minmax(65px,1fr) minmax(75px,1.2fr) auto;gap:5px;font-size:11px}.gift-total-grid b{font-size:24px}.gift-totals{padding:14px}.settings-group{padding:14px 0}.income-controls{grid-template-columns:minmax(0,1fr)}.income-hero>b{font-size:26px}.log-head{flex-wrap:wrap}.head-mark{width:32px;height:32px}}
 `;
@@ -106,8 +111,8 @@ export class Panel {
     this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
-    this.root.append(this.build()); document.body.append(this.host); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); }); this.populate(config); this.bind(); this.restoreLauncherPosition(); this.positionPanel();
+    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
+    this.root.append(this.build()); decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); }); this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});
   }
   input(path, label, type = 'text', hint = '') {
     return `<label class="field"><span>${label}</span><input data-field="${path}" type="${type}" ${type === 'number' ? 'step="any"' : ''}>${hint ? `<small>${hint}</small>` : ''}</label>`;
@@ -121,15 +126,18 @@ export class Panel {
   }
   build() {
     const container = document.createElement('div');
-    const tabGroups = { interaction: [['anchor', '主播数据'], ['pk', 'PK 预测'], ['gift', '礼物感谢'], ['welcome', '进场欢迎'], ['likes', '点赞感谢'], ['keywords', '关键词回复'], ['bot','@机器人'], ['timers', '定时消息']], settings: [['features', '功能开关'], ['appearance','外观'], ['ai', 'AI 设置'], ['runtime', '运行规则'], ['profiles','主播管理'], ['diagnostics', '连接诊断']] };
+
     container.innerHTML = `
-      <button type="button" class="launcher" aria-expanded="true" aria-label="收起场控面板，当前已暂停" title="点击收起 · 拖动调整位置"><div class="launcher-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="4"/><path d="M9 21h6M12 18v3M8 10v3m4-5v7m4-5v3"/></svg></div><b>场控</b><i aria-hidden="true"></i><span>已暂停</span><svg class="launcher-grip" aria-hidden="true" viewBox="0 0 10 16" fill="currentColor"><circle cx="3" cy="4" r="1"/><circle cx="7" cy="4" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="7" cy="8" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="7" cy="12" r="1"/></svg></button>
-      <section class="panel" data-slot="panel" aria-label="抖音直播运营助手控制台">
-        <header class="head" data-slot="panel-header"><div class="head-title"><span class="head-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="4"/><path d="M9 21h6M12 18v3M8 10v3m4-5v7m4-5v3"/></svg></span><div><h1>抖音直播运营助手</h1><div class="room">${this.demo ? '模拟直播间' : `直播间 ${esc(this.room)}`}</div></div></div><button type="button" data-action="close" aria-label="收起面板">收起</button></header>
+      <button type="button" class="launcher" aria-controls="assistant-panel" aria-expanded="true" aria-label="收起场控面板，当前已暂停" title="点击收起 · 拖动调整位置"><div class="launcher-mark" aria-hidden="true">${icon('radio')}</div><b>场控</b><i aria-hidden="true"></i><span>已暂停</span><svg class="launcher-grip" aria-hidden="true" viewBox="0 0 10 16" fill="currentColor"><circle cx="3" cy="4" r="1"/><circle cx="7" cy="4" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="7" cy="8" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="7" cy="12" r="1"/></svg></button>
+      <div class="dock-hint" aria-hidden="true"></div><div class="floating-panel" data-interactive="true">
+      <section class="panel" id="assistant-panel" data-slot="panel" aria-label="抖音直播运营助手控制台">
+        <header class="head" data-slot="panel-header"><div class="head-title"><span class="head-mark" aria-hidden="true">${icon('radio')}</span><div><h1>抖音直播运营助手</h1><div class="room">${this.demo ? '模拟直播间' : `直播间 ${esc(this.room)}`}</div></div></div><button type="button" data-action="close" aria-label="收起面板">收起</button></header>
         <div class="shell-status" aria-label="场控状态"><strong data-shell-state>已暂停</strong><span data-shell-network>等待直播数据</span></div>
         ${this.demo ? '<p class="banner">本地演示：弹幕和礼物均为模拟数据，消息不会发到抖音。</p>' : ''}
         <div class="banner" data-runtime-alert role="status" hidden><strong data-runtime-alert-text></strong> <button type="button" data-go="diagnostics" data-ack-runtime-alert>查看并处理</button></div>
-        <nav class="nav" aria-label="功能导航"><div class="primary-nav" role="group" aria-label="功能分类">${[['interaction','直播互动'],['settings','设置']].map(([key,label])=>`<button type="button" data-category="${key}" aria-pressed="${key==='interaction'}">${label}</button>`).join('')}</div>${Object.entries(tabGroups).map(([category,group])=>`<div class="subnav" data-subnav="${category}" role="tablist" aria-label="${{interaction:'直播互动功能',settings:'功能与运行设置'}[category]}" ${category!=='interaction'?'hidden':''}>${group.map(([key,name])=>`<button type="button" role="tab" id="tab-${key}" aria-controls="page-${key}" data-tab="${key}" aria-selected="${key===this.activeTab}" tabindex="${key===this.activeTab?0:-1}">${name}</button>`).join('')}</div>`).join('')}</nav>
+        <div class="workspace">
+        ${navigationTemplate(this.activeTab)}
+        <main class="workspace-content" aria-label="功能页面">
         <div class="toast" role="status" hidden></div>
         <div class="scroll"><form autocomplete="off">
           <section class="page" id="page-overview" data-page="overview" aria-label="暂存总览" hidden>
@@ -142,27 +150,37 @@ export class Panel {
           </section>
           <section class="page" role="tabpanel" id="page-pk" aria-labelledby="tab-pk" data-page="pk" hidden>
             <h2>PK 局势看板</h2><p class="intro">比分、追分速度与贡献者，随直播推送更新。</p>
+            <div class="pk-overview">
+            <div class="pk-overview-main">
             <div class="status"><strong data-pk-state>等待 PK 事件</strong><span class="badge" data-slot="tag" data-pk-quality>数据不足</span></div>
             <div class="pk-scoreboard"><div><strong data-pk-self-score>--</strong><span data-pk-self-name>己方</span></div><div class="vs">VS<br><small data-pk-remaining>--</small></div><div><strong data-pk-opponent-score>--</strong><span data-pk-opponent-name>对方</span></div></div>
             <section class="pk-multi" data-pk-multi hidden><h3>多人 PK 排名与夺冠估计</h3><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>主播</th><th>比分</th><th>夺冠估计</th></tr></thead><tbody data-pk-competitors><tr><td colspan="3">等待完整比分</td></tr></tbody></table></div></section>
             <div class="pk-lead" role="img" aria-label="等待双方比分" data-pk-lead><span style="width:50%"></span><span style="width:50%"></span></div>
             <p class="pk-freshness" data-pk-freshness>等待双方精确比分；未观测的分数保持未知。</p>
             <div class="pk-verdict"><strong data-pk-summary>等待可分析的战局</strong><p data-pk-basis>收到比分后显示领先、追分压力与数据覆盖情况。</p></div>
-            <div class="pk-chart-head"><h3>比分走势</h3><select data-pk-window aria-label="图表时间范围"><option value="60000">近 1 分钟</option><option value="180000" selected>近 3 分钟</option><option value="0">本场全部</option></select></div>
-            <div class="pk-chart" data-pk-chart="scores" hidden role="img" aria-label="PK参战方比分走势"></div><p class="pk-chart-empty">等待本场比分推送，图表不会填充模拟数据。</p>
-            <div class="pk-chart-head"><h3>分差变化 <small class="choice-hint">正数为己方领先</small></h3></div>
-            <div class="pk-chart pk-chart-gap" data-pk-chart="gap" hidden role="img" aria-label="己方分差随时间变化"></div><p class="pk-chart-empty">双方精确比分就绪后，呈现分差。</p>
-            <div class="pk-reading"><div><span>按近期速度推演的终局分差</span><strong data-pk-projected>--</strong></div><div><span>己方反超所需总分速</span><strong data-pk-required-rate>--</strong></div></div>
+</div><details class="adaptive-detail pk-outlook" data-adaptive-details><summary>追分推演与数据质量</summary><div class="adaptive-detail-body">
+              <div class="pk-reading"><div><span>按近期速度推演的终局分差</span><strong data-pk-projected>--</strong></div><div><span>己方反超所需总分速</span><strong data-pk-required-rate>--</strong></div></div>
             <div class="pk-prob"><div><b data-pk-self-win>未知</b><span>己方获胜估计</span></div><div><b data-pk-opponent-win>未知</b><span>对方获胜估计</span></div></div>
             <div class="grid"><div><span class="choice-hint">近 15 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-speed>--</strong> / <strong data-pk-opponent-speed>--</strong></p></div><div><span class="choice-hint">近 60 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-velocity>--</strong> / <strong data-pk-opponent-velocity>--</strong></p></div><div><span class="choice-hint">模型可信程度</span><p><strong data-pk-confidence>--</strong></p></div><div><span class="choice-hint">比分样本与处理延迟</span><p><strong data-pk-sample>--</strong></p></div></div>
-            <section class="section"><h3>局势因素</h3><ul class="pk-factors" data-pk-factors><li>等待可用比分或礼物事件。</li></ul></section>
-            <section class="section"><h3>贡献榜 · 双方前 8 名</h3><div class="pk-chart pk-chart-contributions" data-pk-chart="contributions" hidden role="img" aria-label="已观测贡献榜前八名"></div><p class="pk-chart-empty">尚未采集贡献榜；礼物钻石不会替代 PK 贡献分。</p><details class="pk-data-detail"><summary>查看贡献者明细</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>观众</th><th>阵营</th><th>贡献分</th><th>礼物钻石</th></tr></thead><tbody data-pk-contributors><tr><td colspan="4">暂无贡献者数据</td></tr></tbody></table></div></details></section>
-            <section class="section"><h3>近期送礼活跃度</h3><table class="pk-table"><thead><tr><th>侧</th><th>活跃用户占比</th><th>观测用户</th><th>已观测钻石</th></tr></thead><tbody data-pk-intent><tr><td colspan="4" class="empty">暂无可估计样本</td></tr></tbody></table></section>
+
+</div></details></div>
+            <div class="pk-workspace">
+<section class="pk-visual pk-score-visual">            <div class="pk-chart-head"><h3>比分走势</h3><select data-pk-window aria-label="图表时间范围"><option value="60000">近 1 分钟</option><option value="180000" selected>近 3 分钟</option><option value="0">本场全部</option></select></div>
+            <div class="pk-chart" data-pk-chart="scores" hidden role="img" aria-label="PK参战方比分走势"></div><p class="pk-chart-empty">等待本场比分推送，图表不会填充模拟数据。</p>
+</section><details class="adaptive-detail pk-visual pk-gap-visual" data-adaptive-details><summary>分差变化 · 正数为己方领先</summary><div class="adaptive-detail-body">
+              <div class="pk-chart pk-chart-gap" data-pk-chart="gap" hidden role="img" aria-label="己方分差随时间变化"></div><p class="pk-chart-empty">双方精确比分就绪后，呈现分差。</p>
+</div></details>            <section class="pk-visual pk-contribution-visual"><h3>贡献榜 · 双方前 8 名</h3><div class="pk-chart pk-chart-contributions" data-pk-chart="contributions" hidden role="img" aria-label="已观测贡献榜前八名"></div><p class="pk-chart-empty">尚未采集贡献榜；礼物钻石不会替代 PK 贡献分。</p><details class="pk-data-detail"><summary>查看贡献者明细</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>观众</th><th>阵营</th><th>贡献分</th><th>礼物钻石</th></tr></thead><tbody data-pk-contributors><tr><td colspan="4">暂无贡献者数据</td></tr></tbody></table></div></details></section>
+<details class="adaptive-detail pk-visual pk-activity-visual" data-adaptive-details><summary>直播活动 · 最近 10 分钟</summary><div class="adaptive-detail-body">
+              <p class="choice-hint">每 10 秒汇总本页观测；暂停场控仍持续采集。</p><div class="pk-chart" data-pk-chart="activity" hidden role="img" aria-label="每10秒的弹幕、进场与礼物件数"></div><p class="pk-chart-empty">等待本页直播互动。</p><p class="choice-hint" data-live-totals>尚无互动数据</p></div></details></div>
+            <div class="pk-analysis">
+<details class="adaptive-detail " data-adaptive-details><summary>局势因素、送礼与场上加成</summary><div class="adaptive-detail-body">
+              <section class="section"><h3>局势因素</h3><ul class="pk-factors" data-pk-factors><li>等待可用比分或礼物事件。</li></ul></section>            <section class="section"><h3>近期送礼活跃度</h3><table class="pk-table"><thead><tr><th>侧</th><th>活跃用户占比</th><th>观测用户</th><th>已观测钻石</th></tr></thead><tbody data-pk-intent><tr><td colspan="4" class="empty">暂无可估计样本</td></tr></tbody></table></section>
             <section class="section"><h3>场上加成与卡片</h3><ul class="pk-effect-list" data-pk-effects><li>尚未采集明确的活动窗口。</li></ul></section>
-            <section class="section"><h3>直播活动 · 最近 10 分钟</h3><p class="choice-hint">每 10 秒汇总本页观测；暂停场控仍持续采集。</p><div class="pk-chart" data-pk-chart="activity" hidden role="img" aria-label="每10秒的弹幕、进场与礼物件数"></div><p class="pk-chart-empty">等待本页直播互动。</p><p class="choice-hint" data-live-totals>尚无互动数据</p></section>
-            <section class="section"><h3>对面弹幕信号</h3><p data-pk-chat class="empty">等待已采集的对手房间弹幕。</p><div class="grid"><div><span class="choice-hint">近 60 秒样本</span><p><strong data-pk-chat-recent>--</strong></p></div><div><span class="choice-hint">求援倾向</span><p><strong data-pk-chat-request>--</strong></p></div><div><span class="choice-hint">反超倾向</span><p><strong data-pk-chat-comeback>--</strong></p></div><div><span class="choice-hint">情绪信号</span><p><strong data-pk-chat-sentiment>--</strong></p></div></div></section>
+</div></details><details class="adaptive-detail " data-adaptive-details><summary>对面弹幕与活动经验记录</summary><div class="adaptive-detail-body">
+              <section class="section"><h3>对面弹幕信号</h3><p data-pk-chat class="empty">等待已采集的对手房间弹幕。</p><div class="grid"><div><span class="choice-hint">近 60 秒样本</span><p><strong data-pk-chat-recent>--</strong></p></div><div><span class="choice-hint">求援倾向</span><p><strong data-pk-chat-request>--</strong></p></div><div><span class="choice-hint">反超倾向</span><p><strong data-pk-chat-comeback>--</strong></p></div><div><span class="choice-hint">情绪信号</span><p><strong data-pk-chat-sentiment>--</strong></p></div></div></section>
             <section class="section"><h3>活动与卡片经验记录</h3><table class="pk-table"><thead><tr><th>项目</th><th>命中 / 样本</th><th>经验频率</th><th>区间</th></tr></thead><tbody data-pk-rates><tr><td colspan="4" class="empty">尚无已记录样本</td></tr></tbody></table></section>
-            <details class="pk-data-detail"><summary data-pk-score-summary>查看比分明细（最近 20 次）</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr data-pk-score-header><th>北京时间</th><th>己方</th><th>对方</th><th>分差</th></tr></thead><tbody data-pk-score-rows><tr><td colspan="4">等待比分</td></tr></tbody></table></div></details>
+</div></details></div>
+            <details class="pk-data-detail" data-adaptive-details><summary data-pk-score-summary>查看比分明细（最近 20 次）</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr data-pk-score-header><th>北京时间</th><th>己方</th><th>对方</th><th>分差</th></tr></thead><tbody data-pk-score-rows><tr><td colspan="4">等待比分</td></tr></tbody></table></div></details>
             <p class="pk-note">这是基于当前页面观测和历史样本的估计，不是抖音官方胜率。3 倍加成、卡片和宝箱概率只会按你实际记录的场次给出经验频率与区间；样本不足时保持未知。</p>
           </section>
           ${anchorPageTemplate(this.room)}
@@ -174,15 +192,17 @@ export class Panel {
           <section class="page" role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" data-page="appearance" hidden>
             <h2>外观</h2><p class="intro">选择适合当前环境的亮暗模式。</p>
             <section class="settings-group"><h3>颜色模式</h3><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
+            <section class="settings-group"><h3>导航布局</h3><p class="group-note">宽窗口使用侧边栏，窄窗口自动切换为顶部导航。</p><label class="field"><span>侧边栏位置</span><select data-sidebar-side aria-label="侧边栏位置"><option value="left">左侧</option><option value="right">右侧</option></select><small>按操作习惯选择；右侧也适合左手操作。选择后自动保存到当前浏览器。</small></label></section>
           </section>
           <section class="page" role="tabpanel" id="page-features" aria-labelledby="tab-features" data-page="features" hidden>
             <h2>功能开关</h2><p class="intro">集中启用或停用直播互动模块；关闭后，该模块从互动导航中隐藏。</p>
+            <div class="settings-workspace">
             <section class="settings-group"><h3>礼物与进场</h3><p class="group-note">按观众送礼和进入直播间事件触发。</p><div class="feature-list">${[['gift','礼物感谢'],['welcome','进场欢迎']].map(([key,label]) => `<div class="feature-row"><div class="feature-title">${label}<small data-feature-note="${key}"></small></div><label class="switch" aria-label="${label}"><input type="checkbox" role="switch" data-field="${key}.enabled" aria-label="${label}"><span></span></label></div>`).join('')}</div></section>
             <section class="settings-group"><h3>弹幕与反馈</h3><p class="group-note">按点赞、弹幕内容或提醒条件触发。</p><div class="feature-list">${[['like','点赞感谢'],['keyword','关键词回复']].map(([key,label]) => `<div class="feature-row"><div class="feature-title">${label}<small data-feature-note="${key}"></small></div><label class="switch" aria-label="${label}"><input type="checkbox" role="switch" data-field="${key}.enabled" aria-label="${label}"><span></span></label></div>`).join('')}<div class="feature-row"><div class="feature-title">内容提醒<small data-feature-note="moderation"></small></div><label class="switch" aria-label="内容提醒"><input type="checkbox" role="switch" data-field="moderation.enabled" aria-label="内容提醒"><span></span></label></div></div></section>
             <section class="settings-group"><h3>@ 机器人</h3><p class="group-note">观众 @ 当前登录账号参加互动；启用 AI 服务后优先 AI 接话，不可用时自动使用内置回复。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">机器人互动<small data-feature-note="bot"></small></div><label class="switch" aria-label="机器人互动"><input type="checkbox" role="switch" data-field="bot.enabled" aria-label="机器人互动"><span></span></label></div></div></section>
             <section class="settings-group"><h3>计划互动</h3><p class="group-note">按已配置的时间间隔循环发送。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">定时消息<small data-feature-note="timers"></small></div><label class="switch" aria-label="定时消息"><input type="checkbox" role="switch" data-field="timersEnabled" aria-label="定时消息"><span></span></label></div></div></section>
             <section class="settings-group"><h3>礼物账本</h3><p class="group-note">独立于礼物感谢，按主播与直播场次保存统计。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">收入统计<small>本地保存每场直播的礼物价值与月度收入估算；关闭后停止采集，历史数据仍保留。</small></div><label class="switch" aria-label="收入统计"><input type="checkbox" role="switch" data-field="incomeEnabled" aria-label="收入统计"><span></span></label></div></div></section>
-            <section class="settings-group"><h3>AI 互动</h3><p class="group-note">先启用 AI 服务，再单独决定要使用的 AI 功能。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">AI 服务<small data-feature-note="ai-service"></small></div><label class="switch" aria-label="AI 服务"><input type="checkbox" role="switch" data-field="ai.enabled" aria-label="AI 服务"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 弹幕问答<small data-feature-note="ai-chat"></small></div><label class="switch" aria-label="AI 弹幕问答"><input type="checkbox" role="switch" data-field="ai.chatEnabled" aria-label="AI 弹幕问答"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 冷场互动<small data-feature-note="ai-idle"></small></div><label class="switch" aria-label="AI 冷场互动"><input type="checkbox" role="switch" data-field="ai.idleEnabled" aria-label="AI 冷场互动"><span></span></label></div></div><button type="button" class="text-button" data-go="ai">配置 AI 服务与问答</button></section>
+            <section class="settings-group"><h3>AI 互动</h3><p class="group-note">先启用 AI 服务，再单独决定要使用的 AI 功能。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">AI 服务<small data-feature-note="ai-service"></small></div><label class="switch" aria-label="AI 服务"><input type="checkbox" role="switch" data-field="ai.enabled" aria-label="AI 服务"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 弹幕问答<small data-feature-note="ai-chat"></small></div><label class="switch" aria-label="AI 弹幕问答"><input type="checkbox" role="switch" data-field="ai.chatEnabled" aria-label="AI 弹幕问答"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 冷场互动<small data-feature-note="ai-idle"></small></div><label class="switch" aria-label="AI 冷场互动"><input type="checkbox" role="switch" data-field="ai.idleEnabled" aria-label="AI 冷场互动"><span></span></label></div></div><button type="button" class="text-button" data-go="ai">配置 AI 服务与问答</button></section></div>
           </section>
           <section class="page" id="page-replies" data-page="replies" aria-label="回复记录（暂未开放）" hidden>
             <h2>回复记录</h2><p class="intro">查看最近预览和已提交的回复。</p>
@@ -190,8 +210,12 @@ export class Panel {
           </section>
           <section class="page" role="tabpanel" id="page-gift" aria-labelledby="tab-gift" data-page="gift" hidden>
             <h2>礼物感谢</h2><p class="intro">设置感谢门槛与话术；礼物连击会合并计算。</p>
+            <div class="settings-workspace gift-workspace">
+            <div class="settings-column">
             <section class="gift-totals" data-gift-totals aria-label="礼物价值统计"><h3 data-gift-total-title>本场礼物价值</h3><div class="gift-total-grid"><div><b data-gift-diamonds>0</b><span>已知礼物面值 · 钻</span></div><div><b data-gift-income>未设置</b><span>收入估算 · 人民币</span></div></div><p class="gift-total-note" data-gift-estimate-note>正在读取本地账本…</p><button type="button" class="text-button" data-go="anchor" data-anchor-target="income" data-income-link>查看收入账本</button></section>
             <section class="recent-gifts section"><div class="log-head"><h3>近期送礼</h3><span class="choice-hint" data-gift-count>仅保留本次页面数据</span></div><div data-recent-gifts><p class="empty">收到礼物后，送礼用户和已知礼物信息会显示在这里。</p></div></section>
+</div>
+            <div class="settings-column">
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="gift"></p></div>
             ${this.select('gift.responseMode', '答谢生成方式', [['rules', '使用预设话术'], ['ai', '使用 AI 生成']])}
             ${this.input('gift.minValue', '达到多少钻石才感谢', 'number')}
@@ -201,13 +225,14 @@ export class Panel {
             <details><summary>筛选与防刷屏</summary>${this.select('gift.basis', '按什么计算价值', [['total', '整次连击的总价值（推荐）'], ['unit', '单个礼物的价值']])}</details>
             ${this.area('gift.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 自动称呼、{nickname} 原昵称、{gift} 礼物名、{count} 数量、{value} 总钻石、{unit} 单价。公开性别为男/女时称哥/姐；未知或已知未成年时仅用昵称，不猜年龄。')}
             <div class="notice">单价未知时，在 1 钻默认门槛下仍会使用不含金额的通用感谢；提高门槛后，需先补充礼物单价才可判断是否感谢。未知单价不会计入收入估算。</div>
-            <details><summary>补充未知礼物的单价</summary><div data-list="prices"></div><button type="button" class="list-add" data-add="prices">添加礼物单价</button><p class="hint">填礼物名称或 ID，仅在直播消息缺少单价时使用。</p></details>
+            <details><summary>补充未知礼物的单价</summary><div data-list="prices"></div><button type="button" class="list-add" data-add="prices">添加礼物单价</button><p class="hint">填礼物名称或 ID，仅在直播消息缺少单价时使用。</p></details></div></div>
           </section>
           <section class="page" role="tabpanel" id="page-profiles" aria-labelledby="tab-profiles" data-page="profiles" hidden>
             <h2>主播管理</h2><p class="intro">每位主播的互动规则、功能开关、AI 配置与收入比例独立保存。进入直播间自动载入对应配置。</p>
+            <div class="settings-workspace">
             <section class="settings-group"><h3>已添加的主播</h3><div data-profiles><p class="empty">正在读取主播列表…</p></div></section>
             <section class="settings-group"><h3>添加主播</h3><p class="group-note">粘贴抖音直播间地址，打开该直播间即可配置。</p><label class="field"><span>直播间地址</span><input type="url" data-profile-url placeholder="https://live.douyin.com/直播间号"></label><button type="button" data-action="add-profile">添加主播</button></section>
-            <p class="hint">“打开并配置”会进入对应主播的直播间，不会自动开始场控。AI 服务密钥按接口域名保存，同一服务可共用密钥。</p>
+            <p class="hint">“打开并配置”会进入对应主播的直播间，不会自动开始场控。AI 服务密钥按接口域名保存，同一服务可共用密钥。</p></div>
           </section>
           <section class="page" role="tabpanel" id="page-welcome" aria-labelledby="tab-welcome" data-page="welcome" hidden>
             <h2>进场欢迎</h2><p class="intro">按荣誉等级、本房粉丝团或指定名单欢迎观众。</p>
@@ -238,15 +263,22 @@ export class Panel {
           <section class="page" role="tabpanel" id="page-ai" aria-labelledby="tab-ai" data-page="ai" hidden>
             <h2>AI 服务与问答</h2><p class="intro">连接模型服务，并配置 AI 如何回应直播间弹幕。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="ai"></p></div>
-            <label class="field"><span>服务预设</span><select data-preset><option value="custom">自定义兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问 / DashScope</option><option value="doubao">豆包 / 火山方舟</option><option value="local">本地 Ollama</option></select></label>
+            <div class="settings-workspace ai-workspace">
+
+            <section class="settings-column">
+<h3 class="subhead">服务连接</h3>
+              <label class="field"><span>服务预设</span><select data-preset><option value="custom">自定义兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问 / DashScope</option><option value="doubao">豆包 / 火山方舟</option><option value="local">本地 Ollama</option></select></label>
             <details data-ai-connection><summary>接口与模型</summary>${this.input('ai.endpoint', 'API 接口地址')}${this.input('ai.model', '模型名称 / 接入点 ID')}</details>
             <label class="field"><span>API Key</span><input type="password" data-api-key autocomplete="new-password" placeholder="留空保留此服务已有密钥"><small data-key-status>密钥按服务域名隔离，不随配置导出。</small></label>
             <label class="toggle"><input type="checkbox" data-remember-key>记住新密钥（仅此设备）</label>
             <div class="actions"><button type="button" data-action="test-ai">测试 AI 连接</button><button type="button" class="danger" data-action="forget-key">清除此服务密钥</button></div>
-            <div class="section"><div data-chat-controls>${this.select('ai.trigger', '自动回复触发条件', [['question', '提问弹幕'], ['mention', '呼叫场控'], ['all', '所有弹幕（受调用限额约束）']])}<details><summary>AI 额度与上下文</summary><div class="grid">${this.input('ai.maxPerHour', '每小时最多调用 / 次', 'number')}${this.input('ai.contextSize', '最近弹幕条数', 'number')}${this.input('ai.contextAgeSec', '弹幕保留时长 / 秒', 'number')}</div></details>
+</section>
+            <section class="settings-column">
+<h3 class="subhead">问答与场控资料</h3>
+              <div class="section"><div data-chat-controls>${this.select('ai.trigger', '自动回复触发条件', [['question', '提问弹幕'], ['mention', '呼叫场控'], ['all', '所有弹幕（受调用限额约束）']])}<details><summary>AI 额度与上下文</summary><div class="grid">${this.input('ai.maxPerHour', '每小时最多调用 / 次', 'number')}${this.input('ai.contextSize', '最近弹幕条数', 'number')}${this.input('ai.contextAgeSec', '弹幕保留时长 / 秒', 'number')}</div></details>
             <div data-ai-mentions>${this.area('ai.mentions', '场控呼叫词（每行一个）')}</div></div><div data-ai-profile>${this.area('ai.persona', '场控风格', 'text')}${this.area('ai.knowledge', '主播与本场直播资料', 'text', '填写已核实的直播主题、开播时间和资料。')}</div>
             <details data-idle-controls><summary>冷场互动</summary>${this.input('ai.idleSec', '没有新互动多久算冷场 / 秒', 'number')}</details>
-            <div class="notice">启用 AI 的模块才会显示 AI 生成选项。最近弹幕、昵称和你填写的资料会发往所配置的服务，不发送 Cookies 或观众 UID。预览模式仍会调用 AI。</div></div>
+            <div class="notice">启用 AI 的模块才会显示 AI 生成选项。最近弹幕、昵称和你填写的资料会发往所配置的服务，不发送 Cookies 或观众 UID。预览模式仍会调用 AI。</div></div></section></div>
           </section>
           <section class="page" role="tabpanel" id="page-bot" aria-labelledby="tab-bot" data-page="bot" hidden>
             <h2>@机器人</h2><p class="intro">观众 @ 你的当前登录账号，即可呼出文字菜单并互动。</p>
@@ -286,44 +318,17 @@ export class Panel {
             <div class="section"><h3>配置与运行记录</h3><div class="actions"><button type="button" data-action="lab">运行规则自检</button><button type="button" data-action="export">导出配置</button><button type="button" data-action="import">导入配置</button><button type="button" data-action="export-log">导出运行记录</button><button type="button" data-action="clear-log">清空记录</button></div><input class="file" data-import-file type="file" accept="application/json,.json"><p class="hint">每个直播间单独保存设置。导出配置不包含密钥；导出的运行记录可能包含公屏昵称和回复。</p></div>
           </section>
         </form></div>
+        </main></div>
         <footer class="foot"><small data-save-state>设置已保存</small><div class="actions"><button data-action="save" hidden>保存设置</button><button class="primary" type="button" data-action="start">开始场控</button><button class="danger" type="button" data-action="stop" hidden>立即暂停</button></div></footer>
-      </section>`;
+      </section>
+      <span class="window-help" id="assistant-resize-help">拖动窗口边缘或角落调整大小。聚焦此控件后用方向键调整，按 Shift 加速；Home 或双击恢复默认大小。拖动标题栏移动窗口。</span>
+      ${['n','e','s','w','nw','ne','sw'].map(edge => `<div class="window-resize" data-resize="${edge}" aria-hidden="true"></div>`).join('')}
+      <button type="button" class="window-resize" data-resize="se" aria-label="调整窗口大小" aria-describedby="assistant-resize-help" title="拖动调整窗口大小 · 双击恢复默认布局"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><path d="M3 9 9 3M7 9l2-2"/></svg></button>
+      </div>`;
     return container;
   }
   node(selector) { if (!this.cache.has(selector)) this.cache.set(selector, this.root.querySelector(selector)); return this.cache.get(selector); }
-  restoreLauncherPosition() {
-    let saved;
-    try { saved = JSON.parse(window.localStorage.getItem('douyin-live-assistant:launcher') || 'null'); } catch {}
-    const rect = this.node('.launcher').getBoundingClientRect();
-    const width = rect.width || 150, height = rect.height || 42;
-    const left = Number.isFinite(saved?.left) ? saved.left : window.innerWidth - width - 24;
-    const top = Number.isFinite(saved?.top) ? saved.top : window.innerHeight - height - 24;
-    this.applyLauncherPosition(left, top, false);
-    this.onResize = () => { this.applyLauncherPosition(this.launcherPosition.left, this.launcherPosition.top, true); this.positionPanel(); };
-    window.addEventListener('resize', this.onResize);
-  }
-  applyLauncherPosition(left, top, persist = false) {
-    const button = this.node('.launcher'), rect = button.getBoundingClientRect();
-    const width = rect.width || 150, height = rect.height || 42;
-    const margin = window.innerWidth <= 560 ? 8 : 12;
-    const x = Math.max(margin, Math.min(Number(left) || 0, window.innerWidth - width - margin));
-    const y = Math.max(margin, Math.min(Number(top) || 0, window.innerHeight - height - margin));
-    button.style.left = `${x}px`; button.style.top = `${y}px`; button.style.right = 'auto'; button.style.bottom = 'auto';
-    this.launcherPosition = { left: x, top: y };
-    if (persist) { try { window.localStorage.setItem('douyin-live-assistant:launcher', JSON.stringify(this.launcherPosition)); } catch {} }
-  }
-  positionPanel() {
-    if (!this.open) return;
-    const panel = this.node('.panel'), button = this.node('.launcher');
-    if (panel.hidden) return;
-    const buttonRect = button.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();
-    const width = panelRect.width || Math.min(620, window.innerWidth - 32), height = panelRect.height || Math.min(780, window.innerHeight - 24);
-    const left = Math.max(10, Math.min(buttonRect.left + buttonRect.width / 2 - width / 2, window.innerWidth - width - 10));
-    const above = buttonRect.top - height - 12;
-    const top = above >= 10 ? above : Math.max(10, Math.min(buttonRect.bottom + 12, window.innerHeight - height - 10));
-    panel.style.left = `${left}px`; panel.style.top = `${top}px`; panel.style.right = 'auto'; panel.style.bottom = 'auto';
-  }
-  text(selector, value) { const node = this.node(selector); if (node.textContent !== String(value)) node.textContent = String(value); }
+  text(selector, value) { const target = this.node(selector); const node = target.querySelector('[data-button-label]') || target; if (node.textContent !== String(value)) node.textContent = String(value); }
   disabled(selector, value) { const node = this.node(selector); if (node.disabled !== value) node.disabled = value; }
   markDirty(value = true) { this.dirty = value; this.syncFooter(); }
   hidden(selector, value) { const node = this.node(selector); if (node.hidden !== value) node.hidden = value; }
@@ -595,7 +600,7 @@ export class Panel {
     const attributes = { 'aria-expanded':String(this.open), 'aria-label':`${this.open ? '收起' : '展开'}场控面板，当前${status}`, title:`点击${this.open ? '收起' : '展开'} · 拖动调整位置` };
     for (const [key, value] of Object.entries(attributes)) if (launcher.getAttribute(key) !== value) launcher.setAttribute(key, value);
   }
-  toggleOpen() { this.open = !this.open; this.node('.panel').hidden = !this.open; this.syncLauncher(); if (this.open) { if (this.latest) this.refresh(...this.latest); this.renderLogs(); this.positionPanel(); } }
+  toggleOpen() { this.open = !this.open; this.floating.setOpen(this.open); this.syncLauncher(); if (this.open) { if (this.latest) this.refresh(...this.latest); this.renderLogs(); this.charts.resize(); } }
   applyFeatureVisibility() {
     const enabled = key => Boolean(this.root.querySelector(`[data-field="${key}.enabled"]`)?.checked);
     for (const key of ['pk', ...interactionPages]) {
@@ -612,6 +617,7 @@ export class Panel {
       const categoryButton = this.root.querySelector(`[data-category="${category}"]`);
       categoryButton.hidden = !hasVisibleTab;
     }
+    this.navigation.sync(this.activeCategory);
     const visibleCategories = [...this.root.querySelectorAll('[data-category]')].filter(button => !button.hidden).length;
     this.root.querySelector('.primary-nav').style.gridTemplateColumns = `repeat(${Math.max(visibleCategories, 1)}, minmax(0, 1fr))`;
     const activeTab = this.root.querySelector(`[data-tab="${this.activeTab}"]`);
@@ -727,8 +733,8 @@ export class Panel {
     const category = interactionPages.includes(key) ? 'interaction' : 'settings';
     this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
-    for (const node of this.root.querySelectorAll('[data-subnav]')) node.hidden = node.dataset.subnav !== category;
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
+    this.navigation.sync(category);
     const featureByPage = { pk: null, anchor:null, gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword', bot:'bot', timers: 'timersEnabled' };
     for (const node of this.root.querySelectorAll('[data-page]')) {
       const feature = featureByPage[node.dataset.page];
@@ -754,41 +760,17 @@ export class Panel {
       if (e.target.dataset.field?.startsWith('identity.') && this.identity) this.updateIdentity(this.identity);
     };
     this.root.addEventListener('input', edited); this.root.addEventListener('change', edited);
-    const launcher = this.node('.launcher');
-    launcher.addEventListener('pointerdown', e => {
-      if (e.button !== undefined && e.button !== 0) return;
-      const rect = launcher.getBoundingClientRect();
-      this.drag = { id:e.pointerId, startX:e.clientX, startY:e.clientY, left:rect.left, top:rect.top, moved:false };
-      try { launcher.setPointerCapture(e.pointerId); } catch {}
-    });
-    this.onPointerMove = e => {
-      if (!this.drag || (this.drag.id != null && e.pointerId != null && this.drag.id !== e.pointerId)) return;
-      const dx=e.clientX-this.drag.startX, dy=e.clientY-this.drag.startY;
-      if (!this.drag.moved && Math.hypot(dx,dy)<5) return;
-      this.drag.moved=true; launcher.classList.add('dragging'); this.applyLauncherPosition(this.drag.left+dx,this.drag.top+dy); this.positionPanel(); e.preventDefault?.();
-    };
-    this.onPointerUp = e => {
-      if (!this.drag || (this.drag.id != null && e.pointerId != null && this.drag.id !== e.pointerId)) return;
-      if (this.drag.moved) {
-        const rect=launcher.getBoundingClientRect(), margin=window.innerWidth<=560?8:12;
-        const leftEdge=rect.left+rect.width/2 < window.innerWidth/2;
-        this.applyLauncherPosition(leftEdge?margin:window.innerWidth-rect.width-margin,rect.top,true);
-        launcher.classList.remove('dragging'); this.suppressLauncherClick=true;
-        clearTimeout(this.suppressClickTimer); this.suppressClickTimer=setTimeout(()=>{this.suppressLauncherClick=false;},0);
-        this.positionPanel();
-      }
-      this.drag=null;
-    };
-    window.addEventListener('pointermove',this.onPointerMove,{passive:false}); window.addEventListener('pointerup',this.onPointerUp); window.addEventListener('pointercancel',this.onPointerUp);
-    launcher.addEventListener('click', () => { if (this.suppressLauncherClick) { this.suppressLauncherClick=false; return; } this.toggleOpen(); });
     this.node('.nav').addEventListener('keydown', e => {
       if (e.defaultPrevented || e.isComposing || e.keyCode === 229 || e.repeat || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(e.key)) return;
-      const category = interactionPages.includes(this.activeTab) ? 'interaction' : 'settings';
-      const tabs = [...this.root.querySelectorAll(`[data-subnav="${category}"] [data-tab]`)].filter(tab => !tab.hidden);
+      const group = e.target.closest('[data-subnav]');
+      if (!group) return;
+      const vertical = group.getAttribute('aria-orientation') === 'vertical';
+      const forward = vertical ? 'ArrowDown' : 'ArrowRight', backward = vertical ? 'ArrowUp' : 'ArrowLeft';
+      if (![forward, backward, 'Home', 'End'].includes(e.key)) return;
+      const tabs = [...group.querySelectorAll('[data-tab]')].filter(tab => !tab.hidden);
       if (!tabs.length || !tabs.includes(this.root.activeElement)) return;
       e.preventDefault(); const current = tabs.indexOf(this.root.activeElement);
-      const i = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (current + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      const i = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (current + (e.key === forward ? 1 : -1) + tabs.length) % tabs.length;
       this.tab(tabs[i].dataset.tab); tabs[i].focus();
     });
     this.root.addEventListener('click', async e => {
@@ -979,5 +961,5 @@ export class Panel {
     this.syncFooter(); this.renderLastReply(); this.renderOverview(engine);
     for (const action of ['identify','test-ai','diagnose','refresh-anchor']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { this.anchorDashboard.destroy(); this.charts.destroy(); this.theme.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); clearTimeout(this.suppressClickTimer); window.removeEventListener('resize',this.onResize); window.removeEventListener('pointermove',this.onPointerMove); window.removeEventListener('pointerup',this.onPointerUp); window.removeEventListener('pointercancel',this.onPointerUp); this.host.remove(); }
+  destroy() { this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
 }

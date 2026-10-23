@@ -9,7 +9,7 @@ const number = value => Number.isFinite(value) ? value : null;
 
 // Chart options are shared by the panel and its local preview. Missing sides
 // remain null: a missing observation must never be plotted as a zero score.
-export function pkChartOptions(data, {windowMs = 180000, now = Date.now(), colors = {self:'#006d70',opponent:'#c91d43',text:'#60636d',line:'#e2e3e6'}} = {}) {
+export function pkChartOptions(data, {windowMs = 180000, now = Date.now(), widths = {}, colors = {self:'#006d70',opponent:'#c91d43',text:'#60636d',line:'#e2e3e6'}} = {}) {
   const all = data.trend || data.history?.filter(item=>item.kind === 'score') || [];
   const cutoff = windowMs ? now-windowMs : -Infinity;
   const before = all.filter(item=>item.at < cutoff).at(-1);
@@ -42,6 +42,16 @@ export function pkChartOptions(data, {windowMs = 180000, now = Date.now(), color
   const buckets=data.activity?.buckets || [], activityPoints=[];
   if(buckets.length)for(let at=Math.max(buckets[0].at,Math.floor((now-590000)/10000)*10000);at<=now;at+=10000)activityPoints.push(buckets.find(item=>item.at===at) || {at,chat:0,enter:0,gift:0});
   const activity={...base,color:[colors.self,colors.opponent,colors.text],legend:{...base.legend,itemHeight:8},xAxis:{...base.xAxis,min:activityPoints[0]?.at,max:now},series:[['chat','弹幕'],['enter','进场'],['gift','礼物件数']].map(([field,name])=>line(name,activityPoints.map(item=>[item.at,item[field]]),{smooth:false}))};
+  // Density follows each plot's available area, not the browser viewport. A wide
+  // dashboard can still contain a narrow secondary plot.
+  for (const [name, option] of Object.entries({scores,gap,activity})) {
+    const width = widths[name] || 480;
+    option.xAxis = {...option.xAxis,splitNumber:width < 360 ? 2 : width < 600 ? 4 : 6};
+    option.yAxis = {...option.yAxis,splitNumber:4};
+    option.legend = {...option.legend,type:'scroll',right:0};
+  }
+  contributions.yAxis.axisLabel.width = (widths.contributions || 480) < 360 ? 76 : 110;
+  contributions.xAxis.splitNumber = (widths.contributions || 480) < 360 ? 2 : 4;
   return {scores,gap,contributions,activity,pointCount:points.length,gapCount:points.filter(point=>Number.isFinite(point.selfScore)&&Number.isFinite(point.opponentScore)).length,contributorCount:users.length,activityCount:activityPoints.length};
 }
 
@@ -50,7 +60,10 @@ export class LiveCharts {
     this.root=root;this.instances=new Map();this.windowMs=180000;this.lastRender=0;
     const view=root.host.ownerDocument.defaultView;
     this.view=view;
-    if (view.ResizeObserver) {this.observer=new view.ResizeObserver(()=>this.resize());this.observer.observe(root.querySelector('[data-pk-chart="scores"]'));}
+    if (view.ResizeObserver) {
+      this.observer=new view.ResizeObserver(()=>this.queueResize());
+      for(const element of root.querySelectorAll('[data-pk-chart]'))this.observer.observe(element);
+    }
     this.themeObserver=new view.MutationObserver(()=>{this.lastSignature='';if(this.lastData)this.render(this.lastData,true);});
     this.themeObserver.observe(root.host,{attributes:true,attributeFilter:['data-theme']});
     this.media=view.matchMedia?.('(prefers-color-scheme: dark)');
@@ -69,13 +82,14 @@ export class LiveCharts {
     if (!force && signature===this.lastSignature) return;
     this.lastSignature=signature;this.lastRender=Date.now();
     const style=this.view.getComputedStyle(this.root.host);
-    const options=pkChartOptions(data,{windowMs:this.windowMs,colors:{self:style.getPropertyValue('--sg-success').trim(),opponent:style.getPropertyValue('--sg-brand').trim(),text:style.getPropertyValue('--sg-muted').trim(),line:style.getPropertyValue('--sg-border').trim()}});
+    const widths=Object.fromEntries([...this.root.querySelectorAll('[data-pk-chart]')].map(element=>[element.dataset.pkChart,element.clientWidth]));
+    const options=pkChartOptions(data,{windowMs:this.windowMs,widths,colors:{self:style.getPropertyValue('--sg-success').trim(),opponent:style.getPropertyValue('--sg-brand').trim(),text:style.getPropertyValue('--sg-muted').trim(),line:style.getPropertyValue('--sg-border').trim()}});
     for(const name of ['scores','gap','contributions','activity']) {
       const element=this.root.querySelector(`[data-pk-chart="${name}"]`);
       const count=name==='contributions' ? options.contributorCount : name==='activity' ? options.activityCount : name==='gap' ? options.gapCount : options.pointCount;
       element.hidden=!count;
       element.nextElementSibling.hidden=Boolean(count);
-      if(!count)continue;
+      if(!count || !element.clientWidth || !element.clientHeight)continue;
       try {
         let chart=this.instances.get(name);
         if(!chart) {chart=init(element,null,{renderer:'svg'});this.instances.set(name,chart);}
@@ -86,6 +100,19 @@ export class LiveCharts {
       }
     }
   }
-  resize() {for(const chart of this.instances.values())chart.resize();if(this.lastData)this.render(this.lastData,true);}
-  destroy() {this.view.clearTimeout(this.timer);this.observer?.disconnect();this.themeObserver.disconnect();this.media?.removeEventListener('change',this.onTheme);for(const chart of this.instances.values())chart.dispose();this.instances.clear();}
+  queueResize() {
+    if(this.resizeFrame)return;
+    this.resizeFrame=this.view.requestAnimationFrame(()=>{
+      this.resizeFrame=null;
+      for(const [name,chart] of this.instances) {
+        const element=this.root.querySelector(`[data-pk-chart="${name}"]`);
+        if(element.clientWidth && element.clientHeight)chart.resize();
+      }
+      // Resizing stays direct. Rebuild data/axis density after the gesture rests.
+      this.view.clearTimeout(this.resizeTimer);
+      this.resizeTimer=this.view.setTimeout(()=>{if(this.lastData)this.render(this.lastData,true);},120);
+    });
+  }
+  resize() {this.queueResize();if(this.lastData)this.render(this.lastData,true);}
+  destroy() {this.view.clearTimeout(this.timer);this.view.clearTimeout(this.resizeTimer);this.view.cancelAnimationFrame(this.resizeFrame);this.observer?.disconnect();this.themeObserver.disconnect();this.media?.removeEventListener('change',this.onTheme);for(const chart of this.instances.values())chart.dispose();this.instances.clear();}
 }

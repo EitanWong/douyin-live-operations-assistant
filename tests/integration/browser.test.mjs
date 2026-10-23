@@ -559,14 +559,13 @@ test('主分类导航收敛二级页面；悬浮按钮可拖动吸附并记住�
     assert.equal(p.activeTab,'gift'); assert.equal(p.node('[data-subnav="interaction"]').hidden,false); assert.equal(p.node('[data-subnav="settings"]').hidden,true);
     p.node('[data-tab="welcome"]').click(); assert.equal(p.activeTab,'welcome');
     const launcher=p.node('.launcher');
-    launcher.getBoundingClientRect=()=>{const left=parseFloat(launcher.style.left)||0,top=parseFloat(launcher.style.top)||0;return {left,top,right:left+100,bottom:top+30,width:100,height:30};};
     const pointer=(type,x,y)=>{const e=new dom.window.Event(type,{bubbles:true,cancelable:true});Object.assign(e,{clientX:x,clientY:y,pointerId:1,button:0});return e;};
-    const start=launcher.getBoundingClientRect(); launcher.dispatchEvent(pointer('pointerdown',start.left+10,start.top+10));
+    const start={left:p.floating.x.value,top:p.floating.y.value}; launcher.dispatchEvent(pointer('pointerdown',start.left+10,start.top+10));
     dom.window.dispatchEvent(pointer('pointermove',start.left+310,start.top+120));
-    assert.equal(launcher.classList.contains('dragging'),true);
+    p.floating.flushGesture(); assert.equal(launcher.classList.contains('dragging'),true);
     dom.window.dispatchEvent(pointer('pointerup',start.left+310,start.top+120)); launcher.dispatchEvent(new dom.window.Event('click',{bubbles:true}));
     assert.equal(launcher.classList.contains('dragging'),false);
-    assert.equal(p.open,true); assert.ok(parseFloat(launcher.style.left)>dom.window.innerWidth/2); assert.equal(dom.window.localStorage.getItem('douyin-live-assistant:launcher')!==null,true);
+    assert.equal(p.open,true); assert.ok(p.floating.x.target>dom.window.innerWidth/2); assert.equal(dom.window.localStorage.getItem('douyin-live-assistant:launcher')!==null,true);
     p.toggleOpen();
     assert.equal(launcher.getAttribute('aria-expanded'),'false');
     assert.match(launcher.getAttribute('aria-label'),/展开场控面板/);
@@ -578,7 +577,7 @@ test('主分类导航收敛二级页面；悬浮按钮可拖动吸附并记住�
     assert.equal(launcher.classList.contains('running'),false);
     assert.equal(p.node('.launcher span').textContent,'已暂停');
     Object.defineProperty(dom.window,'innerWidth',{configurable:true,value:320}); dom.window.dispatchEvent(new dom.window.Event('resize'));
-    assert.ok(parseFloat(launcher.style.left)+100<=320);
+    assert.ok(p.floating.x.value+p.floating.launcherWidth<=320);
   } finally {p.destroy();dom.window.close();}
 });
 test('近期送礼列表显示已知字段并安全转义昵称与礼物名', () => {

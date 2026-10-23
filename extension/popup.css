@@ -1,4 +1,4 @@
-body{margin:0;width:360px;max-height:600px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--sg-scroll) transparent;background:var(--sg-background);color:var(--sg-foreground);font:13px/1.65 var(--sg-font);-webkit-font-smoothing:antialiased}
+body{margin:0;width:360px;max-width:100vw;max-height:600px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--sg-scroll) transparent;background:var(--sg-background);color:var(--sg-foreground);font:13px/1.65 var(--sg-font);-webkit-font-smoothing:antialiased}
 header{display:flex;align-items:center;gap:12px;padding:20px 22px 16px;border-bottom:1px solid var(--sg-border)}
 .symbol{width:34px;height:34px;border-radius:8px;background:var(--sg-brand-wash);color:var(--sg-brand);display:grid;place-items:center;flex-shrink:0}
 .symbol svg{width:21px;height:21px}
@@ -21,6 +21,8 @@ details .hint{margin:10px 0 0}
 footer{margin-top:14px;padding:12px 22px;border-top:1px solid var(--sg-border);color:var(--sg-muted);font-size:12px;background:var(--sg-panel)}
 .theme-setting{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0;font-size:12px}
 .theme-setting select{width:124px;padding:5px 8px;min-height:32px}
+header>div,main,footer,input,select{min-width:0;max-width:100%}.theme-setting{flex-wrap:wrap}h1,.hint,footer p{overflow-wrap:anywhere}
+@media(max-width:340px){header{padding:16px;gap:9px}main{padding-inline:16px}footer{padding-inline:16px}h1{font-size:16px}.theme-setting select{flex:1;max-width:160px}}
 footer p{font-size:11px;margin:9px 0 0}
 ::selection{background:var(--sg-brand-wash);color:var(--sg-foreground)}input{caret-color:var(--sg-brand)}
 @media(prefers-reduced-motion:no-preference){main{animation:popup-enter 160ms cubic-bezier(.16,1,.3,1) both}@keyframes popup-enter{from{opacity:.7;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}}

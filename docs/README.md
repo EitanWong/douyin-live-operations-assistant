@@ -21,6 +21,8 @@
 
 ## 调研资料
 
+- [侧边栏与界面组件](research/sidebar-and-ui-components-2026-10-23.zh-CN.md)：左右布局、折叠交互、Lucide 许可与组件边界。
+- [悬浮窗口交互与动效](research/floating-window-motion-2026-10-23.zh-CN.md)：Apple 交互原则、开源组件比较、可打断弹簧与窗口响应式设计。
 - [功能与市场调研](research/market-research.zh-CN.md)
 - [2026-10-16 泛娱乐市场与开源项目调研](research/market-research-2026-10-16.zh-CN.md)
 - [LiveBot 参考脚本复盘](research/livebot-review.zh-CN.md)

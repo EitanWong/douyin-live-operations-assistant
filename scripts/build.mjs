@@ -37,12 +37,16 @@ const header = `// ==UserScript==
 // ==/UserScript==
 `;
 const chartBundle = (await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,write:false,format:'iife',globalName:'LiveAssistantCharts',minify:true,legalComments:'inline',target:'chrome111'})).outputFiles[0].text + '\nconst { LiveCharts } = LiveAssistantCharts;\n';
-const files = ['runtime/journal', 'runtime/delivery', 'runtime/inbox', 'runtime/live-metrics', 'runtime/health', 'data/interaction-questions', 'core/bot', 'core/phrases', 'core/audience', 'core/milestones', 'core/anchor-stats', 'pk/model', 'core/engine', 'browser/protocol', 'services/ai', 'browser/identity', 'browser/request-sender', 'browser/anchor-data', 'browser/adapter', 'ui/solid-glass', 'ui/theme', 'ui/live-charts', 'ui/stat-visuals', 'ui/anchor-view-model', 'ui/anchor-template', 'ui/anchor-styles', 'ui/anchor-dashboard', 'ui/panel', 'data/gifts', 'app'];
+const iconLicense = await readFile(`${root}vendor/lucide/LICENSE`, 'utf8');
+async function readBuildModule(name) {
+  const source = name === 'ui/live-charts' ? chartBundle : await readFile(`${root}src/${name}.js`, 'utf8');
+  const notice = name === 'ui/icons' ? `/*! Lucide icon subset\n${iconLicense}\n*/\n` : '';
+  return notice + source.replace(/^import\s+.*?;\s*$/gm, '').replace(/^export\s+/gm, '');
+}
+const files = ['runtime/journal', 'runtime/delivery', 'runtime/inbox', 'runtime/live-metrics', 'runtime/health', 'data/interaction-questions', 'core/bot', 'core/phrases', 'core/audience', 'core/milestones', 'core/anchor-stats', 'pk/model', 'core/engine', 'browser/protocol', 'services/ai', 'browser/identity', 'browser/request-sender', 'browser/anchor-data', 'browser/adapter', 'ui/solid-glass', 'ui/theme', 'ui/live-charts', 'ui/stat-visuals', 'ui/anchor-view-model', 'ui/anchor-template', 'ui/anchor-styles', 'ui/anchor-dashboard', 'ui/spring', 'ui/floating-window', 'ui/floating-styles', 'ui/adaptive-layout', 'ui/adaptive-styles', 'ui/icons', 'ui/navigation', 'ui/navigation-styles', 'ui/panel', 'data/gifts', 'app'];
 let body = '';
 for (const name of files) {
-  let source = name === 'ui/live-charts' ? chartBundle : await readFile(`${root}src/${name}.js`, 'utf8');
-  source = source.replace(/^import\s+.*?;\s*$/gm, '').replace(/^export\s+/gm, '');
-  body += `\n// --- ${name}.js ---\n${source}`;
+  body += `\n// --- ${name}.js ---\n${await readBuildModule(name)}`;
 }
 await mkdir(dist, { recursive: true });
 await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/live-charts.js`});
@@ -59,7 +63,7 @@ await writeFile(`${ext}/ai.js`,await readFile(`${root}src/services/ai.js`));
 await writeFile(`${ext}/gifts.js`,await readFile(`${root}src/data/gifts.js`));
 async function bundle(names, entry, async = false) {
   let code='';
-  for (const name of names) code += (name === 'ui/live-charts' ? chartBundle : await readFile(`${root}src/${name}.js`,'utf8')).replace(/^import\s+.*?;\s*$/gm,'').replace(/^export\s+/gm,'') + '\n';
+  for (const name of names) code += await readBuildModule(name) + '\n';
   return `(${async ? 'async ' : ''}() => {\n'use strict';\n${code}\n${await readFile(`${root}extension/${entry}.js`,'utf8')}\n})();\n`;
 }
 await writeFile(`${ext}/page.js`,await bundle(['runtime/delivery','runtime/live-metrics','data/interaction-questions', 'core/bot','core/phrases','core/audience','core/milestones','core/anchor-stats','pk/model','core/engine','browser/protocol','browser/request-sender','browser/anchor-data','browser/adapter'],'page'));
@@ -68,6 +72,7 @@ await mkdir(`${ext}/icons`,{recursive:true});
 for (const size of [16,48,128]) await writeFile(`${ext}/icons/${size}.png`,await readFile(`${root}extension/icons/${size}.png`));
 let chartLicenses='';
 for(const name of ['echarts/LICENSE','echarts/NOTICE','echarts/licenses/LICENSE-d3','zrender/LICENSE','tslib/LICENSE.txt','tslib/CopyrightNotice.txt'])chartLicenses+=`${name}\n${await readFile(`${root}node_modules/${name}`,'utf8')}\n\n`;
+chartLicenses += `Lucide icon subset (vendor/lucide)\n${iconLicense}\n`;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 console.log('Built dist/chrome-extension (Manifest V3)');
