@@ -16,6 +16,11 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "esbuild": "^0.25.12",
+    "fake-indexeddb": "^6.2.6",
     "jsdom": "^26.1.0"
+  },
+  "dependencies": {
+    "echarts": "^6.1.0"
   }
 }

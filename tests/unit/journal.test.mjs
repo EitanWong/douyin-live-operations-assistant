@@ -23,6 +23,15 @@ test('快照写入失败会拒绝检查点，后续快照仍可继续保存', as
   await writer.save(2); assert.equal(writer.running, false);
 });
 
+test('扩展上下文失效后运行快照熔断，不重复调用存储', async () => {
+  let writes = 0;
+  const writer = new RuntimeWriter(async () => { writes++; throw new Error('Extension context invalidated.'); });
+  await assert.rejects(writer.save(1), /context invalidated/i);
+  await assert.rejects(writer.save(2), /context invalidated/i);
+  assert.equal(writes, 1);
+  assert.equal(writer.pending, null);
+});
+
 test('持续积压串行确认，每批最多50条；慢存储期间不堆积检查点', async () => {
   const gate = deferred(), batches = []; let checkpoints = 0;
   const committer = new JournalCommitter({ delay:60000, checkpoint:async () => { checkpoints++; if (checkpoints === 1) await gate.promise; }, ack:async keys => { batches.push(keys); } });
@@ -67,4 +76,26 @@ test('页面离开时不确认在途快照，返回后继续；重复待确认�
     assert.equal(acks, 0); assert.equal(committer.pending.size, 1); assert.equal(committer.timer, null);
     active = true; await committer.flush(); assert.equal(acks, 1); assert.equal(committer.pending.size, 0);
   } finally { gate.resolve(); committer.pause(); }
+});
+
+test('扩展上下文失效后停止日志确认重试并保留待确认键', async () => {
+  let checkpoints = 0, errors = 0;
+  const committer = new JournalCommitter({
+    delay:60000,
+    checkpoint:async () => { checkpoints++; throw new Error('Extension context invalidated.'); },
+    ack:async () => assert.fail('失效后不能确认日志'),
+    onError:() => { errors++; }
+  });
+  committer.add('pending-event');
+  try {
+    await committer.flush();
+    assert.equal(checkpoints, 1);
+    assert.equal(errors, 1);
+    assert.deepEqual([...committer.pending], ['pending-event']);
+    assert.match(committer.failure?.message || '', /context invalidated/i);
+    committer.add('later-event');
+    assert.equal(committer.timer, null);
+    assert.equal(await committer.flush(), undefined);
+    assert.equal(checkpoints, 1);
+  } finally { committer.pause(); }
 });

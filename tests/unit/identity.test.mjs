@@ -43,3 +43,14 @@ test('关闭识别取消请求且不发布晚到资料', async () => {
   const reader=new IdentityReader({page,room:'1',onIdentity:()=>published++}); const task=reader.refresh(); reader.close(); await task;
   assert.equal(published,0); assert.equal(reader.controllers.size,0);
 });
+
+test('房间接口解析真实直播ID和开播下播时间，未知状态不猜测且保留64位ID', () => {
+  const observedAt=Date.parse('2026-10-23T04:00:00Z'),startAt=observedAt-3600000;
+  const data=parseIdentityJSON(`{"data":{"data":[{"web_rid":"1","id":9876543210987654321,"status":2,"create_time":${startAt/1000}}]}}`);
+  assert.deepEqual(identityFromResponse('anchor',data,'1',observedAt).live,
+    {roomId:'9876543210987654321',status:'live',startAt,endAt:0,observedAt});
+  const info=data.data.data[0];info.status=4;info.finish_time=observedAt/1000;
+  assert.equal(identityFromResponse('anchor',data,'1',observedAt).live.endAt,observedAt);
+  info.status=3;assert.equal(identityFromResponse('anchor',data,'1',observedAt).live,undefined);
+  info.status=2;info.web_rid='2';assert.deepEqual(identityFromResponse('anchor',data,'1',observedAt),{});
+});

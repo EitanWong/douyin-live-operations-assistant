@@ -1,7 +1,13 @@
 import { addressedToSelf, RoomBot } from './bot.js';
 import { DEFAULT_PHRASES, choosePhrase } from './phrases.js';
 import { DeliveryTracker } from '../runtime/delivery.js';
+import { LiveMetrics } from '../runtime/live-metrics.js';
 import { PKTracker, PK_EVENT_TYPES } from '../pk/model.js';
+import { milestoneThankYou, recognizeMilestone } from './milestones.js';
+import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplate, validAudienceAI } from './audience.js';
+import { AnchorStats } from './anchor-stats.js';
+
+export { recognizeMilestone };
 
 export const DEFAULTS = {
   version: 2,
@@ -14,13 +20,13 @@ export const DEFAULTS = {
   // 消息按优先级连续出队；发送控件本身仍串行确认每条消息。
   sending: { maxLength: 50, duplicateSec: 120, queueLimit: 200 },
   gift: {
-    enabled: true, responseMode: 'rules', minValue: 2, basis: 'total', mergeSec: 0, cooldownSec: 0, batchEnabled: true, yuanPerDiamond: 0.05,
+    enabled: true, responseMode: 'rules', minValue: 1, basis: 'total', mergeSec: 0, cooldownSec: 0, batchEnabled: true, yuanPerDiamond: 0.05,
     prices: {}, templates: DEFAULT_PHRASES.gift
   },
   welcome: {
     enabled: true, responseMode: 'rules', mode: 'qualified-or-listed', minWealth: 30, requireFan: true,
     minFanLevel: 1, requireLit: true, listed: [], cooldownSec: 0,
-    admin: { enabled: false, minWealth: 60 },
+    admin: { enabled: false, minWealth: 60, minFanLevel: 1 },
     templates: DEFAULT_PHRASES.welcome
   },
   like: {
@@ -38,7 +44,7 @@ export const DEFAULTS = {
     knowledge: '', temperature: 0.7
   },
   timers: [{ id: 'welcome', enabled: false, responseMode: 'rules', intervalSec: 300, start: '', end: '', quietSec: 15, messages: ['喜欢直播内容的朋友，可以点点关注～', '欢迎新来的朋友，一起聊聊吧！'] }],
-  adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', endSelector: '' }
+  adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', startSelector: '', endSelector: '' }
 };
 
 export const copy = value => JSON.parse(JSON.stringify(value));
@@ -58,6 +64,11 @@ export function mergeConfig(input = {}, base = DEFAULTS) {
   }
   if (base === DEFAULTS && input.timersEnabled === undefined) result.timersEnabled = result.timers.some(timer => timer.enabled);
   if (base === DEFAULTS && result.mode === 'review') result.mode = 'auto';
+  // 为旧版仅含荣誉门槛的配置补齐灯牌条件，保留原有配置与基础欢迎下限。
+  if (base === DEFAULTS && input.welcome?.admin?.minFanLevel === undefined) {
+    result.welcome.admin.minWealth = Math.max(result.welcome.admin.minWealth, result.welcome.minWealth);
+    result.welcome.admin.minFanLevel = Math.max(result.welcome.admin.minFanLevel, result.welcome.minFanLevel);
+  }
   if (base === DEFAULTS && (input.version || 1) < 2) {
     result.version = 2;
     for (const feature of ['gift','welcome','like','keyword']) result[feature].cooldownSec = 0;
@@ -87,6 +98,9 @@ export function validateConfig(c) {
   range(c.welcome.minWealth, 0, 100, '荣誉等级'); range(c.welcome.minFanLevel, 0, 100, '粉丝团等级');
   if (typeof c.welcome.admin.enabled !== 'boolean') throw new Error('管理员弹幕开关无效');
   range(c.welcome.admin.minWealth, 1, 100, '管理员弹幕最低荣誉等级');
+  range(c.welcome.admin.minFanLevel, 0, 100, '管理员弹幕最低灯牌等级');
+  if (c.welcome.admin.enabled && c.welcome.admin.minWealth < c.welcome.minWealth) throw new Error('管理员弹幕最低荣誉等级不能低于基础欢迎的最低荣誉等级');
+  if (c.welcome.admin.enabled && c.welcome.admin.minFanLevel < c.welcome.minFanLevel) throw new Error('管理员弹幕最低灯牌等级不能低于基础欢迎的最低粉丝团等级');
   range(c.keyword.cooldownSec, 0, 3600, '关键词用户冷却');
   for (const value of Object.values(c.bot)) if (typeof value !== 'boolean') throw new Error('机器人功能开关无效');
   range(c.like.cooldownSec, 0, 3600, '点赞用户感谢间隔');
@@ -126,6 +140,7 @@ export function matchesUser(user, list) {
     return user.id === item; // 未加前缀的条目只能按 UID 匹配，绝不猜昵称。
   });
 }
+
 export function welcomeDecision(user, config) {
   const w = config.welcome;
   const listed = matchesUser(user, w.listed);
@@ -174,11 +189,19 @@ export class Engine {
     this.timerDue = new Map(); this.rotation = new Map(); this.selfTexts = new Map(); this.offenses = new Map(); this.selfIdentity = null; this.giftStyleSerial = 0;
     this.lastMaintenance = -Infinity;
     this.giftSentAt = new Map();
+    this.milestoneSeen = new Map();
+    this.milestoneSession = {roomId:'',endedAt:null};
+    this.audience = new AudienceProfiles({now});
     this.inFlight = null;
     this.deliveries = new DeliveryTracker({now});
     this.backlogLimit = 2000;
     this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity;
     this.pk = new PKTracker({ now });
+    this.liveMetrics = new LiveMetrics({now});
+    this.pkSeen = new Map();
+    this.roomData = {stats:null,audience:null,activities:[]};
+    this.anchorStats = new AnchorStats({now});
+    this.observationSignatures = new Map();
     this.stats = { events: 0, filtered: 0, previews: 0, submitted: 0, aiCalls: 0, retries: 0, expired: 0, overflow: 0, maxQueueWaitMs: 0 };
   }
   update(config) {
@@ -195,11 +218,11 @@ export class Engine {
       version: 1, savedAt: this.now(), running: this.running || Boolean(this.resumeRequested),
       queue: this.queue, gifts: [...this.gifts.entries()], bot, botQuestions:this.bot.questionHistory,
       seen: entries(this.seen), cooldowns: entries(this.cooldowns), duplicates: entries(this.duplicates),
-      timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt),
+      timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen), milestoneSession:this.milestoneSession,
       history: this.history.slice(-80), stats: this.stats, serial: this.serial,
       lastInteraction: this.lastInteraction, lastChat: this.lastChat,
-      inFlight: this.inFlight, deliveries:this.deliveries.snapshot()
-      , pk: this.pk.export()
+      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), audience:this.audience.snapshot()
+      , pk: this.pk.export(), roomData:this.roomData, anchorStats:this.anchorStats.snapshot()
     });
   }
   restore(snapshot) {
@@ -219,7 +242,11 @@ export class Engine {
       this.bot.session = { ...snapshot.bot, used: Array.isArray(snapshot.bot.used) ? new Set(snapshot.bot.used) : undefined };
       if (snapshot.bot.type === 'idiom') this.bot.chain = { word:snapshot.bot.word, used:new Set(snapshot.bot.used || []), at:snapshot.bot.lastAt };
     }
-    for (const [property, value] of [['seen',snapshot.seen],['cooldowns',snapshot.cooldowns],['duplicates',snapshot.duplicates],['timerDue',snapshot.timerDue],['rotation',snapshot.rotation],['giftSentAt',snapshot.giftSentAt]]) this[property] = map(value);
+    for (const [property, value] of [['seen',snapshot.seen],['cooldowns',snapshot.cooldowns],['duplicates',snapshot.duplicates],['timerDue',snapshot.timerDue],['rotation',snapshot.rotation],['giftSentAt',snapshot.giftSentAt],['milestoneSeen',snapshot.milestoneSeen]]) this[property] = map(value);
+    // 旧快照按排名存储；同一个用户的不同排名合并为本场的一条记录。
+    this.milestoneSeen = new Map([...this.milestoneSeen].map(([key,at]) => [key.replace(/^(contribution:.*):\d+$/u,'$1'),at]));
+    this.milestoneSession = {roomId:String(snapshot.milestoneSession?.roomId || ''),endedAt:Number.isFinite(snapshot.milestoneSession?.endedAt) ? snapshot.milestoneSession.endedAt : null};
+    this.audience.restore(snapshot.audience);
     this.history = Array.isArray(snapshot.history) ? snapshot.history.slice(-80) : [];
     this.stats = snapshot.stats && typeof snapshot.stats === 'object' ? { ...this.stats, ...snapshot.stats } : this.stats;
     this.serial = Number.isSafeInteger(snapshot.serial) ? snapshot.serial : this.serial;
@@ -227,15 +254,29 @@ export class Engine {
     this.lastChat = Number.isFinite(snapshot.lastChat) ? snapshot.lastChat : this.now();
     this.deliveries.restore(snapshot.deliveries || []);
     this.pk.restore(snapshot.pk || {});
+    this.anchorStats.restore(snapshot.anchorStats || {});
+    this.liveMetrics.restore(snapshot.liveMetrics);
+    if (snapshot.roomData && typeof snapshot.roomData === 'object') this.roomData = {
+      stats:snapshot.roomData.stats && typeof snapshot.roomData.stats === 'object' ? snapshot.roomData.stats : null,
+      audience:snapshot.roomData.audience && typeof snapshot.roomData.audience === 'object' ? snapshot.roomData.audience : null,
+      activities:Array.isArray(snapshot.roomData.activities) ? snapshot.roomData.activities.slice(-100) : []
+    };
     const uncertain = this.queue.filter(job => job.deliveryUncertain);
     this.queue = this.queue.filter(job => !job.deliveryUncertain);
     const tracked = new Set(this.deliveries.records.flatMap(record => record.jobs.map(job => job.id)));
     const knownFlight = this.deliveries.records.some(record=>record.id === snapshot.inFlight?.deliveryId);
     for (const job of [...(knownFlight ? [] : snapshot.inFlight?.jobs || []), ...uncertain]) if (!tracked.has(job.id)) {
       const record = this.deliveries.create(snapshot.inFlight?.text || job.text, [job], this.selfIdentity || {id:this.config.selfId});
-      this.deliveries.finish(record,'unknown','刷新前发送结果未知；自动重发'); tracked.add(job.id);
+      this.deliveries.finish(record,'unknown','刷新前发送结果未知；不自动重发'); tracked.add(job.id);
     }
-    for (const record of this.deliveries.pending()) this.retryDelivery(record, '页面恢复后自动重发');
+    // 旧版会把回显超时的消息重新放入队列；升级恢复时也不能再次点击。
+    for (const record of this.deliveries.records) if (record.state === 'retrying' && !record.retrySafe) {
+      const ids = new Set(record.retryJobIds || []);
+      this.queue = this.queue.filter(job=>!ids.has(job.id));
+      record.retryJobIds = [];
+      this.deliveries.finish(record,'unknown','旧版发送结果未知；不自动重发');
+    }
+    for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
     this.queue = this.queue.filter(job=>!job.deliveryUncertain);
     this.rebuildGiftIndex();
     this.resumeRequested = Boolean(snapshot.running);
@@ -247,6 +288,39 @@ export class Engine {
     const selfId = this.config.selfId || this.selfIdentity?.id;
     const selfSecUid = this.selfIdentity?.secUid;
     return Boolean((selfId && user.id && String(user.id) === String(selfId)) || (selfSecUid && user.secUid && user.secUid === selfSecUid));
+  }
+  acceptMilestone(milestone) {
+    if (!milestone?.name || !milestoneThankYou(milestone)) return false;
+    const key = milestone.kind === 'contribution' ? `contribution:${milestone.name}` : `${milestone.kind}:${milestone.name}:${milestone.rank ?? ''}`;
+    const now = this.now(), previous = this.milestoneSeen.get(key);
+    if (Number.isFinite(previous) && (milestone.kind === 'contribution' || now - previous < 600000)) return false;
+    this.milestoneSeen.set(key, now);
+    this.pruneMilestones(now);
+    while (this.milestoneSeen.size > 5000) this.milestoneSeen.delete(this.milestoneSeen.keys().next().value);
+    return true;
+  }
+  pruneMilestones(now) {
+    // 贡献达标是本场的一次性事件，不能随普通冷却窗口过期。
+    for (const [key, at] of this.milestoneSeen) if (!key.startsWith('contribution:') && now - at >= 600000) this.milestoneSeen.delete(key);
+  }
+  queueMilestone(milestone) {
+    const profile = this.audience.findByName(milestone?.name);
+    const canonical = profile ? {...milestone,name:profile.name} : milestone;
+    if (!this.acceptMilestone(canonical)) return;
+    const text = milestoneThankYou(canonical,profile ? audienceAddress(profile,this.now()) : canonical.name);
+    this.lastInteraction = this.now(); this.enqueue('milestone',text);
+  }
+  observeMilestoneSession(event) {
+    const roomId = event.source === 'socket' && ['chat','gift','start'].includes(event.type) ? String(event.roomId || '') : '';
+    const nextSession = roomId && this.milestoneSession.roomId && roomId !== this.milestoneSession.roomId
+      || event.type === 'start' && this.milestoneSession.endedAt !== null && (event.receivedAt || event.at || this.now()) > this.milestoneSession.endedAt;
+    if (nextSession) {
+      for (const key of this.milestoneSeen.keys()) if (key.startsWith('contribution:')) this.milestoneSeen.delete(key);
+      for (const text of this.duplicates.keys()) if (recognizeMilestone(text)?.kind === 'contribution') this.duplicates.delete(text);
+      this.milestoneSession.endedAt = null;
+    }
+    if (roomId) this.milestoneSession.roomId = roomId;
+    if (event.type === 'end') this.milestoneSession.endedAt = event.receivedAt || event.at || this.now();
   }
   acceptsSelfGameChat(event) {
     if (!this.running || event?.type !== 'chat' || !this.config.bot.enabled || (this.selfTexts.get(event.text) || 0) > this.now()) return false;
@@ -268,8 +342,8 @@ export class Engine {
     this.stats.echoed = (this.stats.echoed || 0) + 1;
     this.log('sent',`已回显（${record.latencyMs} ms）：${record.text}`); this.changed(); return true;
   }
-  retryDelivery(record, reason = '发送结果未知；自动重发') {
-    if (!record?.jobs?.length) return false;
+  retryDelivery(record, reason = '发送未完成；稍后重试') {
+    if (!record?.jobs?.length || !['prepared','failed'].includes(record.state)) return false;
     const queued = new Set(this.queue.map(job=>job.id));
     const delay = Math.min(30000, 500 * 2 ** Math.min(record.attempts || 0, 6));
     for (const source of record.jobs) {
@@ -280,6 +354,7 @@ export class Engine {
       this.queue.push(job); this.indexGiftJob(job); queued.add(job.id);
     }
     record.retryJobIds = record.jobs.map(job=>job.id);
+    record.retrySafe = true;
     record.attempts = (record.attempts || 0) + 1;
     record.jobs = [];
     this.deliveries.finish(record,'retrying',`${reason}；${Math.ceil(delay/1000)} 秒后重试`);
@@ -298,7 +373,7 @@ export class Engine {
     if (this.running) return;
     const resuming = Boolean(this.resumeRequested);
     this.running = true; this.resumeRequested = false; this.epoch++;
-    for (const record of this.deliveries.pending()) this.retryDelivery(record, '运行恢复后自动重发');
+    for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
     if (!resuming) { this.lastChat = this.now(); this.lastInteraction = this.now(); this.timerDue.clear(); }
     this.log('system', resuming ? '场控已从上次状态恢复' : '场控已开始'); this.changed();
   }
@@ -315,7 +390,7 @@ export class Engine {
     if (preserveWork && this.inFlight?.deliveryId) {
       const record = this.deliveries.records.find(item=>item.id === this.inFlight.deliveryId);
       if (record && ['prepared','clicked'].includes(record.state)) {
-        this.deliveries.finish(record,'unknown','运行中断，结果未知；恢复后自动重发');
+        this.deliveries.finish(record,'unknown','运行中断，结果未知；不自动重发');
       }
     }
     if (!preserveWork) this.resumeRequested = false;
@@ -330,8 +405,14 @@ export class Engine {
     return choosePhrase(this.rotation, key, templates);
   }
   welcomeChannel(user) {
-    const rule = this.config.welcome.admin;
-    return rule.enabled && Number.isFinite(user?.wealthLevel) && user.wealthLevel >= rule.minWealth ? 'admin' : 'chat';
+    const w = this.config.welcome, rule = w.admin;
+    if (!rule.enabled || !Number.isFinite(user?.wealthLevel) || user.wealthLevel < Math.max(rule.minWealth, w.minWealth)) return 'chat';
+    const minFanLevel = Math.max(rule.minFanLevel, w.minFanLevel);
+    if (minFanLevel > 0 || w.requireFan) {
+      const club = this.config.anchorId && user.fanClubs?.find(f => f.anchorId === this.config.anchorId);
+      if (!club || !Number.isFinite(club.level) || club.level < minFanLevel || (w.requireFan && w.requireLit && club.status !== 1)) return 'chat';
+    }
+    return 'admin';
   }
   filtered(reason) { this.stats.filtered++; this.log('filter', reason); }
   indexGiftJob(job) {
@@ -356,7 +437,7 @@ export class Engine {
     const now = this.now();
     const eventReplies = kind === 'gift' || kind === 'like' || kind === 'bot';
     if (!eventReplies && ((this.duplicates.get(checked.text) ?? -Infinity) + this.config.sending.duplicateSec * 1000 > now || this.queue.some(q => q.text === checked.text))) { this.filtered('重复话术已过滤'); return false; }
-    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, bot: 90, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
+    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, bot: 90, milestone: 85, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
     // 礼物是已发生的事实，不能因为普通互动积压而静默丢弃。
     // 普通互动仍受 queueLimit 约束，并优先淘汰低优先级、较旧的任务。
     const isGift = kind === 'gift' || extra.giftReply;
@@ -377,6 +458,31 @@ export class Engine {
   ingest(event) {
     try { this.ingestEvent(event); } finally { this.changed(); }
   }
+  ingestPK(event) {
+    if (!PK_EVENT_TYPES.has(event?.type) && !['room-state','gift','chat'].includes(event?.type)) return false;
+    // The read-only PK path runs before the durable interaction inbox. Use an
+    // independent bounded identity map so journal replay cannot count it twice.
+    const identity=event.id || event._journalId;
+    if (identity) {
+      const key=JSON.stringify([event.type,identity,event.battleId,event.roomId,event.anchorId,event.side,event.scores,event.selfScore,event.opponentScore,event.remainingMs,event.count,event.final,event.contributors,event.effectType,event.startAt,event.endAt]);
+      if(this.pkSeen.has(key))return false;
+      this.pkSeen.set(key,this.now());
+      while(this.pkSeen.size>5000)this.pkSeen.delete(this.pkSeen.keys().next().value);
+    }
+    const metadata=['pk-start','pk-score','pk-end','room-state'].includes(event.type);
+    const normalized = {...event,...(metadata ? {anchorId:this.config.anchorId || event.anchorId} : {}),receivedAt:event.receivedAt || this.now()};
+    // A platform end message is the only point at which the current score is
+    // promoted to an explicitly final observation. Prediction.final and an
+    // ended phase alone are intentionally insufficient for historical stats.
+    if (normalized.type === 'pk-end') {
+      if (Array.isArray(normalized.scores)) normalized.scores = normalized.scores.map(item => ({...item, final:true}));
+      for (const side of ['self','opponent']) if (Number.isFinite(normalized[`${side}Score`])) normalized[`${side}ScoreMeta`] = {...normalized[`${side}ScoreMeta`],final:true};
+    }
+    this.pk.ingest(normalized);
+    const state = this.pk.current();
+    if (state?.key) this.anchorStats.ingestBattle(state);
+    return true;
+  }
   ingestEvent(event) {
     this.assertCapacity(event);
     const now = this.now(); this.stats.events++;
@@ -387,7 +493,9 @@ export class Engine {
       if (this.seen.has(seenKey)) return;
       this.seen.set(seenKey, now); if (this.seen.size > 5000) this.seen.delete(this.seen.keys().next().value);
     }
-    if (PK_EVENT_TYPES.has(event?.type) || event?.type === 'room-state' || event?.type === 'gift') this.pk.ingest({ ...event, anchorId: this.config.anchorId || event.anchorId, receivedAt: event.receivedAt || now });
+    this.liveMetrics.ingest(event);
+    this.ingestPK(event);
+    if (event.type === 'anchor-exhibition' || event.type === 'pk-rank-season') this.anchorStats.ingest(event, {anchorId:this.config.anchorId,roomId:event.roomId});
     // 按帧实际到达时间区分历史补推；主线程解码积压不能让实时消息变成历史消息。
     const hasReceipt = Number.isFinite(event.receivedAt) && event.receivedAt <= now;
     const hasRecentReceipt = hasReceipt && now - event.receivedAt < 600000;
@@ -396,8 +504,62 @@ export class Engine {
     // 已积压十分钟的日志仍不补发；没有捕获时间时保留平台时间检查。
     if (event.type === 'gift' && hasReceipt && !hasRecentReceipt) { this.filtered('历史礼物事件已忽略'); return; }
     if (!(event.type === 'gift' && hasRecentReceipt) && event.at && (arrival - event.at > 30000 || event.at - arrival > 60000)) { this.filtered('历史或异常时间事件已忽略'); return; }
+    this.observeMilestoneSession(event);
+    if (event.user) event = {...event,user:this.audience.remember(event.user)};
+    if (event.type === 'room-audience') for (const row of [...(event.ranks || []),...(event.seats || [])]) if (row.user) this.audience.remember(row.user);
+    if (['room-stats','room-audience','social','fansclub'].includes(event.type)) {
+      let text = '';
+      if (event.type === 'room-stats') {
+        this.roomData.stats = event;
+        const signature = JSON.stringify([event.metricType,event.displayValue,event.displayLong,event.hidden]);
+        if (this.observationSignatures.get(event.type) === signature) return;
+        this.observationSignatures.set(event.type, signature);
+        text = event.hidden ? '直播间统计有更新（平台标记为隐藏）' : `直播间统计：${event.displayLong || event.displayMiddle || event.displayShort || (event.displayValue ?? '未知')}`;
+      } else if (event.type === 'room-audience') {
+        this.roomData.audience = event;
+        const signature = JSON.stringify([event.onlineCount,event.cumulativeUsers,event.popularity,event.ranks?.map(row=>[row.user?.id,row.score,row.rank])]);
+        if (this.observationSignatures.get(event.type) === signature) return;
+        this.observationSignatures.set(event.type, signature);
+        const leaders = (event.ranks || []).slice(0,5).map(row=>`${row.rank ?? '?'}:${String(row.user?.name || '观众').slice(0,20)} ${row.score ?? '?'}分`).join('、');
+        text = `观众状态：在线 ${event.onlineDisplay || (event.onlineCount ?? '未知')}；累计 ${event.cumulativeUsersDisplay || (event.cumulativeUsers ?? '未知')}；榜单 ${event.ranks?.length || 0} 人${leaders ? `；${leaders}` : ''}`;
+      } else if (event.type === 'social') {
+        this.roomData.activities.push(event); this.roomData.activities = this.roomData.activities.slice(-100);
+        const name = String(event.user?.name || '观众').slice(0,40);
+        text = event.actionName === 'follow' ? `${name} 关注了主播${event.followCount == null ? '' : `；关注数 ${event.followCount}`}`
+          : event.actionName === 'share' ? `${name} 分享了直播间${event.shareCount == null ? '' : `；分享数 ${event.shareCount}`}`
+            : `收到 Social 消息（action ${event.action ?? '未知'}）`;
+      } else {
+        this.roomData.activities.push(event); this.roomData.activities = this.roomData.activities.slice(-100);
+        text = String(event.description || `${event.user?.name || '观众'} 粉丝团状态更新`).slice(0,180);
+      }
+      this.log('system', text); return;
+    }
+    if (['emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push'].includes(event.type)) {
+      this.roomData.activities.push(event);
+      this.roomData.activities = this.roomData.activities.slice(-100);
+      const labels = {
+        'emoji-chat':'表情弹幕', 'screen-chat':'醒目留言', 'room-notice':'房间公告',
+        'room-rank':'房间排行', 'rank-update':'榜单更新', 'room-notify':'房间通知', 'room-sync':'房间同步',
+        'audio-chat':'语音弹幕转写', 'highlight-comment':'置顶评论', 'light-gift':'轻量礼物',
+        'live-shopping':'直播购物状态', 'product-change':'商品列表变化', 'room-banner':'直播间横幅', 'rank-award':'榜单奖励',
+        'red-packet':'红包预览', 'activity-signal':'活动信号', 'chat-like':'弹幕点赞',
+        'fan-ticket':'粉丝票统计', 'room-activity-state':'房间活动状态', 'gift-panel-state':'礼物面板状态',
+        'room-indicator':'房间状态标记', 'gift-catalog':'团播礼物目录候选', 'battle-bonus':'PK 奖励',
+        'battle-property':'PK 道具状态', 'battle-season-honor':'PK 赛季荣誉', 'popular-card':'人气卡状态',
+        'fansclub-statistics':'粉丝团人数', 'group-live-members':'团播成员榜', 'group-live-income':'团播成员收益', 'room-ticket':'付费房票状态',
+        'linkmic-positions':'连麦席位状态', 'guest-link-state':'嘉宾连麦状态', 'fansclub-push':'粉丝团播报'
+      };
+      const detail = event.text || event.notifySubType || event.syncType || event.activityKind || event.title || event.display || event.scene || event.status || (event.type === 'gift-catalog' ? `${event.itemCount || 0} 项候选` : '') || event.products?.map(row=>row.promotionId).filter(Boolean).join('、') || event.updates?.map(row=>row.text).filter(Boolean).join('、') || '';
+      this.log('system', `${labels[event.type]}${detail ? `：${String(detail).slice(0,160)}` : '已更新'}`);
+      return;
+    }
     if (!this.running) return;
     if (event.type === 'end') { this.log('system', '收到直播结束事件；场控保持运行，等待手动暂停'); return; }
+    if (event.type === 'milestone') {
+      if ((this.selfTexts.get(event.text) || 0) > now) return;
+      this.queueMilestone(event.milestone);
+      return;
+    }
     const u = event.user || {};
     const isSelf = this.isSelfUser(u);
     // 登录账号可以手动接龙或回答真心话；自动发送的公屏回显仍被过滤。
@@ -405,6 +567,11 @@ export class Engine {
     if ((!u.name && event.type !== 'gift') || matchesUser(u, this.config.ignored)) return;
     if (event.type === 'chat') {
       if (!event.text || (this.selfTexts.get(event.text) || 0) > now) return;
+      const milestone = recognizeMilestone(event.text);
+      if (milestone) {
+        this.queueMilestone(milestone);
+        return;
+      }
       this.lastChat = now; this.lastInteraction = now;
       this.history.push({ name: u.name.slice(0, 40), text: String(event.text).slice(0, 300), at: now });
       const contextAge = this.config.ai.contextAgeSec * 1000;
@@ -447,7 +614,7 @@ export class Engine {
         this.lastInteraction = now;
         const club = (u.fanClubs || []).find(c => c.anchorId === this.config.anchorId);
         const fallback = renderTemplate(this.choose('welcome', this.config.welcome.templates), { user: u.name, level: u.wealthLevel ?? '?', fanLevel: club?.level ?? '?' });
-        const extra = { channel: this.welcomeChannel(u) };
+        const extra = { channel: this.welcomeChannel(u), welcomeUser: copy(u) };
         if (this.config.welcome.responseMode === 'ai') void this.requestAI({ type: 'welcome', user: u }, { kind: 'welcome', instruction: '礼貌欢迎这位刚进场的观众。', data: { wealthLevel: u.wealthLevel ?? '未知', fanLevel: club?.level ?? '未知', fanClubLit: club ? club.status === 1 : '未知' }, fallback, extra });
         else this.enqueue('welcome', fallback, extra);
       }
@@ -510,10 +677,10 @@ export class Engine {
   recordLike(event) {
     const user = event.user, config = this.config.like;
     this.lastInteraction = this.now();
-    const fallback = renderTemplate(this.choose('like', config.templates), { user: user.name, count: event.count || 1 });
+    const fallback = renderAudienceTemplate(this.choose('like', config.templates), user, {count:event.count || 1},this.now());
     if (config.responseMode === 'ai') {
       void this.requestAI({ type: 'like', user }, {
-        kind: 'like', instruction: `感谢观众 ${user.name} 哥给直播间点赞，语气自然简短，不要引导继续打赏。`,
+        kind: 'like', instruction: '使用 target.address 感谢这位观众给直播间点赞，语气自然简短，不要引导继续打赏。',
         data: { likeCount: event.count || 1 }, fallback
       });
     } else this.enqueue('like', fallback);
@@ -522,24 +689,48 @@ export class Engine {
     const g = this.config.gift, now = this.now();
     const count = Number(e.count);
     if (!Number.isSafeInteger(count) || count < 1 || count > 1000000) { this.filtered('礼物数量无效'); return; }
-    const key = `${e.roomId || ''}:${keyFor(e.user)}:${e.giftId || e.giftName}:${e.groupId || 'window'}`;
+    // 单独点击的非连击礼物没有平台连击 ID。把短时间内同用户的同一种
+    // 礼物合并，并按原始 groupId 保存累计进度，兼容延迟/重复到达的帧。
+    const singleGroup = typeof e.groupId === 'string' && e.groupId.startsWith('single:') ? e.groupId : '';
+    const key = `${e.roomId || ''}:${keyFor(e.user)}:${e.giftId || e.giftName}:${singleGroup ? 'single-window' : e.groupId || 'window'}`;
     let state = this.gifts.get(key);
-    if (!state || (!e.groupId && (state.ended || count < state.count))) {
+    if (singleGroup && state && now - state.touched > 120000 && state.count === state.credited) state = null;
+    if (!state || (!singleGroup && !e.groupId && (state.ended || count < state.count))) {
       if (state && state.count > state.credited && !this.settleGift(state)) {
         // 无 groupId 的新一组不能覆盖尚未入队的旧组。
         this.gifts.set(`${key}:pending:${++this.serial}`, state);
       }
-      state = { ...e, count: 0, credited: 0, pendingSince: now, touched: now, ended: false };
+      state = { ...e, count: 0, credited: 0, pendingSince: now, touched: now, ended: false, ...(singleGroup ? {singleProgress:{}} : {}) };
     }
-    const increased = count > state.count;
-    if (increased && state.count === state.credited) state.pendingSince = now;
-    state.count = Math.max(state.count, count);
+    const wasSettled = state.count === state.credited;
+    let increased;
+    if (singleGroup) {
+      const previousCount = Number(state.singleProgress?.[singleGroup]) || 0;
+      increased = count > previousCount;
+      if (increased) state.singleProgress[singleGroup] = count;
+      state.count = Object.values(state.singleProgress).reduce((sum, value) => sum + value, 0);
+      // Unlike a combo's final frame, a single gift's final flag only closes
+      // that gift. Keep the aggregate open for late neighboring gift events.
+      state.ended = false;
+    } else {
+      increased = count > state.count;
+      state.count = Math.max(state.count, count);
+      state.ended ||= Boolean(e.final);
+    }
+    if (increased && wasSettled) state.pendingSince = now;
     if (Number.isFinite(e.unitValue) && e.unitValue > 0) state.unitValue = e.unitValue;
     state.user = e.user; state.giftName = e.giftName || state.giftName;
-    state.touched = now; state.ended ||= Boolean(e.final);
+    state.touched = now;
     // 使用短静默窗口合并连击，避免默认等待 4～8 秒才感谢；同时设置最大聚合窗口，
     // 让持续连击在高峰期也能分段结算。final 帧仍立即结算。
-    if (increased || e.final || !Number.isFinite(state.due)) {
+    if (singleGroup) {
+      if (increased || !Number.isFinite(state.due)) {
+        const price = Number.isFinite(state.unitValue) && state.unitValue > 0 ? state.unitValue : g.prices[state.giftId] ?? g.prices[state.giftName];
+        state.due = Number.isFinite(price) && price >= g.minValue || (!Number.isFinite(price) && g.minValue <= 1)
+          ? now
+          : Math.min(now + 2000, state.pendingSince + 5000);
+      }
+    } else if (increased || e.final || !Number.isFinite(state.due)) {
       const quietMs = Math.min(g.mergeSec * 1000, 1500);
       const maxWindowMs = Math.min(g.mergeSec * 1000, 3000);
       state.due = state.ended ? now : Math.min(now + quietMs, state.pendingSince + maxWindowMs);
@@ -559,34 +750,43 @@ export class Engine {
     const count = reply.items.reduce((n, item) => n + item.count, 0), value = reply.items.reduce((n, item) => n + item.count * item.price, 0);
     const gift = reply.items.map(item => item.name).join('、');
     if (!compact && reply.items.length === 1) {
-      const text = renderTemplate(reply.template, { user: reply.user.name, gift, count, value, unit: reply.items[0]?.price || 0 });
+      const text = renderAudienceTemplate(reply.template, reply.user, {gift,count,value,unit:reply.items[0]?.price || 0},this.now());
       if (cleanMessage(text, this.config).ok) return text;
     }
     // 只缩短昵称/礼物描述，不把整条感谢因长昵称直接丢弃。
     const clip = (text, length) => [...text].slice(0, length).join('');
     for (const limit of [12, 8, 4, 1]) {
       const gifts = reply.items.map(item => `${clip(item.name, limit)}×${item.count}`).join('、');
-      const text = `感谢${clip(reply.user.name, limit)}的${gifts}！`;
+      const text = `感谢${audienceAddress(reply.user,this.now(),limit)}的${gifts}！`;
       if ([...text].length <= this.config.sending.maxLength) return text;
     }
     // 多种礼物再缩短名称也可能超长，改为总数量，确保能进入队列。
     const summaries = [
-      `感谢${clip(reply.user.name, 4)}的${count}个礼物！`,
-      `感谢${clip(reply.user.name, 1)}的礼物支持！`,
+      `感谢${audienceAddress(reply.user,this.now(),4)}的${count}个礼物！`,
+      `感谢${audienceAddress(reply.user,this.now(),1)}的礼物支持！`,
       '谢谢礼物支持！'
     ];
     return summaries.find(text => [...text].length <= this.config.sending.maxLength);
   }
   settleGift(s) {
     const g = this.config.gift, price = Number.isFinite(s.unitValue) && s.unitValue > 0 ? s.unitValue : g.prices[s.giftId] ?? g.prices[s.giftName];
-    if (!Number.isFinite(price) || price <= 0) { if (!s.unknownReported) { this.filtered(`${s.giftName || '礼物'}：单价未知，等待单价或价格表`); s.unknownReported = true; } return false; }
     const count = s.count - s.credited;
     if (count <= 0) return true;
+    if (!Number.isFinite(price) || price <= 0) {
+      if (g.minValue > 1) { if (!s.unknownReported) { this.filtered(`${s.giftName || '礼物'}：单价未知，无法判断是否达到 ${g.minValue} 钻门槛`); s.unknownReported = true; } return false; }
+      const name = audienceAddress(s.user,this.now(),8), gift = [...String(s.giftName || '礼物')].slice(0,10).join('');
+      const text = `谢谢${name}送的${gift}${count > 1 ? `×${count}` : ''}，谢谢支持！`;
+      if (this.config.blockedWords.some(word => word && `${name} ${gift} ${text}`.toLocaleLowerCase().includes(word.toLocaleLowerCase()))) { this.filtered('礼物感谢命中屏蔽词'); s.credited = s.count; return true; }
+      const giftReply = {userKey:keyFor(s.user),user:s.user,items:[{key:s.giftId || s.giftName,name:s.giftName || '礼物',count,price:0}],template:text};
+      if (!this.enqueue('gift',text,{giftReply,revision:1,readyAt:this.now(),quietOverflow:true})) return false;
+      s.credited = s.count; return true;
+    }
     if ((g.basis === 'unit' ? price : s.count * price) < g.minValue) return false;
     const userKey = keyFor(s.user), old = this.giftJobs.get(userKey)?.values().next().value;
     const reply = old ? { ...old.giftReply, items: old.giftReply.items.map(item => ({...item})) } : {
       userKey, user: s.user, items: [], template: this.choose('gift', g.templates)
     };
+    reply.user = s.user;
     const giftKey = s.giftId || s.giftName;
     const item = reply.items.find(item => item.key === giftKey && item.price === price);
     if (item) item.count += count;
@@ -621,7 +821,7 @@ export class Engine {
     const jobs = [first]; let text = first.text;
     if (!first.giftReply || !this.config.gift.batchEnabled) return {jobs,text};
     const clip = value => [...value].slice(0, 8).join('');
-    const part = q => `${clip(q.giftReply.user.name)}的${q.giftReply.items.map(item => `${clip(item.name)}×${item.count}`).join('、')}`;
+    const part = q => `${audienceAddress(q.giftReply.user,this.now(),8)}的${q.giftReply.items.map(item => `${clip(item.name)}×${item.count}`).join('、')}`;
     const ready = [];
     let readyCount = 0;
     for (const q of this.queue) {
@@ -681,7 +881,7 @@ export class Engine {
     const context = this.history.filter(c => now - c.at <= a.contextAgeSec * 1000).slice(-a.contextSize);
     const prompt = {
       persona: a.persona, knowledge: a.knowledge, context,
-      target: event ? { type: event.type, name: event.user?.name || '', text: event.text || '' } : null,
+      target: event ? { type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
     let aiTimer;
@@ -691,6 +891,7 @@ export class Engine {
         aiTimer = setTimeout(() => reject(new Error('互动 AI 等待超时')), task.timeoutMs);
       })]) : await request;
       const output = task.transform ? task.transform(rawOutput) : rawOutput;
+      if (['gift','like'].includes(task.kind) && !validAudienceAI(output,event?.user,now)) { fallback('AI 称呼与公开资料不符'); return; }
       if (this.running && epoch === this.epoch && this.now() - now < 45000) {
         if (task.targetJob) {
           if (currentJob() && this.now() <= task.deadline) {
@@ -708,7 +909,10 @@ export class Engine {
   }
   async tick(canSend = true) {
     const expiredDeliveries = this.deliveries.expire();
-    for (const record of expiredDeliveries) this.retryDelivery(record,'等待公屏回显超时');
+    if (expiredDeliveries.length) {
+      for (const record of expiredDeliveries) this.log('system',`未收到公屏回显，不自动重发：${record.text}`);
+      this.changed();
+    }
     if (!this.running || this.busy) return;
     const now = this.now(); let stateChanged = false;
     for (const job of this.queue) if (job.aiPending && now >= job.readyAt) { job.aiPending=false; stateChanged=true; }
@@ -718,6 +922,7 @@ export class Engine {
     if (now - this.lastMaintenance >= 30000) {
       this.lastMaintenance = now;
       const retention = Math.max(this.config.gift.cooldownSec, this.config.welcome.cooldownSec, this.config.keyword.cooldownSec, this.config.like.cooldownSec, this.config.ai.userCooldownSec) * 1000;
+      this.pruneMilestones(now);
       for (const [map, age] of [[this.seen, 120000], [this.cooldowns, retention], [this.duplicates, this.config.sending.duplicateSec * 1000], [this.selfTexts, 0], [this.giftSentAt, Math.max(120000, this.config.gift.cooldownSec * 1000)]]) {
         for (const [key, at] of map) if (now - at > age) { map.delete(key); stateChanged = true; }
         while (map.size > 5000) { map.delete(map.keys().next().value); stateChanged = true; }
@@ -803,7 +1008,7 @@ export class Engine {
       }
       if (this.lastRetryReason !== reason) { this.lastRetryReason = reason; this.log('system', `${reason}；消息保留，稍后继续发送`); }
     };
-    const checkpointForSend = async () => {
+    const checkpointForSend = async (required = false) => {
       let timer;
       try {
         const write = this.checkpoint();
@@ -814,8 +1019,9 @@ export class Engine {
       } catch (error) {
         if (this.lastCheckpointWarning !== error.message) {
           this.lastCheckpointWarning = error.message;
-          this.log('error', `运行状态保存暂不可用，场控继续发送并将在后台重试：${error.message}`);
+          this.log('error', `运行状态保存暂不可用：${error.message}`);
         }
+        if (required) throw Object.assign(error,{retryable:true});
       } finally { clearTimeout(timer); }
     };
     try {
@@ -824,17 +1030,21 @@ export class Engine {
         void checkpointForSend();
         if (this.epoch !== epoch) return;
         this.selfTexts.set(batch.text, now + 120000);
-        const result = await this.send(batch.text, () => this.running && this.epoch === epoch, {channel:q.channel || 'chat', beforeClick:async()=>{
-          this.deliveries.clicked(delivery); void checkpointForSend();
+        const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.channel || 'chat';
+        const result = await this.send(batch.text, () => this.running && this.epoch === epoch, {channel, beforeClick:async()=>{
+          this.deliveries.clicked(delivery);
+          try { await checkpointForSend(true); }
+          catch (error) { this.deliveries.finish(delivery,'prepared','点击意图未保存，尚未点击'); delete delivery.clickedAt; throw error; }
         }});
         if (this.epoch !== epoch) return;
         if (result?.submitted || result?.clicked) {
           this.deliveries.clicked(delivery);
           if (result.failed) { this.deliveries.finish(delivery,'failed',result.reason); this.retryDelivery(delivery,`平台拒绝后自动重发：${result.reason || '未知原因'}`); }
-          else if (!result.submitted) { this.deliveries.finish(delivery,'unknown',result.reason || '点击后结果未知'); this.retryDelivery(delivery,'点击后结果未知，自动重发'); }
+          else if (!result.submitted) this.deliveries.finish(delivery,'unknown',result.reason || '点击后结果未知；不自动重发');
           submitted(); this.lastRetryReason = ''; this.stats.submitted++;
           const channelNote = result.channelUsed === 'admin' ? '（管理员弹幕）' : result.modeFallback ? `（普通弹幕：${result.modeFallback}）` : '';
-          this.log('sent',`${result.failed ? '平台拒绝，自动重发' : result.submitted ? '已点击，等待公屏回显' : '结果未知，自动重发'}${channelNote}：${batch.text}`);
+          this.log('sent',`${result.failed ? '平台拒绝，自动重发' : result.submitted ? result.transport === 'request' ? '请求已提交，等待公屏回显' : '已点击，等待公屏回显' : '结果未知，不自动重发'}${channelNote}：${batch.text}`);
+          if (result.displayWarning) this.log('error', result.displayWarning);
           void checkpointForSend();
           if (result.failed) this.log('error', `平台拒绝消息，场控保持运行：${result.reason || '未知原因'}`);
         } else {
@@ -845,7 +1055,7 @@ export class Engine {
     } catch (error) {
       if (this.epoch === epoch) {
         if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
-          this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知'); this.retryDelivery(delivery,'发送异常后自动重发');
+          this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知；不自动重发');
         } else {
           if (delivery) { this.deliveries.finish(delivery,'cancelled',error.message); delivery.jobs = []; }
           retry(error.message || '发送异常');
@@ -857,7 +1067,7 @@ export class Engine {
     finally {
       if (delivery && this.epoch !== epoch && ['prepared','clicked'].includes(delivery.state)) {
         if (delivery.state === 'prepared') { this.deliveries.finish(delivery,'cancelled','点击前任务已取消'); delivery.jobs = []; }
-        else this.deliveries.finish(delivery,'unknown','点击后运行中断；恢复后自动重发');
+        else this.deliveries.finish(delivery,'unknown','点击后运行中断；不自动重发');
       }
       this.inFlight = null; this.busy = false; this.changed();
     }

@@ -47,6 +47,30 @@ test('扩展存储在弹窗和面板间同步外观，删除偏好回到跟随�
   } finally { ca.destroy(); cb.destroy(); a.dom.window.close(); b.dom.window.close(); }
 });
 
+test('受限内容脚本通过扩展后台读取和保存外观，不直接访问扩展存储', async () => {
+  const listeners = new Set(), data = { [THEME_KEY]:'dark' };
+  const chrome = { runtime:{
+    async sendMessage(message) {
+      if (message.type === 'theme-get') return {ok:true,value:data[THEME_KEY]};
+      data[THEME_KEY] = message.value;
+      for (const listener of listeners) listener({[THEME_KEY]:{newValue:message.value}},'local');
+      return {ok:true,value:true};
+    }
+  }, storage:{ local:{
+    async get() { throw new Error('Access to storage is not allowed from this context.'); },
+    async set() { throw new Error('Access to storage is not allowed from this context.'); }
+  }, onChanged:{addListener:fn=>listeners.add(fn),removeListener:fn=>listeners.delete(fn)} } };
+  const s = surface(chrome), errors = [], controller = installTheme({...s,onError:message=>errors.push(message)});
+  try {
+    await controller.ready;
+    assert.equal(s.select.value,'dark');
+    await s.choose('light');
+    assert.equal(data[THEME_KEY],'light');
+    assert.equal(s.target.dataset.theme,'light');
+    assert.deepEqual(errors,[]);
+  } finally { controller.destroy(); s.dom.window.close(); }
+});
+
 test('慢存储读取不能覆盖用户刚选择的模式', async () => {
   let release;
   const s = surface({storage:{local:{get:()=>new Promise(resolve=>release=resolve),set:async()=>{}}}});

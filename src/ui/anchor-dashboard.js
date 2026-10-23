@@ -1,0 +1,102 @@
+import { ANCHOR_PERIODS, selectAnchorPeriod } from './anchor-view-model.js';
+import { anchorEscape, anchorNumber, anchorMoney, anchorPercent, statBars, statDistribution, statProgress } from './stat-visuals.js';
+
+const anchorDateTime = new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+const anchorWhen = value => Number.isFinite(value) && value > 0 ? anchorDateTime.format(new Date(value)) : '未采集';
+const anchorRankCount = value => value != null && /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+
+export class AnchorDashboard {
+  constructor(root, changed) {
+    this.root = root; this.changed = changed; this.anchorId = ''; this.period = 'today'; this.page = 0; this.giftPage = 0; this.giftFilter = 'all';
+    this.onChange = event => {
+      if (event.target.matches('[data-anchor-picker]')) { this.anchorId = event.target.value; this.page = this.giftPage = 0; this.changed(); }
+      if (event.target.matches('[data-anchor-gift-filter]')) { this.giftFilter = event.target.value; this.giftPage = 0; this.changed(); }
+    };
+    this.onClick = event => {
+      const period = event.target.closest('[data-anchor-period]');
+      if (period && Object.hasOwn(ANCHOR_PERIODS, period.dataset.anchorPeriod)) { this.period = period.dataset.anchorPeriod; this.page = 0; this.changed(); }
+      for (const [attribute, property] of [['data-anchor-page','page'],['data-anchor-gift-page','giftPage']]) {
+        const button = event.target.closest(`[${attribute}]`);
+        if (button && !button.disabled) { this[property] = Math.max(0, this[property] + Number(button.getAttribute(attribute))); this.changed(); }
+      }
+    };
+    root.addEventListener('change', this.onChange); root.addEventListener('click', this.onClick);
+  }
+  text(selector, value) { const node = this.root.querySelector(selector); if (node.textContent !== String(value)) node.textContent = String(value); }
+  html(selector, value) { const node = this.root.querySelector(selector); if (node.innerHTML !== value) node.innerHTML = value; }
+  paginate(rows, property, size, selector) {
+    const pages = Math.max(1, Math.ceil(rows.length / size)); this[property] = Math.min(this[property], pages - 1);
+    this.text(`[${selector}-note]`, `${rows.length} 条 · ${this[property] + 1} / ${pages} 页`);
+    for (const node of this.root.querySelectorAll(`[${selector}]`)) node.disabled = Number(node.getAttribute(selector)) < 0 ? this[property] === 0 : this[property] >= pages - 1;
+    return rows.slice(this[property] * size, (this[property] + 1) * size);
+  }
+  render(engine, {identity, income} = {}) {
+    if (!engine?.anchorStats?.report) return;
+    const configuredId = String(engine.config.anchorId || identity?.anchor?.id || '');
+    const selectedId = this.anchorId || configuredId;
+    // Version gating avoids aggregation and serialization for unrelated live events.
+    const stats = engine.anchorStats;
+    const date = new Date((stats.now?.() ?? Date.now()) + 8 * 3600000).toISOString().slice(0,10);
+    const signature = JSON.stringify([stats.revision,date,configuredId,selectedId,identity?.anchor?.name,engine.config.incomeEnabled,this.period,this.page,this.giftPage,this.giftFilter]);
+    if (this.stats === stats && this.signature === signature && this.income === income) return;
+    this.stats = stats; this.signature = signature; this.income = income;
+    const known = new Map((engine.anchorStats.anchors?.() || []).map(item => [String(item.anchorId),item]));
+    if (configuredId && !known.has(configuredId)) known.set(configuredId,{anchorId:configuredId,name:identity?.anchor?.name || ''});
+    this.html('[data-anchor-picker]', '<option value="">当前主播</option>' + [...known.values()].map(item => `<option value="${anchorEscape(item.anchorId)}">${anchorEscape(item.name || item.anchorId)} · ${anchorEscape(item.anchorId)}</option>`).join(''));
+    const picker = this.root.querySelector('[data-anchor-picker]'); if (picker.value !== this.anchorId) picker.value = this.anchorId;
+    const report = engine.anchorStats.report(selectedId,{days:30});
+    const selection = selectAnchorPeriod(report,this.period), summary = selection.summary;
+    const matchingIncome = engine.config.incomeEnabled && income?.anchorId === selectedId && selectedId === configuredId ? income : null;
+    this.matchingIncome = matchingIncome;
+    this.report = {...report,selection};
+    this.text('[data-anchor-report-name]', `主播：${report.name || known.get(selectedId)?.name || selectedId || '未知'}`);
+    this.text('[data-anchor-scope]', selectedId === configuredId ? '当前直播间 · 本机已观测' : '本机已观测');
+    this.text('[data-anchor-period-note]', `${selection.label} · ${selection.range} · 北京时间`);
+    for (const node of this.root.querySelectorAll('[data-anchor-period]')) node.setAttribute('aria-pressed',String(node.dataset.anchorPeriod === this.period));
+    for (const node of this.root.querySelectorAll('[data-anchor-period-label]')) node.textContent = selection.label;
+    this.root.querySelector('.anchor-metrics').setAttribute('aria-label',`主播${selection.label}核心数据`);
+    const day = matchingIncome?.days?.find(item => item.date === report.today?.date);
+    this.text('[data-anchor-stat="income"]', day ? anchorMoney(day.estimatedIncome) : '未知');
+    this.text('[data-anchor-income-note]', !engine.config.incomeEnabled ? '收入统计未启用，可在运行规则中开启。' : matchingIncome ? `今日收入按已采集礼物估算，不代表平台结算。${day?.unknownCount ? ` ${day.unknownCount} 件礼物单价未知，未计入金额。` : ''}` : '尚无与所选主播 UID 匹配的收入账本，收入保持未知。');
+    this.text('[data-anchor-stat="winRate"]',anchorPercent(summary.winRate));
+    this.text('[data-anchor-stat="battles"]',summary.battles ? anchorNumber(summary.battles) : '未知');
+    this.text('[data-anchor-stat="score"]',anchorNumber(summary.totalScore));
+    for (const key of ['wins','losses','draws','pending']) this.text(`[data-anchor-stat="${key}"]`,summary.battles ? anchorNumber(summary[key]) : '未知');
+    this.text('[data-anchor-results-note]',`${summary.decided} 场明确终局 · ${summary.pending} 场待确认`);
+    this.html('[data-anchor-results]',statDistribution(summary));
+    this.text('[data-anchor-pk-note]',`${summary.scoreBattles} 场终局分数 · ${summary.unknownScoreBattles} 场未计分`);
+    this.html('[data-anchor-trend]',statBars(selection.trend.map(row=>({date:row.date,value:row.totalScore,note:`${row.battles} 场，${row.scoreBattles} 场终局分数`})),{label:'每日 PK 总分'}));
+    const rank = report.rank?.afterRank || report.rank?.beforeRank;
+    this.text('[data-anchor-rank]',rank ? rank.detail || rank.name || (rank.level != null ? `等级 ${rank.level}` : '已采集') : '未知');
+    this.text('[data-anchor-rank-score]',rank ? [rank.scoreDisplay,rank.score != null ? `${rank.score} 分` : '',rank.starCount != null ? `${rank.starCount} 星` : ''].filter(Boolean).join(' · ') || '已收到段位事件' : report.rankUnknown?.length ? `${report.rankUnknown.length} 条段位消息未关联 UID` : '等待段位事件');
+    this.text('[data-anchor-rank-at]',anchorWhen(report.rank?.observedAt));
+    this.html('[data-anchor-rank-progress]',rank && (rank.starCount != null || rank.targetStarCount != null) ? statProgress('段位星数',anchorRankCount(rank.starCount),anchorRankCount(rank.targetStarCount)) : '');
+    this.text('[data-anchor-rank-note]',report.rank?.afterRank ? '展示最近一次已确认归属该主播的段位。' : report.rank?.beforeRank ? '变更后段位尚未返回，当前展示变更前观测。' : '段位只展示页面明确关联到该主播 UID 的观察。');
+    const exhibition = report.exhibition;
+    this.text('[data-anchor-exhibition-level]',exhibition ? [exhibition.level != null ? `等级 ${exhibition.level}` : '',exhibition.floor != null ? `${exhibition.floor} 层` : ''].filter(Boolean).join(' · ') || '未知' : '未知');
+    this.text('[data-anchor-exhibition-lit]',anchorNumber(exhibition?.lightedCount));
+    this.text('[data-anchor-exhibition-total]',anchorNumber(exhibition?.totalCount));
+    this.text('[data-anchor-exhibition-stars]',exhibition?.stars ? `${anchorNumber(exhibition.stars.current)} / ${anchorNumber(exhibition.stars.target)}` : '未知');
+    this.text('[data-anchor-exhibition-at]',anchorWhen(exhibition?.updatedAt));
+    this.html('[data-anchor-stars-progress]',exhibition?.stars ? statProgress('展馆星数',exhibition.stars.current,exhibition.stars.target) : '');
+    this.html('[data-anchor-lighted-progress]',exhibition ? statProgress('礼物点亮',exhibition.lightedCount,exhibition.totalCount) : '');
+    this.text('[data-anchor-exhibition-note]',exhibition ? `${exhibition.title || exhibition.name || '展馆接口数据'} · ${exhibition.truncated || exhibition.partial ? '列表未完整返回，仅显示已采集部分。' : '按接口已返回的礼物统计。'}` : '等待展馆接口返回；未登录或接口不可用时不填充猜测值。');
+    const items = (exhibition?.items || []).filter(item => this.giftFilter === 'all' || this.giftFilter === 'tasks' && item.task || this.giftFilter === 'lighted' && item.lighted === true || this.giftFilter === 'unlighted' && item.lighted === false);
+    const gifts = this.paginate(items,'giftPage',12,'data-anchor-gift-page');
+    this.html('[data-anchor-gifts]',gifts.length ? `<ul class="anchor-gifts">${gifts.map(item=>`<li><div class="anchor-gift-name"><strong>${anchorEscape(item.name || item.giftId)}</strong><span data-lighted="${item.lighted}">${item.lighted === true ? '已点亮' : item.lighted === false ? '未点亮' : '状态未知'}</span></div>${statProgress('收集数量',item.received,item.threshold)}${item.task ? `<div class="anchor-task">${statProgress('进阶任务',item.task.current,item.task.target)}<small>${item.task.finished === true ? '已完成' : item.task.finished === false ? '未完成' : '状态未知'} · 奖励 ${anchorNumber(item.task.rewardStars)} 星</small></div>` : ''}</li>`).join('')}</ul>` : '<p class="empty">暂无符合条件的已采集礼物</p>');
+    const incomeDays = (matchingIncome?.days || []).slice().sort((a,b)=>a.date.localeCompare(b.date)).slice(-7);
+    this.html('[data-anchor-income-trend]',statBars(incomeDays.map(row=>({date:row.date,value:row.estimatedIncome})),{label:'最近有记录日的收入',format:anchorMoney}));
+    const battles = this.paginate(selection.rows,'page',20,'data-anchor-page');
+    this.html('[data-anchor-battles]',battles.length ? battles.map(row=>`<tr><td>${anchorEscape(anchorWhen(row.endedAt || row.startedAt))}</td><td>${anchorEscape(row.opponents?.map(item=>item.name || item.anchorId).join(' / ') || '未知')}</td><td>${anchorNumber(row.score)}${row.score != null && !row.scoreFinal ? '（赛中）' : ''}</td><td>${{win:'胜',loss:'负',draw:'平',active:'进行中',pending:'待确认'}[row.outcome || row.status] || '未知'}</td></tr>`).join('') : '<tr><td colspan="4">所选范围暂无场次</td></tr>');
+    this.text('[data-anchor-basis]',report.basis || '统计仅代表当前浏览器已采集到的数据。');
+    this.root.querySelector('[data-action="export-anchor"]').disabled = !selectedId;
+  }
+  exportReport() {
+    if (!this.report?.anchorId) throw new Error('请先识别或选择主播');
+    const {selection, ...report} = this.report;
+    return JSON.parse(JSON.stringify({...report,version:1,exportedAt:new Date().toISOString(),period:selection.period,periodLabel:selection.label,
+      range:selection.range,summary:selection.summary,battles:selection.rows,trend:selection.trend,
+      income:this.matchingIncome ? {...this.matchingIncome,basis:'本地礼物估算，不代表平台结算；收入账本与 PK 时间筛选独立。'} : null}));
+  }
+  destroy() { this.root.removeEventListener('change',this.onChange); this.root.removeEventListener('click',this.onClick); }
+}

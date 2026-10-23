@@ -1,4 +1,16 @@
 import { decodeFrame } from './protocol.js';
+import { recognizeMilestone } from '../core/milestones.js';
+import { PageRequestSender } from './request-sender.js';
+import { AnchorDataCollector } from './anchor-data.js';
+
+const MAX_CAPTURE_FRAME_BYTES = 512 * 1024;
+function base64(bytes, page) {
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+  }
+  return page.btoa(binary);
+}
 
 export function isVisible(element) {
   return !!element && element.isConnected && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden' && getComputedStyle(element).display !== 'none';
@@ -53,6 +65,45 @@ const contributionCell = value => {
   return name && combinedScore !== null ? { name, score:combinedScore } : null;
 };
 const excludedContributionName = value => /^(?:在线观众|贡献用户|高等级用户|全部|粉丝牌|粉丝团|(?:一千|千|1000)票用户|\d+|1000\s*(?:贡献|票)用户(?:\(\d+\))?)$/.test(String(value || '').trim());
+
+function parseDisplayCount(value) {
+  const match = String(value || '').replace(/[\s\u00a0,，]/g, '').match(/^(\d+(?:\.\d+)?)(万|亿)?$/);
+  if (!match) return null;
+  const count = Number(match[1]) * (match[2] === '亿' ? 1e8 : match[2] === '万' ? 1e4 : 1);
+  return Number.isSafeInteger(count) && count <= 1e12 ? count : null;
+}
+
+function readLabeledCount(root, label, before = false) {
+  const labels = [...root.querySelectorAll('*')].filter(node => node.children.length === 0 && node.textContent.trim() === label);
+  if (labels.length !== 1) return null;
+  let node = labels[0];
+  for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+    const leaves = [...node.querySelectorAll('*')].filter(item => item.children.length === 0);
+    const index = leaves.indexOf(labels[0]);
+    if (index < 0 || leaves.length > 8) continue;
+    const values = (before ? leaves.slice(0, index).reverse() : leaves.slice(index + 1))
+      .map(item => parseDisplayCount(item.textContent));
+    const count = values.find(value => value !== null);
+    if (count !== undefined) return count;
+  }
+  return null;
+}
+
+export function readRoomSnapshot(doc = document) {
+  const chatroom = doc.querySelector('#chatroom');
+  if (!chatroom) return null;
+  const likeMatches = [...doc.querySelectorAll('*')]
+    .filter(node => node.children.length === 0)
+    .map(node => node.textContent.trim().match(/^(\d[\d,，]*(?:\.\d+)?(?:万|亿)?)\s*本场点赞$/)?.[1])
+    .filter(Boolean).map(parseDisplayCount).filter(value => value !== null);
+  const likeTotal = likeMatches.length && likeMatches.every(value => value === likeMatches[0]) ? likeMatches[0] : null;
+  return {
+    capturedAt: Date.now(), source: 'dom',
+    onlineCount: readLabeledCount(chatroom, '在线观众'),
+    likeTotal,
+    visibleContributionRows: readAudienceContributions(doc).length
+  };
+}
 
 export function readAudienceContributions(doc = document) {
   const chatroom = doc.querySelector('#chatroom');
@@ -116,18 +167,25 @@ export function readAudienceContributions(doc = document) {
 }
 
 export class DouyinAdapter {
-  constructor({ page, getConfig, onEvent, onLog, onStatus, onEcho = () => false, shouldReadChat = () => true }) {
-    this.page = page; this.getConfig = getConfig; this.shouldReadChat = shouldReadChat; this.onEvent = onEvent; this.onLog = onLog; this.onStatus = onStatus;
-    this.onEcho = onEcho;
+  constructor({ page, getConfig, onEvent, onLog, onStatus, onCapture = () => {}, onPK = null, onEcho = () => false, shouldReadChat = () => true, shouldReadMilestones = shouldReadChat }) {
+    this.page = page; this.getConfig = getConfig; this.shouldReadChat = shouldReadChat; this.shouldReadMilestones = shouldReadMilestones; this.onEvent = onEvent; this.onLog = onLog; this.onStatus = onStatus;
+    this.onEcho = onEcho; this.onPK = onPK; this.onCapture = onCapture;
     this.status = { hook: false, sockets: 0, frames: 0, events: 0, errors: 0, lastFrame: 0, connected: false };
-    this.pending = 0; this.pendingBytes = 0; this.chain = Promise.resolve(); this.roomPath = location.pathname;
+    this.pending = 0; this.pendingBytes = 0; this.decodedCacheBytes = 0; this.chain = Promise.resolve(); this.decodeChain = Promise.resolve(); this.roomPath = location.pathname;
     this.activeSockets = new Set(); this.domSeen = new WeakMap(); this.domActive = false; this.lastSocketChat = 0;
+    this.seenProtocolEvents = new Map();
     this.ownedDraft = null;
+    this.requestSender = new PageRequestSender(page);
+    this.anchorData = new AnchorDataCollector({page,sender:this.requestSender,onEvent:event=>this.onEvent(event),onStatus:(kind,result)=>{
+      this.status.exhibition = {...this.status.exhibition,[kind]:result}; this.emitStatus();
+    }});
   }
   hook() {
+    this.anchorData.start();
     try {
       const Native = this.page.WebSocket, adapter = this;
       if (!Native) throw new Error('没有 WebSocket');
+      const enqueueFrame = (data, transport) => adapter.acceptFrame(data, transport);
       const Hook = new Proxy(Native, {
         construct(target, args, newTarget) {
           const socket = Reflect.construct(target, args, newTarget === Hook ? target : newTarget);
@@ -137,62 +195,153 @@ export class DouyinAdapter {
           adapter.status.sockets++; adapter.emitStatus();
           socket.addEventListener('open', () => { adapter.activeSockets.add(socket); adapter.status.connected = true; adapter.emitStatus(); });
           socket.addEventListener('close', () => { adapter.activeSockets.delete(socket); adapter.status.connected = adapter.activeSockets.size > 0; adapter.emitStatus(); });
-          socket.addEventListener('message', e => {
-            if (location.pathname !== adapter.roomPath) return;
-            if (adapter.pending >= 256 || adapter.pendingBytes + (e.data?.byteLength || e.data?.size || 0) > 16*1024*1024) {
-              adapter.status.frameGaps = (adapter.status.frameGaps || 0)+1; adapter.emitStatus(); return;
-            }
-            const receivedAt = Date.now();
-            const frameBytes = e.data?.byteLength || e.data?.size || 0;
-            adapter.pendingBytes = (adapter.pendingBytes || 0)+frameBytes;
-            adapter.pending++; adapter.status.pendingFrames = adapter.pending;
-            const previous = adapter.chain;
-            adapter.chain = (async () => {
-              try { await previous; } catch (error) { adapter.reportError(error); }
-              try {
-                const events = await decodeFrame(e.data, error => adapter.reportError(error));
-                adapter.status.frames++; adapter.status.lastFrame = Date.now();
-                adapter.status.events += events.length;
-                let processed = 0;
-                for (const event of events) {
-                  if (event.type === 'gift') {
-                    adapter.status.giftEvents = (adapter.status.giftEvents || 0) + 1;
-                    adapter.status.lastGift = {
-                      giftName:event.giftName || '礼物', giftId:event.giftId || '',
-                      count:Number(event.count) || 1, unitValue:Number.isFinite(event.unitValue) ? event.unitValue : null,
-                      eventAt:Number.isFinite(event.at) && event.at > 0 ? event.at : null,
-                      receivedAt, timestampSkewMs:Number.isFinite(event.at) && event.at > 0 ? receivedAt-event.at : null
-                    };
-                  }
-                  if (event.type === 'chat') adapter.lastSocketChat = Date.now();
-                  try { await adapter.onEvent({ ...event, receivedAt }); }
-                  catch (error) { adapter.reportError(error); }
-                  if (++processed % 200 === 0) await new Promise(resolve => setTimeout(resolve, 0));
-                }
-                // 高峰时保留帧并按顺序处理，每批让出主线程，避免静默丢弃第 101 帧。
-                if (adapter.pending > 1 && adapter.status.frames % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0));
-              } catch (error) {
-                adapter.reportError(error);
-              } finally { adapter.pending--; adapter.pendingBytes -= frameBytes; adapter.status.pendingFrames = adapter.pending; adapter.emitStatus(); }
-            })();
-          });
+          socket.addEventListener('message', e => enqueueFrame(e.data, 'socket'));
           return socket;
         }
       });
       this.page.WebSocket = Hook;
       this.status.hook = this.page.WebSocket === Hook;
       if (!this.status.hook) throw new Error('页面未接受 WebSocket 观察器');
+      this.hookLongPoll(enqueueFrame);
     } catch (error) { this.onLog('error', `观察器安装失败：${error.message}；请刷新并检查油猴的页面注入设置`); }
     this.emitStatus();
+  }
+  hookLongPoll(enqueueFrame) {
+    const XHR = this.page.XMLHttpRequest, proto = XHR?.prototype;
+    if (!proto || proto.__liveAssistantPollHook) return;
+    const nativeOpen = proto.open, nativeSend = proto.send, adapter = this;
+    Object.defineProperty(proto, '__liveAssistantPollHook', { value:true, configurable:true });
+    proto.open = function(method, input, ...rest) {
+      let url = null;
+      try { url = new URL(String(input), adapter.page.location.href); } catch {}
+      this.__liveAssistantPoll = url?.origin === adapter.page.location.origin && url.pathname === '/webcast/im/fetch/'
+        ? { method:String(method || 'GET').toUpperCase(), pathname:url.pathname } : null;
+      return nativeOpen.call(this, method, input, ...rest);
+    };
+    proto.send = function(...args) {
+      const request = this.__liveAssistantPoll;
+      if (request?.method === 'GET' && location.pathname === adapter.roomPath) {
+        const xhr = this;
+        adapter.status.pollRequests = (adapter.status.pollRequests || 0) + 1;
+        xhr.addEventListener('load', () => {
+          if (location.pathname !== adapter.roomPath) return;
+          if (xhr.status < 200 || xhr.status >= 300) { adapter.status.pollFailed = (adapter.status.pollFailed || 0) + 1; adapter.emitStatus(); return; }
+          let response, responseType = '';
+          try { response = xhr.response; responseType = xhr.responseType || ''; }
+          catch { adapter.status.pollUnsupported = (adapter.status.pollUnsupported || 0) + 1; adapter.emitStatus(); return; }
+          if (response instanceof ArrayBuffer || ArrayBuffer.isView(response) || (response && typeof response.arrayBuffer === 'function')) {
+            adapter.status.pollResponses = (adapter.status.pollResponses || 0) + 1;
+            enqueueFrame(response, 'http-poll');
+          } else {
+            let text = null;
+            if (responseType === '' || responseType === 'text') try { text = xhr.responseText; } catch {}
+            if (typeof text === 'string' && !text.includes('\ufffd') && [...text].every(char => char.charCodeAt(0) <= 255)) {
+              adapter.status.pollResponses = (adapter.status.pollResponses || 0) + 1;
+              enqueueFrame(Uint8Array.from(text, char => char.charCodeAt(0)), 'http-poll');
+            } else { adapter.status.pollUnsupported = (adapter.status.pollUnsupported || 0) + 1; adapter.emitStatus(); }
+          }
+        }, { once:true });
+      }
+      return nativeSend.apply(this, args);
+    };
+    this.status.pollHook = true;
+  }
+  acceptFrame(data, transport = 'socket') {
+    if (location.pathname !== this.roomPath) return;
+    const frameBytes = typeof data === 'string' ? data.length * 2 : data?.byteLength || data?.size || 0;
+    if (this.pending >= 256 || this.pendingBytes + frameBytes > 16 * 1024 * 1024) {
+      this.status.frameGaps = (this.status.frameGaps || 0) + 1; this.emitStatus(); return;
+    }
+    const receivedAt = Date.now();
+    this.pendingBytes += frameBytes; this.pending++; this.status.pendingFrames = this.pending;
+    const previousDecode = this.decodeChain;
+    // Socket 与长轮询共用有序队列，解析只读内容，不触碰页面发送路径。
+    const decoded = this.decodeChain = (async () => {
+      try { await previousDecode; } catch (error) { this.reportError(error); }
+      try {
+        const messages = []; let decodedEvents = [], parseError = '';
+        try {
+          decodedEvents = (await decodeFrame(data, error => this.reportError(error), method => this.reportUnknownMethod(method), message => messages.push(message))).map(event => ({ ...event, receivedAt }));
+        } catch (error) { parseError = String(error?.message || error).slice(0, 240); this.reportError(error); }
+        try {
+          const textFrame = typeof data === 'string';
+          const raw = textFrame ? new TextEncoder().encode(data) : data && typeof data.arrayBuffer === 'function' ? new Uint8Array(await data.arrayBuffer())
+            : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
+          const safeMessages = messages.filter(message => /^[A-Za-z0-9_]{1,120}$/.test(message.method)).slice(0, 500);
+          const capture = { protocolVersion:1, transport, receivedAt, rawBytes:raw.byteLength, ...(textFrame ? {rawEncoding:'utf8-text'} : {}),
+            messages:safeMessages, ...(messages.length > safeMessages.length ? {messagesOmitted:messages.length-safeMessages.length} : {}), ...(parseError ? { parseError } : {}), ...(raw.byteLength <= MAX_CAPTURE_FRAME_BYTES
+              ? { rawBase64:base64(raw, this.page) }
+              : { captureError:'FRAME_TOO_LARGE' }) };
+          if (typeof this.onCapture === 'function') this.onCapture(capture);
+        } catch (error) { this.status.captureErrors = (this.status.captureErrors || 0) + 1; this.reportError(error); }
+        const events = decodedEvents.filter(event => {
+          if (!this.isDuplicateProtocolEvent(event, transport)) return true;
+          this.status.duplicateEvents = (this.status.duplicateEvents || 0) + 1; return false;
+        });
+        this.status.frames++; this.status.lastFrame = Date.now(); this.status.events += events.length;
+        if (transport === 'http-poll') { this.status.pollFrames = (this.status.pollFrames || 0) + 1; this.status.pollEvents = (this.status.pollEvents || 0) + events.length; }
+        for (const event of events) if (event.type.startsWith('pk-')) {
+          this.status.pkEvents = (this.status.pkEvents || 0) + 1;
+          this.status.lastPK = { type:event.type, receivedAt, decodedAt:Date.now(), method:event.protocolMethod || '',
+            eventAt:event.at > 0 ? event.at : null, timestampSkewMs:event.at > 0 ? receivedAt-event.at : null };
+          if (event.type === 'pk-score' && event.scores?.length) { this.status.pkScoreEvents = (this.status.pkScoreEvents || 0) + 1; this.status.lastPKScore = receivedAt; }
+          if (this.onPK) try { await this.onPK(event); } catch (error) { this.reportError(error); }
+        }
+        const cacheBytes = JSON.stringify(events).length * 2, cache = this.decodedCacheBytes + cacheBytes <= 16 * 1024 * 1024;
+        if (cache) this.decodedCacheBytes += cacheBytes; else this.status.uncachedFrames = (this.status.uncachedFrames || 0) + 1;
+        this.status.decodedCacheBytes = this.decodedCacheBytes; this.emitStatus();
+        return { events:cache ? events : null, cacheBytes:cache ? cacheBytes : 0 };
+      } catch (error) { this.reportError(error); return {events:[],cacheBytes:0}; }
+    })();
+    const previous = this.chain;
+    this.chain = (async () => {
+      try { await previous; } catch (error) { this.reportError(error); }
+      let cacheBytes = 0, result;
+      try {
+        result = await decoded; cacheBytes = result.cacheBytes;
+        const events = result.events || (await decodeFrame(data)).map(event => ({ ...event, receivedAt }));
+        let processed = 0;
+        for (const event of events) {
+          if (event.type === 'gift') {
+            this.status.giftEvents = (this.status.giftEvents || 0) + 1;
+            this.status.lastGift = { giftName:event.giftName || '礼物', giftId:event.giftId || '', count:Number(event.count) || 1,
+              unitValue:Number.isFinite(event.unitValue) ? event.unitValue : null, eventAt:Number.isFinite(event.at) && event.at > 0 ? event.at : null,
+              receivedAt, timestampSkewMs:Number.isFinite(event.at) && event.at > 0 ? receivedAt-event.at : null };
+          }
+          if (event.type === 'chat') this.lastSocketChat = Date.now();
+          try { await this.onEvent(event); } catch (error) { this.reportError(error); }
+          if (++processed % 200 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+        }
+        if (this.pending > 1 && this.status.frames % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      } catch (error) { this.reportError(error); }
+      finally { if (result) result.events = null; this.pending--; this.pendingBytes -= frameBytes; this.decodedCacheBytes -= cacheBytes; this.status.decodedCacheBytes = this.decodedCacheBytes; this.status.pendingFrames = this.pending; this.emitStatus(); }
+    })();
+  }
+  isDuplicateProtocolEvent(event, transport) {
+    if (!event?.id) return false;
+    const now = Date.now(), key = `${event.type}:${event.id}`;
+    for (const [id, record] of this.seenProtocolEvents) if (now - record.at > 120000) this.seenProtocolEvents.delete(id);
+    const previous = this.seenProtocolEvents.get(key);
+    if (previous && previous.transport !== transport) return true;
+    this.seenProtocolEvents.set(key, { at:now, transport });
+    while (this.seenProtocolEvents.size > 20000) this.seenProtocolEvents.delete(this.seenProtocolEvents.keys().next().value);
+    return false;
   }
   reportError(error) {
     this.status.errors++;
     if (this.status.errors === 1 || this.status.errors % 100 === 0) this.onLog('error', `直播消息解析失败：${error.message}；请查看诊断`);
   }
+  reportUnknownMethod(method) {
+    if (!/^[A-Za-z0-9_]{1,120}$/.test(method)) return;
+    const counts = this.status.unknownMethods || (this.status.unknownMethods = {});
+    if (!Object.hasOwn(counts, method) && Object.keys(counts).length >= 50) return;
+    counts[method] = (counts[method] || 0) + 1;
+  }
   emitStatus() { this.onStatus({ ...this.status }); }
   // 无弹幕不等于断线；连接的 open/close 才决定传输是否可用。
   healthy() { return Boolean(this.status.connected); }
   readAudienceContributions() { return readAudienceContributions(this.page.document || document); }
+  readRoomSnapshot() { return readRoomSnapshot(this.page.document || document); }
   findInput() {
     const configured = this.getConfig().adapter.inputSelector;
     if (configured) {
@@ -265,17 +414,26 @@ export class DouyinAdapter {
     return score;
   }
   diagnose() {
-    const result = { ...this.status, anchorId: this.getConfig().anchorId || '未知', input: '', send: '', healthy: this.healthy() };
+    const result = { ...this.status, anchorId: this.getConfig().anchorId || '未知', input: '', send: '', healthy: this.healthy(), domSnapshot:this.readRoomSnapshot() };
     try { const input = this.findInput(); result.input = selectorFor(input); try { result.send = selectorFor(this.findSend(input)); } catch (e) { result.send = e.message; } }
     catch (e) { result.input = e.message; }
     return result;
+  }
+  requestAvailable(channel = 'chat') {
+    return typeof this.requestSender?.available === 'function' && this.requestSender.available(channel) === true;
   }
   findChatModeToggle(input) {
     let current = input?.parentElement;
     for (let depth = 0; current && depth < 5; depth++, current = current.parentElement) {
       if (current.id === 'douyin-live-assistant' || current.closest?.('#douyin-live-assistant')) continue;
-      const toggle = [...current.querySelectorAll('input[type="checkbox"][role="switch"], [role="switch"]')]
-        .find(element => isVisible(element) && !element.closest?.('#douyin-live-assistant'));
+      const toggle = [...current.querySelectorAll('input[type="checkbox"], [role="switch"]')]
+        .find(element => {
+          if (!isVisible(element) || element.closest?.('#douyin-live-assistant')) return false;
+          // 真实页面的 switch 是付费/特权弹幕总开关，并不代表管理员类型。
+          const native = element.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]');
+          const label = [element.getAttribute('aria-label'), element.getAttribute('title'), element.closest('label')?.textContent].filter(Boolean).join(' ');
+          return native || /管理员弹幕/.test(label);
+        });
       if (toggle) return toggle;
     }
     return null;
@@ -284,28 +442,90 @@ export class DouyinAdapter {
     if (!toggle) return false;
     return toggle.checked === true || toggle.getAttribute('aria-checked') === 'true';
   }
+  isAdminChatMode(input, toggle = this.findChatModeToggle(input)) {
+    if (!this.chatMode(toggle)) return false;
+    const hint = input.getAttribute('data-placeholder') || input.getAttribute('placeholder') || '';
+    if (toggle?.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]')) {
+      if (hint) return hint === '发送管理员弹幕';
+      // 富文本输入后 placeholder 会消失，按当前选中类型继续核对。
+      return Boolean(input.closest('.webcast-chatroom')?.querySelector('.cw6Usapi img[src*="/privilege_screen_chat_admin_"]'));
+    }
+    return Boolean(toggle); // 此路径只接受明确标注“管理员弹幕”的控件。
+  }
+  clickChatControl(element) {
+    if (typeof element.click === 'function') element.click();
+    else element.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
+  }
   async setChatMode(input, channel) {
-    const desired = channel === 'admin', toggle = this.findChatModeToggle(input), current = this.chatMode(toggle);
-    if (!toggle || current === desired) return { toggle, previous: current, changed: false, used: desired && Boolean(toggle) ? 'admin' : 'chat', fallback: desired && !toggle ? '管理员弹幕开关未找到' : '' };
-    if (toggle.disabled || toggle.getAttribute('aria-disabled') === 'true') return { toggle, previous: current, changed: false, used: 'chat', fallback: desired ? '管理员弹幕开关不可用' : '' };
-    if (typeof toggle.click === 'function') toggle.click();
-    else toggle.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
-    await new Promise(resolve => setTimeout(resolve, 80));
-    if (this.chatMode(toggle) !== desired) return { toggle, previous: current, changed: false, used: 'chat', fallback: desired ? '管理员弹幕开关未响应' : '' };
-    return { toggle, previous: current, changed: true, used: desired ? 'admin' : 'chat', fallback: '' };
+    const desired = channel === 'admin';
+    let toggle = this.findChatModeToggle(input);
+    const previous = this.isAdminChatMode(input, toggle);
+    const native = toggle?.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]');
+    let fallback = desired && !toggle ? '管理员弹幕开关未找到' : '';
+    const disabled = el => el?.disabled || el?.getAttribute('aria-disabled') === 'true' || el?.closest('[disabled], [aria-disabled="true"]');
+    const refresh = () => { input = this.findInput(); toggle = this.findChatModeToggle(input); };
+    const settle = async () => { await new Promise(resolve => setTimeout(resolve, 80)); refresh(); };
+    if (desired && toggle && !previous) {
+      if (disabled(toggle)) fallback = '管理员弹幕开关不可用';
+      else {
+        if (native) {
+          // 点击“弹”开关后页面请求类型列表；菜单由 showPanel 控制，并非 hover。
+          // 此时即使默认选中付费类型，也只展开列表，绝不写入或点击发送。
+          if (!this.chatMode(toggle)) { this.clickChatControl(toggle); await settle(); }
+          let options = [];
+          const deadline = Date.now() + 2400;
+          do {
+            await settle();
+            const room = input.closest('.webcast-chatroom');
+            options = [...(room?.querySelectorAll('img[src*="/privilege_screen_chat_admin_"]') || [])]
+              .map(img => img.closest('.RfKNBPEF')).filter(el => el && isVisible(el));
+          } while (!options.length && Date.now() < deadline);
+          if (options.length !== 1 || disabled(options[0])) fallback = '管理员弹幕选项不可用';
+          else { this.clickChatControl(options[0]); await settle(); }
+        }
+        if (!fallback && toggle && !this.chatMode(toggle)) { this.clickChatControl(toggle); await settle(); }
+        if (!fallback && !this.isAdminChatMode(input, toggle)) fallback = '管理员弹幕类型未确认';
+      }
+    }
+    if ((!desired || fallback) && this.chatMode(toggle)) {
+      if (disabled(toggle)) throw new Error('无法关闭特权弹幕模式，本条未发送');
+      this.clickChatControl(toggle); await settle();
+      if (this.chatMode(toggle)) throw new Error('特权弹幕开关未关闭，本条未发送');
+    }
+    const used = desired && !fallback && this.isAdminChatMode(input, toggle) ? 'admin' : 'chat';
+    return { toggle, previous, changed: previous !== (used === 'admin'), used, fallback };
   }
   restoreChatMode(mode) {
     if (!mode?.changed || !mode.toggle?.isConnected) return;
+    if (mode.previous && mode.toggle.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]')) {
+      // 恢复前也确认类型；发送期间用户若改选付费类型，不能重新开启总开关。
+      const selected = mode.toggle.closest('.webcast-chatroom')?.querySelector('.cw6Usapi img[src*="/privilege_screen_chat_admin_"]');
+      if (!selected) return;
+    }
     // 只恢复本次发送切换出的状态；用户若在发送期间手动改过开关，不再争抢控制权。
     if (this.chatMode(mode.toggle) === (mode.previous ? false : true)) {
-      if (typeof mode.toggle.click === 'function') mode.toggle.click();
-      else mode.toggle.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
+      this.clickChatControl(mode.toggle);
     }
   }
   async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat' } = {}) {
     if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
     if (!this.healthy()) return { submitted: false, retryable: true, reason: '直播数据重连中，本条未发送' };
     const temporary = reason => Object.assign(new Error(reason), { retryable: true });
+    const prepared = await this.requestSender.prepare(channel);
+    if (prepared?.available) {
+      const guard = () => {
+        if (!isCurrent() || !this.healthy()) return false;
+        // 请求发送不会读写编辑器，但仍让人工草稿优先。
+        const editors = [...this.page.document.querySelectorAll('#chatInput [contenteditable="true"], #chatInput textarea')];
+        if (editors.some(el => ('value' in el ? el.value : el.textContent).replace(/[\u200b\ufeff]/g,'').trim())) throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
+        return true;
+      };
+      if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
+      await beforeClick();
+      if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
+      // 从这里开始请求可能已经送达，未知结果不能转 UI 再发一次。
+      return this.requestSender.commit(prepared.token,text);
+    }
     let input;
     try { input = this.findInput(); this.findSend(input); }
     catch (error) {
@@ -315,33 +535,42 @@ export class DouyinAdapter {
       throw error;
     }
     const readText = () => ('value' in input ? input.value : input.textContent).replace(/[\u200b\ufeff]/g, '').trim();
+    const repeatedDraft = (value, candidate) => {
+      const normalize = text => String(text || '').replace(/[\u200b\ufeff]/g, '').replace(/\s+/g, '').trim();
+      const current = normalize(value), expected = normalize(candidate);
+      if (!current || !expected || current.length <= expected.length || current.length > expected.length * 6) return false;
+      const count = current.length / expected.length;
+      if (Number.isInteger(count) && current === expected.repeat(count)) return true;
+      const remainder = current.slice(expected.length);
+      return current.startsWith(expected) && remainder.length >= Math.min(8, Math.ceil(expected.length * 0.2)) && expected.startsWith(remainder);
+    };
     const existing = readText();
-    if (existing.trim()) {
-      const own = this.ownedDraft;
-      if (own && own.text === existing && Date.now() - own.at < 120000) {
-        const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
-        if ('value' in input) Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, '');
-        else { input.textContent = ''; }
-        input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
-        this.ownedDraft = null;
-      } else throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
+    if (existing && this.ownedDraft?.text !== existing) {
+      if (repeatedDraft(existing, text)) this.ownedDraft = {text:existing,at:Date.now()};
+      else throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
     }
     if (input.disabled || input.readOnly || input.getAttribute('aria-disabled') === 'true') throw temporary('输入框暂不可用，等待网页恢复');
     if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
     const doc = input.ownerDocument;
-    const clearOwnText = () => {
-      if (readText() !== text) return false;
+    const clearOwnText = (expected = text) => {
+      // 清理也必须作用于当前编辑器，不能误把已经脱离页面的旧节点清空当作成功。
+      try { input = this.findInput(); } catch { return false; }
+      if (!input.isConnected || readText() !== expected) return false;
       if ('value' in input) {
         const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
         Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, '');
       } else {
+        if (doc.activeElement !== input && doc.activeElement !== doc.body) return false;
+        input.focus({ preventScroll: true });
         const selection = this.page.getSelection(), range = doc.createRange();
         range.selectNodeContents(input); selection.removeAllRanges(); selection.addRange(range);
         doc.execCommand?.('delete', false);
       }
       input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
-      this.ownedDraft = null;
-      return !readText();
+      const cleared = !readText();
+      // 编辑器可能拒绝 delete；保留归属，重试时复用原文，避免永远等待“人工草稿”。
+      if (cleared) this.ownedDraft = null;
+      return cleared;
     };
     let previousFocus = doc.activeElement;
     while (previousFocus?.shadowRoot?.activeElement) previousFocus = previousFocus.shadowRoot.activeElement;
@@ -351,14 +580,31 @@ export class DouyinAdapter {
     let mode;
     try {
       input.focus({ preventScroll: true });
+      const focusedInput = input;
       mode = await this.setChatMode(input, channel);
       const withMode = result => mode.used === 'admin' || mode.fallback ? { ...result, channelUsed: mode.used, ...(mode.fallback ? { modeFallback: mode.fallback } : {}) } : result;
+      // 切换弹幕模式也可能重建输入框；写入前重新确认，保留用户中途输入的草稿。
+      input = this.findInput();
+      let draft = readText();
+      // 每次回复都从空白输入框开始。只清理由本脚本确认写入的草稿，
+      // 人工输入仍保留并暂停自动发送，避免覆盖观众/主播正在编辑的内容。
+      if (draft && draft === this.ownedDraft?.text) {
+        if (!clearOwnText(draft)) {
+          // 同一回复可能由旧版脚本重复写入；清理仍须成功后才能发送。
+          throw temporary('上条回复仍留在输入框，清理失败后稍后重试');
+        }
+        input = this.findInput(); draft = readText();
+      }
+      if (draft) throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
+      if (input.disabled || input.readOnly || input.getAttribute('aria-disabled') === 'true') throw temporary('输入框暂不可用，等待网页恢复');
+      if (doc.activeElement === focusedInput || (!focusedInput.isConnected && doc.activeElement === doc.body)) input.focus({ preventScroll: true });
       if ('value' in input) {
         const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
         Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, text);
         input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
         input.dispatchEvent(new this.page.Event('change', { bubbles: true }));
       } else {
+        if (doc.activeElement !== input && doc.activeElement !== doc.body) throw temporary('输入焦点已变更，稍后重试');
         // 当前抖音使用有内部文档状态的富文本编辑器，不能只改 textContent。
         // 走编辑器的纯文本粘贴路径，保留原有输入校验、字数限制和 onChange。
         let handled = false;
@@ -369,34 +615,46 @@ export class DouyinAdapter {
         }
         if (!handled && !this.page.document.execCommand?.('insertText', false, text)) throw new Error('富文本编辑器未接受输入，请用人工方式发送并检查页面适配');
       }
+      if (readText() === text) this.ownedDraft = { text, at: Date.now() };
       // 等待 React 更新按钮状态；取消时只清理本脚本的文本。
       await new Promise(resolve => setTimeout(resolve, 120));
-      // React may replace the editor while applying the pasted message.
-      try { input = this.findInput(); } catch {}
-      const currentValue = readText();
-      if (currentValue !== text) throw temporary('输入内容与候选不一致（可能被截断），稍后重试');
-      this.ownedDraft = { text, at: Date.now() };
-      if (!isCurrent() || !this.healthy() || !isVisible(input)) {
-        const cleared = clearOwnText();
-        if (isCurrent() && !cleared) throw temporary('输入框已变化，等待网页稳定后重试');
-        return { submitted: false, retryable: isCurrent(), reason: '连接或输入框暂不可用，本条未点击发送' };
-      }
-      // 富文本变化会把禁用的图标替换成另一个节点，需再次定位。
-      let button;
-      try { button = this.findSend(input); }
-      catch (error) {
-        if (!clearOwnText()) throw temporary('发送控件已变化，等待网页稳定后重试');
-        throw error;
-      }
-      if (!isVisible(button) || button.disabled || button.hasAttribute('disabled') || button.classList.contains('disable') || button.getAttribute('aria-disabled') === 'true') {
-        if (clearOwnText()) throw temporary('发送按钮暂不可用，等待网页恢复');
-        throw temporary('发送按钮暂不可用，等待网页恢复');
-      }
+      // 输入后的状态更新不保证在 120ms 内完成。等待当前控件真正就绪，
+      // 避免每次都在按钮启用前清空重填，并在重绘时重新定位。
+      const waitForSend = async () => {
+        const deadline = Date.now() + 1800;
+        while (true) {
+          if (!isCurrent() || !this.healthy()) return null;
+          let button, unavailable;
+          try { input = this.findInput(); }
+          catch (error) { unavailable = error; }
+          if (!unavailable) {
+            const value = readText();
+            // 粘贴处理器也可能异步提交文档；空编辑器继续等待，其他内容不冒险发送。
+            if (value && value !== text) throw temporary('输入内容已变更或与候选不一致（可能被截断），稍后重试');
+            if (value === text) this.ownedDraft = { text, at: Date.now() };
+            try { button = this.findSend(input); }
+            catch (error) { if (!error.retryable) throw error; unavailable = error; }
+            const disabled = element => element.disabled || element.readOnly || element.hasAttribute('disabled') || element.classList.contains('disable') || element.getAttribute('aria-disabled') === 'true';
+            if (value === text && button && isVisible(input) && !disabled(input) && isVisible(button) && !disabled(button) && !button.closest('[disabled], [aria-disabled="true"], .disable')) return button;
+          }
+          if (Date.now() >= deadline) throw unavailable || temporary('发送按钮暂不可用，等待网页恢复');
+          await new Promise(resolve => setTimeout(resolve, 60));
+        }
+      };
+      let button = await waitForSend();
+      if (!button) { clearOwnText(); return {submitted:false,reason:'点击前已暂停或断线'}; }
       // 抖音的发送控件是 SVGElement，没有 HTMLElement.click()。
       // 对真实控件派发一次冒泡点击，让页面自己的 React 处理发送。
       await beforeClick();
-      if (!isCurrent() || !this.healthy()) {
+      // 异步钩子期间控件与草稿仍可能变化，点击前再次校验并获取当前节点。
+      button = await waitForSend();
+      if (!button) {
         clearOwnText(); return {submitted:false,reason:'点击前已暂停或断线'};
+      }
+      const toggle = this.findChatModeToggle(input);
+      const hint = input.getAttribute('data-placeholder') || input.getAttribute('placeholder') || '';
+      if (mode.used === 'admin' ? !this.isAdminChatMode(input, toggle) : this.chatMode(toggle) || /发送.*(?:至尊|高级|付费|钻)/.test(hint)) {
+        throw temporary('弹幕类型在发送前发生变化，本条未发送');
       }
       clicked = true;
       button.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
@@ -404,12 +662,14 @@ export class DouyinAdapter {
       while (Date.now() < deadline) {
         const rejected = failures().find(value=>!previousFailures.has(value));
         if (rejected) { clearOwnText(); return {submitted:false,clicked:true,failed:true,reason:rejected.slice(0,200)}; }
-        if (!readText()) { this.ownedDraft = null; return withMode({ submitted: true, clicked:true }); }
-        if (readText() !== text || !isCurrent()) return withMode({ submitted: false, clicked:true, reason: '发送后输入框已变更或场控已暂停' });
+        let currentInput = false;
+        try { input = this.findInput(); currentInput = input.isConnected; } catch {}
+        if (currentInput && !readText()) { this.ownedDraft = null; return withMode({ submitted: true, clicked:true }); }
+        if ((currentInput && readText() !== text) || !isCurrent()) return withMode({ submitted: false, clicked:true, reason: '发送后输入框已变更或场控已暂停' });
         await new Promise(resolve => setTimeout(resolve, 60));
       }
       clearOwnText();
-      return withMode({submitted:false,clicked:true,reason:'点击后暂未观察到提交结果，将自动重试'});
+      return withMode({submitted:false,clicked:true,reason:'点击后暂未观察到提交结果，为避免重复发送，不自动重发'});
     } catch (error) {
       if (clicked) error.clicked = true;
       if (this.ownedDraft?.text === text) clearOwnText();
@@ -425,22 +685,34 @@ export class DouyinAdapter {
   }
   observeDOM() {
     // 变动时拍下弹幕快照；虚拟列表随即移除/复用节点也不丢掉已读消息。
-    const pending = []; let timer = null, flushing = false, stopped = false, lastError = 0, domNeedsBaseline = false;
+    const pending = []; let timer = null, flushing = false, stopped = false, lastError = 0, domNeedsBaseline = false, startVisible = false, endVisible = false;
     this.status.domRows = 0; this.status.domBatches = 0;
     const selector = () => this.getConfig().adapter.chatSelector || '[data-e2e="chat-message"], [class*="webcast-chatroom___item"]';
-    const read = (row, emit, receivedAt) => {
+    const read = (row, emit, receivedAt, allowMilestone = true) => {
       this.status.domRows++;
+      const signature = row.textContent.trim();
+      if (this.domSeen.get(row) === signature) return;
+      this.domSeen.set(row, signature);
       const c = this.getConfig().adapter;
       const nameEl = row.querySelector(c.nicknameSelector || '[data-e2e="chat-nickname"], [class*="nickname"]');
       const contentEl = row.querySelector(c.contentSelector || '[data-e2e="chat-content"], [class*="content"]');
+      // 昵称、灯牌和正文在 textContent 中会连在一起，不能把发送者拼成被感谢的人。
+      const text = contentEl ? contentEl.textContent.trim() : signature;
+      const milestone = recognizeMilestone(text);
+      if (allowMilestone && milestone && this.shouldReadMilestones()) pending.push({ type:'milestone', milestone, text, source:'dom', receivedAt });
       if (!nameEl || !contentEl) return;
-      const name = nameEl.textContent.trim().replace(/[:：]$/, ''), text = contentEl.textContent.trim();
-      const signature = `${name}\n${text}`;
-      if (this.domSeen.get(row) === signature) return;
-      this.domSeen.set(row, signature);
-      if (emit && name && text) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
+      const name = nameEl.textContent.trim().replace(/[:：]$/, '');
+      if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
     };
     const report = error => { if (Date.now() - lastError > 10000) { lastError = Date.now(); this.onLog('error', `页面弹幕采集异常：${error.message}`); } };
+    const detectLiveBoundary = () => {
+      const c = this.getConfig().adapter;
+      const start = c.startSelector ? isVisible(document.querySelector(c.startSelector)) : false;
+      const end = c.endSelector ? isVisible(document.querySelector(c.endSelector)) : false;
+      if (start && !end && !startVisible) void Promise.resolve(this.onEvent({ type:'start', source:'dom-observed', at:Date.now() })).catch(report);
+      if (end && !endVisible) void Promise.resolve(this.onEvent({ type:'end', source:'dom', at:Date.now() })).catch(report);
+      startVisible = start; endVisible = end;
+    };
     const scheduleFlush = delay => {
       if (stopped || flushing || timer !== null || !pending.length) return;
       timer = setTimeout(() => { void flush().catch(report); }, delay);
@@ -449,11 +721,11 @@ export class DouyinAdapter {
       if (stopped || flushing) return;
       timer = null; flushing = true; this.status.domBatches++;
       try {
-        const enabled = this.shouldReadChat();
+        const enabled = this.shouldReadChat(), milestonesEnabled = this.shouldReadMilestones();
         // 每批最多处理 200 条，余下继续处理，不能把超过 200 条的消息截掉。
         for (const event of pending.splice(0, 200)) {
           if (stopped) break;
-          if (!enabled) continue;
+          if (event.type === 'milestone' ? !milestonesEnabled : !enabled) continue;
           try { await Promise.resolve(this.onEvent(event)); } catch (error) { report(error); }
         }
       } finally {
@@ -464,10 +736,7 @@ export class DouyinAdapter {
     this.observer = new MutationObserver(records => {
       try {
         const c = this.getConfig().adapter;
-        if (c.endSelector && records.length) {
-          const end = document.querySelector(c.endSelector);
-          if (isVisible(end)) void Promise.resolve(this.onEvent({ type:'end', source:'dom' })).catch(report);
-        }
+        if (records.length) detectLiveBoundary();
         const socketActive = Date.now() - this.lastSocketChat <= 15000;
         const emit = this.shouldReadChat() && !socketActive;
         const sel = selector(), rows = new Set(), receivedAt = Date.now();
@@ -486,7 +755,7 @@ export class DouyinAdapter {
         if (socketActive) domNeedsBaseline = true;
         if (emit && domNeedsBaseline) {
           for (const row of [...document.querySelectorAll(sel)].slice(-200)) {
-            try { read(row, false, receivedAt); } catch (error) { report(error); }
+            try { read(row, false, receivedAt, false); } catch (error) { report(error); }
           }
           domNeedsBaseline = false;
           return;
@@ -495,8 +764,9 @@ export class DouyinAdapter {
         scheduleFlush(50);
       } catch (error) { report(error); }
     });
-    for (const row of [...document.querySelectorAll(selector())].slice(-200)) read(row, false, Date.now());
-    this.observer.observe(document.body, { childList:true, subtree:true, characterData:true });
+    for (const row of [...document.querySelectorAll(selector())].slice(-200)) read(row, false, Date.now(), false);
+    this.observer.observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class','style','hidden','aria-hidden'] });
+    detectLiveBoundary();
     this.stopDOM = () => {
       stopped = true;
       this.observer.disconnect();

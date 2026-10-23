@@ -9,13 +9,13 @@ import { installDevelopmentReload } from '../../extension/development-reload.js'
 const run = promisify(execFile);
 const a = 'a'.repeat(64), b = 'b'.repeat(64);
 
-function harness({revision=a,values={},fetchUpdate,beforeReload,alarmsAvailable=true}={}) {
+function harness({revision=a,values={},fetchUpdate,beforeReload,prepareReload=async()=>({ok:true}),alarmsAvailable=true}={}) {
   let alarm,connect,reloads=0,flushed=0;
   const tabs = new Map([[1,{id:1,url:'https://live.douyin.com/123'}],[2,{id:2,url:'https://example.com/'}]]), refreshed=[];
   const chrome = {
     runtime:{reload:()=>{reloads++;},onConnect:{addListener:f=>connect=f}},
     storage:{local:{get:async()=>values,set:async data=>Object.assign(values,data),remove:async key=>delete values[key]}},
-    tabs:{query:async()=>[...tabs.values()],get:async id=>tabs.get(id),reload:async id=>refreshed.push(id)},
+    tabs:{sendMessage:prepareReload,query:async()=>[...tabs.values()],get:async id=>tabs.get(id),reload:async id=>refreshed.push(id)},
     alarms:{create:async()=>{},onAlarm:{addListener:f=>alarm=f}}
   };
   if (!alarmsAvailable) delete chrome.alarms;
@@ -100,7 +100,21 @@ test('开发构建分离本地权限，正式构建不包含自动重载入口�
     await writeFile(join(dist,'development-watch.lock'),String(process.pid));
     await run(process.execPath,['scripts/build.mjs'],{env});
     const production=JSON.parse(await readFile(join(ext,'manifest.json'),'utf8'));
-    assert.deepEqual(production.permissions,['storage']);assert.doesNotMatch(await readFile(join(ext,'background.js'),'utf8'),/installDevelopmentReload/);
+    assert.deepEqual(production.permissions,['storage','unlimitedStorage']);assert.doesNotMatch(await readFile(join(ext,'background.js'),'utf8'),/installDevelopmentReload/);
     assert.ok(!production.content_scripts.some(script=>script.js.includes('development-content.js')));
   } finally {await rm(dist,{recursive:true,force:true});}
+});
+
+
+test('页面未确认保存或仍有待入账恢复点写入时不重载扩展', async () => {
+  let fail=true, release, entered;
+  const ready=new Promise(resolve=>{entered=resolve;});
+  const h=harness({fetchUpdate:async()=>({ok:true,json:async()=>({revision:b})}),prepareReload:async()=>{
+    if(fail)return {ok:false};
+    entered();await new Promise(resolve=>{release=resolve;});return {ok:true};
+  }});
+  await h.api.checkUpdate();assert.equal(h.reloads(),0);assert.equal(h.flushed(),0);
+  fail=false;const update=h.api.checkUpdate();await ready;
+  assert.equal(h.reloads(),0);release();await update;
+  assert.equal(h.reloads(),1);
 });

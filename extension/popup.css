@@ -1,18 +1,18 @@
 body{margin:0;width:360px;max-height:600px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--sg-scroll) transparent;background:var(--sg-background);color:var(--sg-foreground);font:13px/1.65 var(--sg-font);-webkit-font-smoothing:antialiased}
 header{display:flex;align-items:center;gap:12px;padding:20px 22px 16px;border-bottom:1px solid var(--sg-border)}
-.symbol{width:38px;height:38px;border-radius:11px;background:var(--sg-control);box-shadow:var(--sg-state-shadow);color:var(--sg-brand);display:grid;place-items:center;flex-shrink:0}
-.symbol svg{width:23px;height:23px;filter:drop-shadow(-1px -1px 0 var(--sg-cyan))}
+.symbol{width:34px;height:34px;border-radius:8px;background:var(--sg-brand-wash);color:var(--sg-brand);display:grid;place-items:center;flex-shrink:0}
+.symbol svg{width:21px;height:21px}
 h1{font-size:17px;margin:0;font-weight:650;line-height:1.4}
 header p{margin:4px 0 0;font-size:12px;color:var(--sg-muted)}
 main{padding:16px 22px 0}
-.status{margin:0 0 14px;padding:13px 14px;color:var(--sg-foreground);font-size:12px;min-height:64px;display:flex;align-items:center;line-height:1.7;overflow-wrap:anywhere}
+.status{margin:0 0 16px;padding:12px 0;color:var(--sg-foreground);font-size:13px;min-height:48px;display:flex;align-items:center;line-height:1.7;overflow-wrap:anywhere;border-bottom:1px solid var(--sg-border)}
 .status.error{color:var(--sg-danger)}
 button,input{width:100%}
 .primary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;min-height:44px;text-align:left}
 .primary svg{width:18px;height:18px;flex-shrink:0}
 .hint{margin:11px 0 16px;font-size:12px;color:var(--sg-muted);line-height:1.8}
 details{border-top:1px solid var(--sg-border);padding:10px 0 0}
-summary{cursor:pointer;color:var(--sg-foreground);font-size:12px;font-weight:500;padding:3px 0}
+summary{cursor:pointer;color:var(--sg-foreground);font-size:12px;font-weight:500;padding:8px 0}
 summary:hover,details[open] summary{color:var(--sg-foreground)}
 label{display:block;font-size:12px;margin:16px 0 12px}
 input{margin-top:7px;padding:10px 12px;min-height:42px}
@@ -22,3 +22,5 @@ footer{margin-top:14px;padding:12px 22px;border-top:1px solid var(--sg-border);c
 .theme-setting{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0;font-size:12px}
 .theme-setting select{width:124px;padding:5px 8px;min-height:32px}
 footer p{font-size:11px;margin:9px 0 0}
+::selection{background:var(--sg-brand-wash);color:var(--sg-foreground)}input{caret-color:var(--sg-brand)}
+@media(prefers-reduced-motion:no-preference){main{animation:popup-enter 160ms cubic-bezier(.16,1,.3,1) both}@keyframes popup-enter{from{opacity:.7;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}}

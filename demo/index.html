@@ -46,9 +46,10 @@ body{background:#f3f3f5;color:#1d1d1f}main{width:min(1420px,calc(100% - 48px));m
   <div class="event-group"><h3>进场欢迎</h3><div class="buttons"><button data-event="qualified">高等级 · 本房粉丝团</button><button data-event="other">非本房粉丝团</button><button data-event="unlit">粉丝团未点亮</button><button data-event="low-level">低等级观众</button></div></div>
   <div class="event-group"><h3>互动与公屏</h3><div class="buttons"><button data-event="like">❤️ 点赞 ×30</button><button data-chat="随便聊两句，主播～">普通弹幕</button><button data-chat="@场控 菜单" data-mention="true">@场控 菜单</button></div><small>AI 默认关闭；按你的功能开关生成回复。</small></div>
   <div class="event-group"><h3>机器人回复</h3><div class="buttons"><button data-chat="@场控 骰子" data-mention="true">🎲 @场控 骰子</button><button data-chat="@场控 选择 唱歌/聊天" data-mention="true">🎯 @场控 帮选</button></div><small>先在控制面板启用 @机器人，再开始场控。</small></div>
+  <div class="event-group"><h3>主播与 PK 数据演示</h3><div class="buttons"><button data-pk-demo="start">模拟 PK 追分局</button><button data-pk-demo="end">模拟终局</button><button data-anchor-demo>模拟主播统计</button></div><small>仅生成本地模拟数据，不连接真实直播间。</small></div>
 </div></section>
 <footer>模拟器不会登录直播间，也不会发送真实弹幕或礼物。礼物图标从抖音公开 CDN 加载；名称和钻石价格取自一次公开直播间，仅作本地样例，真实目录、价格和房间布局可能变化。主播收入按约 0.05 元/钻估算，不代表平台结算。AI 请求仅在配置后发往你填写的服务。</footer>
-</main><script type="module">
+</main><script type="importmap">{"imports":{"/src/ui/live-charts.js":"/dist/live-charts.js"}}</script><script type="module">
 import { boot } from '../src/app.js';
 import { DEFAULTS, copy } from '../src/core/engine.js';
 const prefix = 'douyin-live-demo:';
@@ -62,6 +63,44 @@ const request = details => {
 let api; let serial = Date.now(); let chatCount = 3;
 boot({ demo: true, get: (key, fallback) => storage.has(key) ? storage.get(key) : fallback, set: (key, value) => { storage.set(key, value); localStorage.setItem(prefix+key,JSON.stringify(value)); }, del: key => { storage.delete(key); localStorage.removeItem(prefix+key); }, all: () => Object.fromEntries(storage), request, onReady: value => { api = value; attachReplyFeed(value.engine); value.panel.toggleOpen(); } });
 const user = { id: '987654321000001', name: '青山', wealthLevel: 35, fanClubs: [{ anchorId: c.anchorId, level: 8, status: 1 }] };
+let pkDemoTimer,pkDemoBattle='',pkDemoSelf=0,pkDemoOpponent=0;
+const pkDemoEmit=event=>api.engine.ingest({roomId:'demo',id:`pk-demo-${++serial}`,source:'demo',...event});
+document.querySelector('[data-pk-demo="start"]').addEventListener('click',()=>{
+  clearInterval(pkDemoTimer);const now=Date.now();pkDemoBattle=`demo-battle-${now}`;
+  pkDemoEmit({type:'pk-start',battleId:pkDemoBattle,anchorId:c.anchorId,opponentId:'rival',anchorName:'夜航 · 模拟',opponentName:'星河 · 模拟',startedAt:now-90000,endsAt:now+120000,receivedAt:now-90000});
+  for(let i=0;i<=9;i++) {
+    pkDemoSelf=12000+i*850;pkDemoOpponent=9500+i*1050;
+    const at=now-90000+i*10000;
+    pkDemoEmit({type:'pk-score',battleId:pkDemoBattle,selfScore:pkDemoSelf,opponentScore:pkDemoOpponent,receivedAt:at,at});
+    pkDemoEmit({type:'chat',roomId:'demo',text:'加油，稳住',user,receivedAt:at});
+    pkDemoEmit({type:'like',roomId:'demo',count:30+i*3,user,receivedAt:at});
+  }
+  for(const [side,anchorId] of [['self',c.anchorId],['opponent','rival']])pkDemoEmit({type:'pk-contribution',battleId:pkDemoBattle,anchorId,side,contributors:[{user:{id:`${side}-1`,name:side==='self'?'青山':'星光'},score:side==='self'?12500:14000,rank:1},{user:{id:`${side}-2`,name:side==='self'?'晚风':'远山'},score:side==='self'?7200:4300,rank:2}],receivedAt:now});
+  pkDemoEmit({type:'pk-effect',battleId:pkDemoBattle,side:'opponent',effectType:'card',name:'加成卡 · 模拟',startAt:now-3000,endAt:now+20000,receivedAt:now});
+  api.panel.open=true;api.panel.node('.panel').hidden=false;api.panel.tab('pk');api.panel.refresh(api.engine,{connected:true,frames:12});
+  pkDemoTimer=setInterval(()=>{const at=Date.now();pkDemoSelf+=380;pkDemoOpponent+=520;pkDemoEmit({type:'pk-score',battleId:pkDemoBattle,selfScore:pkDemoSelf,opponentScore:pkDemoOpponent,receivedAt:at,at});},3000);
+});
+document.querySelector('[data-pk-demo="end"]').addEventListener('click',()=>{clearInterval(pkDemoTimer);if(pkDemoBattle)pkDemoEmit({type:'pk-end',battleId:pkDemoBattle,selfScore:pkDemoSelf,opponentScore:pkDemoOpponent,receivedAt:Date.now()});});
+document.querySelector('[data-anchor-demo]').addEventListener('click',()=>{
+  if (!api) return;
+  const now=Date.now(), day=86400000;
+  // Explicit local demo fixtures; no platform requests or real room data.
+  for(let i=0;i<7;i++) {
+    const endedAt=now-i*day, score=12400+i*1800;
+    api.engine.anchorStats.ingestBattle({key:`anchor-demo-${new Date(endedAt+8*3600000).toISOString().slice(0,10)}`,roomId:'demo',anchorId:c.anchorId,anchorName:'夜航 · 模拟',opponentId:'rival',opponentName:'星河 · 模拟',
+      phase:'ended',provisional:false,startedAt:endedAt-180000,endedAt,lastEventAt:endedAt,
+      selfScore:score,opponentScore:i%3===0?score+1500:i%3===1?score-2300:score,selfScoreObserved:true,opponentScoreObserved:true,selfScoreAt:endedAt,opponentScoreAt:endedAt,selfScoreMeta:{final:true},opponentScoreMeta:{final:true}});
+  }
+  pkDemoEmit({type:'pk-rank-season',anchorId:c.anchorId,receivedAt:now,afterRank:{detail:'璀璨钻石 · 模拟',starCount:'3',targetStarCount:'5'}});
+  const snapshotId=`demo-exhibition-${now}`;
+  const items=giftCatalog.slice(0,16).map((gift,index)=>({giftId:`demo-${gift.id}`,name:gift.name,diamonds:gift.price,lighted:index<11,received:index<11?3:1,threshold:3,
+    task:index%3===0?{current:2,target:5,rewardStars:3,finished:false}:null}));
+  for(let chunk=0;chunk<2;chunk++) pkDemoEmit({type:'anchor-exhibition',anchorId:c.anchorId,snapshotId,receivedAt:now,section:'items',chunk,chunks:2,totalItems:items.length,
+    summary:{name:'夜航 · 模拟',title:'本周展馆 · 模拟',level:8,gradeLevel:3,stars:{current:18,target:30}},items:items.slice(chunk*10,chunk*10+10)});
+  api.panel.open=true;api.panel.node('.panel').hidden=false;api.panel.tab('anchor');api.panel.refresh(api.engine,{connected:true});
+  api.panel.toast('已加载本地模拟统计，不连接真实直播间。');
+});
+window.addEventListener('pagehide',()=>clearInterval(pkDemoTimer));
 const feed = document.querySelector('#chat');
 const clock = new Intl.DateTimeFormat('zh-CN', {hour:'2-digit',minute:'2-digit',hour12:false});
 const giftCatalog = [

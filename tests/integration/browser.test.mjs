@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 import { Panel } from '../../src/ui/panel.js';
+import { AnchorStats } from '../../src/core/anchor-stats.js';
 import { copy, DEFAULTS, Engine } from '../../src/core/engine.js';
 import { DouyinAdapter, RoomLock } from '../../src/browser/adapter.js';
 import { gzipSync } from 'node:zlib';
@@ -32,6 +33,18 @@ test('面板可完整读写配置、切换选项、保存不会丢失隐藏字�
   panel.tab('gift'); assert.equal(panel.root.querySelector('[data-page="gift"]').hidden, false); assert.equal(panel.root.querySelector('[data-page="runtime"]').hidden, true);
   panel.tab('likes');
   assert.equal(panel.root.querySelector('[data-field="like.cooldownSec"]'), null); assert.equal(panel.root.querySelector('[data-page="likes"]').hidden, false);
+  dom.window.close();
+});
+test('最近观众列表展示可确认的性别和具体年龄，不显示缺失项',()=>{
+  const dom=setup();const panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
+  panel.updateViewers([
+    {key:'uid:1',id:'1',name:'青山',gender:2,age:25},
+    {key:'uid:2',id:'2',name:'匿名',gender:null,age:null}
+  ]);
+  const labels=[...panel.node('[data-viewer-picker]').options].map(option=>option.textContent);
+  assert.ok(labels.some(label=>label.includes('青山 · 女 · 25岁')));
+  assert.ok(labels.some(label=>label.includes('匿名')));
+  assert.ok(!labels.some(label=>label.includes('匿名 · 男') || label.includes('匿名 · 女') || label.includes('匿名 · NaN岁')));
   dom.window.close();
 });
 test('昵称、回复和日志不会注入 HTML；界面不再提供人工审核队列', () => {
@@ -117,6 +130,43 @@ test('WebSocket hook 保留原型、常量和页面帧，只观察抖音直播�
   socket.dispatchEvent(new dom.window.MessageEvent('message', { data: frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) }));
   await a.chain; assert.equal(a.status.frames, 1); assert.equal(events[0].type, 'end'); socket.dispatchEvent(new dom.window.Event('close')); assert.equal(a.status.connected, false); dom.window.close();
 });
+test('仅观察同源直播 IM 长轮询，解码二进制响应并抑制跨传输重复事件', async () => {
+  const dom = setup();
+  class FakeSocket extends dom.window.EventTarget { static OPEN = 1; }
+  class FakeXHR extends dom.window.EventTarget {
+    open(method, url) { this.method = method; this.url = url; }
+    send() { this.status = 200; this.responseType = this.forceUnsupported ? 'json' : 'arraybuffer'; const body = this.forceUnsupported ? null : this.body || (this.forceUnknown ? unknownResponse : frame); this.response = this.forceUnsupported ? {ok:true} : body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength); this.dispatchEvent(new dom.window.Event('load')); }
+  }
+  const v = value => { let n = BigInt(value), out = []; while (n > 127n) { out.push(Number(n & 127n) | 128); n >>= 7n; } out.push(Number(n)); return Buffer.from(out); };
+  const bytes = (field, value) => { const data = Buffer.from(value); return Buffer.concat([v(field * 8 + 2), v(data.length), data]); };
+  const integer = (field, value) => Buffer.concat([v(field * 8), v(value)]);
+  const common = integer(2, 987654), control = Buffer.concat([bytes(1, common), integer(2, 3)]);
+  const message = Buffer.concat([bytes(1, 'WebcastControlMessage'), bytes(2, control), integer(3, 123)]);
+  const response = bytes(1, message), frame = Buffer.concat([bytes(7, 'msg'), bytes(8, response)]);
+  const unknownMessage = Buffer.concat([bytes(1, 'WebcastMysteryMessage'), bytes(2, Buffer.from([0]))]);
+  const unknownResponse = bytes(1, unknownMessage);
+  dom.window.WebSocket = FakeSocket; dom.window.XMLHttpRequest = FakeXHR;
+  const events = [], captures = [], a = new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:event=>events.push(event),onCapture:record=>captures.push(record),onLog:()=>{},onStatus:()=>{}});
+  try {
+    a.hook();
+    const ignored = new dom.window.XMLHttpRequest(); ignored.open('GET', '/webcast/user/'); ignored.send();
+    const socket = new dom.window.WebSocket('wss://webcast5-ws-web-lf.douyin.com/webcast/im/push/v2/');
+    socket.dispatchEvent(new dom.window.MessageEvent('message', {data:frame}));
+    const poll = new dom.window.XMLHttpRequest(); poll.body = response; poll.open('GET', '/webcast/im/fetch/?resp_content_type=protobuf&cursor=redacted'); poll.send();
+    const unknown = new dom.window.XMLHttpRequest(); unknown.body = unknownResponse; unknown.open('GET', '/webcast/im/fetch/'); unknown.send();
+    const unsupported = new dom.window.XMLHttpRequest(); unsupported.forceUnsupported = true; unsupported.open('GET', '/webcast/im/fetch/'); unsupported.send();
+    await a.chain;
+    assert.equal(a.status.pollHook, true); assert.equal(a.status.pollRequests, 3); assert.equal(a.status.pollResponses, 2); assert.equal(a.status.pollUnsupported, 1);
+    assert.equal(a.status.pollFrames, 2); assert.equal(a.status.duplicateEvents, 1);
+    assert.equal(a.status.unknownMethods.WebcastMysteryMessage, 1);
+    assert.deepEqual(events.map(event=>event.type), ['end']); assert.equal(events[0].source, 'socket');
+    assert.equal(captures.length,3,'帧日志包含重复业务帧和未知 method 帧');
+    assert.equal(captures[0].transport,'socket');
+    assert.equal(captures[0].messages[0].decodedTypes[0],'end');
+    assert.deepEqual(captures[2].messages[0],{method:'WebcastMysteryMessage',messageId:'',decodedTypes:[]});
+    assert.equal(Buffer.from(captures[0].rawBase64,'base64').toString('hex'),frame.toString('hex'));
+  } finally { dom.window.close(); }
+});
 test('浏览器锁阻止多标签页同时运行，释放后允许接管', async () => {
   setup(); const options = { room: '1' };
   const a = new RoomLock(options), b = new RoomLock(options); assert.equal(await a.acquire(), true); assert.equal(await b.acquire(), false);
@@ -196,6 +246,18 @@ test('未保存设置开始时先保存，等待期间刷新不会允许重复�
   release();await new Promise(r=>setTimeout(r,10));assert.equal(starts,1);assert.equal(p.dirty,false);assert.equal(p.node('[data-action="start"]').disabled,true);
   p.destroy();dom.window.close();
 });
+
+test('调试消息按钮只在自动发送运行时启用并进入调试回调',async()=>{
+  const dom=setup();let sends=0;const c={...copy(DEFAULTS),mode:'auto'},e=new Engine({config:c});
+  const p=new Panel({config:c,room:'1',callbacks:{debugSend:()=>{sends++;}}});
+  try {
+    p.refresh(e);assert.equal(p.node('[data-action=debug-send]').disabled,true);
+    e.start();p.refresh(e);assert.equal(p.node('[data-action=debug-send]').disabled,false);
+    p.node('[data-action=debug-send]').click();await new Promise(r=>setTimeout(r,0));
+    assert.equal(sends,1);assert.match(p.node('.toast').textContent,/已加入发送队列/);
+    e.config.mode='preview';p.refresh(e);assert.equal(p.node('[data-action=debug-send]').disabled,true);
+  } finally {p.destroy();dom.window.close();}
+});
 test('稳定刷新不重建节点，收起后日志不渲染，记录限制200条',async()=>{
   const dom=setup();const p=new Panel({config:{...copy(DEFAULTS), mode:'preview'},room:'1',callbacks:{}}),e=new Engine({config:{...copy(DEFAULTS), mode:'preview'}});e.start();p.refresh(e);
   const observer=new dom.window.MutationObserver(()=>{});observer.observe(p.root,{subtree:true,childList:true,attributes:true,characterData:true});
@@ -214,6 +276,53 @@ test('DOM备用只读新增弹幕，无关变化不全页扫描；socket活跃�
   a.lastSocketChat=0;insert('恢复时历史');await new Promise(r=>setTimeout(r,10));assert.equal(events.length,1);
   insert('恢复后新增');await new Promise(r=>setTimeout(r,330));assert.equal(events.length,2);
   enabled=false;a.stopDOM();dom.window.close();
+});
+
+test('WebSocket 活跃且普通弹幕采集关闭时仍读取新增守护和贡献榜播报', async () => {
+  const dom=setup('<div id="chat"></div>'),events=[];
+  const a=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:e=>events.push(e),onLog:()=>{},onStatus:()=>{},shouldReadChat:()=>false,shouldReadMilestones:()=>true});a.observeDOM();
+  a.lastSocketChat=Date.now();
+  for(const text of ['恭喜 孤独患者 成为星守护','恭喜 孤独患者成为No.2本场1000贡献用户']){
+    const row=document.createElement('div');row.dataset.e2e='chat-message';row.textContent=text;document.querySelector('#chat').append(row);
+  }
+  await new Promise(resolve=>setTimeout(resolve,100));
+  assert.deepEqual(events.map(event=>event.milestone),[
+    {kind:'guardian',name:'孤独患者'},
+    {kind:'contribution',name:'孤独患者',rank:2}
+  ]);
+  a.stopDOM();dom.window.close();
+});
+
+test('贡献播报只解析正文，自发感谢的 DOM 回显不会拼入发送者昵称再触发回复', async () => {
+  const dom=setup('<div id="chat"></div>'), events=[], sent=[];
+  const config=copy(DEFAULTS); config.selfId='10';
+  let now=1800000000000;
+  const engine=new Engine({config,now:()=>now,send:async(text,isCurrent,hooks)=>{
+    await hooks.beforeClick(); sent.push(text); return {submitted:true};
+  }});
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>config,onEvent:event=>{events.push(event);engine.ingest(event);},onLog:()=>{},onStatus:()=>{},shouldReadChat:()=>false,shouldReadMilestones:()=>true});
+  const insert=(name,text)=>{
+    const row=document.createElement('div'); row.dataset.e2e='chat-message';
+    const nickname=document.createElement('b'); nickname.dataset.e2e='chat-nickname'; nickname.textContent=name;
+    const content=document.createElement('span'); content.dataset.e2e='chat-content'; content.textContent=text;
+    row.append(nickname,content); document.querySelector('#chat').append(row);
+  };
+  try {
+    engine.start(); adapter.observeDOM();
+    engine.ingest({type:'chat',source:'socket',roomId:'live-1',user:{name:'系统'},text:'恭喜 青山成为本场No.1、1000票贡献用户！'});
+    await engine.tick(); assert.equal(sent.length,1);
+    insert('感谢小助手',sent[0]);
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.equal(events.length,1);
+    assert.deepEqual(events[0].milestone,{kind:'contribution',name:'青山',rank:1});
+    assert.equal(events[0].text,sent[0]);
+    assert.equal(engine.queue.length,0);
+    now+=600001; await engine.tick();
+    insert('系统','恭喜 青山成为本场No.2、1000票贡献用户！');
+    insert('系统','恭喜 绿水成为本场No.2、1000票贡献用户！');
+    await new Promise(resolve=>setTimeout(resolve,100));
+    assert.deepEqual(engine.queue.map(job=>job.text),['感谢绿水成为本场No.2、1000票贡献用户！']);
+  } finally {adapter.stopDOM?.();dom.window.close();}
 });
 
 test('DOM备用异步订阅异常和下播回调 rejection 会被收敛，后续事件仍可处理', async () => {
@@ -248,6 +357,21 @@ test('DOM备用异步订阅异常和下播回调 rejection 会被收敛，后续
     assert.equal(logs.length, 1); // report() 对短时间内的重复异常做限流
     a.stopDOM();
   } finally { dom.window.close(); }
+});
+
+test('DOM场次识别只在直播状态与下播提示的可见边沿发送一次', async () => {
+  const dom=setup('<div id="chat"></div>'), c=copy(DEFAULTS), events=[];
+  c.adapter.startSelector='#live'; c.adapter.endSelector='#end';
+  const a=new DouyinAdapter({page:dom.window,getConfig:()=>c,onEvent:event=>events.push(event),onLog:()=>{},onStatus:()=>{}});
+  a.observeDOM();
+  const show=id=>{const node=dom.window.document.createElement('div');node.id=id;node.getClientRects=()=>[{width:1,height:1}];dom.window.document.body.append(node);return node;};
+  const live=show('live'); await new Promise(resolve=>setTimeout(resolve,0));
+  dom.window.document.querySelector('#chat').append(dom.window.document.createElement('span'));
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.deepEqual(events.map(event=>event.type),['start']);
+  live.remove(); await new Promise(resolve=>setTimeout(resolve,0)); show('end'); await new Promise(resolve=>setTimeout(resolve,0));
+  assert.deepEqual(events.map(event=>event.type),['start','end']);
+  a.stopDOM();dom.window.close();
 });
 
 test('DOM备用停止时会取消挂起批次的剩余事件，不与异步 flush 并发', async () => {
@@ -291,6 +415,22 @@ test('保存和开始互斥；运行时保存不暂停，失败保留修改且�
     assert.match(p.node('.toast').textContent,/无法保存/);
     e.start();p.refresh(e);assert.equal(p.node('[data-action=start]').hidden,true);assert.equal(p.node('[data-action=stop]').hidden,false);assert.equal(p.node('[data-action=save]').textContent,'保存设置');
     p.tab('gift');assert.equal(p.node('[data-action=stop]').closest('[data-page]'),null);
+  } finally {p.destroy();dom.window.close();}
+});
+
+test('查看并处理会确认当前采集告警，旧缺口不再提示而新增缺口会提示', async () => {
+  const dom=setup(),c={...copy(DEFAULTS),mode:'preview'},p=new Panel({config:c,room:'1',callbacks:{}}),e=new Engine({config:c});
+  let acknowledged;
+  p.callbacks.acknowledgeRuntimeAlert=async()=>{acknowledged={contextInvalidated:false,blocked:false,quarantined:0,gaps:{events:2,bridge:1,frames:0,capture:0},storageHigh:false};};
+  const status={ingestion:{gaps:2},bridgeGaps:1,frameGaps:0,capture:{gaps:0}};
+  try {
+    p.refresh(e,status);assert.equal(p.node('[data-runtime-alert]').hidden,false);
+    p.node('[data-runtime-alert] [data-ack-runtime-alert]').click();
+    await new Promise(resolve=>setTimeout(resolve,0));
+    p.refresh(e,{...status,acknowledgedRuntimeAlert:acknowledged});
+    assert.equal(p.activeTab,'diagnostics');assert.equal(p.node('[data-runtime-alert]').hidden,true);
+    p.refresh(e,{...status,ingestion:{gaps:3},acknowledgedRuntimeAlert:acknowledged});
+    assert.equal(p.node('[data-runtime-alert]').hidden,false);
   } finally {p.destroy();dom.window.close();}
 });
 
@@ -345,7 +485,7 @@ test('各模块摘要跟随草稿；礼物快捷阈值和独立关键词页可�
     assert.equal(p.node('[data-field="gift.responseMode"]').value,'rules');
     assert.equal(p.node('[data-field="welcome.responseMode"]').value,'rules');
     assert.equal(p.node('[data-field="keyword.responseMode"]').value,'rules');
-    assert.match(p.node('[data-summary=gift]').textContent,/连击总价 ≥ 2 钻/);
+    assert.match(p.node('[data-summary=gift]').textContent,/连击总价 ≥ 1 钻/);
     p.node('[data-gift-value="500"]').click();
     assert.equal(p.node('[data-field="gift.minValue"]').value,'500');
     assert.match(p.node('[data-summary=gift]').textContent,/≥ 500 钻/);
@@ -493,7 +633,7 @@ test('ARIA 角色型抖音编辑器和相邻图标也能被准确定位', async 
 });
 
 test('高价值欢迎发送时临时启用管理员弹幕并恢复用户原状态', async () => {
-  const dom=setup('<div id="chatInput"><label><input id="admin-mode" type="checkbox" role="switch"></label><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
+  const dom=setup('<div id="chatInput"><label><input id="admin-mode" type="checkbox" role="switch" aria-label="管理员弹幕"></label><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
   const input=dom.window.document.querySelector('textarea'), toggle=dom.window.document.querySelector('#admin-mode'), button=dom.window.document.querySelector('button');
   let modeAtSend;
   button.addEventListener('click',()=>{modeAtSend=toggle.checked;input.value='';});
@@ -508,12 +648,94 @@ test('高价值欢迎发送时临时启用管理员弹幕并恢复用户原状�
 });
 
 test('管理员弹幕开关不可用时安全回退普通弹幕', async () => {
-  const dom=setup('<div id="chatInput"><input type="checkbox" role="switch" disabled><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
+  const dom=setup('<div id="chatInput"><input type="checkbox" role="switch" aria-label="管理员弹幕" disabled><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
   const input=dom.window.document.querySelector('textarea'),button=dom.window.document.querySelector('button');let clicks=0;
   button.addEventListener('click',()=>{clicks++;input.value='';});
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
   try { const result=await adapter.send('欢迎贵宾',()=>true,{channel:'admin'});assert.equal(result.submitted,true);assert.equal(result.channelUsed,'chat');assert.match(result.modeFallback,/不可用/);assert.equal(clicks,1); }
   finally {dom.window.close();}
+});
+
+function privilegeComposer({admin = true} = {}) {
+  const dom = setup(`<pace-island id="island_random"><div class="webcast-chatroom"><div id="chatInput"><div data-e2e="live-chatting"><div class="semi-switch"><input type="checkbox" role="switch" aria-checked="false"></div><textarea placeholder="与大家互动一下"></textarea></div><button>发送</button></div><div class="FJl3IMTf" style="display:none"><div><div class="RfKNBPEF cw6Usapi"><img src="https://cdn/privilege_screen_chat_supreme_v2.png"></div>${admin ? '<div class="RfKNBPEF"><img src="https://cdn/privilege_screen_chat_admin_v2.png"></div>' : ''}</div></div></div></pace-island>`);
+  const doc = dom.window.document, input = doc.querySelector('textarea'), toggle = doc.querySelector('[role=switch]'), menu = doc.querySelector('.FJl3IMTf');
+  for (const option of menu.querySelectorAll('.RfKNBPEF')) option.getClientRects = () => menu.style.display === 'none' ? [] : [{width:100,height:30}];
+  let selected = 'supreme', paidClicks = 0, sentMode = null, sends = 0;
+  const sync = () => { toggle.setAttribute('aria-checked', String(toggle.checked)); input.placeholder = toggle.checked ? selected === 'admin' ? '发送管理员弹幕' : '发送至尊弹幕（366钻/条）' : '与大家互动一下'; };
+  toggle.addEventListener('click',()=>{
+    sync();
+    if (toggle.checked) dom.window.setTimeout(()=>{menu.style.display=toggle.checked?'block':'none';},150);
+    else menu.style.display='none';
+  });
+  doc.querySelectorAll('.RfKNBPEF').forEach(option=>option.addEventListener('click',()=>{
+    selected = option.querySelector('img').src.includes('_admin_') ? 'admin' : 'supreme';
+    if (selected === 'supreme') paidClicks++;
+    doc.querySelectorAll('.RfKNBPEF').forEach(el=>el.classList.toggle('cw6Usapi',el===option));
+    toggle.checked=true; sync();
+  }));
+  doc.querySelector('button').addEventListener('click',()=>{sentMode = toggle.checked ? selected : 'chat'; sends++; input.value='';});
+  const adapter = new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}}); adapter.status.connected=true;
+  return {dom,adapter,input,toggle,sync,state:()=>({paidClicks,sentMode,sends})};
+}
+test('真实抖音结构按管理员图片定位，选中至尊样式不会被误认为管理员', async () => {
+  const f = privilegeComposer();
+  try {
+    const result = await f.adapter.send('欢迎新朋友',()=>true,{channel:'admin'});
+    assert.equal(result.channelUsed,'admin'); assert.deepEqual(f.state(),{paidClicks:0,sentMode:'admin',sends:1});
+    assert.equal(f.toggle.checked,false); assert.equal(f.input.placeholder,'与大家互动一下');
+  } finally { f.dom.window.close(); }
+});
+test('管理员富文本写入后占位提示消失，仍校验当前选中的管理员类型', async () => {
+  const f = privilegeComposer();
+  try {
+    const result=await f.adapter.send('欢迎贵宾',()=>true,{channel:'admin',beforeClick:async()=>f.input.removeAttribute('placeholder')});
+    assert.equal(result.channelUsed,'admin'); assert.equal(f.state().sentMode,'admin');
+  } finally { f.dom.window.close(); }
+});
+test('请求发送不依赖UI控件，暂停和人工草稿仍阻止提交；未知结果不走UI重发',async()=>{
+  const dom=setup('<div id="chatInput"><textarea></textarea></div>'); let commits=0,active=true;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
+  adapter.requestSender={prepare:async()=>({available:true,token:'ticket'}),commit:async()=>{commits++;return {submitted:false,clicked:true,transport:'request',reason:'未知'};}};
+  try {
+    const cancelled=await adapter.send('欢迎',()=>active,{beforeClick:async()=>{active=false;}}); assert.equal(cancelled.clicked,undefined); assert.equal(commits,0);
+    active=true; dom.window.document.querySelector('textarea').value='人工草稿';
+    await assert.rejects(adapter.send('欢迎',()=>true),/手动草稿/); assert.equal(commits,0);
+    dom.window.document.querySelector('textarea').value='';
+    const unknown=await adapter.send('欢迎',()=>true); assert.equal(unknown.transport,'request'); assert.equal(unknown.clicked,true); assert.equal(commits,1);
+  } finally {dom.window.close();}
+});
+test('旧版请求发送器没有能力探测方法时安全回退页面控件',()=>{
+  const adapter=Object.create(DouyinAdapter.prototype);
+  adapter.requestSender={prepare:async()=>({available:false})};
+  assert.equal(adapter.requestAvailable('chat'),false);
+});
+test('管理员选项缺失时只发普通弹幕，不开启默认至尊弹幕', async () => {
+  const f = privilegeComposer({admin:false});
+  try {
+    const result = await f.adapter.send('欢迎新朋友',()=>true,{channel:'admin'});
+    assert.equal(result.channelUsed,'chat'); assert.match(result.modeFallback,/选项不可用/);
+    assert.deepEqual(f.state(),{paidClicks:0,sentMode:'chat',sends:1}); assert.equal(f.toggle.checked,false);
+  } finally { f.dom.window.close(); }
+});
+test('发送期间模式变为至尊弹幕时阻止点击发送', async () => {
+  const f = privilegeComposer();
+  try {
+    await assert.rejects(f.adapter.send('欢迎新朋友',()=>true,{beforeClick:async()=>{f.toggle.checked=true;f.sync();}}),/弹幕类型在发送前发生变化/);
+    assert.equal(f.state().sends,0);
+  } finally { f.dom.window.close(); }
+});
+test('面板灯牌门槛可保存，低于基础欢迎时定位错误字段并保留输入', () => {
+  const dom=setup(), c=copy(DEFAULTS); c.welcome.admin.enabled=true;
+  const p=new Panel({config:c,room:'1',callbacks:{}});
+  try {
+    const field=key=>p.node(`[data-field="welcome.${key}"]`);
+    field('minFanLevel').value='8'; field('admin.minFanLevel').value='7'; p.syncControls();
+    assert.equal(field('admin.minFanLevel').min,'8');
+    assert.throws(()=>p.read(),/灯牌.*不能低于基础欢迎/);
+    assert.equal(field('admin.minFanLevel').getAttribute('aria-invalid'),'true'); assert.equal(field('admin.minFanLevel').value,'7');
+    field('admin.minFanLevel').value='9'; assert.equal(p.read().welcome.admin.minFanLevel,9);
+    field('minWealth').value='61'; assert.throws(()=>p.read(),/荣誉.*不能低于基础欢迎/);
+  } finally { dom.window.close(); }
 });
 
 test('抖音重绘后旧的手动选择器失效时回退到当前控件', () => {
@@ -530,10 +752,132 @@ test('点击无效不会误报已提交，也不重复点击发送按钮', async
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
   adapter.status={connected:true,lastFrame:Date.now()};let clicks=0;const input=dom.window.document.querySelector('textarea');dom.window.document.querySelector('svg').addEventListener('click',()=>{clicks++;if(clicks===2)input.value='';});
   try {
-    const first=await adapter.send('感谢支持',()=>true);assert.equal(first.submitted,false);assert.equal(first.clicked,true);assert.match(first.reason,/自动重试/);assert.equal(clicks,1);assert.equal(input.value,'');
+    const first=await adapter.send('感谢支持',()=>true);assert.equal(first.submitted,false);assert.equal(first.clicked,true);assert.match(first.reason,/不自动重发/);assert.equal(clicks,1);assert.equal(input.value,'');
     assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(clicks,2);
   }
   finally {dom.window.close();}
+});
+
+test('输入框已有重复候选文案时发送前收敛为一份', async () => {
+  const dom=setup('<div><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  const input=document.querySelector('textarea'),button=document.querySelector('button');
+  input.value='谢谢 @A 哥的 小心心，心意收到啦～谢谢 @A 哥的 小心心，心意收到啦～';
+  let clicks=0;
+  button.addEventListener('click',()=>{clicks++;input.value='';});
+  try {
+    assert.deepEqual(await adapter.send('谢谢 @A 哥的 小心心，心意收到啦～',()=>true),{submitted:true,clicked:true});
+    assert.equal(clicks,1); assert.equal(input.value,'');
+  } finally {dom.window.close();}
+});
+
+test('输入框已有完整话术加部分重复时只提交一份并保留灯牌名称', async () => {
+  const dom=setup('<div><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  const input=document.querySelector('textarea'),button=document.querySelector('button');
+  const message='感谢岁小孩LILAC成为本场No.1、1000票贡献用户！';
+  input.value=message + '感谢岁小孩LILAC成为本场No.1、10';
+  let clicks=0;
+  button.addEventListener('click',()=>{clicks++;assert.equal(input.value,message);input.value='';});
+  try {
+    assert.deepEqual(await adapter.send(message,()=>true),{submitted:true,clicked:true});
+    assert.equal(clicks,1);assert.equal(input.value,'');
+  } finally {dom.window.close();}
+});
+
+test('页面延迟启用发送按钮时等待就绪，不反复清空重填回复', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button disabled>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;let writes=0,clicks=0,timer;
+  input.addEventListener('input',()=>{writes++;timer=setTimeout(()=>{button.disabled=false;},350);});
+  button.addEventListener('click',()=>{clicks++;input.value='';});
+  try {
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
+    assert.equal(writes,1);assert.equal(clicks,1);
+  } finally {clearTimeout(timer);dom.window.close();}
+});
+
+test('点击前异步钩子触发重绘后只点击当前发送按钮', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');let oldClicks=0,newClicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;button.addEventListener('click',()=>{oldClicks++;});
+  try {
+    const result=await adapter.send('感谢支持',()=>true,{beforeClick:async()=>{
+      const replacement=button.cloneNode(true);replacement.getClientRects=button.getClientRects;
+      replacement.addEventListener('click',()=>{newClicks++;input.value='';});button.replaceWith(replacement);
+      await Promise.resolve();
+    }});
+    assert.deepEqual(result,{submitted:true,clicked:true});assert.equal(oldClicks,0);assert.equal(newClicks,1);
+  } finally {dom.window.close();}
+});
+
+test('富文本异步粘贴晚于初始等待时仍提交一次', async () => {
+  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么"></div><button disabled>发送</button></div>');
+  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let pastes=0,clicks=0,timer;
+  dom.window.DataTransfer=class {setData(key,value){this.value=value;} getData(){return this.value;}};
+  dom.window.ClipboardEvent=class extends dom.window.Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}};
+  input.addEventListener('paste',event=>{event.preventDefault();pastes++;timer=setTimeout(()=>{input.textContent=event.clipboardData.getData('text/plain');button.disabled=false;},350);});
+  button.addEventListener('click',()=>{clicks++;input.textContent='';});
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
+  try {
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(pastes,1);assert.equal(clicks,1);
+  } finally {clearTimeout(timer);dom.window.close();}
+});
+
+test('发送后编辑器被替换时读取新编辑器的提交结果', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');let clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  button.addEventListener('click',()=>{clicks++;const replacement=input.cloneNode();replacement.value='';replacement.getClientRects=input.getClientRects;input.replaceWith(replacement);});
+  try {
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(clicks,1);
+    assert.equal(adapter.ownedDraft,null);
+  } finally {dom.window.close();}
+});
+
+test('富文本清理失败时不发送；恢复清空后重新写入再提交', async () => {
+  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么"></div><button>发送</button></div>');
+  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;
+  let deletes=0;
+  document.execCommand=(command,unused,text)=>{if(command==='delete'){if(++deletes===1)return false;input.textContent='';return true;}inserts++;input.textContent+=text;return true;};
+  button.addEventListener('click',()=>{if(++clicks===2)input.textContent='';});
+  try {
+    assert.equal((await adapter.send('感谢支持',()=>true)).submitted,false);
+    assert.equal(input.textContent,'感谢支持');assert.equal(adapter.ownedDraft?.text,'感谢支持');
+    adapter.ownedDraft.at=Date.now()-180000;
+    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
+    assert.equal(inserts,2);assert.equal(clicks,2);
+  } finally {dom.window.close();}
+});
+
+test('残留脚本草稿改发另一条回复时通过编辑器选区替换', async () => {
+  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么">旧回复</div><button>发送</button></div>');
+  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;adapter.ownedDraft={text:'旧回复',at:Date.now()-180000};
+  document.execCommand=(command,unused,text)=>{if(command==='delete'){input.textContent='';return true;}assert.equal(command,'insertText');inserts++;input.textContent=text;return true;};
+  button.addEventListener('click',()=>{clicks++;assert.equal(input.textContent,'新回复');input.textContent='';});
+  try {
+    assert.deepEqual(await adapter.send('新回复',()=>true),{submitted:true,clicked:true});assert.equal(inserts,1);assert.equal(clicks,1);
+  } finally {dom.window.close();}
+});
+
+test('点击前用户改写草稿时不提交或清除人工内容', async () => {
+  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
+  const input=document.querySelector('textarea'),button=document.querySelector('button');let clicks=0;
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
+  adapter.status.connected=true;button.addEventListener('click',()=>{clicks++;input.value='';});
+  try {
+    await assert.rejects(adapter.send('感谢支持',()=>true,{beforeClick:async()=>{input.value='人工修改';}}),/不一致|变更/);
+    assert.equal(clicks,0);assert.equal(input.value,'人工修改');
+  } finally {dom.window.close();}
 });
 
 test('发送控件短暂缺失或输入禁用可以重试，多个发送候选仍停止', async () => {
@@ -555,7 +899,7 @@ test('发送控件短暂缺失或输入禁用可以重试，多个发送候选�
   } finally {dom.window.close();}
 });
 
-test('月报可选多个主播月份，按日展示；账本开关隐藏统计而保留主播管理', () => {
+test('月报可选多个主播月份，关闭采集后仍可从主播数据查看历史账本', () => {
   const dom=setup(),panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
   try {
     panel.updateProfiles([{room:'1',name:'主播甲',anchorId:'101'},{room:'2',name:'<img src=x>',anchorId:'202'}]);
@@ -567,11 +911,49 @@ test('月报可选多个主播月份，按日展示；账本开关隐藏统计�
     assert.match(panel.node('[data-income-total]').textContent,/5\.00/);
     assert.match(panel.node('[data-income-daily]').textContent,/2026-09-18/);
     assert.match(panel.node('[data-income-coverage]').textContent,/1.*未知/);
-    panel.tab('income');assert.equal(panel.node('[data-page=income]').hidden,false);
+    assert.equal(panel.node('[data-tab=income]'),null);panel.tab('anchor');assert.equal(panel.node('[data-page=anchor]').hidden,false);
     panel.node('[data-field=incomeEnabled]').checked=false;panel.syncControls();
-    assert.equal(panel.node('[data-tab=income]').hidden,true);assert.equal(panel.node('[data-tab=profiles]').hidden,false);
-    assert.equal(panel.activeTab,'features');assert.equal(panel.read().incomeEnabled,false);
+    assert.equal(panel.node('[data-tab=anchor]').hidden,false);assert.equal(panel.node('[data-tab=profiles]').hidden,false);
+    assert.equal(panel.activeTab,'anchor');assert.equal(panel.read().incomeEnabled,false);
+    panel.node('[data-income-link]').click();
+    assert.equal(panel.node('[data-anchor-content=income]').hidden,false);
+    assert.equal(panel.node('[data-anchor-content=overview]').hidden,true);
+    assert.equal(panel.node('[data-income-paused]').hidden,false);
+    assert.match(panel.node('[data-income-total]').textContent,/5\.00/);
+    panel.toggleOpen();panel.toggleOpen();
+    assert.equal(panel.node('[data-anchor-content=income]').hidden,false);
+    panel.node('[data-anchor-view=overview]').click();
+    assert.equal(panel.node('[data-anchor-content=overview]').hidden,false);
+    assert.equal(panel.node('[data-page=anchor] [data-income-room]') !== null,true);
     assert.equal(panel.node('[data-profiles] a').href,'https://live.douyin.com/1?anchor_id=101');
+  } finally {panel.destroy();dom.window.close();}
+});
+
+test('主播看板按所选日期汇总并分页，不跨 UID 显示收入，稳定数据不重绘', () => {
+  const dom=setup(),config=copy(DEFAULTS);config.anchorId='101';
+  const panel=new Panel({config,room:'1',callbacks:{}}),now=Date.now();
+  const stats=new AnchorStats({now:()=>now});
+  stats.restore({version:1,records:Array.from({length:25},(_,i)=>({battleKey:`b${i}`,anchorId:'101',name:'主播甲',roomId:'1',opponents:[{anchorId:'202',name:'主播乙'}],startedAt:now-(i===24?2*86400000:1000),endedAt:now-(i===24?2*86400000:0),phase:'ended',score:100,scoreFinal:true,outcome:'win'}))});
+  const engine=new Engine({config});engine.anchorStats=stats;
+  try {
+    panel.updateAnchorIncome({anchorId:'101',days:[{date:new Date(now+8*3600000).toISOString().slice(0,10),estimatedIncome:12}]});
+    panel.refresh(engine,{connected:true,frames:1});panel.tab('anchor');
+    assert.equal(panel.node('[data-anchor-stat=battles]').textContent,'24');
+    assert.match(panel.node('[data-anchor-stat=income]').textContent,/12\.00/);
+    panel.node('[data-anchor-period="7"]').click();
+    assert.equal(panel.node('[data-anchor-stat=battles]').textContent,'25');
+    assert.equal(panel.node('[data-anchor-stat=score]').textContent,'2,500');
+    assert.equal(panel.node('[data-anchor-battles]').rows.length,20);
+    panel.node('[data-anchor-page="1"]').click();
+    assert.equal(panel.node('[data-anchor-battles]').rows.length,5);
+    assert.equal(panel.anchorDashboard.exportReport().battles.length,25);
+    const observer=new dom.window.MutationObserver(()=>{});observer.observe(panel.node('[data-page=anchor]'),{subtree:true,attributes:true,childList:true,characterData:true});
+    panel.renderAnchor(engine);assert.equal(observer.takeRecords().length,0);observer.disconnect();
+    stats.ingestRank({id:'rank-202',anchorId:'202',receivedAt:now,afterRank:{level:2}},{});
+    panel.renderAnchor(engine);const picker=panel.node('[data-anchor-picker]');picker.value='202';picker.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+    assert.equal(panel.node('[data-anchor-stat=income]').textContent,'未知');
+    assert.match(panel.node('[data-anchor-report-name]').textContent,/202/);
+    assert.equal(panel.node('[data-shell-network]').textContent,'直播数据已连接');
   } finally {panel.destroy();dom.window.close();}
 });
 
@@ -774,6 +1156,15 @@ test('按主播配置自动开始场控；手动暂停后不会被定时器偷�
   }
 });
 
+test('请求发送可用时开始场控不要求定位页面输入框', async()=>{
+  const dom=setup(),values=new Map([['live-assistant:config:1234567890',{mode:'auto'}]]);let api;
+  const lock=new RoomLock({room:'1234567890'});
+  const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true,requestAvailable:()=>true,findInput(){throw Error('should not locate input');},findSend(){throw Error('should not locate send');},send:async()=>({submitted:true})};
+  boot({page:dom.window,lock,get:(k,f)=>values.get(k)??f,set:(k,v)=>values.set(k,v),del:k=>values.delete(k),request:()=>{},adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
+  try { api.panel.node('[data-action=start]').click();await new Promise(r=>setTimeout(r,30));assert.equal(api.engine.running,true); }
+  finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api.panel.destroy();dom.window.close();await lock.drained;}
+});
+
 test('自动发送恢复原有面板焦点，用户中途切换焦点时不夺回；断线发生在输入后也不点击', async () => {
   const dom=setup('<textarea id="chat"></textarea><button id="send">发送</button><input id="other"><div id="host"></div>');
   const shadow=document.querySelector('#host').attachShadow({mode:'open'});shadow.innerHTML='<input id="setting">';const setting=shadow.querySelector('input');
@@ -795,4 +1186,45 @@ test('运行锁请求已发出后取消，迟到授权不持有；原生申请�
   assert.equal(await request,false);assert.equal(a.held,false);await a.drained;
   let fail=true;a.locks={request:async(name,options,callback)=>{if(fail)throw new Error('浏览器拒绝请求');return callback({name});}};
   await assert.rejects(a.acquire(),/浏览器拒绝请求/);fail=false;assert.equal(await a.acquire(),true);a.release();await a.drained;
+});
+
+test('场次面板显示整场金额和边界来源，旧日账不计作直播场次', () => {
+  const dom=setup(),p=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
+  const startAt=Date.parse('2026-10-22T15:00:00Z'),endAt=startAt+7200000;
+  const session={id:'A',startAt,endAt,startSource:'platform',endSource:'room-changed',totalDiamonds:200,giftCount:2,unknownCount:0,estimatedIncome:10};
+  try {
+    p.updateGiftSummary(session,0.05,true);
+    assert.equal(p.node('[data-gift-total-title]').textContent,'最近一场礼物价值');
+    assert.equal(p.node('[data-gift-diamonds]').textContent,'200');
+    assert.match(p.node('[data-gift-estimate-note]').textContent,/结束边界推定/);
+    p.updateIncome({room:'1',month:'2026-10',summary:session,sessions:[session],days:[],legacyDays:[]});
+    assert.equal(p.node('[data-income-days]').textContent,'1');
+    assert.match(p.node('[data-income-daily]').textContent,/推定边界/);
+    p.updateIncome({room:'1',month:'2026-09',summary:{},sessions:[],days:[{date:'2026-09-01'}],legacyDays:[]});
+    assert.equal(p.node('[data-income-days]').textContent,'0');
+  } finally {p.destroy();dom.window.close();}
+});
+
+test('房间状态进入真实账本并驱动本场概览，接口失效不制造下播', async () => {
+  const dom=setup(),values=new Map(),room='1234567890';let api,onIdentity,onEvent;
+  const at=Date.now(),startAt=at-3600000;
+  const engine=boot({page:dom.window,get:(k,f)=>values.get(k)??f,set:async(k,v)=>values.set(k,structuredClone(v)),del:k=>values.delete(k),all:()=>Object.fromEntries(values),request:()=>{},
+    adapterFactory:options=>{onEvent=options.onEvent;return {status:{},onEvent,hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>false};},
+    identityFactory:callback=>{onIdentity=callback;return {refresh:async()=>{},close(){}};},onReady:value=>api=value});
+  try {
+    onIdentity({live:{roomId:'broadcast-A',status:'live',startAt,endAt:0,observedAt:at}});
+    await new Promise(setImmediate);
+    await onEvent({type:'gift',id:'a',groupId:'a',roomId:'broadcast-A',giftId:'rose',count:2,unitValue:100,receivedAt:at,user:{id:'9',name:'观众'},final:true});
+    await new Promise(resolve=>setTimeout(resolve,650));
+    assert.equal(api.panel.node('[data-gift-diamonds]').textContent,'200');
+    assert.equal(api.panel.node('[data-gift-total-title]').textContent,'本场礼物价值');
+    onIdentity({warning:'接口暂不可用'});await new Promise(setImmediate);
+    const saved=()=>values.get(`live-assistant:income:${room}`);
+    assert.equal(saved().sessions.length,1);assert.equal(saved().sessions[0][1].endAt,0);
+    onIdentity({live:{roomId:'broadcast-A',status:'ended',startAt,endAt:at+1,observedAt:at+2}});
+    await new Promise(resolve=>setTimeout(resolve,650));
+    assert.equal(saved().sessions[0][1].endAt,at+1);
+    assert.equal(api.panel.node('[data-gift-total-title]').textContent,'最近一场礼物价值');
+    assert.equal(engine.running,false);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 });

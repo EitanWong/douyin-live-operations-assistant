@@ -22,7 +22,7 @@ function roomAdmins(info, expectedRoom) {
 export function roomAdminStatus(self, adminUserIds) {
   return self?.id && Array.isArray(adminUserIds) ? adminUserIds.includes(self.id) : null;
 }
-export function identityFromResponse(kind, data, room) {
+export function identityFromResponse(kind, data, room, observedAt = Date.now()) {
   if (!data || (data.status_code !== undefined && data.status_code !== 0)) return {};
   if (kind === 'self') {
     const user = identityUser(data.data?.user || data.data);
@@ -32,7 +32,17 @@ export function identityFromResponse(kind, data, room) {
   const anchor = identityUser(info?.owner || info?.anchor || data.data?.user);
   const rid = String(info?.web_rid || info?.webRid || '');
   if (rid && rid !== room) return {};
-  return anchor ? { anchor, title: String(info?.title || '').slice(0, 120), adminUserIds: roomAdmins(info, room) } : {};
+  const next = anchor ? { anchor, title: String(info?.title || '').slice(0, 120), adminUserIds: roomAdmins(info, room) } : {};
+  const roomId = numericId(info?.id_str) || numericId(info?.id);
+  const status = Number(info?.status);
+  if (roomId && [2,4].includes(status)) {
+    const timestamp = value => {
+      const time = Number(value) * 1000;
+      return Number.isFinite(time) && time > 0 && time <= observedAt ? time : 0;
+    };
+    next.live = {roomId, status:status === 2 ? 'live' : 'ended', startAt:timestamp(info.create_time), endAt:timestamp(info.finish_time), observedAt};
+  }
+  return next;
 }
 export class IdentityReader {
   constructor({ page, room, onIdentity = () => {} }) { this.page = page; this.room = room; this.onIdentity = onIdentity; this.value = {}; this.busy = null; this.controllers = new Set(); this.closed = false; }
@@ -73,6 +83,7 @@ export class IdentityReader {
   }
   async read(kind, path) {
     if (!this.page.fetch) throw new Error('页面未提供身份查询');
+    const observedAt = Date.now();
     const controller = new this.page.AbortController(); this.controllers.add(controller);
     const timer = this.page.setTimeout(() => controller.abort(), 8000);
     try {
@@ -80,8 +91,16 @@ export class IdentityReader {
       if (!response.ok) throw new Error('身份查询失败');
       const data = parseIdentityJSON(await response.text());
       if (data.status_code !== undefined && data.status_code !== 0) throw new Error('身份查询暂不可用');
-      return identityFromResponse(kind, data, this.room);
+      return identityFromResponse(kind, data, this.room, observedAt);
     } finally { this.page.clearTimeout(timer); this.controllers.delete(controller); }
+  }
+  async refreshRoom() {
+    if (this.closed || this.roomBusy || this.busy) return;
+    this.roomBusy = true;
+    try {
+      const next = await this.read('anchor', `/webcast/room/web/enter/?aid=6383&app_name=douyin_web&device_platform=web&web_rid=${encodeURIComponent(this.room)}`);
+      this.publish(next);
+    } finally { this.roomBusy = false; }
   }
   close() { this.closed = true; for (const controller of this.controllers) controller.abort(); this.controllers.clear(); }
 }

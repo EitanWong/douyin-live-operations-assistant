@@ -2,6 +2,7 @@ import { readFile, mkdir, writeFile, rm, rename } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { SOLID_GLASS_CSS } from '../src/ui/solid-glass.js';
+import { build } from 'esbuild';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dist = process.env.DOUYIN_DIST_DIR || `${root}dist`;
 const development = process.argv.includes('--dev');
@@ -35,20 +36,22 @@ const header = `// ==UserScript==
 // @license      MIT
 // ==/UserScript==
 `;
-const files = ['runtime/journal', 'runtime/delivery', 'runtime/inbox', 'data/interaction-questions', 'core/bot', 'core/phrases', 'pk/model', 'core/engine', 'browser/protocol', 'services/ai', 'browser/identity', 'browser/adapter', 'ui/solid-glass', 'ui/theme', 'ui/panel', 'data/gifts', 'app'];
+const chartBundle = (await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,write:false,format:'iife',globalName:'LiveAssistantCharts',minify:true,legalComments:'inline',target:'chrome111'})).outputFiles[0].text + '\nconst { LiveCharts } = LiveAssistantCharts;\n';
+const files = ['runtime/journal', 'runtime/delivery', 'runtime/inbox', 'runtime/live-metrics', 'runtime/health', 'data/interaction-questions', 'core/bot', 'core/phrases', 'core/audience', 'core/milestones', 'core/anchor-stats', 'pk/model', 'core/engine', 'browser/protocol', 'services/ai', 'browser/identity', 'browser/request-sender', 'browser/anchor-data', 'browser/adapter', 'ui/solid-glass', 'ui/theme', 'ui/live-charts', 'ui/stat-visuals', 'ui/anchor-view-model', 'ui/anchor-template', 'ui/anchor-styles', 'ui/anchor-dashboard', 'ui/panel', 'data/gifts', 'app'];
 let body = '';
 for (const name of files) {
-  let source = await readFile(`${root}src/${name}.js`, 'utf8');
+  let source = name === 'ui/live-charts' ? chartBundle : await readFile(`${root}src/${name}.js`, 'utf8');
   source = source.replace(/^import\s+.*?;\s*$/gm, '').replace(/^export\s+/gm, '');
   body += `\n// --- ${name}.js ---\n${source}`;
 }
 await mkdir(dist, { recursive: true });
+await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/live-charts.js`});
 await writeFile(`${dist}/douyin-live-assistant.user.js`, `${header}\n(() => {\n'use strict';\n${body}\nboot();\n})();\n`);
 console.log('Built dist/douyin-live-assistant.user.js (standalone; no runtime dependencies)');
 const destination = `${dist}/chrome-extension`;
 const ext = development ? `${dist}/.chrome-extension-next-${process.pid}` : destination;
 await mkdir(ext, { recursive:true });
-for (const name of ['manifest.json','popup.html','popup.css','popup.js','background.js']) await writeFile(`${ext}/${name}`,await readFile(`${root}extension/${name}`));
+for (const name of ['manifest.json','popup.html','popup.css','popup.js','background.js','durable-storage.js']) await writeFile(`${ext}/${name}`,await readFile(`${root}extension/${name}`));
 const glassLicense = await readFile(`${root}vendor/solid-glass/LICENSE`, 'utf8');
 await writeFile(`${ext}/solid-glass.css`, `/* Solid Glass · https://github.com/deeplethe/solid-glass\n${glassLicense}\n*/\n${SOLID_GLASS_CSS}`);
 await writeFile(`${ext}/theme.js`, await readFile(`${root}src/ui/theme.js`));
@@ -56,13 +59,17 @@ await writeFile(`${ext}/ai.js`,await readFile(`${root}src/services/ai.js`));
 await writeFile(`${ext}/gifts.js`,await readFile(`${root}src/data/gifts.js`));
 async function bundle(names, entry, async = false) {
   let code='';
-  for (const name of names) code += (await readFile(`${root}src/${name}.js`,'utf8')).replace(/^import\s+.*?;\s*$/gm,'').replace(/^export\s+/gm,'') + '\n';
+  for (const name of names) code += (name === 'ui/live-charts' ? chartBundle : await readFile(`${root}src/${name}.js`,'utf8')).replace(/^import\s+.*?;\s*$/gm,'').replace(/^export\s+/gm,'') + '\n';
   return `(${async ? 'async ' : ''}() => {\n'use strict';\n${code}\n${await readFile(`${root}extension/${entry}.js`,'utf8')}\n})();\n`;
 }
-await writeFile(`${ext}/page.js`,await bundle(['runtime/delivery','data/interaction-questions', 'core/bot','core/phrases','pk/model','core/engine','browser/protocol','browser/adapter'],'page'));
+await writeFile(`${ext}/page.js`,await bundle(['runtime/delivery','runtime/live-metrics','data/interaction-questions', 'core/bot','core/phrases','core/audience','core/milestones','core/anchor-stats','pk/model','core/engine','browser/protocol','browser/request-sender','browser/anchor-data','browser/adapter'],'page'));
 await writeFile(`${ext}/content.js`,await bundle(files,'content',true));
 await mkdir(`${ext}/icons`,{recursive:true});
 for (const size of [16,48,128]) await writeFile(`${ext}/icons/${size}.png`,await readFile(`${root}extension/icons/${size}.png`));
+let chartLicenses='';
+for(const name of ['echarts/LICENSE','echarts/NOTICE','echarts/licenses/LICENSE-d3','zrender/LICENSE','tslib/LICENSE.txt','tslib/CopyrightNotice.txt'])chartLicenses+=`${name}\n${await readFile(`${root}node_modules/${name}`,'utf8')}\n\n`;
+await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
+await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 console.log('Built dist/chrome-extension (Manifest V3)');
 if (development) {
   const manifest = JSON.parse(await readFile(`${ext}/manifest.json`, 'utf8'));
@@ -74,7 +81,7 @@ if (development) {
   await writeFile(`${ext}/manifest.json`, JSON.stringify(manifest, null, 2));
   for (const name of ['development-reload.js', 'development-content.js']) await writeFile(`${ext}/${name}`, await readFile(`${root}extension/${name}`));
   const hash = createHash('sha256');
-  for (const name of ['manifest.json','content.js','page.js','background.js','popup.js','popup.html','popup.css','solid-glass.css','theme.js','ai.js','gifts.js','development-reload.js','development-content.js']) hash.update(await readFile(`${ext}/${name}`));
+  for (const name of ['manifest.json','content.js','page.js','background.js','popup.js','popup.html','popup.css','solid-glass.css','theme.js','ai.js','gifts.js','durable-storage.js','development-reload.js','development-content.js']) hash.update(await readFile(`${ext}/${name}`));
   const revision = hash.digest('hex');
   await writeFile(`${ext}/background.js`, `${await readFile(`${ext}/background.js`, 'utf8')}\nimport { installDevelopmentReload } from './development-reload.js';\ninstallDevelopmentReload({ chrome, revision:'${revision}', endpoint:'http://127.0.0.1:${developmentPort}/build', beforeReload:async()=>{ await storageReady; await giftStore.tail; } });\n`);
   // 最后发布构建标识；构建中或失败时，Chrome 不会读到半成品更新通知。

@@ -10,9 +10,36 @@ export class GiftLedger {
   constructor({ maxActive = 500, maxFinalized = 2000, state, now = Date.now } = {}) {
     this.maxActive = maxActive; this.maxFinalized = maxFinalized; this.now = now;
     if (state) state = JSON.parse(JSON.stringify(state));
-    this.active = new Map(state?.version === 1 ? state.active : []);
-    this.finalized = new Map(state?.version === 1 ? state.finalized : []);
-    this.days = new Map(state?.version === 1 ? state.days : []);
+    this.active = new Map(state?.version >= 1 ? state.active : []);
+    this.finalized = new Map(state?.version >= 1 ? state.finalized : []);
+    this.days = new Map(state?.version >= 1 ? state.days : []);
+    this.sessions = new Map(state?.version >= 2 ? state.sessions : []);
+    this.currentSessionId = state?.version >= 2 ? state.currentSessionId || '' : '';
+    // Keep legacy daily totals separate: dates alone cannot reconstruct broadcasts.
+    this.legacyDays = new Map((state?.version >= 3 ? state.legacyDays : state?.days || []).map(([date, total]) => [date, {...total}]));
+    if (state?.version === 2) {
+      const accounted = new Map();
+      const subtract = (date, total) => {
+        const legacy = this.legacyDays.get(date);
+        if (legacy) for (const key of Object.keys(emptyGiftTotal())) legacy[key] = Math.max(0, legacy[key] - total[key]);
+      };
+      for (const progress of [...this.active.values(), ...this.finalized.values()]) {
+        for (const segment of progress?.segments || []) {
+          if (!this.sessions.has(segment.sessionId)) continue;
+          const total = {giftCount:segment.count, unknownCount:progress.unitValue === null ? segment.count : 0,
+            totalDiamonds:segment.count * (progress.unitValue || 0), estimatedIncome:segment.count * (progress.unitValue || 0) * segment.rate};
+          subtract(segment.date, total);
+          const sum = accounted.get(segment.sessionId) || emptyGiftTotal();
+          for (const key of Object.keys(sum)) sum[key] += total[key];
+          accounted.set(segment.sessionId, sum);
+        }
+      }
+      for (const session of this.sessions.values()) {
+        const rest = emptyGiftTotal(), sum = accounted.get(session.id) || emptyGiftTotal();
+        for (const key of Object.keys(rest)) rest[key] = Math.max(0, session[key] - sum[key]);
+        subtract(giftDate(session.startAt), rest);
+      }
+    }
     this.serial = 0;
   }
 
@@ -34,6 +61,17 @@ export class GiftLedger {
         if (previous.unitValue === null) day.unknownCount -= segment.count;
         const delta = segment.count * (unitValue - (previous.unitValue || 0));
         day.totalDiamonds += delta; day.estimatedIncome += delta * segment.rate;
+        const session = this.sessions.get(segment.sessionId);
+        if (session) {
+          if (previous.unitValue === null) session.unknownCount -= segment.count;
+          session.totalDiamonds += delta; session.estimatedIncome += delta * segment.rate;
+        } else {
+          const legacy = this.legacyDays.get(segment.date);
+          if (legacy) {
+            if (previous.unitValue === null) legacy.unknownCount -= segment.count;
+            legacy.totalDiamonds += delta; legacy.estimatedIncome += delta * segment.rate;
+          }
+        }
       }
     }
     if (added) {
@@ -43,15 +81,20 @@ export class GiftLedger {
         : Number.isFinite(event.receivedAt) && event.receivedAt > 0 && event.receivedAt <= now ? event.receivedAt : now;
       const platformAt = Number.isFinite(event.at) && event.at > 0 ? event.at : 0;
       const date = giftDate(platformAt && capturedAt - platformAt <= 600000 && platformAt - capturedAt <= 60000 ? platformAt : capturedAt);
+      const previousSession = this.sessions.get(previous.segments.at(-1)?.sessionId);
+      const session = previousSession || this.sessionForGift(capturedAt, event.roomId);
       const day = this.days.get(date) || emptyGiftTotal();
       const appliedRate = Number.isFinite(rate) && rate >= 0 ? rate : 0.05;
       day.giftCount += added;
       if (unitValue === null) day.unknownCount += added;
       else { day.totalDiamonds += added * unitValue; day.estimatedIncome += added * unitValue * appliedRate; }
       this.days.set(date, day);
+      session.giftCount += added;
+      if (unitValue === null) session.unknownCount += added;
+      else { session.totalDiamonds += added * unitValue; session.estimatedIncome += added * unitValue * appliedRate; }
       const last = previous.segments.at(-1);
-      if (last?.date === date && last.rate === appliedRate) last.count += added;
-      else previous.segments.push({ date, count: added, rate: appliedRate });
+      if (last?.date === date && last.rate === appliedRate && last.sessionId === session.id) last.count += added;
+      else previous.segments.push({ date, count: added, rate: appliedRate, sessionId: session.id });
     }
     const changed = Boolean(added || previous.unitValue !== unitValue || (event.final && this.active.has(key)));
     const next = { count: nextCount, unitValue, segments: previous.segments };
@@ -67,6 +110,69 @@ export class GiftLedger {
     return changed;
   }
 
+  ensureSession(at, source, roomId = '') {
+    const current = this.sessions.get(this.currentSessionId);
+    if (current && !current.endAt) return current;
+    let id;
+    do { id = `session:${at}:${++this.serial}`; } while (this.sessions.has(id));
+    const session = { id, roomId, startAt: at, endAt: 0, startSource: source, endSource: '', ...emptyGiftTotal() };
+    this.sessions.set(id, session); this.currentSessionId = id;
+    return session;
+  }
+
+  sessionForGift(at, roomId = '') {
+    // Delayed/retried facts belong to the broadcast in which they were captured.
+    const known = roomId && [...this.sessions.values()].find(session => session.roomId === roomId);
+    if (known) { known.startAt = Math.min(known.startAt, at); return known; }
+    const matching = [...this.sessions.values()].filter(session =>
+      (!roomId || !session.roomId || session.roomId === roomId) && session.startAt <= at && (!session.endAt || at <= session.endAt)
+    ).sort((a,b) => b.startAt-a.startAt)[0];
+    if (matching) { if (!matching.roomId && roomId) matching.roomId = roomId; return matching; }
+    const current = this.sessions.get(this.currentSessionId);
+    const next = [...this.sessions.values()].filter(session => session.startAt > at).sort((a,b) => a.startAt-b.startAt)[0];
+    if (next) {
+      const id = `session:${at}:${++this.serial}`;
+      const historical = {id,roomId,startAt:at,endAt:next.startAt,startSource:'first-observed',endSource:'next-observed',...emptyGiftTotal()};
+      this.sessions.set(id, historical);
+      return historical;
+    }
+    if (current && roomId && current.roomId && roomId !== current.roomId) this.endSession(at, 'room-changed', current.roomId);
+    const session = this.ensureSession(at, 'first-observed', roomId);
+    session.startAt = Math.min(session.startAt, at);
+    return session;
+  }
+
+  startSession(at = this.now(), source = 'explicit', roomId = '', observedAt = at) {
+    const known = roomId && [...this.sessions.values()].find(session => session.roomId === roomId);
+    if (known?.endAt) return false; // A replay or stale API response cannot reopen it.
+    let session = this.sessions.get(this.currentSessionId);
+    if (session && !session.endAt) {
+      if (observedAt < session.startAt) return false;
+      if (roomId && session.roomId && roomId !== session.roomId) {
+        if (at < session.startAt) return false;
+        this.endSession(at, 'room-changed', session.roomId);
+      }
+      else {
+        if (session.startSource === 'first-observed' || source === 'platform' && session.startSource !== 'platform') {
+          session.startAt = Math.min(at, session.startAt); session.startSource = source;
+          if (roomId) session.roomId = roomId;
+          return session;
+        }
+        if (roomId && !session.roomId) { session.roomId = roomId; return session; }
+        return false;
+      }
+    }
+    if ([...this.sessions.values()].some(item => item.endAt && item.endAt >= observedAt)) return false;
+    return this.ensureSession(at, source, roomId);
+  }
+
+  endSession(at = this.now(), source = 'explicit', roomId = '') {
+    const session = this.sessions.get(this.currentSessionId);
+    if (!session || session.endAt || at < session.startAt || roomId && session.roomId && session.roomId !== roomId) return false;
+    session.endAt = Math.max(at, session.startAt); session.endSource = source; this.currentSessionId = '';
+    return true;
+  }
+
   rememberFinalized(key, progress) {
     this.finalized.delete(key); this.finalized.set(key, progress);
     while (this.finalized.size > this.maxFinalized) this.finalized.delete(this.finalized.keys().next().value);
@@ -80,7 +186,8 @@ export class GiftLedger {
     for (const [date, day] of this.days) if (date.startsWith(month)) for (const key of Object.keys(total)) total[key] += day[key];
     return total;
   }
-  serialize() { return { version: 1, days: [...this.days], active: [...this.active], finalized: [...this.finalized] }; }
+  currentSession() { return this.sessions.get(this.currentSessionId) || [...this.sessions.values()].sort((a,b) => b.startAt-a.startAt)[0] || null; }
+  serialize() { return { version: 3, days: [...this.days], legacyDays: [...this.legacyDays], active: [...this.active], finalized: [...this.finalized], sessions: [...this.sessions], currentSessionId: this.currentSessionId }; }
 }
 
 // 存储层供扩展后台和用户脚本共用；持久数据每次从存储读取，服务工作线程重启不丢账。
@@ -126,7 +233,7 @@ export class GiftStore {
         try {
           // 重读持久进度再试：写入已成功但调用报错时也不能重复入账。
           const ledger = new GiftLedger({ state: await this.get(key, null), now: this.now });
-          const changed = ledger.observe(event, room, String(userKey).slice(0, 200), rate);
+          const changed = ledger.observe({...event, capturedAt:receivedAt}, room, String(userKey).slice(0, 200), rate);
           if (changed) await this.set(key, ledger.serialize());
           return changed;
         } catch (error) {
@@ -134,6 +241,16 @@ export class GiftStore {
           await this.retryWait(attempt === 0 ? 100 : 400);
         }
       }
+    });
+  }
+  recordSession({ room, type, at = this.now(), source = 'platform', roomId = '', observedAt = at }) {
+    return this.transaction(async () => {
+      if (!/^(\d+|demo)$/.test(String(room)) || !['start','end'].includes(type) || !Number.isFinite(at) || at <= 0 || !Number.isFinite(observedAt) || observedAt <= 0 || typeof roomId !== 'string' || roomId.length > 100) throw new Error('直播场次事件无效');
+      const key = `live-assistant:income:${room}`;
+      const ledger = new GiftLedger({ state: await this.get(key, null), now: this.now });
+      const changed = type === 'start' ? ledger.startSession(at, source, roomId, observedAt) : ledger.endSession(at, source, roomId);
+      if (changed) await this.set(key, ledger.serialize());
+      return changed;
     });
   }
   recordContribution({ room, date = giftDate(this.now()), userId, name = '', score, scoreIsFloor = false }) {
@@ -185,6 +302,14 @@ export class GiftStore {
     const calibration = entries.reduce((total, entry) => {
       total.observations++; total.score += entry.score; total.incomeEstimate += entry.score * CONTRIBUTION_YUAN_PER_POINT; total.hasFloor ||= Boolean(entry.scoreIsFloor); return total;
     }, { users: monthUsers.size, observations: 0, score: 0, incomeEstimate: 0, hasFloor: false });
-    return { room, month, timezone: 'Asia/Shanghai', calibrationBasis: { yuanPerPoint: CONTRIBUTION_YUAN_PER_POINT, anchor: '1000 分约 ¥100' }, calibration, summary: ledger.summary(month), days: reportDays };
+    const sessions = [...ledger.sessions.values()]
+      .filter(session => session.startAt && giftDate(session.startAt).startsWith(month))
+      .map(session => ({...session}))
+      .sort((a,b) => b.startAt-a.startAt);
+    const legacyDays = [...ledger.legacyDays].filter(([date, total]) => date.startsWith(month) && total.giftCount)
+      .map(([date,total]) => ({date,...total})).sort((a,b) => b.date.localeCompare(a.date));
+    const summary = emptyGiftTotal();
+    for (const total of [...sessions, ...legacyDays]) for (const key of Object.keys(summary)) summary[key] += total[key];
+    return { room, month, timezone: 'Asia/Shanghai', monthBasis:'session-start', calibrationBasis: { yuanPerPoint: CONTRIBUTION_YUAN_PER_POINT, anchor: '1000 分约 ¥100' }, calibration, summary, days: reportDays, legacyDays, sessions, currentSession:ledger.currentSession() };
   }
 }

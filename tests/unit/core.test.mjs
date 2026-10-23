@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, copy, Engine, welcomeDecision, matchesUser, validateConfig, mergeConfig, inTimeWindow } from '../../src/core/engine.js';
+import { DEFAULTS, copy, Engine, welcomeDecision, matchesUser, validateConfig, mergeConfig, inTimeWindow, recognizeMilestone } from '../../src/core/engine.js';
+import { audienceAddress, audienceAge, audienceGender, renderAudienceTemplate, validAudienceAI } from '../../src/core/audience.js';
 
 const user = { id: '9007199254740993123', name: '青山', wealthLevel: 35, fanClubs: [{ anchorId: '1234567890', level: 8, status: 1 }] };
 function harness(change = () => {}) {
@@ -10,6 +11,176 @@ function harness(change = () => {}) {
   e.start(); return { e, sent, logs, advance: ms => { time += ms; }, time: () => time };
 }
 const gift = (override = {}) => ({ type: 'gift', user, giftId: '123', giftName: '星星', unitValue: 50, count: 1, groupId: 'group', ...override });
+
+test('识别星守护和本场 1000 贡献榜系统播报', () => {
+  assert.deepEqual(recognizeMilestone('恭喜 [图片] 孤独患者成为星守护'), { kind:'guardian', name:'孤独患者' });
+  assert.deepEqual(recognizeMilestone('恭喜 孤独患者成为No.2本场1000贡献用户'), { kind:'contribution', name:'孤独患者', rank:2 });
+  assert.deepEqual(recognizeMilestone('恭喜 孤独患者成为本场 No.2 1000 贡献用户'), { kind:'contribution', name:'孤独患者', rank:2 });
+  assert.deepEqual(recognizeMilestone('感谢岁小孩LILAC成为本场No.1、1000票贡献用户！'), { kind:'contribution', name:'岁小孩LILAC', rank:1 });
+  assert.equal(recognizeMilestone('恭喜大家晚上好'), null);
+});
+
+test('感谢称呼使用明确性别，生日只用于排除已知未成年用户',()=>{
+  const now=Date.parse('2026-10-23T12:00:00+08:00');
+  const female={id:'f',name:'青山',gender:2,birthdayDescription:'2000-10-24',birthdayValid:true};
+  const male={id:'m',name:'松柏',gender:1,birthdayDescription:'2000-10-22',birthdayValid:true};
+  const child={id:'c',name:'小雨',gender:2,birthdayDescription:'2012年10月23日',birthdayValid:true};
+  assert.equal(audienceGender(1),'male'); assert.equal(audienceGender(2),'female'); assert.equal(audienceGender(0),null);
+  assert.equal(audienceAge(female,now),25); assert.equal(audienceAddress(female,now),'青山姐');
+  assert.equal(audienceAge(male,now),26); assert.equal(audienceAddress(male,now),'松柏哥');
+  assert.equal(audienceAge(child,now),14); assert.equal(audienceAddress(child,now),'小雨');
+  assert.equal(audienceAge({...female,birthdayValid:false},now),null);
+  assert.equal(audienceAge({...female,birthdayDescription:'2000-02-30'},now),null);
+  assert.equal(audienceAge({...female,birthdayDescription:'25岁'},now),null);
+  assert.equal(audienceAddress({name:'未知昵称',ageRange:20,gender:0},now),'未知昵称');
+  assert.equal(audienceAddress({name:'生日隐藏的男性',gender:1},now),'生日隐藏的男性哥');
+  assert.equal(audienceAddress({name:'生日隐藏的女性',gender:2},now),'生日隐藏的女性姐');
+  assert.equal(audienceAddress({name:'明确未成年',gender:1,birthdayDescription:'2012-10-23',birthdayValid:true},now),'明确未成年');
+  assert.equal(audienceAddress({name:'性别未知',birthdayDescription:'2000-10-22',birthdayValid:true},now),'性别未知');
+  assert.equal(renderAudienceTemplate('感谢 {user} 哥送的{gift}',female,{gift:'星星'},now),'感谢 青山姐送的星星');
+  assert.equal(validAudienceAI('谢谢青山姐送的星星',female,now),true);
+  assert.equal(validAudienceAI('谢谢青山哥送的星星',female,now),false);
+  assert.equal(validAudienceAI('谢谢青山哥送的星星',{name:'青山'},now),false);
+});
+
+test('最近用户资料按 UID 保存、恢复，且昵称不唯一时不用于贡献称呼',()=>{
+  const e=harness().e;
+  const two={...user,id:'two',name:'青山',gender:2};
+  e.audience.remember({...user,gender:1}); e.audience.remember(two);
+  assert.equal(e.audience.findByName('青山'),null);
+  const snapshot=e.snapshot(),restored=new Engine({config:e.config,now:e.now}); restored.restore(snapshot);
+  assert.equal(restored.audience.findByName('青山'),null);
+  const unique=harness().e; unique.audience.remember({...user,gender:2,birthdayDescription:'2000-10-22',birthdayValid:true});
+  unique.ingest({type:'milestone',milestone:{kind:'contribution',name:'青山',rank:1}});
+  assert.equal(unique.queue[0].text,'感谢青山姐成为本场No.1、1000票贡献用户！');
+});
+
+test('系统播报会分别排入星守护和 1000 票贡献榜感谢', () => {
+  const { e } = harness();
+  e.ingest({ type:'chat', id:'guardian', user:{id:'system',name:'系统'}, text:'恭喜 [图片] 孤独患者成为星守护' });
+  e.ingest({ type:'chat', id:'rank', user:{id:'system',name:'系统'}, text:'恭喜 孤独患者成为No.2本场1000贡献用户' });
+  e.ingest({ type:'chat', id:'fan-badge-rank', user:{id:'system',name:'系统'}, text:'感谢岁小孩LILAC成为本场No.1、1000票贡献用户！' });
+  assert.deepEqual(e.queue.filter(item => item.kind === 'milestone').map(item => item.text), [
+    '感谢孤独患者开通星守护，欢迎加入！',
+    '感谢孤独患者成为本场No.2、1000票贡献用户！',
+    '感谢岁小孩LILAC成为本场No.1、1000票贡献用户！'
+  ]);
+});
+test('房间状态、关注分享和粉丝团事件只记录，不触发自动发送', () => {
+  const logs = [], sent = [], e = new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  e.ingest({type:'room-stats',id:'stats-1',metricType:1,displayValue:10764,displayLong:'10,764 在线观众'});
+  e.ingest({type:'room-stats',id:'stats-2',metricType:1,displayValue:10764,displayLong:'10,764 在线观众'});
+  e.ingest({type:'room-audience',id:'audience-1',onlineCount:18,cumulativeUsers:'1234',ranks:[{user:{id:'7',name:'榜单用户'},score:100,rank:1}]});
+  e.ingest({type:'social',id:'follow-1',action:1,actionName:'follow',user:{id:'8',name:'关注用户'},followCount:99});
+  e.ingest({type:'fansclub',id:'club-1',action:2,actionName:'join',description:'成员加入粉丝团',user:{id:'9',name:'粉丝'} });
+  assert.equal(logs.filter(item=>item.text.startsWith('直播间统计')).length,1,'相同统计快照不重复记日志');
+  assert.ok(logs.some(item=>item.text.includes('在线 18')));
+  assert.ok(logs.some(item=>item.text.includes('关注用户 关注了主播')));
+  assert.ok(logs.some(item=>item.text.includes('成员加入粉丝团')));
+  assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+  const restored = new Engine({config:copy(DEFAULTS),now:()=>1800000000000});
+  assert.equal(restored.restore(e.snapshot()),true);
+  assert.equal(restored.roomData.stats.displayValue,10764);
+  assert.equal(restored.roomData.audience.ranks[0].user.name,'榜单用户');
+  assert.equal(restored.roomData.activities.length,2);
+});
+test('表情、醒目留言、公告、排行、通知和 WRDS 仅作有界观察数据', () => {
+  const sent=[], logs=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  for (let index=0;index<105;index++) e.ingest({type:index%2?'screen-chat':'emoji-chat',id:`observed-${index}`,user:{id:String(index),name:'观众'},text:'只读内容'});
+  e.ingest({type:'room-notice',id:'notice',text:'房间公告'});
+  e.ingest({type:'room-rank',id:'rank',ranks:[{score:'520'}]});
+  e.ingest({type:'rank-update',id:'rank-update',updates:[{text:'榜单更新'}]});
+  e.ingest({type:'room-notify',id:'notify',notifySubType:'live_gift_notify'});
+  e.ingest({type:'room-sync',id:'sync',syncType:'InteractEffectSyncData',syncDataBytes:128});
+  e.ingest({type:'audio-chat',id:'audio',text:'谢谢主播'});
+  e.ingest({type:'product-change',id:'products',products:[{promotionId:'12345'}]});
+  e.ingest({type:'highlight-comment',id:'highlight',text:'置顶内容'});
+  e.ingest({type:'activity-signal',id:'lottery',activityKind:'lottery-result'});
+  e.ingest({type:'red-packet',id:'red',status:'发放中',count:5});
+  e.ingest({type:'chat-like',id:'chat-likes',entries:[{messageId:'123',count:'5'}]});
+  e.ingest({type:'fan-ticket',id:'tickets',display:'1.2万',total:'12000'});
+  e.ingest({type:'room-activity-state',id:'game',title:'小游戏进行中'});
+  assert.equal(e.roomData.activities.length,100); assert.ok(logs.some(row=>row.text.includes('房间公告')));
+  assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+});
+test('新增团播礼物目录和 PK 元数据在暂停时只读记录', () => {
+  const sent=[], logs=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  e.ingest({type:'gift-catalog',id:'menu',itemCount:2,items:[{id:'77',name:'熱氣球',price:520}]});
+  e.ingest({type:'battle-bonus',id:'bonus',mvp:{user:{name:'MVP'}}});
+  e.ingest({type:'battle-property',id:'props',rooms:[{roomId:'7',properties:[{name:'PK 宝箱'}]}]});
+  e.ingest({type:'battle-season-honor',id:'honor',honors:[{name:'赛季荣誉'}]});
+  e.ingest({type:'popular-card',id:'popular',enterNumber:12});
+  assert.equal(e.roomData.activities.length,5);
+  assert.ok(logs.some(row=>row.text.includes('团播礼物目录候选')));
+  assert.ok(logs.some(row=>row.text.includes('PK 奖励')));
+  assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+  const restored=new Engine({config:copy(DEFAULTS),now:()=>1800000000000});
+  assert.equal(restored.restore(e.snapshot()),true); assert.equal(restored.roomData.activities.length,5);
+});
+test('粉丝团与团播成员/收益、房票状态在暂停时只读持久化', () => {
+  const sent=[], logs=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};},log:(category,text)=>logs.push({category,text})});
+  for (const [type,id] of [['fansclub-statistics','club'],['group-live-members','members'],['group-live-income','income'],['room-ticket','ticket']]) e.ingest({type,id});
+  assert.equal(e.roomData.activities.length,4); assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+  assert.ok(logs.some(row=>row.text.includes('团播成员收益')));
+  const restored=new Engine({config:copy(DEFAULTS),now:()=>1800000000000});
+  assert.equal(restored.restore(e.snapshot()),true); assert.equal(restored.roomData.activities.length,4);
+});
+test('连麦席位、嘉宾状态与粉丝团播报暂停时只读持久化', () => {
+  const sent=[], e=new Engine({config:copy(DEFAULTS),now:()=>1800000000000,send:async text=>{sent.push(text);return {submitted:true};}});
+  for (const [type,id] of [['linkmic-positions','positions'],['guest-link-state','guest-link'],['fansclub-push','fan-push']]) e.ingest({type,id});
+  assert.equal(e.roomData.activities.length,3); assert.deepEqual(sent,[]); assert.equal(e.queue.length,0);
+});
+test('1000票播报跨 socket 弹幕与 DOM milestone 去重，并在恢复后保留去重状态', async () => {
+  const {e, advance} = harness();
+  const message = '感谢岁小孩LILAC成为本场No.1、1000票贡献用户！';
+  e.ingest({type:'chat',id:'socket-row-1',user:{id:'system',name:'系统'},text:message,source:'socket'});
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:2},source:'dom'});
+  assert.equal(e.queue.filter(job=>job.kind==='milestone').length,1,'同一贡献用户变更排名也只感谢一次');
+  const restored = new Engine({config:e.config,now:e.now});
+  restored.restore(e.snapshot());
+  restored.start();
+  restored.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  assert.equal(restored.queue.filter(job=>job.kind==='milestone').length,1,'刷新后迟到的另一来源不重复入队');
+  await e.tick();
+  advance(600001);
+  await e.tick();
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'岁小孩LILAC',rank:1},source:'dom'});
+  assert.equal(e.queue.filter(job=>job.kind==='milestone').length,0,'同场十分钟后重播不重复感谢');
+});
+
+test('旧版按排名保存的贡献去重记录恢复后仍覆盖新排名', async () => {
+  const {e,advance} = harness();
+  const saved = e.snapshot(); saved.milestoneSeen = [['contribution:青山:1',e.now()]];
+  e.restore(saved); advance(600001); await e.tick();
+  e.ingest({type:'milestone',milestone:{kind:'contribution',name:'青山',rank:2},source:'dom'});
+  assert.equal(e.queue.length,0);
+});
+
+test('贡献去重跨暂停和刷新保留，在平台新场次或下播后重新开播时重置', async () => {
+  const {e,advance} = harness();
+  const announce = (roomId, rank=1) => e.ingest({type:'chat',source:'socket',roomId,user:{name:'系统'},text:`恭喜 青山成为本场No.${rank}、1000票贡献用户！`});
+  announce('live-1'); await e.tick();
+  e.stop(); e.start(); announce('live-1',2); assert.equal(e.queue.length,0);
+  announce('live-2'); assert.equal(e.queue.length,1); await e.tick();
+  e.ingest({type:'end',source:'socket',roomId:'live-2'});
+  const restored = new Engine({config:e.config,now:e.now}); restored.restore(e.snapshot()); restored.start();
+  advance(1); restored.ingest({type:'start',source:'dom-observed'});
+  restored.ingest({type:'milestone',milestone:{kind:'contribution',name:'青山',rank:1},source:'dom'});
+  assert.equal(restored.queue.length,1,'明确的新场次可以再次感谢');
+});
+
+test('星守护仍按十分钟窗口去重，其他贡献用户仍分别感谢', async () => {
+  const {e,advance} = harness();
+  for (const name of ['青山','绿水']) e.ingest({type:'milestone',milestone:{kind:'contribution',name,rank:1}});
+  e.ingest({type:'milestone',milestone:{kind:'guardian',name:'青山'}});
+  assert.equal(e.queue.length,3);
+  await e.tick(); await e.tick(); await e.tick();
+  advance(600001); await e.tick();
+  e.ingest({type:'milestone',milestone:{kind:'guardian',name:'青山'}});
+  assert.equal(e.queue.length,1);
+});
 
 test('复用消息 ID 的连击更新和结束消息仍结算到最新累计数量', async () => {
   const {e, logs} = harness();
@@ -22,7 +193,7 @@ test('复用消息 ID 的连击更新和结束消息仍结算到最新累计数�
 
 test('互动队列默认不设全局发送节流并保留自动发送', () => {
   assert.equal(DEFAULTS.gift.cooldownSec, 0);
-  assert.equal(DEFAULTS.gift.minValue, 2);
+  assert.equal(DEFAULTS.gift.minValue, 1);
   assert.equal(DEFAULTS.gift.mergeSec, 0);
   assert.equal('intervalSec' in DEFAULTS.sending, false);
   assert.equal('perMinute' in DEFAULTS.sending, false);
@@ -128,7 +299,7 @@ test('聊天提前返回与游戏提交仍通知持久化', () => {
   assert.equal(persisted.history.at(-1).text, '@场控 猜数字');
   assert.equal(persisted.bot.type, 'guess');
 });
-test('发送中快照恢复为结果未知并自动重发', async () => {
+test('尚未进入点击钩子的发送快照恢复后可安全重试', async () => {
   const { e, time } = harness(); let resolveSend;
   e.config.mode = 'auto'; e.send = () => new Promise(resolve => { resolveSend = resolve; });
   e.enqueue('gift','感谢青山！',{giftReply:{userKey:'uid:9',user:{name:'青山'},items:[],template:'谢谢'}});
@@ -139,7 +310,7 @@ test('发送中快照恢复为结果未知并自动重发', async () => {
   assert.equal(restored.queue.length,1); assert.equal(restored.deliveries.records[0].state,'retrying');
   resolveSend({submitted:true}); await pending;
 });
-test('运行快照写入挂起时发送仍会继续，页面离开时保留在途任务供恢复重发', async () => {
+test('适配器尚未返回时页面离开，保留未知状态且迟到结果不覆盖', async () => {
   const { e } = harness(c => { c.mode = 'auto'; });
   let checkpointed = false, sendCalls = 0;
   e.checkpoint = async () => { assert.equal(e.snapshot().inFlight.jobs.length,1); checkpointed = true; };
@@ -154,9 +325,9 @@ test('运行快照写入挂起时发送仍会继续，页面离开时保留在�
   const sending = e.tick(); await new Promise(setImmediate);
   assert.equal(sendCalls,1);
   e.stop('刷新',{preserveWork:true});
-  assert.equal(e.queue.length,0); assert.equal(e.deliveries.pending().at(-1).state,'unknown');
+  assert.equal(e.queue.length,0); assert.equal(e.deliveries.records.at(-1).state,'unknown');
   finish({submitted:true}); await sending;
-  assert.equal(e.queue.length,0); assert.equal(e.deliveries.pending().at(-1).state,'unknown');
+  assert.equal(e.queue.length,0); assert.equal(e.deliveries.records.at(-1).state,'unknown');
 });
 test('礼物回复不因相同文本去重丢失，其他类别仍保留重复过滤', () => {
   const { e } = harness();
@@ -171,11 +342,12 @@ test('礼物回复不因相同文本去重丢失，其他类别仍保留重复�
 });
 test('点赞感谢即时处理同一用户的连续事件，规则话术轮换且不按用户间隔过滤', async () => {
   const { e } = harness(c => { c.like.enabled = true; c.like.templates = ['谢谢 {user} 哥点赞！', '感谢 {user} 哥的赞！']; });
-  e.ingest({ type: 'like', id: 'like-1', user, count: 30 });
-  assert.equal(e.queue[0].text, '谢谢 青山 哥点赞！');
-  e.ingest({ type: 'like', id: 'like-2', user, count: 30 });
-  assert.equal(e.queue.length, 2); assert.equal(e.queue[1].text, '感谢 青山 哥的赞！');
-  e.ingest({ type: 'like', id: 'like-3', user, count: 20 });
+  const male={...user,gender:1,birthdayDescription:'2000-10-22',birthdayValid:true};
+  e.ingest({ type: 'like', id: 'like-1', user:male, count: 30 });
+  assert.equal(e.queue[0].text, '谢谢 青山哥点赞！');
+  e.ingest({ type: 'like', id: 'like-2', user:male, count: 30 });
+  assert.equal(e.queue.length, 2); assert.equal(e.queue[1].text, '感谢 青山哥的赞！');
+  e.ingest({ type: 'like', id: 'like-3', user:male, count: 20 });
   assert.equal(e.queue.length, 3); assert.match(e.queue[2].text,/点赞|的赞/u);
 });
 test('点赞 AI 生成失败时回退到轮换话术，不需要人工审核', async () => {
@@ -187,8 +359,8 @@ test('点赞 AI 生成失败时回退到轮换话术，不需要人工审核', a
 });
 test('礼物 AI 关闭或不可用时使用轮换规则话术兜底', async () => {
   const { e, logs } = harness(c => { c.gift.responseMode = 'ai'; c.gift.minValue = 50; c.gift.templates = ['感谢 {user} 哥送的 {gift}']; });
-  e.ingest(gift({ final: true })); await e.tick();
-  assert.ok(logs.some(item => item.category === 'preview' && /青山\s*哥送的\s*星星/.test(item.text)));
+  e.ingest(gift({ user:{...user,gender:1,birthdayDescription:'2000-10-22',birthdayValid:true}, final: true })); await e.tick();
+  assert.ok(logs.some(item => item.category === 'preview' && /青山哥送的\s*星星/.test(item.text)));
 });
 test('旧版定时配置迁移为规则话术模式', () => {
   const old = mergeConfig({ timers: [{ id: 'old', enabled: false, intervalSec: 300, start: '', end: '', quietSec: 15, messages: [] }] });
@@ -204,12 +376,32 @@ test('欢迎必须同时满足荣誉等级、本主播粉丝团和点亮状态',
   c.anchorId = ''; assert.equal(welcomeDecision(user, c).pass, false);
 });
 
-test('只有明确启用且达到荣誉门槛的欢迎使用管理员弹幕', () => {
-  const e = new Engine({ config:copy(DEFAULTS) });
-  e.config.welcome.admin.enabled = true; e.config.welcome.admin.minWealth = 60;
-  assert.equal(e.welcomeChannel({wealthLevel:59}), 'chat');
-  assert.equal(e.welcomeChannel({wealthLevel:null}), 'chat');
-  assert.equal(e.welcomeChannel({wealthLevel:60}), 'admin');
+test('管理员弹幕欢迎必须启用并同时满足荣誉与本房粉丝团门槛', () => {
+  const config = copy(DEFAULTS); config.anchorId = '1234567890';
+  const e = new Engine({ config });
+  e.config.welcome.admin.enabled = true; e.config.welcome.admin.minWealth = 60; e.config.welcome.admin.minFanLevel = 1;
+  const qualified = {wealthLevel:60,fanClubs:[{anchorId:config.anchorId,level:1,status:1}]};
+  assert.equal(e.welcomeChannel({...qualified,wealthLevel:59}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,wealthLevel:null}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,fanClubs:[]}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,fanClubs:[{anchorId:'other',level:8,status:1}]}), 'chat');
+  assert.equal(e.welcomeChannel({...qualified,fanClubs:[{anchorId:config.anchorId,level:1,status:2}]}), 'chat');
+  assert.equal(e.welcomeChannel(qualified), 'admin');
+});
+test('管理员欢迎等级不得低于基础欢迎；旧配置补齐灯牌下限', () => {
+  const c = copy(DEFAULTS); c.welcome.admin.enabled = true;
+  c.welcome.minWealth = 61; assert.throws(()=>validateConfig(c), /不能低于基础欢迎/);
+  c.welcome.admin.minWealth = 61; c.welcome.minFanLevel = 9; assert.throws(()=>validateConfig(c), /灯牌.*不能低于基础欢迎/);
+  c.welcome.admin.minFanLevel = 9; assert.equal(validateConfig(c), c);
+  const old = mergeConfig({ welcome:{minWealth:70,minFanLevel:10,admin:{enabled:true,minWealth:60}} });
+  assert.equal(old.welcome.admin.minWealth,70); assert.equal(old.welcome.admin.minFanLevel,10); validateConfig(old);
+});
+test('排队的管理员欢迎在发送时重新核验新门槛', async () => {
+  const {e} = harness(c=>{c.mode='auto';c.welcome.admin={enabled:true,minWealth:35,minFanLevel:8};});
+  let channel; e.send = async (_text,_current,options)=>{channel=options.channel;return {submitted:true};};
+  e.ingest({type:'enter',id:'admin-welcome',user}); assert.equal(e.queue[0].channel,'admin');
+  e.config.welcome.admin.minFanLevel = 9;
+  await e.tick(); assert.equal(channel,'chat');
 });
 test('指定名单可独立欢迎；昵称只接受显式 name 前缀', () => {
   const c = copy(DEFAULTS); c.welcome.listed = ['uid:9007199254740993123'];
@@ -235,9 +427,13 @@ test('礼物事件缺少昵称但有用户标识时仍会生成通用感谢', as
   assert.equal(e.stats.previews,1);
   assert.ok(logs.some(item => /观众.*玫瑰/.test(item.text)));
 });
-test('未知礼物单价跳过，补价格表可恢复', async () => {
-  const a = harness(); a.e.ingest(gift({ unitValue: null, count: 3, final: true })); await a.e.tick(); assert.equal(a.e.stats.previews, 0);
+test('未知礼物单价使用不含估值的通用感谢，较高门槛下等待补价', async () => {
+  const a = harness(); a.e.ingest(gift({ unitValue: null, count: 3, final: true })); await a.e.tick(); assert.equal(a.e.stats.previews, 1);
+  const strict = harness(c => { c.gift.minValue = 50; }); strict.e.ingest(gift({ unitValue: null, count: 3, final: true })); await strict.e.tick(); assert.equal(strict.e.stats.previews, 0);
   const b = harness(c => { c.gift.prices = { '123': 50 }; }); b.e.ingest(gift({ unitValue: null, count: 3, final: true })); await b.e.tick(); assert.equal(b.e.stats.previews, 1);
+});
+test('默认感谢门槛会感谢单价为 1 钻的小礼物', async () => {
+  const {e}=harness(); e.ingest(gift({unitValue:1,count:1,final:true})); await e.tick(); assert.equal(e.stats.previews,1);
 });
 test('先出现低价子连击，稍后累积达标仍感谢累计价值', async () => {
   const { e, advance, logs } = harness(c => { c.gift.minValue = 100; });
@@ -277,6 +473,30 @@ test('两笔亲吻各一份的平台时间偏差不漏感谢，重复推送不�
   assert.equal(e.stats.previews,1);
   assert.equal(logs.find(item=>item.category==='preview')?.text,'( ✘_✘ )↯：亲吻×2，198钻石');
   assert.equal(e.stats.filtered,0);
+});
+test('逐个点击的小心心按用户与礼物短窗口累计，延迟帧与重复帧不刷感谢', async () => {
+  const {e, advance, logs} = harness(c => { c.gift.minValue = 2; });
+  const single = (id, at, extra = {}) => gift({id, giftId:'heart',giftName:'小心心',unitValue:1,count:1,groupId:`single:${id}`,final:true,receivedAt:at,...extra});
+  const start = 1800000000000;
+  e.ingest(single('heart-1',start));
+  advance(700); e.ingest(single('heart-2',start+700));
+  advance(600); e.ingest(single('heart-1',start,{count:1})); // 重复延迟帧
+  advance(700); e.ingest(single('heart-3',start+2000));
+  advance(1999); await e.tick(); assert.equal(e.stats.previews,0);
+  advance(1); await e.tick();
+  assert.equal(e.stats.previews,1);
+  assert.match(logs.find(item=>item.category==='preview').text,/小心心×3，3钻石/);
+  assert.equal([...e.gifts.values()][0].count,3);
+});
+test('单独礼物的累计进度乱序不回退，静默窗口后新点击可以再次结算', async () => {
+  const {e, advance, logs} = harness();
+  const one = (id, count = 1) => gift({id, giftId:'heart',giftName:'小心心',unitValue:1,count,groupId:`single:${id}`,final:true});
+  e.ingest(one('heart-combo',2)); advance(100); e.ingest(one('heart-combo',1));
+  e.ingest(one('heart-2')); advance(2000); await e.tick();
+  assert.equal(e.stats.previews,1);
+  assert.match(logs.find(item=>item.category==='preview').text,/小心心×3，3钻石/);
+  e.ingest(one('heart-3')); advance(2000); await e.tick();
+  assert.equal(e.stats.previews,2);
 });
 test('礼物捕获时间超过十分钟仍拒绝补发，缺少捕获时间不豁免历史检查', async () => {
   for (const receipt of ['stale','missing']) {
@@ -513,7 +733,7 @@ test('礼物在普通队列达到上限时仍进入高优先级通道', () => {
 });
 
 test('未知价格不会每 500 毫秒忙循环，后续收到累计帧仍可结算', async () => {
-  const { e, advance } = harness();
+  const { e, advance } = harness(c => { c.gift.minValue = 2; });
   e.ingest(gift({ unitValue: null, count: 1, final: true })); await e.tick();
   assert.equal(e.stats.previews, 0);
   const state = [...e.gifts.values()][0]; assert.equal(state.due, Infinity);
