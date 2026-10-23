@@ -53,7 +53,7 @@
 - 当前已加载的公开 bundle `3273.81597587.js` 模块 40356 使用 GET `/webcast/room/chat/` 发送普通聊天；`426.3098d46d.js` 模块 801541 的 `Ew` 使用 POST `/webcast/screen_chat/`，模块 261882 在管理员样式分支选择它。付费接口 `/webcast/privilege/screen_chat/send/` 是另一条路径，助手不调用。
 - `src/browser/request-sender.js` 复用 `client-entry~1.28f20eec.js` 中请求模块的默认客户端，保留登录态、安全初始化和公共参数拦截器。只允许当前房间和账号；管理员还须页面用户资料明确标记 `user_attr.is_admin`。这些属于页面私有实现，版本变化会使能力探测失败并回退 UI。
 - 本场运行记录 00:14:42 普通定时弹幕通过请求提交，00:14:43 收到本人结构化公屏回显，延迟 1305 ms。00:14:00 管理员欢迎请求返回成功，页面随后可见同文消息，但未收到助手可识别的结构化回显。原站发送逻辑也会根据接口响应生成 `is_mock` 本地显示消息，故页面可见本身不证明远端投递；管理员回显仍待补齐协议证据。
-- 入站的 `WebcastScreenChatMessage` / `WebcastPrivilegeScreenChatMessage` 已有只读 decoder；不把发送接口 HTTP 成功或本地显示伪装成 socket 回显。请求结果未知后不转 UI 再发；同一发送票据只执行一次。
+- 入站的 `WebcastScreenChatMessage` / `WebcastPrivilegeScreenChatMessage` 已有 decoder。2026-10-22 修复发送跟踪器仅接受 `chat` 的遗漏：现在 `screen-chat` 也可在本人 UID、文本、来源和时间全部匹配后确认发送，其余业务仍按只读活动处理。不把发送接口 HTTP 成功或本地显示伪装成 socket 回显；本场管理员远端投递仍待新版实测。请求结果未知后不转 UI 再发；同一发送票据只执行一次。
 - REA 对本地 JavaScript 树的分析调用遇到结果 schema 错误，Chrome CDP 不可达；以上路由结论来自常规静态源码追踪及扩展自身运行记录，不是 REA 成功执行的网络抓包结果。
 
 | 缺口 | 状态 | 判断依据与解码前提 |

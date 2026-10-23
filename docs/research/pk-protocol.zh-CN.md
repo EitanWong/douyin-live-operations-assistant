@@ -24,6 +24,7 @@
 | `WebcastLinkMicBattleFinishMethod` | 2 / 4 / 12 | BattleSettings / 重复 BattleScore / 主播映射 |
 | `BattleScore` | 1 / 2 / 8 | score / user_id / user_id_str |
 | 同上 | 11 / 12 / 15 | score_relative / score_relative_text / score_blur_text |
+| `webcast.data.User` | 4 / 7 / 1014 / 1015 / 1045 | `gender` / `birthday` / `birthday_description` / `birthday_valid` / `age_range`；年龄只由明确有效的完整生日推算，`age_range` 不等于岁数 |
 | `WebcastLinkmicPlayModeUpdateScoreMessage` | 5 / 6 / 7 / 9 | anchor_id / from_user_id / to_user_id / hot_score |
 
 `PlayModeUpdateScoreMessage` 的字段 6 是送礼用户 ID，字段 9 是单次热度更新，不能直接当作累计比分。旧参考 proto 将字段 6 标成 `score_self`，与当前网页解码表冲突。`LinkMicArmies` 属于贡献榜，也不能相加代替官方累计比分。普通连麦、布局更新和未核对的 Battle 类型不再建立战局。

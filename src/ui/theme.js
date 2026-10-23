@@ -6,6 +6,7 @@ export function installTheme({ target, select, onError = () => {} }) {
   const view = target.ownerDocument.defaultView;
   const extensionStorage = view.chrome?.storage;
   const storage = extensionStorage?.local;
+  const runtime = view.chrome?.runtime;
   let theme = 'system', revision = 0, destroyed = false;
   const apply = value => {
     theme = normalizeTheme(value);
@@ -18,18 +19,25 @@ export function installTheme({ target, select, onError = () => {} }) {
     if (area !== 'local' || !Object.hasOwn(changes, THEME_KEY) || destroyed) return;
     revision++; apply(changes[THEME_KEY].newValue);
   };
+  const onRuntimeMessage = message => {
+    if (message?.type !== 'theme-changed' || destroyed) return;
+    revision++; apply(message.value);
+  };
   const onLocalStorage = event => {
     if ((event.key === THEME_KEY || event.key === null) && !destroyed) {
       revision++; apply(event.newValue);
     }
   };
   if (storage) extensionStorage.onChanged?.addListener(onStorage);
-  else view.addEventListener('storage', onLocalStorage);
+  if (runtime?.onMessage?.addListener) runtime.onMessage.addListener(onRuntimeMessage);
+  if (!storage && !runtime?.onMessage?.addListener) view.addEventListener('storage', onLocalStorage);
 
   const ready = (async () => {
     const initialRevision = revision;
     try {
-      const saved = storage ? (await storage.get(THEME_KEY))[THEME_KEY] : view.localStorage.getItem(THEME_KEY);
+      const saved = runtime?.sendMessage
+        ? await sendThemeMessage(runtime,{type:'theme-get'})
+        : storage ? (await storage.get(THEME_KEY))[THEME_KEY] : view.localStorage.getItem(THEME_KEY);
       if (!destroyed && revision === initialRevision) apply(saved);
     } catch { if (!destroyed) onError('无法读取外观偏好，暂时跟随系统。'); }
   })();
@@ -37,7 +45,8 @@ export function installTheme({ target, select, onError = () => {} }) {
     const previous = theme, currentRevision = ++revision;
     apply(select.value);
     try {
-      if (storage) await storage.set({ [THEME_KEY]: theme });
+      if (runtime?.sendMessage) await sendThemeMessage(runtime,{type:'theme-set',value:theme});
+      else if (storage) await storage.set({ [THEME_KEY]: theme });
       else view.localStorage.setItem(THEME_KEY, theme);
     } catch {
       if (!destroyed && revision === currentRevision) {
@@ -53,7 +62,14 @@ export function installTheme({ target, select, onError = () => {} }) {
       destroyed = true;
       select.removeEventListener('change', onChange);
       if (storage) extensionStorage.onChanged?.removeListener(onStorage);
-      else view.removeEventListener('storage', onLocalStorage);
+      runtime?.onMessage?.removeListener?.(onRuntimeMessage);
+      if (!storage && !runtime?.onMessage?.addListener) view.removeEventListener('storage', onLocalStorage);
     }
   };
+}
+
+async function sendThemeMessage(runtime, message) {
+  const result = await runtime.sendMessage(message);
+  if (!result?.ok) throw new Error(result?.error || '外观偏好读取失败');
+  return result.value;
 }

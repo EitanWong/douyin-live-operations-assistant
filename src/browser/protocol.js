@@ -66,6 +66,9 @@ const textAt = (m, n) => { const v = bytesAt(m, n); return v ? decoder.decode(v)
 const intAt = (m, n) => { const v = m.get(n)?.[0]; return typeof v === 'bigint' ? v : null; };
 const numberAt = (m, n) => { const v = intAt(m, n); return v === null || v > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(v); };
 const idAt = (m, n) => intAt(m, n)?.toString() || '';
+// Common.createTime is seconds on most methods, but current GiftMessage uses
+// milliseconds. Preserve both observed layouts before applying freshness checks.
+const commonTime = common => { const value = numberAt(common, 4) || 0; return value < 1e12 ? value * 1000 : value; };
 const nested = (m, n) => wire(bytesAt(m, n) || new Uint8Array());
 function decodeClub(bytes) {
   const m = wire(bytes);
@@ -78,9 +81,55 @@ export function decodeUser(bytes) {
     if (!(entry instanceof Uint8Array)) continue;
     const value = bytesAt(wire(entry), 2); if (value) fanClubs.push(decodeClub(value));
   }
-  return { id: textAt(m, 1028) || idAt(m, 1), secUid: textAt(m, 46), displayId: textAt(m, 38), name: textAt(m, 3), wealthLevel: numberAt(nested(m, 23), 6), fanClubs };
+  return { id: textAt(m, 1028) || idAt(m, 1), secUid: textAt(m, 46), displayId: textAt(m, 38), name: textAt(m, 3), wealthLevel: numberAt(nested(m, 23), 6), fanClubs,
+    ...(m.has(4) ? {gender:[1,2].includes(numberAt(m,4)) ? numberAt(m,4) : null} : {}),
+    ...(m.has(7) ? {birthday:idAt(m,7)} : {}),
+    ...(m.has(1014) ? {birthdayDescription:textAt(m,1014)} : {}),
+    ...(m.has(1015) ? {birthdayValid:numberAt(m,1015) === 1} : {}),
+    ...(m.has(1045) ? {ageRange:numberAt(m,1045)} : {})
+  };
 }
 const messagesAt = (m, n) => (m.get(n) || []).filter(value => value instanceof Uint8Array).map(value => wire(value));
+const signedInt64At = (m, n) => { const value = intAt(m, n); return value === null ? '' : BigInt.asIntN(64, value).toString(); };
+function battleGrade(m) {
+  return {
+    ...(bytesAt(m, 1) ? { name: textAt(m, 1).slice(0, 200) } : {}),
+    ...Object.fromEntries([[2, 'level'], [3, 'starCount'], [4, 'targetStarCount']]
+      .filter(([field]) => intAt(m, field) !== null).map(([field, name]) => [name, signedInt64At(m, field)])),
+    ...(intAt(m, 6) !== null ? { gradeEnum: numberAt(m, 6) } : {})
+  };
+}
+function battleGradeChange(m) {
+  return {
+    ...Object.fromEntries([[1, 'star'], [2, 'score'], [4, 'beforeLevel'], [6, 'currentLevel']]
+      .filter(([field]) => intAt(m, field) !== null).map(([field, name]) => [name, signedInt64At(m, field)])),
+    ...(bytesAt(m, 3) ? { beforeGrade: textAt(m, 3).slice(0, 200) } : {}),
+    ...(bytesAt(m, 5) ? { currentGrade: textAt(m, 5).slice(0, 200) } : {})
+  };
+}
+function battleSeasonRank(m) {
+  return {
+    ...Object.fromEntries([[3, 'detail'], [8, 'scoreDisplay'], [9, 'maxScoreDisplay']]
+      .filter(([field]) => bytesAt(m, field)).map(([field, name]) => [name, textAt(m, field).slice(0, 200)])),
+    ...Object.fromEntries([[5, 'score'], [6, 'maxScore']]
+      .filter(([field]) => intAt(m, field) !== null).map(([field, name]) => [name, signedInt64At(m, field)])),
+    ...(intAt(m, 7) !== null ? { level: numberAt(m, 7) } : {})
+  };
+}
+function decodeBattleRankSeason(m, event) {
+  const result = nested(m, 2);
+  if (!result.size) return null;
+  const delta = nested(result, 1), change = nested(result, 2);
+  // RankSeasonResult 没有主播 UID，只保留房间来源，不能据当前主播猜测段位归属。
+  return { ...event, type: 'pk-rank-season',
+    ...(bytesAt(change, 1) ? { beforeRank: battleSeasonRank(nested(change, 1)) } : {}),
+    ...(bytesAt(change, 2) ? { afterRank: battleSeasonRank(nested(change, 2)) } : {}),
+    ...(intAt(change, 4) !== null ? { changeType: numberAt(change, 4) } : {}),
+    ...(bytesAt(delta, 1) ? { deltaScore: textAt(delta, 1).slice(0, 200) } : {}),
+    ...(delta.has(2) ? { deltaDetails: messagesAt(delta, 2).slice(0, 50).map(row => ({ name: textAt(row, 1).slice(0, 200), score: textAt(row, 2).slice(0, 200) })) } : {}),
+    ...(bytesAt(result, 3) ? { tips: textAt(result, 3).slice(0, 1000) } : {})
+  };
+}
 // 字段核对自抖音网页 live-schema-im.e322bd8a.js（详见 docs/research/pk-protocol.zh-CN.md）。
 // LinkMicMethod.UserScores 才是累计 PK 分数；Armies 是贡献榜，PlayModeUpdateScore 是单次热度更新。
 function battleScores(m, field, finish = false) {
@@ -95,7 +144,8 @@ function battleScores(m, field, finish = false) {
     return anchorId && anchorId !== '0' && Number.isSafeInteger(value) && value >= 0 ? [{ anchorId, score: value,
       ...(score.has(finish ? 24 : 17) ? { scoreVersion: idAt(score, finish ? 24 : 17) } : {}),
       ...(score.has(finish ? 23 : 16) ? { contributorCount: numberAt(score, finish ? 23 : 16) } : {}),
-      ...(!finish && score.has(15) ? { buffScoreRatio: numberAt(score, 15) } : {})
+      ...(!finish && score.has(15) ? { buffScoreRatio: numberAt(score, 15) } : {}),
+      ...(finish && bytesAt(score, 10) ? { grade: battleGrade(nested(score, 10)) } : {})
     }] : [];
   });
 }
@@ -103,7 +153,12 @@ function battleParticipants(m, field) {
   return messagesAt(m, field).flatMap(entry => {
     const info = nested(entry, 2), user = nested(info, 1);
     const anchorId = textAt(user, 5) || idAt(user, 1) || idAt(entry, 1);
-    return anchorId ? [{ anchorId, name: textAt(user, 2), roomId: textAt(info, 13) }] : [];
+    const stage = nested(info, 12);
+    return anchorId ? [{ anchorId, name: textAt(user, 2), roomId: textAt(info, 13),
+      ...(bytesAt(info, 4) ? { grade: battleGrade(nested(info, 4)) } : {}),
+      ...(bytesAt(info, 5) ? { gradeChange: battleGradeChange(nested(info, 5)) } : {}),
+      ...(bytesAt(stage, 3) ? { pkStageDescription: textAt(stage, 3).slice(0, 200) } : {})
+    }] : [];
   });
 }
 function battleSettings(m, field = 2, dataSettings = false) {
@@ -153,7 +208,8 @@ function decodeBattleMessage(method, bytes, outerId) {
   const name = String(method).replace(/^Webcast/, '');
   if (!KNOWN_BATTLE_METHODS.has(name)) return null;
   const m = wire(bytes), common = nested(m, 1);
-  const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket', confidence: 'protocol-field', protocolMethod: method };
+  const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: commonTime(common), source: 'socket', confidence: 'protocol-field', protocolMethod: method };
+  if (name === 'BattleRankSeasonMessage') return decodeBattleRankSeason(m, event);
   if (name === 'LinkMicMethod' || name === 'LinkMicMethodMessage') {
     const scores = battleScores(m, 17), rawBattleId = textAt(m, 114) || idAt(m, 104), battleId = validId(rawBattleId) ? rawBattleId : '';
     const contributions = contributionEvents(event, m, 22, 'linkmic', { battleId });
@@ -501,14 +557,14 @@ function decodeProtocolEvent(method, m, event) {
     prizeType:numberAt(m, 2), field6:numberAt(m, 6), field8:numberAt(m, 8) };
   return null;
 }
-const KNOWN_BATTLE_METHODS = new Set(['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage','LinkMicArmiesMethod','LinkMicArmies','BattleStateSyncMessage']);
+const KNOWN_BATTLE_METHODS = new Set(['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage','LinkMicArmiesMethod','LinkMicArmies','BattleStateSyncMessage','BattleRankSeasonMessage']);
 const KNOWN_PROTOCOL_METHODS = new Set(['WebcastChatMessage','WebcastGiftMessage','WebcastLikeMessage','WebcastMemberMessage','WebcastControlMessage','WebcastRoomStatsMessage','WebcastRoomUserSeqMessage','WebcastSocialMessage','WebcastFansclubMessage','WebcastEmojiChatMessage','WebcastScreenChatMessage','WebcastPrivilegeScreenChatMessage','WebcastRoomMessage','WebcastRoomRankMessage','WebcastRankUpdateMessage','WebcastRoomNotifyMessage','WebcastRoomDataSyncMessage','RoomDataSyncMessage','WebcastAudioChatMessage','WebcastHighlightCommentMessage','WebcastLightGiftMessage','WebcastLiveShoppingMessage','WebcastProductChangeMessage','WebcastInRoomBannerMessage','WebcastRanklistAwardMessage','WebcastPreviewCjRpMessage','WebcastLotteryDrawResultEventMessage','WebcastLotteryEventNewMessage','WebcastLuckyBoxMessage','WebcastLuckyBoxEndMessage','WebcastLuckyBoxRewardMessage','WebcastLuckyBoxTempStatusMessage','WebcastPrizeNoticeMessage','WebcastChatLikeMessage','WebcastUpdateFanTicketMessage','WebcastProfitGameStatusMessage','WebcastGiftSortMessage','WebcastRoomIndicatorMessage','GroupLiveContainerChangeMessage','WebcastBattleBonusMessage','WebcastBattlePropertyMessage','BattleSeasonHonorMessage','PopularCardMessage','WebcastPopularCardMessage','FansclubStatisticsMessage','GroupLiveMemberChangeMessage','GroupLiveIncomeChangeMessage','RoomTicketMessage','LinkMicPositionMessage','LinkmicGuestLinkMessage','FansclubV1PushMessage']);
 const knownProtocolMethod = method => KNOWN_PROTOCOL_METHODS.has(method) || KNOWN_BATTLE_METHODS.has(String(method).replace(/^Webcast/, ''));
 export function decodeMessage(method, bytes, outerId = '') {
   if (KNOWN_BATTLE_METHODS.has(method) || KNOWN_BATTLE_METHODS.has(String(method).replace(/^Webcast/, ''))) return decodeBattleMessage(method, bytes, outerId);
   if (!KNOWN_PROTOCOL_METHODS.has(method)) return null;
   const m = wire(bytes), common = nested(m, method === 'WebcastPreviewCjRpMessage' ? 2 : 1);
-  const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: (numberAt(common, 4) || 0) * 1000, source: 'socket' };
+  const event = { id: outerId || idAt(common, 2), roomId: idAt(common, 3), at: commonTime(common), source: 'socket' };
   const observed = decodeProtocolEvent(method, m, event);
   if (observed) return observed;
   if (method === 'WebcastChatMessage') {

@@ -52,7 +52,9 @@ function orientScores(state, event) {
   for (const item of participants) {
     if (!item?.anchorId) continue;
     const id = String(item.anchorId), old = state.competitors[id] || { anchorId:id, score:0, scoreObserved:false, scoreAt:null, scoreMeta:{} };
-    state.competitors[id] = { ...old, name:String(item.name || old.name || '').slice(0,80), roomId:String(item.roomId || old.roomId || ''), isSelf:id === String(state.anchorId || event.anchorId || '') };
+    state.competitors[id] = { ...old, name:String(item.name || old.name || '').slice(0,80), roomId:String(item.roomId || old.roomId || ''), isSelf:id === String(state.anchorId || event.anchorId || ''),
+      ...(item.grade ? { grade:item.grade } : {}), ...(item.gradeChange ? { gradeChange:item.gradeChange } : {}),
+      ...(item.pkStageDescription ? { pkStageDescription:String(item.pkStageDescription).slice(0,200) } : {}) };
   }
   const self = participants.find(item => item.anchorId && String(item.anchorId) === state.anchorId)
     || participants.find(item => item.roomId && String(item.roomId) === state.roomId);
@@ -70,11 +72,13 @@ function orientScores(state, event) {
   const otherScore = scores.find(item => item.anchorId && String(item.anchorId) === state.opponentId)
     || (ownScore && others.length === 1 ? others[0] : null);
   if (otherScore && !state.opponentId) state.opponentId = String(otherScore.anchorId);
-  const meta = item => Object.fromEntries(['scoreVersion', 'contributorCount', 'buffScoreRatio'].filter(field => item[field] != null).map(field => [field, item[field]]));
+  const meta = item => Object.fromEntries(['scoreVersion', 'contributorCount', 'buffScoreRatio', 'final'].filter(field => item[field] != null).map(field => [field, item[field]]));
   const names = new Map(participants.map(item => [String(item.anchorId), item.name || '']));
   const competitorScores = scores.filter(item => item?.anchorId && Number.isFinite(item.score) && item.score >= 0).map(item => ({
     anchorId:String(item.anchorId), name:names.get(String(item.anchorId)) || state.competitors[String(item.anchorId)]?.name || '',
-    score:item.score, scoreMeta:meta(item), isSelf:String(item.anchorId) === String(state.anchorId || event.anchorId || '')
+    score:item.score, scoreMeta:meta(item), isSelf:String(item.anchorId) === String(state.anchorId || event.anchorId || ''),
+    ...(item.grade ? { grade:item.grade } : {}), ...(item.gradeChange ? { gradeChange:item.gradeChange } : {}),
+    ...(item.pkStageDescription ? { pkStageDescription:String(item.pkStageDescription).slice(0,200) } : {})
   }));
   return { ...event, ...(competitorScores.length ? { competitorScores } : {}), ...(ownScore ? { selfScore: ownScore.score, selfScoreMeta: meta(ownScore) } : {}), ...(otherScore ? { opponentScore: otherScore.score, opponentScoreMeta: meta(otherScore) } : {}) };
 }
@@ -264,7 +268,9 @@ function recordScores(state, event, at) {
     const timestamp = Number.isFinite(item.scoreAt) ? Math.min(at,item.scoreAt) : at;
     if (old.scoreObserved && ((old.scoreAt != null && timestamp < old.scoreAt) || item.score < old.score)) { state.dataQuality.rejectedScoreEvents += 1; continue; }
     state.competitors[id] = { ...old, name:String(item.name || old.name || '').slice(0,80), isSelf:Boolean(item.isSelf || id === String(state.anchorId || '')),
-      score:item.score, scoreObserved:true, scoreAt:timestamp, scoreMeta:{...old.scoreMeta,...(item.scoreMeta || {})} };
+      score:item.score, scoreObserved:true, scoreAt:timestamp, scoreMeta:{...old.scoreMeta,...(item.scoreMeta || {})},
+      ...(item.grade ? { grade:item.grade } : {}), ...(item.gradeChange ? { gradeChange:item.gradeChange } : {}),
+      ...(item.pkStageDescription ? { pkStageDescription:String(item.pkStageDescription).slice(0,200) } : {}) };
     accepted = true;
   }
   for (const side of ['self', 'opponent']) {

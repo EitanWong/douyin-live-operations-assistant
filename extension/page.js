@@ -3,7 +3,8 @@ const jsonBytes = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length * 2 : null; }
   catch { return null; }
 };
-const room = location.pathname.match(/^\/(\d+)\/?$/)?.[1];
+const currentRoom = () => location.pathname.match(/^\/(\d+)\/?$/)?.[1] || new URLSearchParams(location.search).get('room_id')?.match(/^\d+$/)?.[0];
+const room = currentRoom();
 if (room) {
   const backlog = [], captureBacklog = []; let backlogBytes = 0, captureBacklogBytes = 0, bridgeGaps = 0, captureGaps = 0, ready = false, paused = false, flushing = false, flushingCaptures = false;
   let emitStatus = () => {};
@@ -63,7 +64,7 @@ if (room) {
     if (e.source !== window || e.origin !== location.origin || e.data?.source !== 'live-assistant-content-v1') return;
     if (e.data.type === 'hello') { ready = true; void flush(); void flushCaptures(); adapter.emitStatus(); }
     if (e.data.type === 'flow' && e.data.room === room) { paused = Boolean(e.data.paused); if (!paused) void flush(); adapter.emitStatus(); }
-    if (e.data.type === 'send-api' && e.data.room === room && /^\/(\d+)\/?$/.exec(location.pathname)?.[1] === room && typeof e.data.id === 'string' && e.data.id.length <= 64) {
+    if (e.data.type === 'send-api' && e.data.room === room && currentRoom() === room && typeof e.data.id === 'string' && e.data.id.length <= 64) {
       const {id,operation,channel,token,text} = e.data;
       if (!['prepare','commit'].includes(operation)) return;
       void (async()=>{

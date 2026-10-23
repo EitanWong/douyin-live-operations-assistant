@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {Engine, mergeConfig} from '../../src/core/engine.js';
 import {DeliveryTracker} from '../../src/runtime/delivery.js';
+import {decodeMessage} from '../../src/browser/protocol.js';
 
 function setup(send) {
   let now = 1800000000000;
@@ -34,6 +35,32 @@ test('回显可早于发送函数返回，已回显结果不会被点击返回�
   const snapshot=s.engine.snapshot();snapshot.inFlight={deliveryId:snapshot.deliveries[0].id,text:'感谢',jobs:[{id:1,text:'感谢',kind:'gift',created:s.engine.now()}]};
   const restored=new Engine({config:s.engine.config,now:s.engine.now});restored.restore(snapshot);
   assert.equal(restored.queue.length,0);assert.equal(restored.deliveries.pending().length,0,'已确认回显的在途快照不能重新隔离或重发');
+});
+
+test('管理员两种协议及文本布局的本人回显均确认发送，拒绝非协议和不匹配消息',async()=>{
+  const bytes = (field, value) => {
+    const data = Buffer.from(value);
+    assert.ok(data.length < 128);
+    return Buffer.concat([Buffer.from([field * 8 + 2, data.length]), data]);
+  };
+  for (const method of ['WebcastScreenChatMessage','WebcastPrivilegeScreenChatMessage']) {
+    for (const field of [3,4]) {
+      let sends=0;
+      const s=setup(async(text,current,hooks)=>{await hooks.beforeClick();sends++;return {submitted:true,clicked:true,transport:'request',channelUsed:'admin'};});
+      s.engine.enqueue('welcome','欢迎回来');await s.engine.tick();s.advance(1000);
+      const event={...decodeMessage(method,Buffer.concat([bytes(2,[8,10]),bytes(field,'欢迎回来')]),'admin-echo'),receivedAt:s.engine.now()};
+      assert.equal(s.engine.observeEcho({...event,source:'dom'}),false);
+      assert.equal(s.engine.observeEcho({...event,user:{id:'other'}}),false);
+      assert.equal(s.engine.observeEcho({...event,text:'另一条消息'}),false);
+      assert.equal(s.engine.observeEcho({...event,at:s.engine.now()-60000}),false);
+      assert.equal(s.engine.observeEcho(event),true,`${method} field ${field}`);
+      assert.equal(s.engine.deliveries.records[0].state,'echoed');
+      assert.equal(s.engine.deliveries.records[0].messageId,'admin-echo');
+      assert.equal(s.engine.deliveries.records[0].latencyMs,1000);
+      assert.equal(s.engine.observeEcho(event),false);
+      s.advance(60000);await s.engine.tick();assert.equal(sends,1);
+    }
+  }
 });
 
 test('回显超时、暂停恢复和刷新均不重发，迟到回显仍可确认',async()=>{

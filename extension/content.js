@@ -2,7 +2,7 @@ const jsonBytes = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length * 2 : null; }
   catch { return null; }
 };
-const room = location.pathname.match(/^\/(\d+)\/?$/)?.[1];
+const room = location.pathname.match(/^\/(\d+)\/?$/)?.[1] || new URLSearchParams(location.search).get('room_id')?.match(/^\d+$/)?.[0];
 if (room) {
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
   const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint, activeAdapter;
@@ -14,7 +14,7 @@ if (room) {
     if (data.type === 'event') {
       const event = data.event;
       let valid = true;
-      try { valid = Boolean(event) && ['gift','like','chat','enter','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
+      try { valid = Boolean(event) && ['gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
       catch { valid = false; }
       if (!valid) return;
       if (receive) receive(event);
@@ -25,6 +25,7 @@ if (room) {
       }
     }
     if (data.type === 'protocol-frame') {
+      if (contextInvalidated) { captureGaps++; activeAdapter?.sync(); return; }
       const record = data.record, bytes = jsonBytes(record);
       if (bytes == null || bytes > 1800000 || capturePending >= 256 || capturePendingBytes + bytes > 8*1024*1024) {
         captureGaps++; activeAdapter?.sync(); return;
@@ -39,9 +40,27 @@ if (room) {
     if (data.type === 'status' && data.status) liveStatus = { ...data.status };
   });
   let liveStatus = { hook:false, sockets:0, frames:0, events:0, errors:0, connected:false, lastFrame:0 };
+  let contextInvalidated = false;
+  const isContextError = error => error?.code === 'CONTEXT_INVALID' || /context invalidated|扩展上下文|receiving end does not exist/i.test(String(error?.message || error));
+  const contextFailure = () => Object.assign(new Error('扩展上下文已失效，请先导出恢复数据，再刷新直播页'), {code:'CONTEXT_INVALID'});
+  const invalidateContext = () => {
+    contextInvalidated = true;
+    activeAdapter?.sync();
+    return contextFailure();
+  };
   const message = async payload => {
-    const result = await chrome.runtime.sendMessage(payload);
-    if (!result?.ok) throw Object.assign(new Error(result?.error || '扩展后台暂不可用，请刷新页面'),{code:result?.code});
+    if (contextInvalidated) throw contextFailure();
+    let result;
+    try { result = await chrome.runtime.sendMessage(payload); }
+    catch (error) {
+      if (isContextError(error)) throw invalidateContext();
+      throw error;
+    }
+    if (!result?.ok) {
+      const error = Object.assign(new Error(result?.error || '扩展后台暂不可用，请刷新页面'), { code:result?.code });
+      if (isContextError(error)) throw invalidateContext();
+      throw error;
+    }
     return result.value;
   };
   const values = new Map(Object.entries(await message({ type:'init' })));
@@ -54,7 +73,7 @@ if (room) {
       try { return await message({type:remove?'delete':'set',key,value}); }
       catch (error) {
         if (previous === undefined) values.delete(key); else values.set(key,previous);
-        panel?.log('error',`保存失败：${error.message}`); throw error;
+        throw error;
       }
     })();
     writes=task; void task.catch(()=>{}); return task;
@@ -132,10 +151,12 @@ if (room) {
       return this.replayPromise;
     }
     async recoverEvents() {
+      if (contextInvalidated) throw contextFailure();
       this.inbox.held = true; await this.inbox.whenIdle();
       this.inbox.recover(); await this.replayJournal();
     }
     async exportEvents() {
+      if (contextInvalidated) return {...this.inbox.export(),error:contextFailure().message};
       const journalRecords = []; let after;
       for (;;) {
         const records = await journal.pending(after); journalRecords.push(...records);
@@ -153,8 +174,16 @@ if (room) {
         protocolCapture:{saved:captureSaved,pending:capturePending,gaps:captureGaps,errors:captureErrors}};
     }
     async checkStorage() {
-      this.storage = await message({type:'storage-status'}); this.sync(); return this.storage;
+      if (contextInvalidated) throw contextFailure();
+      const storage = await message({type:'storage-status'});
+      this.storage = storage; this.sync(); return this.storage;
     }
+    async clearCache() {
+      if (contextInvalidated) throw contextFailure();
+      const storage = await message({type:'storage-clear-cache'});
+      this.storage = storage; this.sync(); return storage;
+    }
+    persistenceUnavailable() { return contextInvalidated; }
     closeEvents() { this.inbox.close(); }
     hook() {
       receive = event => {
@@ -166,7 +195,7 @@ if (room) {
       for (const event of events.splice(0)) receive(event); eventsBytes = 0;
       window.postMessage({source:'live-assistant-content-v1',type:'hello'},location.origin);
     }
-    sync() { this.status = {...liveStatus,bridgeGaps:(this.priorBridgeGaps || 0)+(liveStatus.bridgeGaps || 0),frameGaps:(this.priorFrameGaps || 0)+(liveStatus.frameGaps || 0),capture:{saved:captureSaved,pending:capturePending,gaps:(this.priorCaptureGaps || 0)+captureGaps+(liveStatus.captureBridgeGaps || 0),errors:captureErrors},ingestion:this.inbox.status(),storage:this.storage}; this.emitStatus(); }
+    sync() { this.status = {...liveStatus,contextInvalidated,bridgeGaps:(this.priorBridgeGaps || 0)+(liveStatus.bridgeGaps || 0),frameGaps:(this.priorFrameGaps || 0)+(liveStatus.frameGaps || 0),capture:{saved:captureSaved,pending:capturePending,gaps:(this.priorCaptureGaps || 0)+captureGaps+(liveStatus.captureBridgeGaps || 0),errors:captureErrors},ingestion:this.inbox.status(),storage:this.storage}; this.emitStatus(); }
   }
 
   const request = details => {
@@ -182,6 +211,7 @@ if (room) {
     profile: profile => message({ type:'income-profile', profile }),
     profiles: () => message({ type:'income-profiles' }),
     record: record => message({ type:'gift-record', ...record }),
+    recordSession: boundary => message({ ...boundary, type:'income-session', boundaryType:boundary.type }),
     recordContribution: contribution => message({ type:'contribution-record', ...contribution }),
     report: (room, month) => message({ type:'income-report', room, month })
   };

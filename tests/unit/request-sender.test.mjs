@@ -2,18 +2,61 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {PageRequestSender,RequestBridgeClient} from '../../src/browser/request-sender.js';
+import {DeliveryTracker} from '../../src/runtime/delivery.js';
 
 function fixture() {
-  const dom=new JSDOM('',{url:'https://live.douyin.com/123?anchor_id=456'}), page=dom.window, requests=[];
-  page.__STORE__={roomStore:{roomInfo:{roomId:'7698776476925443611',room:{web_rid:'123'}}},userStore:{userInfo:{id_str:'789',user_attr:{is_admin:true}}}};
-  const client={defaults:{baseURL:'https://live.douyin.com',withCredentials:true},request:async value=>{requests.push(value);return {data:{status_code:0,data:{}}};}};
+  const dom=new JSDOM('',{url:'https://live.douyin.com/123?anchor_id=456'}), page=dom.window, requests=[], displayed=[];
+  page.__STORE__={roomStore:{roomInfo:{roomId:'7698776476925443611',room:{web_rid:'123'}}},userStore:{userInfo:{id_str:'789',user_attr:{is_admin:true}}},singletonStore:{message:{queuePush(message){displayed.push(message);}}}};
+  const client={defaults:{baseURL:'https://live.douyin.com',withCredentials:true},request:async value=>{requests.push(value);return {data:{status_code:0,data:{msg_id_str:'7699503115607725858',content:value.params.content,user:{id_str:'789',nickname:'测试账号'},show_identity:1,identity_label:'房管',rtf_content_v2:{text:value.params.content}}}};}};
   const require=()=>({ZP:client});
   // Same distinguishing literals as the observed request module, with no live network.
   require.m={request:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
   page.webpackChunkdouyin_live_v2=[];
   page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
-  return {dom,page,client,require,requests,sender:new PageRequestSender(page)};
+  return {dom,page,client,require,requests,displayed,sender:new PageRequestSender(page)};
 }
+test('普通感谢走网页原生本地队列显示一次，本地显示不充当结构化投递回执',async()=>{
+  const f=fixture();
+  try {
+    const tracker=new DeliveryTracker(), delivery=tracker.create('感谢饭饭的热气球',[],{id:'789'});tracker.clicked(delivery);
+    const prepared=f.sender.prepare('chat');
+    const result=await f.sender.commit(prepared.token,delivery.text);
+    await f.sender.commit(prepared.token,delivery.text);
+    assert.equal(result.submitted,true);assert.equal(f.requests.length,1);assert.equal(f.displayed.length,1);
+    const message=f.displayed[0];
+    assert.equal(message.is_mock,true);assert.equal(message.method,'WebcastChatMessage');
+    assert.equal(message.msg_id,'7699503115607725858');assert.equal(message.payload.common.msg_id,message.msg_id);
+    assert.equal(message.payload.content,delivery.text);assert.equal(message.payload.user.nickname,'测试账号');
+    assert.equal(message.identity_label,'房管');assert.equal(message.show_identity,1);
+    assert.equal(message.payload.rtf_content_v2.text,delivery.text);
+    assert.equal(tracker.observe({...message.payload,type:'chat',text:delivery.text,user:{id:'789'},source:'local'}),null);
+    assert.equal(delivery.state,'clicked');
+  } finally {f.dom.window.close();}
+});
+test('缺少网页公屏队列时在请求前回退；服务端拒绝、超时都不插入本地感谢',async()=>{
+  const f=fixture();
+  try {
+    const messages=f.page.__STORE__.singletonStore.message;
+    delete f.page.__STORE__.singletonStore.message;
+    assert.equal(f.sender.available('chat'),false);assert.equal(f.sender.prepare('chat').available,false);
+    assert.equal(f.requests.length,0);
+    f.page.__STORE__.singletonStore.message=messages;
+    for (const request of [async()=>({data:{status_code:403}}),async()=>{throw Error('timeout');}]) {
+      f.client.request=request;const prepared=f.sender.prepare('chat');
+      assert.equal((await f.sender.commit(prepared.token,'感谢支持')).submitted,false);
+      assert.equal(f.displayed.length,0);
+    }
+  } finally {f.dom.window.close();}
+});
+test('平台已接受后本地显示失败保留提交状态，提示问题且不重复请求',async()=>{
+  const f=fixture();
+  try {
+    f.page.__STORE__.singletonStore.message.queuePush=()=>{throw Error('页面重绘');};
+    const prepared=f.sender.prepare('chat'), result=await f.sender.commit(prepared.token,'感谢支持');
+    assert.equal(result.submitted,true);assert.match(result.displayWarning,/本页公屏更新失败/);
+    await f.sender.commit(prepared.token,'感谢支持');assert.equal(f.requests.length,1);
+  } finally {f.dom.window.close();}
+});
 test('请求发送区分普通和管理员接口，保留64位房间ID且同一票据不重复发送',async()=>{
   const f=fixture();
   try {

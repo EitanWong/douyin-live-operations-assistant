@@ -25,6 +25,27 @@ test('多个标签页并发上报同一礼物只记一次，不同主播独立�
   assert.equal((await restarted.report('2','2026-10')).summary.estimatedIncome,5);
   assert.equal((await restarted.report('1','2026-09')).summary.giftCount,0);
 });
+test('收入按开播与下播边界分场次；边界重复幂等，重启后继续新场次', async () => {
+  const {store,options}=setup(), start=options.now(), end=start+3600000;
+  let now=start; store.now=()=>now;
+  await store.recordSession({room:'1',type:'start',at:start,source:'dom-observed'});
+  await store.record(record('session-gift-1'));
+  await store.recordSession({room:'1',type:'end',at:end,source:'platform'});
+  await store.recordSession({room:'1',type:'end',at:end+1,source:'platform'});
+  now=end+1000;
+  const second=record('session-gift-2');second.event.roomId='session-2';
+  await store.record(second);
+  const report=await store.report('1','2026-10');
+  assert.equal(report.sessions.length,2);
+  assert.equal(report.sessions.find(session=>session.endAt).startSource,'dom-observed');
+  assert.equal(report.sessions.find(session=>session.endAt).endAt,end);
+  assert.equal(report.sessions.find(session=>!session.endAt).startSource,'first-observed');
+  assert.equal(report.sessions.reduce((sum,session)=>sum+session.giftCount,0),2);
+  const restarted=new GiftStore(options);
+  await restarted.recordSession({room:'1',type:'end',at:end+3600000,source:'platform'});
+  await restarted.recordSession({room:'1',type:'start',at:end+7200000,source:'dom-observed'});
+  assert.equal((await restarted.report('1','2026-10')).sessions.length,3);
+});
 test('服务工作线程重启后从持久进度接续连击，不重复累计',async()=>{
   const {store,options}=setup(), first=record();first.event.final=false;first.event.count=2;
   await store.record(first);
@@ -140,4 +161,67 @@ test('无平台时间的恢复礼物跨月补记时沿用顶层采集检查点',
   await later.record(item);await later.record(item);
   assert.equal((await later.report('1','2026-10')).summary.totalDiamonds,100);
   assert.equal((await later.report('1','2026-11')).summary.totalDiamonds,0);
+});
+
+test('跨午夜和跨月直播保持整场总额，月报按开播月份归属', async () => {
+  const {store}=setup();let now=Date.parse('2026-10-31T15:59:00Z');store.now=()=>now;
+  await store.recordSession({room:'1',type:'start',roomId:'broadcast-A',at:now});
+  const gift=(id)=>({...record(id),event:{...record(id).event,roomId:'broadcast-A',receivedAt:now}});
+  await store.record(gift('before-midnight'));
+  now+=120000;
+  await store.record(gift('after-midnight'));
+  const october=await store.report('1','2026-10'),november=await store.report('1','2026-11');
+  assert.equal(october.sessions.length,1);assert.equal(october.sessions[0].totalDiamonds,200);
+  assert.equal(october.summary.totalDiamonds,200);assert.equal(november.summary.totalDiamonds,0);
+  assert.equal(november.currentSession.totalDiamonds,200);
+});
+
+test('直播ID变化可识别漏掉的下播和重开，旧通知不关闭或重开新场次', async () => {
+  const {store,options}=setup();let now=options.now();store.now=()=>now;
+  await store.recordSession({room:'1',type:'start',roomId:'A',at:now});
+  await store.record({...record('a'),event:{...record('a').event,roomId:'A'}});
+  now+=3600000;
+  await store.recordSession({room:'1',type:'start',roomId:'B',at:now-10000,observedAt:now});
+  await store.record({...record('b'),event:{...record('b').event,roomId:'B'}});
+  await store.recordSession({room:'1',type:'end',roomId:'A',at:now+1});
+  await store.recordSession({room:'1',type:'start',roomId:'A',at:now-3600000,observedAt:now+2});
+  const report=await store.report('1','2026-10');
+  assert.equal(report.sessions.length,2);assert.equal(report.currentSession.roomId,'B');
+  assert.equal(report.currentSession.endAt,0);assert.equal(report.currentSession.giftCount,1);
+  assert.equal(report.sessions.find(item=>item.roomId==='A').giftCount,1);
+});
+
+test('故障后恢复的旧场次礼物和迟到连击仍回填原场次', async () => {
+  const {store,options}=setup();let now=options.now();store.now=()=>now;const capturedAt=now;
+  await store.recordSession({room:'1',type:'start',roomId:'A',at:now});
+  await store.record({...record('combo'),event:{...record('combo').event,roomId:'A',count:1,unitValue:null}});
+  now+=10000;await store.recordSession({room:'1',type:'end',roomId:'A',at:now});
+  now+=10000;await store.recordSession({room:'1',type:'start',roomId:'B',at:now});
+  await store.record({...record('retry'),capturedAt,event:{...record('retry').event,roomId:'A'}});
+  await store.record({...record('combo'),event:{...record('combo').event,roomId:'A',count:3,unitValue:100}});
+  const report=await store.report('1','2026-10');
+  assert.equal(report.sessions.length,2);assert.equal(report.currentSession.giftCount,0);
+  assert.equal(report.sessions.find(item=>item.roomId==='A').totalDiamonds,400);
+});
+
+test('场次汇总不依赖有界连击去重缓存；旧日账和新场次可以同时显示', async () => {
+  const {GiftLedger}=await import('../../src/data/gifts.js');
+  const {store,values,options}=setup(),at=options.now();
+  const ledger=new GiftLedger({now:()=>at,maxFinalized:1,state:{version:1,days:[['2026-10-14',{totalDiamonds:50,giftCount:1,unknownCount:0,estimatedIncome:2.5}]],active:[],finalized:[]}});
+  for(let i=0;i<5;i++)ledger.observe({...record(String(i)).event,roomId:'A'},'1','uid:9',0.05);
+  values['live-assistant:income:1']=ledger.serialize();
+  const report=await store.report('1','2026-10');
+  assert.equal(report.sessions[0].giftCount,5);assert.equal(report.sessions[0].totalDiamonds,500);
+  assert.equal(report.legacyDays[0].giftCount,1);assert.equal(report.summary.totalDiamonds,550);
+});
+
+test('刷新和后台重启沿用同一直播ID，并用平台时间补齐首次观测时间', async () => {
+  const {store,options}=setup(),at=options.now();
+  await store.record(record('first'));
+  const restarted=new GiftStore(options);
+  await restarted.recordSession({room:'1',type:'start',roomId:'session-1',at:at-3600000,observedAt:at,source:'platform'});
+  await restarted.recordSession({room:'1',type:'start',roomId:'session-1',at:at-3600000,observedAt:at+1,source:'platform'});
+  const report=await restarted.report('1','2026-10');
+  assert.equal(report.sessions.length,1);assert.equal(report.currentSession.startAt,at-3600000);
+  assert.equal(report.currentSession.giftCount,1);assert.equal(report.currentSession.startSource,'platform');
 });

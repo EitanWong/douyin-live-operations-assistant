@@ -9,8 +9,8 @@ export function recognizeMilestone(text) {
   return guardian ? { kind: 'guardian', name: guardian[1] } : null;
 }
 
-export function milestoneThankYou(milestone) {
-  if (milestone?.kind === 'guardian') return `感谢${milestone.name}开通星守护，欢迎加入！`;
-  if (milestone?.kind === 'contribution' && Number.isSafeInteger(milestone.rank)) return `感谢${milestone.name}成为本场No.${milestone.rank}、1000票贡献用户！`;
+export function milestoneThankYou(milestone, address = milestone?.name) {
+  if (milestone?.kind === 'guardian') return `感谢${address}开通星守护，欢迎加入！`;
+  if (milestone?.kind === 'contribution' && Number.isSafeInteger(milestone.rank)) return `感谢${address}成为本场No.${milestone.rank}、1000票贡献用户！`;
   return '';
 }

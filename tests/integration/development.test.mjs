@@ -100,7 +100,7 @@ test('开发构建分离本地权限，正式构建不包含自动重载入口�
     await writeFile(join(dist,'development-watch.lock'),String(process.pid));
     await run(process.execPath,['scripts/build.mjs'],{env});
     const production=JSON.parse(await readFile(join(ext,'manifest.json'),'utf8'));
-    assert.deepEqual(production.permissions,['storage']);assert.doesNotMatch(await readFile(join(ext,'background.js'),'utf8'),/installDevelopmentReload/);
+    assert.deepEqual(production.permissions,['storage','unlimitedStorage']);assert.doesNotMatch(await readFile(join(ext,'background.js'),'utf8'),/installDevelopmentReload/);
     assert.ok(!production.content_scripts.some(script=>script.js.includes('development-content.js')));
   } finally {await rm(dist,{recursive:true,force:true});}
 });

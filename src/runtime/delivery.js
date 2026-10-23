@@ -19,7 +19,9 @@ export class DeliveryTracker {
     record.state = state; record.reason = reason; record.updatedAt = this.now();
   }
   observe(event) {
-    if (event?.type !== 'chat' || event.source !== 'socket' || !event.user) return null;
+    // Administrator messages arrive as screen-chat, not ordinary chat. Both
+    // require the same protocol source, sender, text and time checks below.
+    if (!['chat','screen-chat'].includes(event?.type) || event.source !== 'socket' || !event.user) return null;
     const received = Number.isFinite(event.receivedAt) ? event.receivedAt : this.now();
     const matches = this.records.filter(record => ['clicked','unknown','failed','retrying'].includes(record.state) && record.clickedAt != null &&
       ((record.account.id && String(event.user.id) === String(record.account.id)) || (record.account.secUid && event.user.secUid === record.account.secUid)) &&

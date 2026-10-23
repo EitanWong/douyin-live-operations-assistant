@@ -36,12 +36,40 @@ export class PageRequestSender {
     const user = this.page.__STORE__?.userStore?.userInfo;
     return {roomId:id, path:this.page.location.pathname, userId:user?.id_str, admin:[true,1].includes(user?.user_attr?.is_admin)};
   }
+  chatDisplay() {
+    const messages = this.page.__STORE__?.singletonStore?.message;
+    return typeof messages?.queuePush === 'function' ? messages : null;
+  }
+  displayChat(data, text) {
+    // The native page filters the current user's incoming ChatMessage and
+    // displays the successful send response through its local IM queue instead.
+    // Match its constructChatMsg shape; this local mock is NOT a delivery echo.
+    const messages = this.chatDisplay();
+    const msg_id_str = typeof data?.msg_id_str === 'string' ? data.msg_id_str
+      : typeof data?.msg_id === 'string' ? data.msg_id : '';
+    if (!messages || !/^\d+$/.test(msg_id_str) || data.content !== text || !data.user) return false;
+    const {content, user, show_identity, identity_label, rtf_content_v2} = data;
+    messages.queuePush({is_mock:true, method:'WebcastChatMessage', msg_id:msg_id_str,
+      payload:{content, common:{msg_id:msg_id_str}, user, rtf_content_v2}, show_identity, identity_label});
+    return true;
+  }
+  available(channel = 'chat') {
+    if (!['chat','admin'].includes(channel)) return false;
+    try {
+      const context = this.context();
+      return Boolean(context && typeof context.userId === 'string' && /^\d+$/.test(context.userId)
+        && this.client() && (channel === 'admin' ? context.admin : this.chatDisplay()) && this.tickets.size < 128);
+    } catch { return false; }
+  }
   prepare(channel) {
     if (!['chat','admin'].includes(channel)) return {available:false};
     try {
       const context = this.context(), client = context && this.client();
       if (!client || typeof context.userId !== 'string' || !/^\d+$/.test(context.userId)) return {available:false};
       if (channel === 'admin' && !context.admin) return {available:false};
+      // Fall back before submitting when we cannot complete the native chat UI
+      // flow. Otherwise the server echo is deliberately hidden on this page.
+      if (channel === 'chat' && !this.chatDisplay()) return {available:false};
       const now = Date.now();
       for (const [id,ticket] of this.tickets) if (now-ticket.at > 300000) this.tickets.delete(id);
       if (this.tickets.size >= 128) return {available:false};
@@ -75,7 +103,14 @@ export class PageRequestSender {
     try {
       const response = await ticket.client.request({url:admin?'/webcast/screen_chat/':'/webcast/room/chat/',method:admin?'post':'get',params,timeout:8000});
       const data = response?.data;
-      if (data?.status_code === 0) return {...result,submitted:true};
+      if (data?.status_code === 0) {
+        if (!admin) {
+          let displayed = false;
+          try { displayed = this.displayChat(data.data, text); } catch {}
+          if (!displayed) return {...result,submitted:true,displayWarning:'平台已接受请求，但本页公屏更新失败；不自动重发'};
+        }
+        return {...result,submitted:true};
+      }
       if (Number.isInteger(data?.status_code)) return {...result,submitted:false,failed:true,reason:`平台拒绝请求（${data.status_code}）：${String(data.data?.prompts || data.data?.message || '').slice(0,160)}`};
       return {...result,submitted:false,reason:'请求响应无法确认，等待公屏回显，不自动重发'};
     } catch {

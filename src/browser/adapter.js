@@ -1,6 +1,7 @@
 import { decodeFrame } from './protocol.js';
 import { recognizeMilestone } from '../core/milestones.js';
 import { PageRequestSender } from './request-sender.js';
+import { AnchorDataCollector } from './anchor-data.js';
 
 const MAX_CAPTURE_FRAME_BYTES = 512 * 1024;
 function base64(bytes, page) {
@@ -175,8 +176,12 @@ export class DouyinAdapter {
     this.seenProtocolEvents = new Map();
     this.ownedDraft = null;
     this.requestSender = new PageRequestSender(page);
+    this.anchorData = new AnchorDataCollector({page,sender:this.requestSender,onEvent:event=>this.onEvent(event),onStatus:(kind,result)=>{
+      this.status.exhibition = {...this.status.exhibition,[kind]:result}; this.emitStatus();
+    }});
   }
   hook() {
+    this.anchorData.start();
     try {
       const Native = this.page.WebSocket, adapter = this;
       if (!Native) throw new Error('没有 WebSocket');
@@ -413,6 +418,9 @@ export class DouyinAdapter {
     try { const input = this.findInput(); result.input = selectorFor(input); try { result.send = selectorFor(this.findSend(input)); } catch (e) { result.send = e.message; } }
     catch (e) { result.input = e.message; }
     return result;
+  }
+  requestAvailable(channel = 'chat') {
+    return typeof this.requestSender?.available === 'function' && this.requestSender.available(channel) === true;
   }
   findChatModeToggle(input) {
     let current = input?.parentElement;
@@ -677,7 +685,7 @@ export class DouyinAdapter {
   }
   observeDOM() {
     // 变动时拍下弹幕快照；虚拟列表随即移除/复用节点也不丢掉已读消息。
-    const pending = []; let timer = null, flushing = false, stopped = false, lastError = 0, domNeedsBaseline = false;
+    const pending = []; let timer = null, flushing = false, stopped = false, lastError = 0, domNeedsBaseline = false, startVisible = false, endVisible = false;
     this.status.domRows = 0; this.status.domBatches = 0;
     const selector = () => this.getConfig().adapter.chatSelector || '[data-e2e="chat-message"], [class*="webcast-chatroom___item"]';
     const read = (row, emit, receivedAt, allowMilestone = true) => {
@@ -685,16 +693,26 @@ export class DouyinAdapter {
       const signature = row.textContent.trim();
       if (this.domSeen.get(row) === signature) return;
       this.domSeen.set(row, signature);
-      const milestone = recognizeMilestone(signature);
-      if (allowMilestone && milestone && this.shouldReadMilestones()) pending.push({ type:'milestone', milestone, source:'dom', receivedAt });
       const c = this.getConfig().adapter;
       const nameEl = row.querySelector(c.nicknameSelector || '[data-e2e="chat-nickname"], [class*="nickname"]');
       const contentEl = row.querySelector(c.contentSelector || '[data-e2e="chat-content"], [class*="content"]');
+      // 昵称、灯牌和正文在 textContent 中会连在一起，不能把发送者拼成被感谢的人。
+      const text = contentEl ? contentEl.textContent.trim() : signature;
+      const milestone = recognizeMilestone(text);
+      if (allowMilestone && milestone && this.shouldReadMilestones()) pending.push({ type:'milestone', milestone, text, source:'dom', receivedAt });
       if (!nameEl || !contentEl) return;
-      const name = nameEl.textContent.trim().replace(/[:：]$/, ''), text = contentEl.textContent.trim();
+      const name = nameEl.textContent.trim().replace(/[:：]$/, '');
       if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
     };
     const report = error => { if (Date.now() - lastError > 10000) { lastError = Date.now(); this.onLog('error', `页面弹幕采集异常：${error.message}`); } };
+    const detectLiveBoundary = () => {
+      const c = this.getConfig().adapter;
+      const start = c.startSelector ? isVisible(document.querySelector(c.startSelector)) : false;
+      const end = c.endSelector ? isVisible(document.querySelector(c.endSelector)) : false;
+      if (start && !end && !startVisible) void Promise.resolve(this.onEvent({ type:'start', source:'dom-observed', at:Date.now() })).catch(report);
+      if (end && !endVisible) void Promise.resolve(this.onEvent({ type:'end', source:'dom', at:Date.now() })).catch(report);
+      startVisible = start; endVisible = end;
+    };
     const scheduleFlush = delay => {
       if (stopped || flushing || timer !== null || !pending.length) return;
       timer = setTimeout(() => { void flush().catch(report); }, delay);
@@ -718,10 +736,7 @@ export class DouyinAdapter {
     this.observer = new MutationObserver(records => {
       try {
         const c = this.getConfig().adapter;
-        if (c.endSelector && records.length) {
-          const end = document.querySelector(c.endSelector);
-          if (isVisible(end)) void Promise.resolve(this.onEvent({ type:'end', source:'dom' })).catch(report);
-        }
+        if (records.length) detectLiveBoundary();
         const socketActive = Date.now() - this.lastSocketChat <= 15000;
         const emit = this.shouldReadChat() && !socketActive;
         const sel = selector(), rows = new Set(), receivedAt = Date.now();
@@ -750,7 +765,8 @@ export class DouyinAdapter {
       } catch (error) { report(error); }
     });
     for (const row of [...document.querySelectorAll(selector())].slice(-200)) read(row, false, Date.now(), false);
-    this.observer.observe(document.body, { childList:true, subtree:true, characterData:true });
+    this.observer.observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class','style','hidden','aria-hidden'] });
+    detectLiveBoundary();
     this.stopDOM = () => {
       stopped = true;
       this.observer.disconnect();

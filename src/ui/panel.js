@@ -1,17 +1,21 @@
 import { SOLID_GLASS_CSS } from './solid-glass.js';
 import { installTheme } from './theme.js';
+import { AnchorDashboard } from './anchor-dashboard.js';
+import { anchorPageTemplate } from './anchor-template.js';
+import { ANCHOR_DASHBOARD_CSS } from './anchor-styles.js';
 import { LiveCharts } from './live-charts.js';
 import { copy, mergeConfig, validateConfig } from '../core/engine.js';
 import { validateEndpoint } from '../services/ai.js';
 import { giftDate } from '../data/gifts.js';
 import { BOT_COMMANDS, RoomBot } from '../core/bot.js';
+import { hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
 const put = (o, path, value) => { const parts = path.split('.'); const key = parts.pop(); parts.reduce((v, k) => v[k], o)[key] = value; };
 const categories = { system: '运行', filter: '过滤', moderation: '内容提醒', queue: '发送队列', preview: '预览', sent: '提交', ai: 'AI', error: '错误', lab: '自检' };
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-const interactionPages = ['pk','gift','welcome','likes','keywords','bot','timers','income'];
+const interactionPages = ['anchor','pk','gift','welcome','likes','keywords','bot','timers'];
 const money = value => new Intl.NumberFormat('zh-CN', {style:'currency',currency:'CNY',maximumFractionDigits:2}).format(value);
 const presets = {
   deepseek: ['https://api.deepseek.com/chat/completions', 'deepseek-flash'],
@@ -30,7 +34,7 @@ button.launcher:active:not(:disabled){transform:scale(.98)}
 button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.launcher.dragging:active:not(:disabled){background:var(--sg-solid-hover);box-shadow:var(--sg-pane-shadow);outline:2px solid var(--sg-focus);cursor:grabbing;transform:none;transition:none}
 .launcher-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--sg-brand-wash);color:var(--sg-brand);flex-shrink:0}
 .launcher-mark svg{width:18px;height:18px}.launcher b{font-weight:650}.launcher i{width:5px;height:5px;flex-shrink:0;border-radius:50%;background:var(--muted);margin-left:3px}.launcher.running i{background:var(--sg-success)}.launcher span{font-size:12px;color:var(--muted);min-width:48px;text-align:left}.launcher.running span{color:var(--ink)}.launcher-grip{width:10px;height:16px;margin-left:3px;color:var(--muted);flex-shrink:0}
-.panel{position:fixed;right:24px;bottom:82px;width:min(560px,calc(100vw - 32px));height:min(800px,calc(100dvh - 110px));display:flex;flex-direction:column;background:var(--sg-popover);border:0;border-radius:18px;box-shadow:inset 0 1px 0 var(--sg-rim),inset 0 0 0 1px var(--sg-inner),0 0 0 1px var(--sg-edge),0 24px 60px -18px var(--sg-shade),0 6px 16px -6px var(--sg-contact);overflow:hidden;backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px)}
+.panel{position:fixed;right:24px;bottom:82px;width:min(620px,calc(100vw - 32px));height:min(800px,calc(100dvh - 110px));display:flex;flex-direction:column;background:var(--sg-popover);border:0;border-radius:18px;box-shadow:inset 0 1px 0 var(--sg-rim),inset 0 0 0 1px var(--sg-inner),0 0 0 1px var(--sg-edge),0 24px 60px -18px var(--sg-shade),0 6px 16px -6px var(--sg-contact);overflow:hidden;backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px)}
 .head{padding:20px 22px 17px;display:flex;justify-content:space-between;gap:14px;align-items:center;flex-shrink:0;border-bottom:1px solid var(--line)}
 .head-title{display:flex;gap:11px;align-items:center;min-width:0}.head-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--sg-control);box-shadow:var(--sg-state-shadow);color:var(--sg-brand);flex-shrink:0}.head-mark svg{width:21px;height:21px;filter:drop-shadow(-1px -1px 0 var(--sg-cyan))}
 .head h1{font-size:17px;line-height:1.35;margin:0;font-weight:650;letter-spacing:.1px}.room{color:var(--muted);font-size:11px;margin-top:4px;overflow-wrap:anywhere}.head button{background:transparent;min-height:32px;padding:5px 9px;color:var(--muted);font-size:12px}
@@ -81,17 +85,29 @@ summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-hei
 .pk-lead{height:4px;display:flex;overflow:hidden;border-radius:4px;background:var(--sg-well);margin-top:12px}.pk-lead span:first-child{background:var(--sg-success)}.pk-lead span:last-child{background:var(--sg-brand)}
 .pk-chart-head{display:flex;gap:12px;align-items:center;justify-content:space-between;margin:20px 0 12px}.pk-chart-head h3{margin:0;font-size:13px;font-weight:600}.pk-chart-head select{width:auto;min-height:34px;padding:5px 8px;font-size:11px}.pk-chart{height:208px;width:100%;min-width:0}.pk-chart-gap{height:152px}.pk-chart-contributions{height:220px}.pk-chart-empty{min-height:104px;display:grid;place-items:center;text-align:center;padding:16px;color:var(--muted);font-size:12px;line-height:1.7;background:var(--sg-well);border-radius:8px}
 .pk-reading{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}.pk-reading>div{padding:12px;background:var(--sg-panel);border-radius:8px}.pk-reading span{font-size:11px;color:var(--muted);display:block}.pk-reading strong{font-size:17px;font-weight:550;display:block;margin-top:5px;font-variant-numeric:tabular-nums}.pk-data-detail{margin:16px 0}.pk-data-detail summary{font-size:12px;cursor:pointer;min-height:36px;display:flex;align-items:center;color:var(--muted)}.pk-data-scroll{overflow:auto;max-height:240px}.pk-data-scroll table{min-width:280px}.pk-effect-list{font-size:12px;line-height:1.8;color:var(--muted);padding-left:18px}
+.shell-status{display:flex;justify-content:space-between;gap:12px;padding:8px 18px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);background:var(--sg-background)}.shell-status strong{font-weight:600;color:var(--ink)}
+::selection{background:var(--sg-brand-wash);color:var(--ink)}input,textarea{caret-color:var(--sg-brand)}
+/* Compact operational surfaces: clear hierarchy, restrained depth and brief state motion. */
+.panel{width:min(620px,calc(100vw - 32px));background:var(--sg-popover);border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px -24px var(--sg-shade);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+.head{padding:15px 18px 13px}.head-mark{width:32px;height:32px;border-radius:8px;box-shadow:none}.head-mark svg{filter:none}
+.nav{padding:0 14px 8px;background:var(--sg-background)}.primary-nav{margin:8px 2px 6px;padding:3px;border-radius:8px;box-shadow:none}.primary-nav button{min-height:32px}.subnav{gap:2px;padding:1px 2px}.subnav button{min-height:34px;padding:5px 9px}
+.scroll{padding:18px 20px}.page h2{font-size:19px;line-height:1.35}.page>.intro{margin:4px 0 14px;max-width:64ch}.settings-group{margin:0;padding:14px 0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;box-shadow:none}.settings-group+.settings-group{margin-top:0}.rule-summary{padding:10px 12px;background:var(--sg-well);border-radius:7px;box-shadow:none}
+.income-controls{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;align-items:end}.income-controls .field{margin:0 0 10px}.income-hero{padding:16px 0 12px;background:transparent;border-block:1px solid var(--line);border-radius:0;box-shadow:none}.income-hero>b{font-size:30px;line-height:1.2;font-variant-numeric:tabular-nums}.income-toolbar{margin:14px 0 8px}.income-toolbar h3{font-size:13px}.income-error{padding:9px 11px;border-radius:6px}
+.foot{padding:11px 18px;background:var(--sg-background);box-shadow:none}.foot .primary{min-height:38px}
+.panel:not([hidden]){animation:panel-enter 180ms cubic-bezier(.16,1,.3,1) both;transform-origin:bottom right}.subnav button,.primary-nav button,.switch span:after{transition:background-color 140ms ease-out,color 140ms ease-out,transform 140ms ease-out}
+@keyframes panel-enter{from{opacity:.7;transform:translateY(6px) scale(.985)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(prefers-reduced-motion:reduce){.panel:not([hidden]){animation:none}}
 @supports not (backdrop-filter:blur(1px)){.panel{background:var(--sg-solid)}}
-@media(max-width:560px){.panel{width:calc(100vw - 20px);height:calc(100dvh - 24px);border-radius:14px}.launcher{right:12px;bottom:12px}.grid{grid-template-columns:minmax(0,1fr)}.head{padding:16px}.head h1{font-size:16px}.scroll{padding:18px 16px}.banner{padding:9px 16px}.nav{padding:0 10px 8px}.primary-nav{margin-top:10px}.subnav{gap:3px}.subnav button{font-size:11px;padding:5px 9px}.foot{padding:12px 16px}.foot small{max-width:140px}.foot .primary{min-width:116px}.row{gap:8px}.candidate{grid-template-columns:64px minmax(0,1fr)}.gift-activity{grid-template-columns:minmax(65px,1fr) minmax(75px,1.2fr) auto;gap:5px;font-size:11px}.gift-total-grid b{font-size:24px}.gift-totals{padding:14px}.settings-group{padding:14px}.log-head{flex-wrap:wrap}.head-mark{width:32px;height:32px}}
+@media(max-width:560px){.panel{width:calc(100vw - 20px);height:calc(100dvh - 24px);border-radius:14px}.launcher{right:12px;bottom:12px}.grid{grid-template-columns:minmax(0,1fr)}.head{padding:16px}.head h1{font-size:16px}.scroll{padding:18px 16px}.banner{padding:9px 16px}.nav{padding:0 10px 8px}.primary-nav{margin-top:10px}.subnav{gap:3px}.subnav button{font-size:11px;padding:5px 9px}.foot{padding:12px 16px}.foot small{max-width:140px}.foot .primary{min-width:116px}.row{gap:8px}.candidate{grid-template-columns:64px minmax(0,1fr)}.gift-activity{grid-template-columns:minmax(65px,1fr) minmax(75px,1.2fr) auto;gap:5px;font-size:11px}.gift-total-grid b{font-size:24px}.gift-totals{padding:14px}.settings-group{padding:14px 0}.income-controls{grid-template-columns:minmax(0,1fr)}.income-hero>b{font-size:26px}.log-head{flex-wrap:wrap}.head-mark{width:32px;height:32px}}
 `;
 
 export class Panel {
   constructor({ config, room, demo = false, callbacks }) {
-    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
-    this.busyActions = new Set(); this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
+    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
+    this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
-    this.root.append(this.build()); document.body.append(this.host); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.populate(config); this.bind(); this.restoreLauncherPosition(); this.positionPanel();
+    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
+    this.root.append(this.build()); document.body.append(this.host); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); }); this.populate(config); this.bind(); this.restoreLauncherPosition(); this.positionPanel();
   }
   input(path, label, type = 'text', hint = '') {
     return `<label class="field"><span>${label}</span><input data-field="${path}" type="${type}" ${type === 'number' ? 'step="any"' : ''}>${hint ? `<small>${hint}</small>` : ''}</label>`;
@@ -105,13 +121,14 @@ export class Panel {
   }
   build() {
     const container = document.createElement('div');
-    const tabGroups = { interaction: [['pk', 'PK 预测'], ['gift', '礼物感谢'], ['welcome', '进场欢迎'], ['likes', '点赞感谢'], ['keywords', '关键词回复'], ['bot','@机器人'], ['timers', '定时消息'], ['income','收入统计']], settings: [['features', '功能开关'], ['appearance','外观'], ['ai', 'AI 设置'], ['runtime', '运行规则'], ['profiles','主播管理'], ['diagnostics', '连接诊断']] };
+    const tabGroups = { interaction: [['anchor', '主播数据'], ['pk', 'PK 预测'], ['gift', '礼物感谢'], ['welcome', '进场欢迎'], ['likes', '点赞感谢'], ['keywords', '关键词回复'], ['bot','@机器人'], ['timers', '定时消息']], settings: [['features', '功能开关'], ['appearance','外观'], ['ai', 'AI 设置'], ['runtime', '运行规则'], ['profiles','主播管理'], ['diagnostics', '连接诊断']] };
     container.innerHTML = `
       <button type="button" class="launcher" aria-expanded="true" aria-label="收起场控面板，当前已暂停" title="点击收起 · 拖动调整位置"><div class="launcher-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="4"/><path d="M9 21h6M12 18v3M8 10v3m4-5v7m4-5v3"/></svg></div><b>场控</b><i aria-hidden="true"></i><span>已暂停</span><svg class="launcher-grip" aria-hidden="true" viewBox="0 0 10 16" fill="currentColor"><circle cx="3" cy="4" r="1"/><circle cx="7" cy="4" r="1"/><circle cx="3" cy="8" r="1"/><circle cx="7" cy="8" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="7" cy="12" r="1"/></svg></button>
       <section class="panel" data-slot="panel" aria-label="抖音直播运营助手控制台">
         <header class="head" data-slot="panel-header"><div class="head-title"><span class="head-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="4"/><path d="M9 21h6M12 18v3M8 10v3m4-5v7m4-5v3"/></svg></span><div><h1>抖音直播运营助手</h1><div class="room">${this.demo ? '模拟直播间' : `直播间 ${esc(this.room)}`}</div></div></div><button type="button" data-action="close" aria-label="收起面板">收起</button></header>
+        <div class="shell-status" aria-label="场控状态"><strong data-shell-state>已暂停</strong><span data-shell-network>等待直播数据</span></div>
         ${this.demo ? '<p class="banner">本地演示：弹幕和礼物均为模拟数据，消息不会发到抖音。</p>' : ''}
-        <div class="banner" data-runtime-alert role="status" hidden><strong data-runtime-alert-text></strong> <button type="button" data-go="diagnostics">查看并处理</button></div>
+        <div class="banner" data-runtime-alert role="status" hidden><strong data-runtime-alert-text></strong> <button type="button" data-go="diagnostics" data-ack-runtime-alert>查看并处理</button></div>
         <nav class="nav" aria-label="功能导航"><div class="primary-nav" role="group" aria-label="功能分类">${[['interaction','直播互动'],['settings','设置']].map(([key,label])=>`<button type="button" data-category="${key}" aria-pressed="${key==='interaction'}">${label}</button>`).join('')}</div>${Object.entries(tabGroups).map(([category,group])=>`<div class="subnav" data-subnav="${category}" role="tablist" aria-label="${{interaction:'直播互动功能',settings:'功能与运行设置'}[category]}" ${category!=='interaction'?'hidden':''}>${group.map(([key,name])=>`<button type="button" role="tab" id="tab-${key}" aria-controls="page-${key}" data-tab="${key}" aria-selected="${key===this.activeTab}" tabindex="${key===this.activeTab?0:-1}">${name}</button>`).join('')}</div>`).join('')}</nav>
         <div class="toast" role="status" hidden></div>
         <div class="scroll"><form autocomplete="off">
@@ -148,6 +165,7 @@ export class Panel {
             <details class="pk-data-detail"><summary data-pk-score-summary>查看比分明细（最近 20 次）</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr data-pk-score-header><th>北京时间</th><th>己方</th><th>对方</th><th>分差</th></tr></thead><tbody data-pk-score-rows><tr><td colspan="4">等待比分</td></tr></tbody></table></div></details>
             <p class="pk-note">这是基于当前页面观测和历史样本的估计，不是抖音官方胜率。3 倍加成、卡片和宝箱概率只会按你实际记录的场次给出经验频率与区间；样本不足时保持未知。</p>
           </section>
+          ${anchorPageTemplate(this.room)}
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime" hidden>
             <h2>运行规则</h2><p class="intro">符合规则的消息按优先级及时发送。</p>
             <div class="status"><strong data-state>已暂停</strong></div>
@@ -163,7 +181,7 @@ export class Panel {
             <section class="settings-group"><h3>弹幕与反馈</h3><p class="group-note">按点赞、弹幕内容或提醒条件触发。</p><div class="feature-list">${[['like','点赞感谢'],['keyword','关键词回复']].map(([key,label]) => `<div class="feature-row"><div class="feature-title">${label}<small data-feature-note="${key}"></small></div><label class="switch" aria-label="${label}"><input type="checkbox" role="switch" data-field="${key}.enabled" aria-label="${label}"><span></span></label></div>`).join('')}<div class="feature-row"><div class="feature-title">内容提醒<small data-feature-note="moderation"></small></div><label class="switch" aria-label="内容提醒"><input type="checkbox" role="switch" data-field="moderation.enabled" aria-label="内容提醒"><span></span></label></div></div></section>
             <section class="settings-group"><h3>@ 机器人</h3><p class="group-note">观众 @ 当前登录账号参加互动；启用 AI 服务后优先 AI 接话，不可用时自动使用内置回复。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">机器人互动<small data-feature-note="bot"></small></div><label class="switch" aria-label="机器人互动"><input type="checkbox" role="switch" data-field="bot.enabled" aria-label="机器人互动"><span></span></label></div></div></section>
             <section class="settings-group"><h3>计划互动</h3><p class="group-note">按已配置的时间间隔循环发送。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">定时消息<small data-feature-note="timers"></small></div><label class="switch" aria-label="定时消息"><input type="checkbox" role="switch" data-field="timersEnabled" aria-label="定时消息"><span></span></label></div></div></section>
-            <section class="settings-group"><h3>礼物账本</h3><p class="group-note">独立于礼物感谢，按主播与北京时间保存统计。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">收入统计<small>本地保存每日礼物价值与月度收入估算；关闭后停止采集，历史数据仍保留。</small></div><label class="switch" aria-label="收入统计"><input type="checkbox" role="switch" data-field="incomeEnabled" aria-label="收入统计"><span></span></label></div></div></section>
+            <section class="settings-group"><h3>礼物账本</h3><p class="group-note">独立于礼物感谢，按主播与直播场次保存统计。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">收入统计<small>本地保存每场直播的礼物价值与月度收入估算；关闭后停止采集，历史数据仍保留。</small></div><label class="switch" aria-label="收入统计"><input type="checkbox" role="switch" data-field="incomeEnabled" aria-label="收入统计"><span></span></label></div></div></section>
             <section class="settings-group"><h3>AI 互动</h3><p class="group-note">先启用 AI 服务，再单独决定要使用的 AI 功能。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">AI 服务<small data-feature-note="ai-service"></small></div><label class="switch" aria-label="AI 服务"><input type="checkbox" role="switch" data-field="ai.enabled" aria-label="AI 服务"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 弹幕问答<small data-feature-note="ai-chat"></small></div><label class="switch" aria-label="AI 弹幕问答"><input type="checkbox" role="switch" data-field="ai.chatEnabled" aria-label="AI 弹幕问答"><span></span></label></div><div class="feature-row"><div class="feature-title">AI 冷场互动<small data-feature-note="ai-idle"></small></div><label class="switch" aria-label="AI 冷场互动"><input type="checkbox" role="switch" data-field="ai.idleEnabled" aria-label="AI 冷场互动"><span></span></label></div></div><button type="button" class="text-button" data-go="ai">配置 AI 服务与问答</button></section>
           </section>
           <section class="page" id="page-replies" data-page="replies" aria-label="回复记录（暂未开放）" hidden>
@@ -172,7 +190,7 @@ export class Panel {
           </section>
           <section class="page" role="tabpanel" id="page-gift" aria-labelledby="tab-gift" data-page="gift" hidden>
             <h2>礼物感谢</h2><p class="intro">设置感谢门槛与话术；礼物连击会合并计算。</p>
-            <section class="gift-totals" data-gift-totals aria-label="礼物价值统计"><h3 data-gift-total-title>今日礼物价值</h3><div class="gift-total-grid"><div><b data-gift-diamonds>0</b><span>已知礼物面值 · 钻</span></div><div><b data-gift-income>未设置</b><span>收入估算 · 人民币</span></div></div><p class="gift-total-note" data-gift-estimate-note>正在读取本地账本…</p><button type="button" class="text-button" data-go="income" data-income-link>查看月度账本</button></section>
+            <section class="gift-totals" data-gift-totals aria-label="礼物价值统计"><h3 data-gift-total-title>本场礼物价值</h3><div class="gift-total-grid"><div><b data-gift-diamonds>0</b><span>已知礼物面值 · 钻</span></div><div><b data-gift-income>未设置</b><span>收入估算 · 人民币</span></div></div><p class="gift-total-note" data-gift-estimate-note>正在读取本地账本…</p><button type="button" class="text-button" data-go="anchor" data-anchor-target="income" data-income-link>查看收入账本</button></section>
             <section class="recent-gifts section"><div class="log-head"><h3>近期送礼</h3><span class="choice-hint" data-gift-count>仅保留本次页面数据</span></div><div data-recent-gifts><p class="empty">收到礼物后，送礼用户和已知礼物信息会显示在这里。</p></div></section>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="gift"></p></div>
             ${this.select('gift.responseMode', '答谢生成方式', [['rules', '使用预设话术'], ['ai', '使用 AI 生成']])}
@@ -181,17 +199,9 @@ export class Panel {
             <p class="hint">默认按 100 钻约 10 元、主播分成约一半估算（0.05 元/钻）；请按主播结算情况调整。</p>
             <div class="presets" aria-label="常用礼物阈值"><span>快速设为</span>${[[50,'50'],[100,'100'],[500,'500'],[1000,'1000']].map(([value,label])=>`<button type="button" data-gift-value="${value}">${label} 钻</button>`).join('')}</div>
             <details><summary>筛选与防刷屏</summary>${this.select('gift.basis', '按什么计算价值', [['total', '整次连击的总价值（推荐）'], ['unit', '单个礼物的价值']])}</details>
-            ${this.area('gift.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 昵称、{gift} 礼物名、{count} 数量、{value} 总钻石、{unit} 单价。')}
-            <div class="notice">收入估算仅按已知钻石面值和你填写的比例计算，不代表平台结算或到账金额。单价未知的礼物不会计入面值，会单独统计。</div>
+            ${this.area('gift.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 自动称呼、{nickname} 原昵称、{gift} 礼物名、{count} 数量、{value} 总钻石、{unit} 单价。公开性别为男/女时称哥/姐；未知或已知未成年时仅用昵称，不猜年龄。')}
+            <div class="notice">单价未知时，在 1 钻默认门槛下仍会使用不含金额的通用感谢；提高门槛后，需先补充礼物单价才可判断是否感谢。未知单价不会计入收入估算。</div>
             <details><summary>补充未知礼物的单价</summary><div data-list="prices"></div><button type="button" class="list-add" data-add="prices">添加礼物单价</button><p class="hint">填礼物名称或 ID，仅在直播消息缺少单价时使用。</p></details>
-          </section>
-          <section class="page" role="tabpanel" id="page-income" aria-labelledby="tab-income" data-page="income" hidden>
-            <h2>收入统计</h2><p class="intro">按主播独立保存，刷新或重开浏览器后继续累计。</p>
-            <div class="grid"><label class="field"><span>主播</span><select data-income-room><option value="${esc(this.room)}">当前直播间 ${esc(this.room)}</option></select></label><label class="field"><span>统计月份 · 北京时间</span><input type="month" data-income-month value="${giftDate().slice(0,7)}"></label></div>
-            <p class="income-error" data-income-error role="status" hidden></p>
-            <section class="income-hero" aria-label="月度礼物收入"><span data-income-period>所选月份收入估算</span><b data-income-total>¥0.00</b><div class="income-meta"><span>礼物面值 <strong data-income-diamonds>0 钻</strong></span><span>礼物数量 <strong data-income-count>0</strong></span><span>记录天数 <strong data-income-days>0</strong></span></div><p class="hint" data-income-calibration>在线贡献榜估值：暂无可识别用户</p></section>
-            <div class="income-toolbar"><h3>每日明细</h3><button type="button" data-action="export-income" disabled>导出当月</button></div><div data-income-daily><p class="empty">正在读取本地账本…</p></div>
-            <p class="hint" data-income-coverage></p><p class="hint" data-income-calibration-status>在线榜单：等待自动采样</p><p class="hint">在线榜估值按你提供的经验锚点线性折算：1000 分约 ¥100，单独显示，不与已采集礼物收入相加；只接受 UID 可唯一识别的用户。这个换算尚未用长期直播样本校准，不代表平台结算或实际到账。榜单只采集页面当前可见的用户。</p><p class="hint">礼物统计按工具在线时实际采集的事件估算；较早的礼物无法还原。每笔按采集时保存的元/钻比例计算；修改比例仅影响后续礼物。未知单价不计入金额。数据保存在当前浏览器，卸载扩展或清除其数据会移除账本。</p>
           </section>
           <section class="page" role="tabpanel" id="page-profiles" aria-labelledby="tab-profiles" data-page="profiles" hidden>
             <h2>主播管理</h2><p class="intro">每位主播的互动规则、功能开关、AI 配置与收入比例独立保存。进入直播间自动载入对应配置。</p>
@@ -215,7 +225,7 @@ export class Panel {
             <h2>点赞感谢</h2><p class="intro">按点赞事件感谢观众。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="like"></p></div>
             ${this.select('like.responseMode', '感谢生成方式', [['rules', '使用预设话术'], ['ai', '使用 AI 生成']])}
-            ${this.area('like.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 昵称、{count} 本次点赞数。')}
+            ${this.area('like.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 自动称呼、{nickname} 原昵称、{count} 本次点赞数。按公开性别称哥/姐；资料未知或已知未成年时仅用昵称。')}
             <div class="notice">点赞感谢使用当前回复方式，按事件及时发送。</div>
           </section>
           <section class="page" role="tabpanel" id="page-keywords" aria-labelledby="tab-keywords" data-page="keywords" hidden>
@@ -260,17 +270,18 @@ export class Panel {
             <div class="rule-summary"><strong>检查顺序</strong><p>先检查连接与解析，再定位输入框和发送按钮。修改页面适配参数后需要刷新直播间。</p></div>
             <h3 class="subhead">直播连接</h3>
             <div class="actions"><button type="button" data-action="diagnose">检查连接与发送控件</button><button type="button" data-action="pick-input">定位输入框</button><button type="button" data-action="pick-send">定位发送按钮</button></div>
+            <div class="actions"><button type="button" data-action="debug-send">调试消息发送</button></div><p class="hint">点击后会通过正常发送队列向直播公屏发送“调试消息发送测试”。仅自动发送模式且场控运行时可用。</p>
             <pre data-diagnostics>点击“检查连接与发送控件”查看结果。</pre>
             <p class="hint" data-delivery-health role="status">发送队列为空。</p>
-            <section class="settings-group"><h3>发送状态</h3><p class="hint">发送后自动跟踪平台回显；结果未知、发送失败或页面恢复时会自动重试。</p><div data-deliveries><p class="empty">暂无发送记录。</p></div></section>
-            <section class="settings-group"><h3>采集与存储</h3><p data-ingestion-health role="status">采集就绪，尚未检查存储用量。</p><p class="hint">礼物事实先写入日志，感谢任务独立排队。缓冲耗尽后的采集缺口无法自动补回。</p><div class="actions"><button type="button" data-action="recover-events">恢复采集与重试隔离事件</button><button type="button" data-action="export-events">导出恢复数据</button><button type="button" data-action="import-income">导入礼物恢复数据</button></div><input class="file" data-import-income-file type="file" accept="application/json,.json"><p class="hint">导出可能包含观众昵称和弹幕，请妥善保管。导出不会清除原始数据。</p></section>
+            <section class="settings-group"><h3>发送状态</h3><p class="hint">发送后跟踪本人普通弹幕或管理员弹幕的结构化回显；结果未知时不自动重发，后续消息继续处理。</p><div data-deliveries><p class="empty">暂无发送记录。</p></div></section>
+            <section class="settings-group"><h3>采集与存储</h3><p data-ingestion-health role="status">采集就绪，尚未检查存储用量。</p><p class="hint">礼物事实先写入日志，感谢任务独立排队。缓冲耗尽后的采集缺口无法自动补回。</p><div class="actions"><button type="button" data-action="recover-events">恢复采集与重试隔离事件</button><button type="button" data-action="export-events">导出恢复数据</button><button type="button" data-action="release-cache">释放临时协议缓存</button><button type="button" data-action="import-income">导入礼物恢复数据</button></div><input class="file" data-import-income-file type="file" accept="application/json,.json"><p class="hint">收入账本、设置和待处理事件保存在 IndexedDB；临时协议帧会自动过期或在空间紧张时清理。导出可能包含观众昵称和弹幕，请妥善保管。</p></section>
             <h3 class="subhead">账号身份</h3>
             <details data-manual-identity><summary>主播与账号识别</summary>${this.toggle('identity.autoAnchor', '自动识别主播')}${this.input('anchorId', '主播 UID（自动识别不到时填写）')}${this.toggle('identity.autoSelf', '自动识别登录账号')}${this.input('selfId', '登录账号 UID（自动识别不到时填写）')}</details>
             <h3 class="subhead">互动过滤</h3>
             ${this.area('ignored', '忽略用户（每行一位）', 'lines', '支持 uid:、sec:、name: 前缀。')}${this.area('blockedWords', '禁止发送的词（每行一个）')}
             <details class="section" data-moderation-settings><summary>辱骂与恶意弹幕提醒</summary>${this.area('moderation.terms', '识别词（每行一个）', 'lines', '本地匹配，不把原始弹幕发给第三方；请按直播间语境调整。')}${this.input('moderation.threshold', '达到多少次提醒管理员', 'number')}${this.input('moderation.windowSec', '统计时长 / 秒', 'number')}<p class="hint">房间响应提供管理员 UID 名单时才确认身份。当前封禁操作未经验证，所以只提醒和计数，不会自动封禁。</p></details>
             <details><summary>高级页面适配与去重</summary><div class="grid">${this.input('adapter.inputSelector', '公屏输入框选择器')}${this.input('adapter.sendSelector', '公屏发送按钮选择器')}${this.input('sending.duplicateSec', '重复话术冷却 / 秒', 'number')}</div></details>
-            <details class="section"><summary>弹幕备用采集设置</summary><p class="hint">只采集新弹幕，不从页面文字推测等级或金额。修改这些选择器后需刷新。</p>${this.input('adapter.chatSelector', '弹幕行选择器')}${this.input('adapter.nicknameSelector', '行内昵称选择器')}${this.input('adapter.contentSelector', '行内内容选择器')}${this.input('adapter.endSelector', '下播提示选择器（可选）')}</details>
+            <details class="section"><summary>弹幕备用采集与场次识别</summary><p class="hint">场次开播时间需配置一个直播中状态元素；下播优先使用平台结束消息，也可配置结束提示。修改后需刷新。</p>${this.input('adapter.chatSelector', '弹幕行选择器')}${this.input('adapter.nicknameSelector', '行内昵称选择器')}${this.input('adapter.contentSelector', '行内内容选择器')}${this.input('adapter.startSelector', '直播中状态选择器（场次开始）')}${this.input('adapter.endSelector', '下播提示选择器（可选）')}</details>
             <details class="section" data-log-details><summary>运行记录</summary><div class="stats">${[['events', '接收事件'], ['filtered', '已过滤'], ['previews', '已预览'], ['submitted', '已提交']].map(([key, name]) => `<div><b data-stat="${key}">0</b><span>${name}</span></div>`).join('')}</div><div class="log-head"><select data-log-filter aria-label="筛选运行记录"><option value="all">全部记录</option>${Object.entries(categories).map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select></div><div class="logs" data-logs aria-label="运行记录"></div></details>
             <div class="section"><h3>配置与运行记录</h3><div class="actions"><button type="button" data-action="lab">运行规则自检</button><button type="button" data-action="export">导出配置</button><button type="button" data-action="import">导入配置</button><button type="button" data-action="export-log">导出运行记录</button><button type="button" data-action="clear-log">清空记录</button></div><input class="file" data-import-file type="file" accept="application/json,.json"><p class="hint">每个直播间单独保存设置。导出配置不包含密钥；导出的运行记录可能包含公屏昵称和回复。</p></div>
           </section>
@@ -306,7 +317,7 @@ export class Panel {
     const panel = this.node('.panel'), button = this.node('.launcher');
     if (panel.hidden) return;
     const buttonRect = button.getBoundingClientRect(), panelRect = panel.getBoundingClientRect();
-    const width = panelRect.width || Math.min(560, window.innerWidth - 32), height = panelRect.height || Math.min(780, window.innerHeight - 24);
+    const width = panelRect.width || Math.min(620, window.innerWidth - 32), height = panelRect.height || Math.min(780, window.innerHeight - 24);
     const left = Math.max(10, Math.min(buttonRect.left + buttonRect.width / 2 - width / 2, window.innerWidth - width - 10));
     const above = buttonRect.top - height - 12;
     const top = above >= 10 ? above : Math.max(10, Math.min(buttonRect.bottom + 12, window.innerHeight - height - 10));
@@ -327,6 +338,7 @@ export class Panel {
     this.text('[data-action=start]', this.dirty ? '保存并开始' : '开始场控');
     this.disabled('[data-action=start]', running || busy); this.disabled('[data-action=save]', busy);
     this.disabled('[data-action=stop]', !running);
+    this.disabled('[data-action=debug-send]', !running || this.latest?.[1]?.contextInvalidated || this.latest?.[0].config.mode !== 'auto' || this.busyActions.has('debug-send'));
     const form = this.node('form'); if (form.inert !== busy) form.inert = busy;
   }
   rowField(field, label, value = '', type = 'text', choices = null) {
@@ -386,7 +398,7 @@ export class Panel {
   }
   syncControls() {
     this.syncFooter();
-    for (const action of ['identify','test-ai','diagnose']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
+    for (const action of ['identify','test-ai','diagnose','refresh-anchor']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
     const get = path => this.root.querySelector(`[data-field="${path}"]`);
     const welcomeMode = get('welcome.mode').value;
     this.hidden('[data-qualified]', welcomeMode === 'listed');
@@ -489,10 +501,17 @@ export class Panel {
     if (identity.self === null && this.root.querySelector('[data-field="identity.autoSelf"]').checked) { this.root.querySelector('[data-field="selfId"]').value = ''; this.config.selfId = ''; }
     this.syncControls();
   }
+  updateAnchorIncome(report) {
+    this.anchorIncome = report && typeof report === 'object' ? report : null;
+    if (this.latest?.[0] && this.activeTab === 'anchor') this.renderAnchor(this.latest[0]);
+  }
+  renderAnchor(engine) {
+    this.anchorDashboard.render(engine, {identity:this.identity, income:this.anchorIncome});
+  }
   updateViewers(viewers) {
     this.viewers = viewers; const picker = this.node('[data-viewer-picker]'), value = picker.value;
-    const signature = viewers.map(u=>`${u.key}:${u.name}:${u.wealthLevel}:${u.fanLevel}:${u.fanStatus}`).join('|'); if (signature === this.viewerSignature) return; this.viewerSignature = signature;
-    picker.innerHTML = '<option value="">选择最近出现的观众</option>' + viewers.map(u=>`<option value="${esc(u.key)}">${esc(u.name)}${u.wealthLevel == null ? '' : ` · 荣誉${u.wealthLevel}级`}${u.fanLevel == null ? '' : ` · 粉丝团${u.fanLevel}级${u.fanStatus === 1 ? '已点亮' : ''}`}${u.id || u.secUid ? '' : '（按昵称）'}</option>`).join('');
+    const signature = viewers.map(u=>`${u.key}:${u.name}:${u.gender}:${u.age}:${u.wealthLevel}:${u.fanLevel}:${u.fanStatus}`).join('|'); if (signature === this.viewerSignature) return; this.viewerSignature = signature;
+    picker.innerHTML = '<option value="">选择最近出现的观众</option>' + viewers.map(u=>`<option value="${esc(u.key)}">${esc(u.name)}${u.gender === 1 ? ' · 男' : u.gender === 2 ? ' · 女' : ''}${u.age == null ? '' : ` · ${u.age}岁`}${u.wealthLevel == null ? '' : ` · 荣誉${u.wealthLevel}级`}${u.fanLevel == null ? '' : ` · 粉丝团${u.fanLevel}级${u.fanStatus === 1 ? '已点亮' : ''}`}${u.id || u.secUid ? '' : '（按昵称）'}</option>`).join('');
     picker.value = viewers.some(u=>u.key===value) ? value : '';
   }
   updateGifts(gifts) {
@@ -526,7 +545,7 @@ export class Panel {
     this.text('[data-income-total]',money(summary.estimatedIncome));
     this.text('[data-income-diamonds]',`${number(summary.totalDiamonds)} 钻`);
     this.text('[data-income-count]',number(summary.giftCount));
-    this.text('[data-income-days]',String(report.days.length));
+    this.text('[data-income-days]',String(report.sessions?.length || 0));
     this.text('[data-income-coverage]',summary.unknownCount ? `另有 ${number(summary.unknownCount)} 个礼物单价未知，未计入面值与收入。` : '金额仅包含已识别单价的礼物，不代表平台结算或实际到账。');
     const calibration = report.calibration || {users:0,score:0,incomeFloor:0};
     this.text('[data-income-calibration]', calibration.users
@@ -536,7 +555,14 @@ export class Panel {
     const signature = JSON.stringify(report);
     if (signature !== this.incomeSignature) {
       this.incomeSignature = signature;
-      box.innerHTML = report.days.length ? `<div class="income-table-wrap"><table class="income-table"><thead><tr><th scope="col">日期</th><th scope="col">礼物数</th><th scope="col">面值 / 钻</th><th scope="col">礼物收入估算</th><th scope="col">榜单估值</th></tr></thead><tbody>${report.days.map(day=>`<tr><td>${esc(day.date)}</td><td>${number(day.giftCount)}${day.unknownCount ? ` <span title="单价未知">(未知 ${number(day.unknownCount)})</span>` : ''}</td><td>${number(day.totalDiamonds)}</td><td>${money(day.estimatedIncome)}</td><td>${day.calibrationUsers ? `${day.calibrationHasFloor ? '至少 ' : ''}${money(day.calibratedIncomeEstimate)} · ${number(day.calibrationUsers)}人` : '—'}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">这个月份还没有采集到礼物或榜单校准数据。进入对应直播间后，会自动记录可见数据。</p>';
+      const sessions = report.sessions || [];
+      const rows = sessions.map(session => {
+        const time = at => at ? new Date(at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '进行中';
+        const start = session.startSource === 'first-observed' ? `${time(session.startAt)}（首次观测）` : ['dom-observed','platform-observed'].includes(session.startSource) ? `${time(session.startAt)}（状态识别）` : time(session.startAt);
+        const end = !session.endAt ? '直播中' : `${time(session.endAt)}${['room-changed','next-observed'].includes(session.endSource) ? '（推定边界）' : ['dom','platform-observed'].includes(session.endSource) ? '（状态识别）' : ''}`;
+        return `<tr><td>${start}<br>${end}</td><td>${number(session.giftCount)}${session.unknownCount ? ` <span title="单价未知">(未知 ${number(session.unknownCount)})</span>` : ''}</td><td>${number(session.totalDiamonds)}</td><td>${money(session.estimatedIncome)}</td><td>—</td></tr>`;
+      }).concat((report.legacyDays || (sessions.length ? [] : report.days)).map(day=>`<tr><td>${esc(day.date)}（历史日汇总）</td><td>${number(day.giftCount)}${day.unknownCount ? ` <span title="单价未知">(未知 ${number(day.unknownCount)})</span>` : ''}</td><td>${number(day.totalDiamonds)}</td><td>${money(day.estimatedIncome)}</td><td>${day.calibrationUsers ? `${day.calibrationHasFloor ? '至少 ' : ''}${money(day.calibratedIncomeEstimate)} · ${number(day.calibrationUsers)}人` : '—'}</td></tr>`));
+      box.innerHTML = rows.length ? `<div class="income-table-wrap"><table class="income-table"><thead><tr><th scope="col">开始 / 结束 · 北京时间</th><th scope="col">礼物数</th><th scope="col">面值 / 钻</th><th scope="col">礼物收入估算</th><th scope="col">榜单估值</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '<p class="empty">这个月份还没有采集到礼物或榜单校准数据。进入对应直播间后，会自动记录可见数据。</p>';
     }
     this.node('[data-action="export-income"]').disabled = false;
   }
@@ -546,7 +572,7 @@ export class Panel {
     const count = Math.max(0, Number(summary?.giftCount) || 0);
     const rate = Math.max(0, Number(yuanPerDiamond) || 0);
     this.text('[data-gift-diamonds]', new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(diamonds));
-    this.text('[data-gift-total-title]', persisted ? '今日礼物价值' : '本页礼物价值');
+    this.text('[data-gift-total-title]', summary?.endAt ? '最近一场礼物价值' : '本场礼物价值');
     this.text('[data-gift-income]', persisted ? money(summary.estimatedIncome || 0) : rate > 0
       ? new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY', maximumFractionDigits: 2 }).format(diamonds * rate)
       : '未设置');
@@ -554,7 +580,9 @@ export class Panel {
     const estimate = rate > 0 ? `按 ${rate} 元/钻估算；此数不代表平台结算或到账金额。` : '填写结算单对应的元/钻比例后显示估算收入。';
     const disconnected = /context invalidated|扩展上下文/i.test(error);
     const status = error ? disconnected ? '扩展已更新，当前页与后台断开。请先在连接诊断中导出恢复数据，刷新后导入礼物恢复数据。' : `账本暂不可用：${error}。正在重试。` : pending ? '正在保存到账本。' : '';
-    this.text('[data-gift-estimate-note]', persisted ? `${status}${pending ? `有 ${pending} 组礼物待入账，尚未计入以上金额。` : ''}${error || pending ? `以上为最近读取的账本数据（${count} 个礼物）。` : `今日已记录 ${count} 个礼物，已保存到本地账本。按收到礼物时的比例估算。${coverage}`}` : `本页采集 ${count} 个礼物。${estimate} ${coverage}`);
+    const time = at => new Date(at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const boundary = summary?.startAt ? `${summary.startSource === 'first-observed' ? '首次观测' : ['dom-observed','platform-observed'].includes(summary.startSource) ? '识别到开播' : '开播'} ${time(summary.startAt)}；${summary.endAt ? `${['room-changed','next-observed'].includes(summary.endSource) ? '结束边界推定' : ['dom','platform-observed'].includes(summary.endSource) ? '识别到下播' : '下播'} ${time(summary.endAt)}` : '直播中'}。` : '等待确认直播场次。';
+    this.text('[data-gift-estimate-note]', `${boundary}${persisted ? `${status}${pending ? `有 ${pending} 组礼物待入账，尚未计入以上金额。` : ''}${error || pending ? `以上为最近读取的账本数据（${count} 个礼物）。` : `本场已记录 ${count} 个礼物，已保存到本地账本。按收到礼物时的比例估算。${coverage}`}` : `本场采集 ${count} 个礼物。${estimate} ${coverage}`}`);
   }
   toast(message, error = false) {
     const node = this.root.querySelector('.toast'); node.textContent = message; node.classList.toggle('error', error); node.hidden = false;
@@ -571,7 +599,7 @@ export class Panel {
   applyFeatureVisibility() {
     const enabled = key => Boolean(this.root.querySelector(`[data-field="${key}.enabled"]`)?.checked);
     for (const key of ['pk', ...interactionPages]) {
-      const visible = key === 'pk' ? true : ['timers','income'].includes(key) ? Boolean(this.root.querySelector(`[data-field="${key === 'income' ? 'incomeEnabled' : 'timersEnabled'}"]`)?.checked) : enabled(({ gift:'gift', welcome:'welcome', likes:'like', keywords:'keyword', bot:'bot' })[key]);
+      const visible = ['pk','anchor'].includes(key) ? true : key === 'timers' ? Boolean(this.root.querySelector('[data-field="timersEnabled"]')?.checked) : enabled(({ gift:'gift', welcome:'welcome', likes:'like', keywords:'keyword', bot:'bot' })[key]);
       const tab = this.root.querySelector(`[data-tab="${key}"]`);
       const page = this.root.querySelector(`[data-page="${key}"]`);
       if (tab) tab.hidden = !visible;
@@ -587,7 +615,7 @@ export class Panel {
     const visibleCategories = [...this.root.querySelectorAll('[data-category]')].filter(button => !button.hidden).length;
     this.root.querySelector('.primary-nav').style.gridTemplateColumns = `repeat(${Math.max(visibleCategories, 1)}, minmax(0, 1fr))`;
     const activeTab = this.root.querySelector(`[data-tab="${this.activeTab}"]`);
-    this.hidden('[data-income-link]', !this.node('[data-field="incomeEnabled"]').checked);
+    this.hidden('[data-income-paused]', this.node('[data-field="incomeEnabled"]').checked);
     if (activeTab?.hidden) {
       this.tab('features');
     }
@@ -685,22 +713,30 @@ export class Panel {
     };
     this.node('[data-pk-rates]').innerHTML = [rate('3 倍加成', data.multiplierStats), rate('卡片 / 宝箱命中', data.cardStats)].join('');
   }
+  setAnchorView(view) {
+    if (!['overview','income'].includes(view)) return;
+    this.anchorView = view;
+    for (const button of this.root.querySelectorAll('[data-anchor-view]')) button.setAttribute('aria-pressed', String(button.dataset.anchorView === view));
+    for (const content of this.root.querySelectorAll('[data-anchor-content]')) content.hidden = content.dataset.anchorContent !== view;
+    this.node('.scroll').scrollTop = 0;
+  }
   tab(key) {
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
-    if (['income','profiles'].includes(key)) void this.callbacks.income?.();
+    if (['anchor','profiles'].includes(key)) void this.callbacks.income?.();
     const category = interactionPages.includes(key) ? 'interaction' : 'settings';
     this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-subnav]')) node.hidden = node.dataset.subnav !== category;
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
-    const featureByPage = { pk: null, gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword', bot:'bot', timers: 'timersEnabled', income:'incomeEnabled' };
+    const featureByPage = { pk: null, anchor:null, gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword', bot:'bot', timers: 'timersEnabled' };
     for (const node of this.root.querySelectorAll('[data-page]')) {
       const feature = featureByPage[node.dataset.page];
-      const disabled = feature && !this.root.querySelector(`[data-field="${['timersEnabled','incomeEnabled'].includes(feature) ? feature : `${feature}.enabled`}"]`)?.checked;
+      const disabled = feature && !this.root.querySelector(`[data-field="${feature === 'timersEnabled' ? feature : `${feature}.enabled`}"]`)?.checked;
       node.hidden = node.dataset.page !== key || Boolean(disabled);
     }
     if(key==='pk' && this.latest) this.renderPK(this.latest[0]);
+    if(key==='anchor' && this.latest) this.renderAnchor(this.latest[0]);
   }
   bind() {
     this.node('[data-pk-window]').addEventListener('change',event=>{this.charts.windowMs=Number(event.target.value);if(this.latest)this.renderPK(this.latest[0]);});
@@ -758,7 +794,7 @@ export class Panel {
     this.root.addEventListener('click', async e => {
       const category=e.target.closest('[data-category]');
       if(category){
-        const firstVisibleTab=[...this.root.querySelectorAll(`[data-subnav="${category.dataset.category}"] [data-tab]`)].find(tab=>!tab.hidden && !(category.dataset.category === 'interaction' && tab.dataset.tab === 'pk'));
+        const firstVisibleTab=[...this.root.querySelectorAll(`[data-subnav="${category.dataset.category}"] [data-tab]`)].find(tab=>!tab.hidden && !(category.dataset.category === 'interaction' && ['pk','anchor'].includes(tab.dataset.tab)));
         if(firstVisibleTab)this.tab(firstVisibleTab.dataset.tab);
         return;
       }
@@ -767,12 +803,19 @@ export class Panel {
       const remove = e.target.closest('[data-remove]'); if (remove) { remove.closest('[data-list-row]').remove(); this.markDirty(); this.syncControls(); return; }
       const move = e.target.closest('[data-move]');
       if (move) { const row = move.closest('[data-list-row]'), sibling = move.dataset.move === 'up' ? row.previousElementSibling : row.nextElementSibling; if (sibling) { if (move.dataset.move === 'up') row.parentNode.insertBefore(row,sibling); else row.parentNode.insertBefore(sibling,row); this.markDirty(); } return; }
-      const go = e.target.closest('[data-go]'); if (go) { this.tab(go.dataset.go); return; }
+      const go = e.target.closest('[data-go]'); if (go) {
+        if (go.hasAttribute('data-ack-runtime-alert')) await this.callbacks.acknowledgeRuntimeAlert?.();
+        if (go.dataset.anchorTarget) this.setAnchorView(go.dataset.anchorTarget);
+        this.tab(go.dataset.go); return;
+      }
+      const anchorView = e.target.closest('[data-anchor-view]'); if (anchorView) { this.setAnchorView(anchorView.dataset.anchorView); return; }
       const tab = e.target.closest('[data-tab]'); if (tab) this.tab(tab.dataset.tab);
       const button = e.target.closest('[data-action]'); if (!button || button.disabled || button.hidden) return;
       const action = button.dataset.action;
       try {
         if (action === 'export-income') { this.setBusy(action,true); await this.callbacks.exportIncome?.(); return; }
+        if (action === 'export-anchor') { await this.callbacks.exportAnchor?.(this.anchorDashboard.exportReport()); return; }
+        if (action === 'refresh-anchor') { this.setBusy(action,true); await this.callbacks.income?.(); const refreshed = await this.callbacks.refreshAnchor?.(); this.toast(refreshed ? '主播统计已刷新。' : '本地统计已刷新；展馆暂不可用，请确认已登录并打开直播间。', !refreshed); return; }
         if (action === 'add-profile') { this.setBusy(action,true); await this.callbacks.addProfile?.(this.node('[data-profile-url]').value); this.node('[data-profile-url]').value = ''; return; }
         if (action === 'close') return this.toggleOpen();
         if (action === 'identity-settings') { this.tab('diagnostics'); this.node('[data-manual-identity]').open = true; return; }
@@ -791,6 +834,7 @@ export class Panel {
           finally { button.disabled = false; }
           return;
         }
+        if (action === 'release-cache') { this.setBusy(action,true); try { await this.callbacks.clearCache?.(); this.toast('临时协议缓存已释放'); } finally { this.setBusy(action,false); } return; }
         if (action === 'import-income') return this.node('[data-import-income-file]').click();
         if (action === 'import') return this.root.querySelector('[data-import-file]').click();
         if (action === 'save' || action === 'test-ai') {
@@ -809,6 +853,7 @@ export class Panel {
           await this.callbacks.start();
         }
         else if (action === 'stop') this.callbacks.stop();
+        else if (action === 'debug-send') { this.setBusy(action, true); await this.callbacks.debugSend?.(); this.toast('测试消息已加入发送队列'); }
         else if (action === 'lab') this.callbacks.lab();
         else if (action === 'diagnose') { this.setBusy(action, true); this.showDiagnostics(await this.callbacks.diagnose()); }
       } catch (error) { this.toast(error.message, true); }
@@ -893,8 +938,9 @@ export class Panel {
       status.lastGift ? `最近礼物：${status.lastGift.giftName} ×${status.lastGift.count}；单价 ${status.lastGift.unitValue ?? '未知'} 钻${status.lastGift.timestampSkewMs == null ? '' : `；平台时间偏差 ${Math.round(status.lastGift.timestampSkewMs / 1000)} 秒`}` : '最近礼物：尚未捕获',
       `待解码帧：${status.pendingFrames || 0}`,
       `最近消息：${status.lastFrame ? new Date(status.lastFrame).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '尚未收到'}`,
-      `发送连接检查：${status.healthy ? '通过' : '未通过；请刷新直播页，确认开播状态'}`,
+      `消息接收连接：${status.healthy ? '在线' : '未就绪；请刷新直播页，确认开播状态'}`,
       `主播 UID：${status.anchorId}`, `输入框：${status.input}`, `发送按钮：${status.send}`,
+      '发送结果：以本人普通弹幕或管理员弹幕的结构化回显为准；接收连接在线、控件已找到均不代表发送成功。',
       '礼物价值与等级来源：结构化直播消息；网页文字不会用于猜测。'
     ].join('\n');
   }
@@ -904,30 +950,34 @@ export class Panel {
     const signature = JSON.stringify(records.map(({jobs,...record})=>record));
     if (signature !== this.deliverySignature) {
       this.deliverySignature = signature;
-      const states = {prepared:'待发送',clicked:'已点击 · 等待回显',echoed:'已回显',unknown:'结果未知 · 自动重试',failed:'发送失败 · 自动重试',retrying:'自动重试中',cancelled:'未点击 · 自动重试'};
+      const states = {prepared:'待发送',clicked:'已提交 · 等待回显',echoed:'已回显',unknown:'结果未知 · 不自动重发',failed:'发送失败 · 自动重试',retrying:'自动重试中',cancelled:'未点击 · 自动重试'};
       this.node('[data-deliveries]').innerHTML = records.length ? [...pending,...records.filter(record=>!pending.includes(record)).slice(-10).reverse()].map(record=>`<div class="section"><strong>${esc(states[record.state] || record.state)}</strong><p>${esc(record.text)}</p><p class="hint">${esc(record.reason || (record.state === 'echoed' ? `回显延迟 ${record.latencyMs} ms${record.messageId ? ` · 消息 ${record.messageId}` : ''}` : '等待本人账号的公屏回显'))}</p></div>`).join('') : '<p class="empty">暂无发送记录。</p>';
     }
     const health = network.ingestion || {}, storage = network.storage;
     const capture = network.capture || {}, gaps = (health.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(capture.gaps || 0);
-    const storageText = storage?.used != null ? `存储 ${(storage.used/1024/1024).toFixed(2)} / ${(storage.quota/1024/1024).toFixed(0)} MB` : '存储用量尚未取得';
-    this.text('[data-ingestion-health]',`${health.blocked ? '采集交接受阻（场控仍保持运行）' : health.quarantined ? '有隔离事件待处理' : '采集交接正常'} · 本次协议帧已保存 ${capture.saved || 0} 条 / 等待 ${capture.pending || 0} 条 · 隔离 ${health.quarantined || 0} 条 · 已知缺口 ${gaps}（事件或帧） · ${storageText}${health.reason ? `。${health.reason}` : ''}`);
-    const alert = health.blocked || health.quarantined || gaps || storage?.ratio >= .8;
+    const storageText = storage?.used != null ? `临时缓存 ${(storage.used/1024/1024).toFixed(2)} / ${(storage.quota/1024/1024).toFixed(0)} MB；持久数据 ${(Object.values(storage.durable?.categories || {}).reduce((sum,item)=>sum+item.bytes,0)/1024/1024).toFixed(2)} MB（IndexedDB）` : '存储用量尚未取得';
+    const pruneText = storage?.pruned?.deleted ? `；最近自动清理 ${storage.pruned.deleted} 条旧协议帧（${(storage.pruned.bytes/1024/1024).toFixed(2)} MB）` : '';
+    this.text('[data-ingestion-health]',`${health.blocked ? '采集交接受阻（场控仍保持运行）' : health.quarantined ? '有隔离事件待处理' : '采集交接正常'} · 本次协议帧已保存 ${capture.saved || 0} 条 / 等待 ${capture.pending || 0} 条 · 隔离 ${health.quarantined || 0} 条 · 已知缺口 ${gaps}（事件或帧） · ${storageText}${pruneText}${health.reason ? `。${health.reason}` : ''}`);
+    const alert = hasUnacknowledgedRuntimeAlert(network,network.acknowledgedRuntimeAlert);
     this.hidden('[data-runtime-alert]', !alert);
-    if (alert) this.text('[data-runtime-alert-text]',`${health.blocked ? '采集交接受阻，场控仍保持运行。' : ''}${gaps ? '采集存在缺口。' : ''}${health.quarantined ? '有隔离事件待重试。' : ''}${storage?.ratio >= .8 ? '本地存储接近上限。' : ''}`);
+    if (alert) this.text('[data-runtime-alert-text]', network.contextInvalidated ? '扩展连接已失效，自动发送和后台重试已暂缓。请先导出恢复数据，再刷新直播页。' : `${health.blocked ? '采集交接受阻，场控仍保持运行。' : ''}${gaps ? '采集存在缺口。' : ''}${health.quarantined ? '有隔离事件待重试。' : ''}${storage?.ratio >= .8 ? '本地存储接近上限，旧协议帧已自动清理，待处理事件和账本仍保留。' : ''}`);
   }
   refresh(engine, network = {}) {
     this.latest = [engine,network];
     const mode = { preview: '仅预览', auto: '自动发送' }[engine.config.mode];
     this.syncLauncher();
     if (!this.open) return;
-    this.text('[data-state]', engine.running ? `运行中 · ${mode}` : '已暂停');
+    this.text('[data-state]', network.contextInvalidated ? '扩展连接失效 · 待刷新' : engine.running ? `运行中 · ${mode}` : '已暂停');
+    this.text('[data-shell-state]', this.node('[data-state]').textContent);
+    this.text('[data-shell-network]', this.demo ? '模拟数据' : network.connected && network.frames ? '直播数据已连接' : '等待直播数据');
     const badge = this.node('[data-network]'); this.text('[data-network]', this.demo ? '模拟数据' : network.connected && network.frames ? '直播数据已连接' : '等待直播数据'); badge.classList.toggle('live', Boolean(network.connected && network.frames));
     for (const key of ['events','filtered','previews','submitted']) this.text(`[data-stat="${key}"]`,engine.stats[key]);
     this.text('[data-delivery-health]', `待发送 ${engine.queue.length} 条 · 等待结算 ${[...engine.gifts.values()].filter(g => g.count > g.credited).length} 组礼物 · 重试 ${engine.stats.retries} 次 · 过期 ${engine.stats.expired} 条 · 队列满 ${engine.stats.overflow} 次`);
     this.renderDelivery(engine,network); this.renderPK(engine);
+    if (this.activeTab === 'anchor') this.renderAnchor(engine);
     this.text('[data-bot-session]', engine.bot?.sessionSummary?.() || '当前没有进行中的游戏。');
     this.syncFooter(); this.renderLastReply(); this.renderOverview(engine);
-    for (const action of ['identify','test-ai','diagnose']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
+    for (const action of ['identify','test-ai','diagnose','refresh-anchor']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { this.charts.destroy(); this.theme.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); clearTimeout(this.suppressClickTimer); window.removeEventListener('resize',this.onResize); window.removeEventListener('pointermove',this.onPointerMove); window.removeEventListener('pointerup',this.onPointerUp); window.removeEventListener('pointercancel',this.onPointerUp); this.host.remove(); }
+  destroy() { this.anchorDashboard.destroy(); this.charts.destroy(); this.theme.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); clearTimeout(this.suppressClickTimer); window.removeEventListener('resize',this.onResize); window.removeEventListener('pointermove',this.onPointerMove); window.removeEventListener('pointerup',this.onPointerUp); window.removeEventListener('pointercancel',this.onPointerUp); this.host.remove(); }
 }

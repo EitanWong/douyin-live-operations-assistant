@@ -10,10 +10,25 @@ const uid = '9007199254740993123';
 const club = anchor => cat(b(1, '本房粉丝团'), i(2, 8), i(3, 1), i(6, anchor));
 const user = cat(i(1, uid), b(3, '青山'), b(23, i(6, 35)), b(24, cat(b(1, club('1234567890')), b(2, cat(i(1, 99), b(2, club('12345')))))));
 const common = cat(i(2, '9876543210123456789'), i(3, '7777777777777777777'), i(4, 1791990000));
+test('Common 时间兼容实录中的秒与毫秒，礼物不会变成远未来事件', () => {
+  for (const [time,expected] of [[1792680266,1792680266000],[1792680266271,1792680266271]]) {
+    const common=cat(i(2, 123),i(4,time));
+    for (const method of ['WebcastGiftMessage','WebcastChatMessage','WebcastLikeMessage','WebcastLinkMicBattleMethod']) {
+      const extra=method==='WebcastLinkMicBattleMethod'?b(2,i(2,999)):Buffer.alloc(0);
+      assert.equal(decodeMessage(method,cat(b(1,common),extra)).at,expected);
+    }
+  }
+});
 test('UID 和房间 ID 保留全部 64 位精度，解析粉丝团 preferData', () => {
   const decoded = decodeUser(user); assert.equal(decoded.id, uid); assert.equal(decoded.wealthLevel, 35); assert.equal(decoded.fanClubs.length, 2); assert.equal(decoded.fanClubs[0].status, 1);
   const e = decodeMessage('WebcastChatMessage', cat(b(1, common), b(2, user), b(3, '直播真好看')));
   assert.equal(e.roomId, '7777777777777777777'); assert.equal(e.id, '9876543210123456789'); assert.equal(e.text, '直播真好看');
+});
+test('User 只暴露明确性别和有效生日字段，不把 age_range 当作岁数',()=>{
+  const profile=cat(i(1,uid),b(3,'青山'),i(4,2),b(1014,'2000-10-24'),i(1015,1),i(1045,4));
+  assert.deepEqual(decodeUser(profile),{id:uid,secUid:'',displayId:'',name:'青山',wealthLevel:null,fanClubs:[],gender:2,birthdayDescription:'2000-10-24',birthdayValid:true,ageRange:4});
+  const unknown=decodeUser(cat(i(1,uid),b(3,'未知'),i(4,7),i(1015,0),i(1045,3)));
+  assert.equal(unknown.gender,null);assert.equal(unknown.birthdayValid,false);assert.equal(unknown.ageRange,3);assert.equal(unknown.birthdayDescription,undefined);
 });
 test('ChatMessage 字段 12 atUser 解析被 @ 用户 UID', () => {
   const e = decodeMessage('WebcastChatMessage', cat(b(1, common), b(2, user), b(3, '请看一下'), b(12, cat(i(1, '12345678901234567890'), b(3, '小助手')))));
@@ -277,7 +292,7 @@ test('PK 单次热度更新不把 from_user_id 或 hot_score 当成累计比分'
 });
 
 const score = (anchor, value, extra = Buffer.alloc(0)) => cat(i(2, anchor), ...(value === null ? [] : [i(1, value)]), extra);
-const participant = (anchor, name, room) => cat(i(1, anchor), b(2, cat(b(1, cat(i(1, anchor), b(2, name))), b(13, room))));
+const participant = (anchor, name, room, extra = Buffer.alloc(0)) => cat(i(1, anchor), b(2, cat(b(1, cat(i(1, anchor), b(2, name))), b(13, room), extra)));
 test('LinkMicMethod 第 17 字段读取双方总分，保留 UID 精度且不以消息 ID 代替 battle_id', () => {
   const body = cat(b(1, common), b(17, score(12345, 65249, b(7, '65249'))), b(17, score(uid, 0)), i(104, '9007199254740993999'));
   const event = decodeMessage('WebcastLinkMicMethod', body, '987');
@@ -327,6 +342,52 @@ test('Battle 开始消息完整保留三人及四人 PK 的所有参战主播', 
     b(6,participant(23,'主播丁','room-d'))));
   assert.equal(start.participants.length,4);
   assert.deepEqual(start.participants.map(item=>item.anchorId),[uid,'21','22','23']);
+});
+test('Battle 主播段位按显式 UID 归属，完整保留零星、大整数及负数段位变化', () => {
+  const grade = cat(b(1, '璀璨钻石'), i(2, 4), i(3, 0), i(4, uid), i(6, 6));
+  const change = cat(i(1, BigInt.asUintN(64, -2n)), i(2, BigInt.asUintN(64, -9007199254740993n)),
+    b(3, '璀璨钻石'), i(4, 5), b(5, '璀璨钻石'), i(6, 4));
+  const event = decodeMessage('WebcastLinkMicBattleMethod', cat(b(2, i(2, 42)),
+    b(6, participant(uid, '己方', 'room-self', cat(b(4, grade), b(5, change), b(12, b(3, '钻石 IV'))))),
+    b(6, participant(21, '对方', 'room-other', b(4, b(1, '荣耀王者'))))));
+  assert.deepEqual(event.participants[0], {anchorId:uid,name:'己方',roomId:'room-self',
+    grade:{name:'璀璨钻石',level:'4',starCount:'0',targetStarCount:uid,gradeEnum:6},
+    gradeChange:{star:'-2',score:'-9007199254740993',beforeGrade:'璀璨钻石',beforeLevel:'5',currentGrade:'璀璨钻石',currentLevel:'4'},
+    pkStageDescription:'钻石 IV'});
+  assert.deepEqual(event.participants[1].grade, {name:'荣耀王者'});
+  assert.equal(event.participants[1].gradeChange, undefined);
+  assert.equal(event.participants[1].pkStageDescription, undefined);
+});
+test('Battle 结束成绩中的段位和参战主播段位分别保留，不将其他字段误作段位', () => {
+  const event = decodeMessage('WebcastLinkMicBattleFinishMethod', cat(b(2, i(2, 42)),
+    b(4, score(uid, 3210, b(10, cat(b(1, '荣耀王者'), i(2, 1), i(3, 12))))),
+    b(4, score(21, 0)),
+    b(12, participant(uid, '己方', 'room-self', b(4, cat(b(1, '璀璨钻石'), i(3, 2)))))));
+  assert.deepEqual(event.scores, [{anchorId:uid,score:3210,grade:{name:'荣耀王者',level:'1',starCount:'12'}},{anchorId:'21',score:0}]);
+  assert.deepEqual(event.participants[0].grade, {name:'璀璨钻石',starCount:'2'});
+});
+test('赛季段位结果支持网页消息别名并保留精确分值，无 UID 时不猜测主播归属', async () => {
+  const before = cat(b(3, '璀璨钻石'), i(5, uid), i(6, '9223372036854775807'), i(7, 6), b(8, '钻石积分'), b(9, '上限'));
+  const after = cat(b(3, '荣耀王者'), i(5, 0), i(7, 7));
+  const result = cat(b(1, cat(b(1, '-25'), b(2, cat(b(1, '本局扣分'), b(2, '-30'))), b(2, cat(b(1, '保护加分'), b(2, '+5'))))),
+    b(2, cat(b(1, before), b(2, after), i(4, 2))), b(3, '赛季积分已结算'));
+  const body = cat(b(1, common), b(2, result));
+  for (const method of ['BattleRankSeasonMessage', 'WebcastBattleRankSeasonMessage']) {
+    const event = decodeMessage(method, body, 'season-1');
+    assert.equal(event.type, 'pk-rank-season'); assert.equal(event.protocolMethod, method);
+    assert.equal(event.roomId, '7777777777777777777'); assert.equal(event.anchorId, undefined);
+    assert.equal(event.battleId, undefined);
+    assert.deepEqual(event.beforeRank, {detail:'璀璨钻石',score:uid,maxScore:'9223372036854775807',level:6,scoreDisplay:'钻石积分',maxScoreDisplay:'上限'});
+    assert.deepEqual(event.afterRank, {detail:'荣耀王者',score:'0',level:7});
+    assert.equal(event.changeType, 2); assert.equal(event.deltaScore, '-25');
+    assert.deepEqual(event.deltaDetails, [{name:'本局扣分',score:'-30'},{name:'保护加分',score:'+5'}]);
+    assert.equal(event.tips, '赛季积分已结算');
+  }
+  const events = await decodeFrame(b(8, b(1, cat(b(1, 'BattleRankSeasonMessage'), b(2, body), i(3, 201)))));
+  assert.equal(events[0].type, 'pk-rank-season'); assert.equal(events[0].id, '201');
+  const partial = decodeMessage('BattleRankSeasonMessage', b(2, b(3, '暂无结果')));
+  assert.equal(partial.tips, '暂无结果'); assert.equal(partial.beforeRank, undefined); assert.equal(partial.deltaScore, undefined);
+  assert.equal(decodeMessage('BattleRankSeasonMessage', b(1, common)), null);
 });
 test('普通连麦、贡献榜和未知 Battle 更新不能建立虚假 PK', () => {
   const body = cat(b(1, common), i(2, 1), i(3, 300), i(4, 10000));

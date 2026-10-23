@@ -4,6 +4,8 @@ import { DeliveryTracker } from '../runtime/delivery.js';
 import { LiveMetrics } from '../runtime/live-metrics.js';
 import { PKTracker, PK_EVENT_TYPES } from '../pk/model.js';
 import { milestoneThankYou, recognizeMilestone } from './milestones.js';
+import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplate, validAudienceAI } from './audience.js';
+import { AnchorStats } from './anchor-stats.js';
 
 export { recognizeMilestone };
 
@@ -18,7 +20,7 @@ export const DEFAULTS = {
   // 消息按优先级连续出队；发送控件本身仍串行确认每条消息。
   sending: { maxLength: 50, duplicateSec: 120, queueLimit: 200 },
   gift: {
-    enabled: true, responseMode: 'rules', minValue: 2, basis: 'total', mergeSec: 0, cooldownSec: 0, batchEnabled: true, yuanPerDiamond: 0.05,
+    enabled: true, responseMode: 'rules', minValue: 1, basis: 'total', mergeSec: 0, cooldownSec: 0, batchEnabled: true, yuanPerDiamond: 0.05,
     prices: {}, templates: DEFAULT_PHRASES.gift
   },
   welcome: {
@@ -42,7 +44,7 @@ export const DEFAULTS = {
     knowledge: '', temperature: 0.7
   },
   timers: [{ id: 'welcome', enabled: false, responseMode: 'rules', intervalSec: 300, start: '', end: '', quietSec: 15, messages: ['喜欢直播内容的朋友，可以点点关注～', '欢迎新来的朋友，一起聊聊吧！'] }],
-  adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', endSelector: '' }
+  adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', startSelector: '', endSelector: '' }
 };
 
 export const copy = value => JSON.parse(JSON.stringify(value));
@@ -188,6 +190,8 @@ export class Engine {
     this.lastMaintenance = -Infinity;
     this.giftSentAt = new Map();
     this.milestoneSeen = new Map();
+    this.milestoneSession = {roomId:'',endedAt:null};
+    this.audience = new AudienceProfiles({now});
     this.inFlight = null;
     this.deliveries = new DeliveryTracker({now});
     this.backlogLimit = 2000;
@@ -196,6 +200,7 @@ export class Engine {
     this.liveMetrics = new LiveMetrics({now});
     this.pkSeen = new Map();
     this.roomData = {stats:null,audience:null,activities:[]};
+    this.anchorStats = new AnchorStats({now});
     this.observationSignatures = new Map();
     this.stats = { events: 0, filtered: 0, previews: 0, submitted: 0, aiCalls: 0, retries: 0, expired: 0, overflow: 0, maxQueueWaitMs: 0 };
   }
@@ -213,11 +218,11 @@ export class Engine {
       version: 1, savedAt: this.now(), running: this.running || Boolean(this.resumeRequested),
       queue: this.queue, gifts: [...this.gifts.entries()], bot, botQuestions:this.bot.questionHistory,
       seen: entries(this.seen), cooldowns: entries(this.cooldowns), duplicates: entries(this.duplicates),
-      timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen),
+      timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen), milestoneSession:this.milestoneSession,
       history: this.history.slice(-80), stats: this.stats, serial: this.serial,
       lastInteraction: this.lastInteraction, lastChat: this.lastChat,
-      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot()
-      , pk: this.pk.export(), roomData:this.roomData
+      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), audience:this.audience.snapshot()
+      , pk: this.pk.export(), roomData:this.roomData, anchorStats:this.anchorStats.snapshot()
     });
   }
   restore(snapshot) {
@@ -238,6 +243,10 @@ export class Engine {
       if (snapshot.bot.type === 'idiom') this.bot.chain = { word:snapshot.bot.word, used:new Set(snapshot.bot.used || []), at:snapshot.bot.lastAt };
     }
     for (const [property, value] of [['seen',snapshot.seen],['cooldowns',snapshot.cooldowns],['duplicates',snapshot.duplicates],['timerDue',snapshot.timerDue],['rotation',snapshot.rotation],['giftSentAt',snapshot.giftSentAt],['milestoneSeen',snapshot.milestoneSeen]]) this[property] = map(value);
+    // 旧快照按排名存储；同一个用户的不同排名合并为本场的一条记录。
+    this.milestoneSeen = new Map([...this.milestoneSeen].map(([key,at]) => [key.replace(/^(contribution:.*):\d+$/u,'$1'),at]));
+    this.milestoneSession = {roomId:String(snapshot.milestoneSession?.roomId || ''),endedAt:Number.isFinite(snapshot.milestoneSession?.endedAt) ? snapshot.milestoneSession.endedAt : null};
+    this.audience.restore(snapshot.audience);
     this.history = Array.isArray(snapshot.history) ? snapshot.history.slice(-80) : [];
     this.stats = snapshot.stats && typeof snapshot.stats === 'object' ? { ...this.stats, ...snapshot.stats } : this.stats;
     this.serial = Number.isSafeInteger(snapshot.serial) ? snapshot.serial : this.serial;
@@ -245,6 +254,7 @@ export class Engine {
     this.lastChat = Number.isFinite(snapshot.lastChat) ? snapshot.lastChat : this.now();
     this.deliveries.restore(snapshot.deliveries || []);
     this.pk.restore(snapshot.pk || {});
+    this.anchorStats.restore(snapshot.anchorStats || {});
     this.liveMetrics.restore(snapshot.liveMetrics);
     if (snapshot.roomData && typeof snapshot.roomData === 'object') this.roomData = {
       stats:snapshot.roomData.stats && typeof snapshot.roomData.stats === 'object' ? snapshot.roomData.stats : null,
@@ -280,14 +290,37 @@ export class Engine {
     return Boolean((selfId && user.id && String(user.id) === String(selfId)) || (selfSecUid && user.secUid && user.secUid === selfSecUid));
   }
   acceptMilestone(milestone) {
-    if (!milestone || !['guardian','contribution'].includes(milestone.kind) || !milestone.name) return false;
-    const key = `${milestone.kind}:${milestone.name}:${milestone.rank ?? ''}`;
+    if (!milestone?.name || !milestoneThankYou(milestone)) return false;
+    const key = milestone.kind === 'contribution' ? `contribution:${milestone.name}` : `${milestone.kind}:${milestone.name}:${milestone.rank ?? ''}`;
     const now = this.now(), previous = this.milestoneSeen.get(key);
-    if (Number.isFinite(previous) && now - previous < 600000) return false;
+    if (Number.isFinite(previous) && (milestone.kind === 'contribution' || now - previous < 600000)) return false;
     this.milestoneSeen.set(key, now);
-    for (const [oldKey, at] of this.milestoneSeen) if (now - at >= 600000) this.milestoneSeen.delete(oldKey);
+    this.pruneMilestones(now);
     while (this.milestoneSeen.size > 5000) this.milestoneSeen.delete(this.milestoneSeen.keys().next().value);
     return true;
+  }
+  pruneMilestones(now) {
+    // 贡献达标是本场的一次性事件，不能随普通冷却窗口过期。
+    for (const [key, at] of this.milestoneSeen) if (!key.startsWith('contribution:') && now - at >= 600000) this.milestoneSeen.delete(key);
+  }
+  queueMilestone(milestone) {
+    const profile = this.audience.findByName(milestone?.name);
+    const canonical = profile ? {...milestone,name:profile.name} : milestone;
+    if (!this.acceptMilestone(canonical)) return;
+    const text = milestoneThankYou(canonical,profile ? audienceAddress(profile,this.now()) : canonical.name);
+    this.lastInteraction = this.now(); this.enqueue('milestone',text);
+  }
+  observeMilestoneSession(event) {
+    const roomId = event.source === 'socket' && ['chat','gift','start'].includes(event.type) ? String(event.roomId || '') : '';
+    const nextSession = roomId && this.milestoneSession.roomId && roomId !== this.milestoneSession.roomId
+      || event.type === 'start' && this.milestoneSession.endedAt !== null && (event.receivedAt || event.at || this.now()) > this.milestoneSession.endedAt;
+    if (nextSession) {
+      for (const key of this.milestoneSeen.keys()) if (key.startsWith('contribution:')) this.milestoneSeen.delete(key);
+      for (const text of this.duplicates.keys()) if (recognizeMilestone(text)?.kind === 'contribution') this.duplicates.delete(text);
+      this.milestoneSession.endedAt = null;
+    }
+    if (roomId) this.milestoneSession.roomId = roomId;
+    if (event.type === 'end') this.milestoneSession.endedAt = event.receivedAt || event.at || this.now();
   }
   acceptsSelfGameChat(event) {
     if (!this.running || event?.type !== 'chat' || !this.config.bot.enabled || (this.selfTexts.get(event.text) || 0) > this.now()) return false;
@@ -437,7 +470,17 @@ export class Engine {
       while(this.pkSeen.size>5000)this.pkSeen.delete(this.pkSeen.keys().next().value);
     }
     const metadata=['pk-start','pk-score','pk-end','room-state'].includes(event.type);
-    this.pk.ingest({...event,...(metadata ? {anchorId:this.config.anchorId || event.anchorId} : {}),receivedAt:event.receivedAt || this.now()});
+    const normalized = {...event,...(metadata ? {anchorId:this.config.anchorId || event.anchorId} : {}),receivedAt:event.receivedAt || this.now()};
+    // A platform end message is the only point at which the current score is
+    // promoted to an explicitly final observation. Prediction.final and an
+    // ended phase alone are intentionally insufficient for historical stats.
+    if (normalized.type === 'pk-end') {
+      if (Array.isArray(normalized.scores)) normalized.scores = normalized.scores.map(item => ({...item, final:true}));
+      for (const side of ['self','opponent']) if (Number.isFinite(normalized[`${side}Score`])) normalized[`${side}ScoreMeta`] = {...normalized[`${side}ScoreMeta`],final:true};
+    }
+    this.pk.ingest(normalized);
+    const state = this.pk.current();
+    if (state?.key) this.anchorStats.ingestBattle(state);
     return true;
   }
   ingestEvent(event) {
@@ -452,6 +495,7 @@ export class Engine {
     }
     this.liveMetrics.ingest(event);
     this.ingestPK(event);
+    if (event.type === 'anchor-exhibition' || event.type === 'pk-rank-season') this.anchorStats.ingest(event, {anchorId:this.config.anchorId,roomId:event.roomId});
     // 按帧实际到达时间区分历史补推；主线程解码积压不能让实时消息变成历史消息。
     const hasReceipt = Number.isFinite(event.receivedAt) && event.receivedAt <= now;
     const hasRecentReceipt = hasReceipt && now - event.receivedAt < 600000;
@@ -460,6 +504,9 @@ export class Engine {
     // 已积压十分钟的日志仍不补发；没有捕获时间时保留平台时间检查。
     if (event.type === 'gift' && hasReceipt && !hasRecentReceipt) { this.filtered('历史礼物事件已忽略'); return; }
     if (!(event.type === 'gift' && hasRecentReceipt) && event.at && (arrival - event.at > 30000 || event.at - arrival > 60000)) { this.filtered('历史或异常时间事件已忽略'); return; }
+    this.observeMilestoneSession(event);
+    if (event.user) event = {...event,user:this.audience.remember(event.user)};
+    if (event.type === 'room-audience') for (const row of [...(event.ranks || []),...(event.seats || [])]) if (row.user) this.audience.remember(row.user);
     if (['room-stats','room-audience','social','fansclub'].includes(event.type)) {
       let text = '';
       if (event.type === 'room-stats') {
@@ -509,9 +556,8 @@ export class Engine {
     if (!this.running) return;
     if (event.type === 'end') { this.log('system', '收到直播结束事件；场控保持运行，等待手动暂停'); return; }
     if (event.type === 'milestone') {
-      if (!this.acceptMilestone(event.milestone)) return;
-      const text = milestoneThankYou(event.milestone);
-      if (text) { this.lastInteraction = now; this.enqueue('milestone', text); }
+      if ((this.selfTexts.get(event.text) || 0) > now) return;
+      this.queueMilestone(event.milestone);
       return;
     }
     const u = event.user || {};
@@ -523,10 +569,7 @@ export class Engine {
       if (!event.text || (this.selfTexts.get(event.text) || 0) > now) return;
       const milestone = recognizeMilestone(event.text);
       if (milestone) {
-        if (!this.acceptMilestone(milestone)) return;
-        const text = milestoneThankYou(milestone);
-        this.lastInteraction = now;
-        this.enqueue('milestone', text);
+        this.queueMilestone(milestone);
         return;
       }
       this.lastChat = now; this.lastInteraction = now;
@@ -634,10 +677,10 @@ export class Engine {
   recordLike(event) {
     const user = event.user, config = this.config.like;
     this.lastInteraction = this.now();
-    const fallback = renderTemplate(this.choose('like', config.templates), { user: user.name, count: event.count || 1 });
+    const fallback = renderAudienceTemplate(this.choose('like', config.templates), user, {count:event.count || 1},this.now());
     if (config.responseMode === 'ai') {
       void this.requestAI({ type: 'like', user }, {
-        kind: 'like', instruction: `感谢观众 ${user.name} 哥给直播间点赞，语气自然简短，不要引导继续打赏。`,
+        kind: 'like', instruction: '使用 target.address 感谢这位观众给直播间点赞，语气自然简短，不要引导继续打赏。',
         data: { likeCount: event.count || 1 }, fallback
       });
     } else this.enqueue('like', fallback);
@@ -683,7 +726,7 @@ export class Engine {
     if (singleGroup) {
       if (increased || !Number.isFinite(state.due)) {
         const price = Number.isFinite(state.unitValue) && state.unitValue > 0 ? state.unitValue : g.prices[state.giftId] ?? g.prices[state.giftName];
-        state.due = Number.isFinite(price) && price >= g.minValue
+        state.due = Number.isFinite(price) && price >= g.minValue || (!Number.isFinite(price) && g.minValue <= 1)
           ? now
           : Math.min(now + 2000, state.pendingSince + 5000);
       }
@@ -707,34 +750,43 @@ export class Engine {
     const count = reply.items.reduce((n, item) => n + item.count, 0), value = reply.items.reduce((n, item) => n + item.count * item.price, 0);
     const gift = reply.items.map(item => item.name).join('、');
     if (!compact && reply.items.length === 1) {
-      const text = renderTemplate(reply.template, { user: reply.user.name, gift, count, value, unit: reply.items[0]?.price || 0 });
+      const text = renderAudienceTemplate(reply.template, reply.user, {gift,count,value,unit:reply.items[0]?.price || 0},this.now());
       if (cleanMessage(text, this.config).ok) return text;
     }
     // 只缩短昵称/礼物描述，不把整条感谢因长昵称直接丢弃。
     const clip = (text, length) => [...text].slice(0, length).join('');
     for (const limit of [12, 8, 4, 1]) {
       const gifts = reply.items.map(item => `${clip(item.name, limit)}×${item.count}`).join('、');
-      const text = `感谢${clip(reply.user.name, limit)}的${gifts}！`;
+      const text = `感谢${audienceAddress(reply.user,this.now(),limit)}的${gifts}！`;
       if ([...text].length <= this.config.sending.maxLength) return text;
     }
     // 多种礼物再缩短名称也可能超长，改为总数量，确保能进入队列。
     const summaries = [
-      `感谢${clip(reply.user.name, 4)}的${count}个礼物！`,
-      `感谢${clip(reply.user.name, 1)}的礼物支持！`,
+      `感谢${audienceAddress(reply.user,this.now(),4)}的${count}个礼物！`,
+      `感谢${audienceAddress(reply.user,this.now(),1)}的礼物支持！`,
       '谢谢礼物支持！'
     ];
     return summaries.find(text => [...text].length <= this.config.sending.maxLength);
   }
   settleGift(s) {
     const g = this.config.gift, price = Number.isFinite(s.unitValue) && s.unitValue > 0 ? s.unitValue : g.prices[s.giftId] ?? g.prices[s.giftName];
-    if (!Number.isFinite(price) || price <= 0) { if (!s.unknownReported) { this.filtered(`${s.giftName || '礼物'}：单价未知，等待单价或价格表`); s.unknownReported = true; } return false; }
     const count = s.count - s.credited;
     if (count <= 0) return true;
+    if (!Number.isFinite(price) || price <= 0) {
+      if (g.minValue > 1) { if (!s.unknownReported) { this.filtered(`${s.giftName || '礼物'}：单价未知，无法判断是否达到 ${g.minValue} 钻门槛`); s.unknownReported = true; } return false; }
+      const name = audienceAddress(s.user,this.now(),8), gift = [...String(s.giftName || '礼物')].slice(0,10).join('');
+      const text = `谢谢${name}送的${gift}${count > 1 ? `×${count}` : ''}，谢谢支持！`;
+      if (this.config.blockedWords.some(word => word && `${name} ${gift} ${text}`.toLocaleLowerCase().includes(word.toLocaleLowerCase()))) { this.filtered('礼物感谢命中屏蔽词'); s.credited = s.count; return true; }
+      const giftReply = {userKey:keyFor(s.user),user:s.user,items:[{key:s.giftId || s.giftName,name:s.giftName || '礼物',count,price:0}],template:text};
+      if (!this.enqueue('gift',text,{giftReply,revision:1,readyAt:this.now(),quietOverflow:true})) return false;
+      s.credited = s.count; return true;
+    }
     if ((g.basis === 'unit' ? price : s.count * price) < g.minValue) return false;
     const userKey = keyFor(s.user), old = this.giftJobs.get(userKey)?.values().next().value;
     const reply = old ? { ...old.giftReply, items: old.giftReply.items.map(item => ({...item})) } : {
       userKey, user: s.user, items: [], template: this.choose('gift', g.templates)
     };
+    reply.user = s.user;
     const giftKey = s.giftId || s.giftName;
     const item = reply.items.find(item => item.key === giftKey && item.price === price);
     if (item) item.count += count;
@@ -769,7 +821,7 @@ export class Engine {
     const jobs = [first]; let text = first.text;
     if (!first.giftReply || !this.config.gift.batchEnabled) return {jobs,text};
     const clip = value => [...value].slice(0, 8).join('');
-    const part = q => `${clip(q.giftReply.user.name)}的${q.giftReply.items.map(item => `${clip(item.name)}×${item.count}`).join('、')}`;
+    const part = q => `${audienceAddress(q.giftReply.user,this.now(),8)}的${q.giftReply.items.map(item => `${clip(item.name)}×${item.count}`).join('、')}`;
     const ready = [];
     let readyCount = 0;
     for (const q of this.queue) {
@@ -829,7 +881,7 @@ export class Engine {
     const context = this.history.filter(c => now - c.at <= a.contextAgeSec * 1000).slice(-a.contextSize);
     const prompt = {
       persona: a.persona, knowledge: a.knowledge, context,
-      target: event ? { type: event.type, name: event.user?.name || '', text: event.text || '' } : null,
+      target: event ? { type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
     let aiTimer;
@@ -839,6 +891,7 @@ export class Engine {
         aiTimer = setTimeout(() => reject(new Error('互动 AI 等待超时')), task.timeoutMs);
       })]) : await request;
       const output = task.transform ? task.transform(rawOutput) : rawOutput;
+      if (['gift','like'].includes(task.kind) && !validAudienceAI(output,event?.user,now)) { fallback('AI 称呼与公开资料不符'); return; }
       if (this.running && epoch === this.epoch && this.now() - now < 45000) {
         if (task.targetJob) {
           if (currentJob() && this.now() <= task.deadline) {
@@ -869,7 +922,8 @@ export class Engine {
     if (now - this.lastMaintenance >= 30000) {
       this.lastMaintenance = now;
       const retention = Math.max(this.config.gift.cooldownSec, this.config.welcome.cooldownSec, this.config.keyword.cooldownSec, this.config.like.cooldownSec, this.config.ai.userCooldownSec) * 1000;
-      for (const [map, age] of [[this.seen, 120000], [this.milestoneSeen, 600000], [this.cooldowns, retention], [this.duplicates, this.config.sending.duplicateSec * 1000], [this.selfTexts, 0], [this.giftSentAt, Math.max(120000, this.config.gift.cooldownSec * 1000)]]) {
+      this.pruneMilestones(now);
+      for (const [map, age] of [[this.seen, 120000], [this.cooldowns, retention], [this.duplicates, this.config.sending.duplicateSec * 1000], [this.selfTexts, 0], [this.giftSentAt, Math.max(120000, this.config.gift.cooldownSec * 1000)]]) {
         for (const [key, at] of map) if (now - at > age) { map.delete(key); stateChanged = true; }
         while (map.size > 5000) { map.delete(map.keys().next().value); stateChanged = true; }
       }
@@ -990,6 +1044,7 @@ export class Engine {
           submitted(); this.lastRetryReason = ''; this.stats.submitted++;
           const channelNote = result.channelUsed === 'admin' ? '（管理员弹幕）' : result.modeFallback ? `（普通弹幕：${result.modeFallback}）` : '';
           this.log('sent',`${result.failed ? '平台拒绝，自动重发' : result.submitted ? result.transport === 'request' ? '请求已提交，等待公屏回显' : '已点击，等待公屏回显' : '结果未知，不自动重发'}${channelNote}：${batch.text}`);
+          if (result.displayWarning) this.log('error', result.displayWarning);
           void checkpointForSend();
           if (result.failed) this.log('error', `平台拒绝消息，场控保持运行：${result.reason || '未知原因'}`);
         } else {
