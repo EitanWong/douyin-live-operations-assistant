@@ -1,6 +1,9 @@
 import { validateEndpoint } from './ai.js';
 import { GiftStore } from './gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
+import { installCollectionKeeper } from './collection-keeper.js';
+
+const collectionKeeper = installCollectionKeeper(chrome);
 
 const durableStorage = new DurableStorage({ local:chrome.storage.local });
 const storageReady = (async()=>{ await chrome.storage.local.setAccessLevel({ accessLevel:'TRUSTED_CONTEXTS' }); await durableStorage.migrate(); })();
@@ -38,7 +41,7 @@ const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
 };
-const eventTypes = new Set(['gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season']);
+const eventTypes = new Set(['gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season']);
 const validEvent = (event, maxBytes) => {
   try {
     const size = jsonLength(event);
@@ -113,6 +116,25 @@ async function writeStorage(key, value) {
   }
 }
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
+  if (message?.type === 'exhibition-indicator') {
+    void (async()=>{
+      try {
+        const url = new URL(sender.url), event = message.event;
+        if (sender.frameId <= 0 || !sender.tab?.id || !roomFromUrl(sender.tab.url)
+          || url.origin !== 'https://lf-normal-gr-sourcecdn.bytegecko.com'
+          || url.pathname !== '/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html'
+          || event?.type !== 'anchor-exhibition-retention' || event.source !== 'native-indicator'
+          || event.anchorId !== (url.searchParams.get('anchor_id_str') || url.searchParams.get('anchor_id'))
+          || event.roomId !== url.searchParams.get('room_id') || !Number.isSafeInteger(event.remaining) || event.remaining < 0 || event.remaining > 10000
+          || typeof event.name !== 'string' || event.name.length > 20 || typeof event.text !== 'string' || event.text.length > 200) throw new Error('指标来源无效');
+        const value = await chrome.tabs.sendMessage(sender.tab.id,{type:'exhibition-indicator',frameURL:url.href,event:{
+          type:event.type,source:event.source,anchorId:event.anchorId,roomId:event.roomId,name:event.name,text:event.text,remaining:event.remaining,
+          id:`retention:frame:${sender.frameId}:${Date.now()}`,receivedAt:Date.now()}},{frameId:0});
+        reply({ok:value?.ok === true});
+      } catch { reply({ok:false}); }
+    })();
+    return true;
+  }
   const extensionPage = sender.url?.startsWith(chrome.runtime.getURL('')) && !sender.tab;
   if (!isRoom(sender) && !extensionPage) { reply({ok:false,error:'请求来源无效'}); return; }
   void (async()=>{
@@ -120,6 +142,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       await storageReady;
       let value;
       if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
+      else if (message.type === 'collection-state' && isRoom(sender)) value = await collectionKeeper.update(sender,message.active);
       else if (message.type === 'theme-get' && (isRoom(sender) || extensionPage)) value = await readRecord(themeKey) ?? 'system';
       else if (message.type === 'theme-set' && (isRoom(sender) || extensionPage) && themeValues.has(message.value)) {
         await giftStore.transaction(() => writeRecord(themeKey,message.value)); value=true;
@@ -185,10 +208,14 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       }
       else if (message.type === 'income-profiles' && isRoom(sender)) value = await giftStore.profiles();
       else if (message.type === 'income-profile' && isRoom(sender)) value = await giftStore.profile(message.profile);
-      else if (message.type === 'income-report' && isRoom(sender)) value = await giftStore.report(String(message.room), message.month);
+      else if (message.type === 'income-report' && isRoom(sender)) value = await giftStore.report(String(message.room), message.month, {includeAllSessions:message.includeAllSessions === true});
       else if (message.type === 'income-session' && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
         value = await giftStore.recordSession({...message, room, type:message.boundaryType});
+      }
+      else if (message.type === 'contribution-snapshot' && isRoom(sender)) {
+        const room = roomFromUrl(sender.tab.url), config = await readRecord(`live-assistant:config:${room}`);
+        value = config?.incomeEnabled === false ? false : await giftStore.recordContributionSnapshot({...message,room});
       }
       else if (message.type === 'contribution-record' && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
@@ -202,7 +229,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         try { valid = valid && (event.unitValue == null || (Number.isFinite(event.unitValue) && event.unitValue >= 0 && event.unitValue <= 1e9)); } catch { valid = false; }
         if (!valid) throw Object.assign(new Error('礼物记录无效'),{code:'INVALID_EVENT'});
         const config = await readRecord(`live-assistant:config:${room}`);
-        if (config?.incomeEnabled === false || (config?.selfId && String(event.user?.id) === config.selfId)) value = false;
+        if (config?.incomeEnabled === false) value = false;
         else value = await giftStore.record({ room, event, userKey: message.userKey, rate: message.rate, capturedAt:message.capturedAt });
       }
       else if (message.type === 'ai' && isRoom(sender)) {

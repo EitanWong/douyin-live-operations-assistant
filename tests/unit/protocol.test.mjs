@@ -317,6 +317,22 @@ test('比分字段兼容纯数字显示文本、默认零和模糊展示，不�
   ));
   assert.deepEqual(event.scores, [{anchorId:'1',score:1273262},{anchorId:'2',score:65249},{anchorId:'3',score:0}]);
 });
+
+test('多人比分从两种连麦名单补齐昵称，只接收比分中明确参战的 UID', () => {
+  const user=(id,name)=>cat(b(1028,id),b(3,name));
+  const event=decodeMessage('WebcastLinkMicMethod',cat(b(17,score(uid,100)),b(17,score(21,50)),b(17,score(22,20)),
+    b(45,user(uid,'己方')),b(45,user('21','乙')),b(58,b(1,user('22','丙'))),b(58,b(1,user('23','连麦观众')))));
+  assert.deepEqual(event.participants,[{anchorId:uid,name:'己方'},{anchorId:'21',name:'乙'},{anchorId:'22',name:'丙'}]);
+  assert.equal(decodeMessage('WebcastLinkMicMethod',b(45,user('21','普通连麦'))),null);
+});
+
+test('指标协议的明确展馆文案可作为保级数据，不保留跳转或未知额外载荷',()=>{
+  const info=cat(b(1,'sslocal://private'),b(2,cat(b(3,'甄选展馆'))),b(2,cat(b(3,'差1款保级'))),b(3,'private-extra'));
+  const event=decodeMessage('WebcastRoomIndicatorMessage',cat(b(1,common),i(2,9),b(4,info)));
+  assert.equal(event.exhibitionRetention.remaining,1);
+  assert.equal(event.exhibitionRetention.name,'甄选展馆');
+  assert.doesNotMatch(JSON.stringify(event),/private/);
+});
 test('PK 开始和结束按 settings、主播映射和 BattleScore 字段解码', () => {
   const settings = cat(i(2, '9007199254740993333'), i(3, 1800000000000), i(4, 300));
   const start = decodeMessage('WebcastLinkMicBattleMethod', cat(b(1, common), b(2, settings), b(6, participant(uid, '己方', 'room-1')), b(6, participant(12345, '对方', 'room-2'))));

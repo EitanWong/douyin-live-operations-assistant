@@ -3,7 +3,7 @@
   "name": "抖音直播运营助手",
   "version": "0.1.1",
   "description": "抖音直播互动助手，支持自动感谢、欢迎、AI互动、定时消息和多主播月度礼物账本。",
-  "permissions": ["storage", "unlimitedStorage"],
+  "permissions": ["storage", "unlimitedStorage", "alarms", "power"],
   "host_permissions": ["https://live.douyin.com/*"],
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },
@@ -11,7 +11,8 @@
   "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
   "content_scripts": [
     { "matches": ["https://live.douyin.com/*"], "js": ["page.js"], "run_at": "document_start", "world": "MAIN" },
-    { "matches": ["https://live.douyin.com/*"], "js": ["content.js"], "run_at": "document_start", "world": "ISOLATED" }
+    { "matches": ["https://live.douyin.com/*"], "js": ["content.js"], "run_at": "document_start", "world": "ISOLATED" },
+    { "matches": ["https://lf-normal-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html*"], "js": ["indicator-frame.js"], "run_at": "document_idle", "world": "ISOLATED", "all_frames": true }
   ],
-  "minimum_chrome_version": "111"
+  "minimum_chrome_version": "120"
 }

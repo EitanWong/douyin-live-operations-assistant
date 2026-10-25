@@ -63,13 +63,23 @@ if (room) {
   window.addEventListener('message', e => {
     if (e.source !== window || e.origin !== location.origin || e.data?.source !== 'live-assistant-content-v1') return;
     if (e.data.type === 'hello') { ready = true; void flush(); void flushCaptures(); adapter.emitStatus(); }
+    if (e.data.type === 'collection-pulse' && e.data.room === room && currentRoom() === room) {
+      adapter.collectionGuard?.tick(); adapter.emitStatus();
+      window.postMessage({source:'live-assistant-page-v1',room,type:'collection-result',id:e.data.id,active:adapter.status.collection?.active === true},location.origin);
+    }
+    if (e.data.type === 'collection-stop' && e.data.room === room) adapter.collectionGuard?.stop();
     if (e.data.type === 'flow' && e.data.room === room) { paused = Boolean(e.data.paused); if (!paused) void flush(); adapter.emitStatus(); }
     if (e.data.type === 'send-api' && e.data.room === room && currentRoom() === room && typeof e.data.id === 'string' && e.data.id.length <= 64) {
-      const {id,operation,channel,token,text} = e.data;
-      if (!['prepare','commit'].includes(operation)) return;
+      const {id,operation,channel,token,text,action,target,count,sequence} = e.data;
+      if (!['prepare','commit','prepare-moderation','commit-moderation','prepare-like','commit-like','stop-like'].includes(operation)) return;
       void (async()=>{
         const sender = adapter.requestSender;
-        const result = operation === 'prepare' ? sender?.prepare(channel) || {available:false}
+        const result = operation === 'prepare-like' ? sender?.prepareLike() || {available:false}
+          : operation === 'commit-like' ? typeof token === 'string' && token.length<=64 ? await sender?.commitLike(token,count,sequence) : {submitted:false}
+          : operation === 'stop-like' ? typeof token === 'string' && token.length<=64 ? sender?.stopLike(token) : {stopped:false}
+          : operation === 'prepare-moderation' ? sender?.prepareModeration(action,target) || {available:false}
+          : operation === 'commit-moderation' ? typeof token === 'string' && token.length<=64 ? await sender?.commitModeration(token) : {submitted:false}
+          : operation === 'prepare' ? sender?.prepare(channel) || {available:false}
           : typeof token === 'string' && typeof text === 'string' && text.length <= 200 ? await sender?.commit(token,text) : {submitted:false,reason:'请求参数无效'};
         window.postMessage({source:'live-assistant-page-v1',room,type:'send-api-result',id,result},location.origin);
       })();

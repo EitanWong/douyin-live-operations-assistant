@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { JSDOM } from 'jsdom';
 import { Panel } from '../../src/ui/panel.js';
 import { AnchorStats } from '../../src/core/anchor-stats.js';
-import { copy, DEFAULTS, Engine } from '../../src/core/engine.js';
+import { copy, DEFAULTS, Engine, mergeConfig } from '../../src/core/engine.js';
+import { DEFAULT_TIMER_PHRASES } from '../../src/core/phrases.js';
 import { DouyinAdapter, RoomLock } from '../../src/browser/adapter.js';
 import { gzipSync } from 'node:zlib';
 import { webLocks } from '../helpers/web-locks.mjs';
@@ -23,6 +24,77 @@ function setup(body = '') {
   for (const el of dom.window.document.querySelectorAll('*')) el.getClientRects = () => [{ width: 100, height: 30 }];
   return dom;
 }
+test('扩展工具自动点赞独立于回复模式：输入不会污染配置，状态和停止按钮可用',async()=>{
+  const dom=setup(),config=copy(DEFAULTS),calls=[];
+  const panel=new Panel({config,room:'1',callbacks:{startAutoLike:async options=>calls.push(options),stopAutoLike:()=>calls.push('stop')}});
+  try {
+    panel.node('[data-category=tools]').click();
+    assert.equal(panel.activeTab,'auto-like');assert.equal(panel.node('[data-page=auto-like]').hidden,false);
+    assert.equal(panel.node('[data-auto-like=intervalSec]').value,'2');
+    assert.equal(panel.node('[data-auto-like=intervalSec]').min,'0.001');
+    assert.equal(panel.node('[data-auto-like=intervalSec]').step,'0.001');
+    panel.node('[data-auto-like=batch]').value='30';
+    panel.node('[data-auto-like=intervalSec]').value='0.001';
+    assert.equal(panel.node('[data-auto-like=intervalSec]').checkValidity(),true);
+    panel.node('[data-auto-like=target]').value='65';
+    panel.node('[data-action=auto-like-start]').click();await new Promise(setImmediate);
+    assert.deepEqual(calls[0],{batch:30,intervalSec:0.001,target:65});assert.deepEqual(panel.read(),config);assert.equal(panel.dirty,false);
+    panel.updateAutoLike({phase:'running',accepted:30,batches:1,reason:'正在自动点赞'});
+    assert.equal(panel.node('[data-action=auto-like-start]').disabled,true);
+    assert.equal(panel.node('[data-auto-like=batch]').disabled,true);
+    assert.match(panel.node('[data-auto-like-progress]').textContent,/30 次 · 1 批/);
+    panel.node('[data-action=auto-like-stop]').click();assert.equal(calls.at(-1),'stop');
+    panel.updateAutoLike({phase:'stopped',accepted:30,batches:1,reason:'已停止'});
+    assert.equal(panel.node('[data-action=auto-like-start]').disabled,false);
+    assert.equal(panel.node('[data-action=auto-like-stop]').disabled,true);
+  } finally {panel.destroy();dom.window.close();}
+});
+test('PK 播报设置通过内联摘要展开，开关联动、零点预览与表单草稿保持一致',()=>{
+  const dom=setup(),config=copy(DEFAULTS),panel=new Panel({config,room:'1',callbacks:{}});
+  try{
+    assert.equal(panel.root.querySelector('[data-tab=pk-settings]'),null);
+    assert.equal(panel.root.querySelector('[data-pk-settings-open],[data-pk-settings-close]'),null);
+    const settings=panel.node('[data-pk-settings]');assert.equal(settings.closest('[data-page]').dataset.page,'pk');assert.equal(settings.open,false);
+    const summary=settings.querySelector('summary');summary.click();
+    assert.equal(panel.activeTab,'pk');assert.equal(settings.open,true);assert.equal(panel.dirty,false);
+    assert.equal(panel.root.querySelectorAll('[data-field="pkOperations.enabled"]').length,1);
+    assert.equal(panel.node('[data-field="pkOperations.aiEnabled"]').closest('details'),settings);
+    assert.equal(panel.node('[data-field="pkOperations.reportEnabled"]').matches(':disabled'),true);
+    assert.equal(panel.node('[data-pk-midnight-settings]').hidden,true);
+    panel.node('[data-field="pkOperations.enabled"]').click();
+    assert.match(panel.node('[data-summary=pk-broadcast]').textContent,/固定格式/);
+    assert.equal(panel.node('[data-pk-settings-state]').textContent,'已开启');
+    assert.equal(panel.node('[data-field="pkOperations.reportEnabled"]').matches(':disabled'),false);
+    const report=panel.node('[data-field="pkOperations.reportEnabled"]'),interval=panel.node('[data-field="pkOperations.reportSec"]');
+    if(report.checked)report.click();
+    assert.equal(interval.disabled,true);report.click();assert.equal(interval.disabled,false);
+    interval.value='90';interval.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+    assert.match(panel.node('[data-pk-settings-summary]').textContent,/任务每 90 秒/);
+    const midnight=panel.node('[data-field="pkOperations.midnightEnabled"]');
+    if(midnight.checked)midnight.click();
+    assert.equal(panel.node('[data-pk-midnight-settings]').hidden,true);midnight.click();
+    assert.equal(panel.node('[data-pk-midnight-settings]').hidden,false);
+    const duration=panel.node('[data-field="pkOperations.durationSec"]'),grace=panel.node('[data-field="pkOperations.crossMidnightSec"]');
+    duration.value='600';grace.value='10';duration.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+    assert.match(panel.node('[data-pk-plan-preview]').textContent,/23:50:10 开局 → 次日 00:00:10 结束/);
+    grace.value='600';grace.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+    assert.match(panel.node('[data-pk-plan-preview]').textContent,/结束余量需小于 PK 时长/);
+    grace.value='10';grace.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+    const read=panel.read();assert.equal(read.pkOperations.enabled,true);assert.equal(read.ai.enabled,false);
+    assert.match(settings.textContent,/固定格式示例/);
+    summary.click();assert.equal(panel.activeTab,'pk');assert.equal(settings.open,false);
+    summary.click();assert.equal(panel.node('[data-field="pkOperations.enabled"]').checked,true);assert.equal(interval.value,'90');
+    panel.node('[data-field="pkOperations.enabled"]').click();assert.equal(interval.matches(':disabled'),true);assert.equal(panel.node('[data-pk-midnight-settings]').hidden,true);
+    panel.node('[data-field="pkOperations.enabled"]').click();assert.equal(interval.value,'90');assert.equal(report.checked,true);
+    for(const key of ['gift','welcome','like','keyword','bot'])panel.node(`[data-field="${key}.enabled"]`).checked=false;
+    panel.node('[data-field="timersEnabled"]').checked=false;panel.applyFeatureVisibility();
+    panel.tab('ai');panel.node('[data-category=interaction]').click();assert.equal(panel.activeTab,'anchor');
+    panel.node('[data-tab=pk]').click();assert.equal(panel.activeTab,'pk');assert.equal(settings.open,true);assert.equal(interval.value,'90');
+    panel.tab('ai');
+    const contextInfo=[...panel.root.querySelectorAll('h3')].find(node=>node.textContent==='所有 AI 功能共用直播上下文');
+    assert.equal(contextInfo.closest('[data-chat-controls]'),null);
+  }finally{panel.destroy();dom.window.close();}
+});
 test('面板可完整读写配置、切换选项、保存不会丢失隐藏字段', () => {
   const dom = setup(); const c = copy(DEFAULTS); c.mode = 'preview'; c.anchorId = '1234567890'; c.like.enabled = true;
   const panel = new Panel({ config: c, room: '1234567890', callbacks: {} });
@@ -34,6 +106,66 @@ test('面板可完整读写配置、切换选项、保存不会丢失隐藏字�
   panel.tab('likes');
   assert.equal(panel.root.querySelector('[data-field="like.cooldownSec"]'), null); assert.equal(panel.root.querySelector('[data-page="likes"]').hidden, false);
   dom.window.close();
+});
+test('旧配置升级后只展示四种房间游戏，开关同步菜单并只导出保留的玩法', () => {
+  const dom=setup(), config=mergeConfig({bot:{enabled:true,diceEnabled:true,coinEnabled:true,rpsEnabled:true,choiceEnabled:true}});
+  const panel=new Panel({config,room:'1',callbacks:{}});
+  try {
+    panel.tab('bot');
+    const page=panel.node('[data-page="bot"]');
+    assert.deepEqual([...page.querySelectorAll('[role="switch"]')].map(node=>node.getAttribute('aria-label')),['成语接龙','猜数字','真心话','大冒险']);
+    assert.match(page.textContent,/开始接龙.*开始猜数字.*开始真心话.*开始大冒险/su);
+    assert.doesNotMatch(page.textContent,/骰子|硬币|猜拳|帮我选择/u);
+    assert.match(panel.node('[data-bot-menu]').textContent,/接龙.*猜数字.*真心话.*大冒险/u);
+    panel.node('[data-field="bot.guessEnabled"]').checked=false; panel.syncControls();
+    assert.doesNotMatch(panel.node('[data-bot-menu]').textContent,/猜数字/u);
+    const saved=panel.read();
+    assert.equal(saved.bot.guessEnabled,false);
+    for (const key of ['diceEnabled','coinEnabled','rpsEnabled','choiceEnabled']) assert.equal(Object.hasOwn(saved.bot,key),false);
+  } finally { panel.destroy(); dom.window.close(); }
+});
+test('接龙局数、计分、读音和提示规则可配置，个人积分榜显示答错次数并保留结果', () => {
+  const dom=setup(), config=copy(DEFAULTS); config.bot.enabled=true;
+  const panel=new Panel({config,room:'1',callbacks:{}});
+  const engine=new Engine({config,random:()=>0});
+  try {
+    panel.node('[data-field="bot.idiomMaxAttempts"]').value='3';
+    panel.node('[data-field="bot.idiomPoints"]').value='7';
+    panel.node('[data-field="bot.idiomGames"]').value='2';
+    panel.node('[data-field="bot.idiomPenalty"]').value='3';
+    panel.node('[data-field="bot.idiomHintIntervalSec"]').value='15';
+    panel.node('[data-field="bot.idiomNasalRelaxed"]').checked=false;
+    panel.node('[data-field="bot.idiomCountCorrectOnly"]').checked=true;
+    panel.node('[data-field="bot.idiomHintsEnabled"]').checked=false;
+    const next=panel.read();
+    assert.equal(next.bot.idiomMaxAttempts,3);
+    assert.equal(next.bot.idiomPoints,7);
+    assert.equal(next.bot.idiomGames,2);
+    assert.equal(next.bot.idiomPenalty,3);
+    assert.equal(next.bot.idiomHintIntervalSec,15);
+    assert.equal(next.bot.idiomNasalRelaxed,false);
+    assert.equal(next.bot.idiomCountCorrectOnly,true);
+    assert.equal(next.bot.idiomHintsEnabled,false);
+    engine.bot.startSession('idiom','','','一心一意',next.bot);
+    engine.bot.participate('意气风发',{id:'a',name:'<img src=x onerror=alert(1)>'},next.bot,50).commit();
+    engine.bot.participate('接龙 你好世界',{id:'a',name:'<img src=x onerror=alert(1)>'},next.bot,50).commit();
+    panel.open=true; panel.tab('bot'); panel.refresh(engine);
+    assert.match(panel.node('[data-bot-session]').textContent,/剩2次/);
+    assert.match(panel.node('[data-bot-scores]').textContent,/4 分.*答对 1 次.*答错 1 次/);
+    assert.equal(panel.node('[data-bot-scores]').querySelector('img'),null);
+    assert.equal(panel.node('[data-bot-score-empty]').hidden,true);
+    const observer=new dom.window.MutationObserver(()=>{});
+    observer.observe(panel.node('[data-bot-scores]'),{subtree:true,childList:true,characterData:true});
+    panel.refresh(engine); assert.equal(observer.takeRecords().length,0); observer.disconnect();
+    engine.bot.reply('结束游戏',next.bot,50,'主持','h').commit();
+    panel.refresh(engine);
+    assert.match(panel.node('[data-bot-session]').textContent,/已结束/);
+    assert.match(panel.node('[data-bot-scores]').textContent,/4 分/);
+    engine.bot.reply('开始接龙',next.bot,50,'主持','h').commit();
+    panel.refresh(engine);
+    assert.equal(panel.node('[data-bot-scores]').hidden,true);
+    assert.equal(panel.node('[data-bot-score-empty]').hidden,false);
+  } finally { panel.destroy(); dom.window.close(); }
 });
 test('最近观众列表展示可确认的性别和具体年龄，不显示缺失项',()=>{
   const dom=setup();const panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
@@ -158,6 +290,8 @@ test('仅观察同源直播 IM 长轮询，解码二进制响应并抑制跨传�
     await a.chain;
     assert.equal(a.status.pollHook, true); assert.equal(a.status.pollRequests, 3); assert.equal(a.status.pollResponses, 2); assert.equal(a.status.pollUnsupported, 1);
     assert.equal(a.status.pollFrames, 2); assert.equal(a.status.duplicateEvents, 1);
+    assert.equal(a.status.connected,false);assert.equal(a.healthy(),true,'成功的长轮询不需要 WebSocket 在线');
+    const lastPoll=a.status.lastPoll;a.status.lastPoll=Date.now()-90001;assert.equal(a.healthy(),false);a.status.lastPoll=lastPoll;
     assert.equal(a.status.unknownMethods.WebcastMysteryMessage, 1);
     assert.deepEqual(events.map(event=>event.type), ['end']); assert.equal(events[0].source, 'socket');
     assert.equal(captures.length,3,'帧日志包含重复业务帧和未知 method 帧');
@@ -238,6 +372,33 @@ test('空定时话术会展开折叠区并定位错误，启用组不能静默�
   const dom=setup(),c={...copy(DEFAULTS),mode:'preview'};c.timersEnabled=true;c.timers=[{id:'blank',enabled:true,messages:[],intervalSec:300,start:'',end:'',quietSec:15}];const p=new Panel({config:c,room:'1',callbacks:{}});
   const timing=p.root.querySelector('[data-list="timers"] details');assert.equal(timing.open,false);assert.throws(()=>p.read(),/至少一条定时话术/);assert.equal(p.activeTab,'timers');assert.equal(p.root.querySelector('[data-item="messages"]').getAttribute('aria-invalid'),'true');p.root.querySelector('[data-item="messages"]').value='欢迎';p.root.querySelector('[data-item="quietSec"]').value='-1';assert.throws(()=>p.read(),/互动避让/);assert.equal(timing.open,true);p.destroy();dom.window.close();
 });
+test('默认欢迎关注话术直接显示，设置中没有补充预设按钮', () => {
+  const dom=setup(), config=copy(DEFAULTS);
+  const panel=new Panel({config,room:'1',callbacks:{}});
+  try {
+    assert.equal(panel.root.querySelector('[data-phrase-library], [data-phrase-group], [data-keyword-presets]'),null);
+    assert.deepEqual(panel.node('[data-list="timers"] [data-item="messages"]').value.split('\n'),DEFAULT_TIMER_PHRASES);
+    assert.deepEqual(panel.read().timers,config.timers);
+  } finally { panel.destroy(); dom.window.close(); }
+});
+test('直接编辑话术保留草稿、自定义规则及各定时组启停和间隔', () => {
+  const dom=setup(), config=copy(DEFAULTS);
+  config.gift.templates=['自己的感谢'];
+  config.keyword.rules=[{keywords:['几点开播'],reply:'今晚八点',exact:false}];
+  config.timers=[{...config.timers[0],messages:['自己的定时内容'],enabled:false,intervalSec:720}, {...config.timers[0],id:'second',messages:['第二组']}];
+  const panel=new Panel({config,room:'1',callbacks:{}});
+  try {
+    const field=panel.node('[data-list="timers"] [data-item="messages"]');
+    field.value+='\n欢迎来玩，喜欢就关注一下。';
+    field.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+    const result=panel.read();
+    assert.deepEqual(result.gift.templates,config.gift.templates);
+    assert.deepEqual(result.keyword.rules,config.keyword.rules);
+    assert.deepEqual(result.timers[0],{...config.timers[0],messages:['自己的定时内容','欢迎来玩，喜欢就关注一下。']});
+    assert.deepEqual(result.timers[1],config.timers[1]);
+    assert.equal(result.timersEnabled,false); assert.equal(panel.dirty,true);
+  } finally { panel.destroy(); dom.window.close(); }
+});
 test('未保存设置开始时先保存，等待期间刷新不会允许重复开始',async()=>{
   const dom=setup();let release,starts=0,saves=0;const c={...copy(DEFAULTS),mode:'preview'},e=new Engine({config:c});
   const p=new Panel({config:c,room:'1',callbacks:{save:async()=>{saves++;await new Promise(r=>release=r);},start:()=>{starts++;e.start();}}});p.refresh(e);
@@ -247,16 +408,35 @@ test('未保存设置开始时先保存，等待期间刷新不会允许重复�
   p.destroy();dom.window.close();
 });
 
-test('调试消息按钮只在自动发送运行时启用并进入调试回调',async()=>{
-  const dom=setup();let sends=0;const c={...copy(DEFAULTS),mode:'auto'},e=new Engine({config:c});
-  const p=new Panel({config:c,room:'1',callbacks:{debugSend:()=>{sends++;}}});
+test('两种调试弹幕只在自动发送运行时启用，并分别传递普通和管理员通道',async()=>{
+  const dom=setup(),channels=[];const c={...copy(DEFAULTS),mode:'auto'},e=new Engine({config:c});
+  const p=new Panel({config:c,room:'1',callbacks:{debugSend:channel=>{channels.push(channel);}}});
+  const buttons=['debug-send','debug-send-admin'].map(action=>p.node(`[data-action=${action}]`));
   try {
-    p.refresh(e);assert.equal(p.node('[data-action=debug-send]').disabled,true);
-    e.start();p.refresh(e);assert.equal(p.node('[data-action=debug-send]').disabled,false);
-    p.node('[data-action=debug-send]').click();await new Promise(r=>setTimeout(r,0));
-    assert.equal(sends,1);assert.match(p.node('.toast').textContent,/已加入发送队列/);
-    e.config.mode='preview';p.refresh(e);assert.equal(p.node('[data-action=debug-send]').disabled,true);
+    p.refresh(e);assert.ok(buttons.every(button=>button.disabled));
+    e.start();p.refresh(e);assert.ok(buttons.every(button=>!button.disabled));
+    for (const button of buttons) {button.click();await new Promise(r=>setTimeout(r,0));}
+    assert.deepEqual(channels,['chat','admin']);assert.match(p.node('.toast').textContent,/管理员弹幕测试消息已加入发送队列/);
+    p.refresh(e,{contextInvalidated:true});assert.ok(buttons.every(button=>button.disabled));
+    e.config.mode='preview';p.refresh(e);assert.ok(buttons.every(button=>button.disabled));
   } finally {p.destroy();dom.window.close();}
+});
+
+test('调试发送经应用队列保留两种通道，管理员测试不依赖欢迎规则',async()=>{
+  const dom=setup(),values=new Map([['live-assistant:config:1234567890',{mode:'auto',welcome:{enabled:false,admin:{enabled:false}}}]]),sent=[];
+  let api,connected=true;
+  const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>connected,requestAvailable:()=>true,
+    send:async(text,isCurrent,{channel})=>{assert.equal(isCurrent(),true);sent.push({text,channel});return {submitted:true,channelUsed:channel};}};
+  const engine=boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:(key,value)=>values.set(key,value),del:key=>values.delete(key),request:()=>{},adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>{api=value;}});
+  try {
+    assert.throws(()=>api.panel.callbacks.debugSend('admin'),/开始场控/);
+    await api.panel.callbacks.start();
+    connected=false;assert.throws(()=>api.panel.callbacks.debugSend('admin'),/未连接/);connected=true;
+    api.panel.callbacks.debugSend('chat');api.panel.callbacks.debugSend('admin');
+    await new Promise(setImmediate);
+    assert.deepEqual(sent,[{text:'调试消息发送测试',channel:'chat'},{text:'管理员弹幕调试消息发送测试',channel:'admin'}]);
+    assert.equal(engine.queue.length,0);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 });
 test('稳定刷新不重建节点，收起后日志不渲染，记录限制200条',async()=>{
   const dom=setup();const p=new Panel({config:{...copy(DEFAULTS), mode:'preview'},room:'1',callbacks:{}}),e=new Engine({config:{...copy(DEFAULTS), mode:'preview'}});e.start();p.refresh(e);
@@ -460,13 +640,15 @@ test('名单模式隐藏无关条件且保留配置；模式提示跟随草稿�
 test('各模块摘要跟随草稿；礼物快捷阈值和独立关键词页可用', () => {
   const dom=setup(),c={...copy(DEFAULTS),mode:'preview'};c.keyword.enabled=true;c.keyword.rules=[];c.timersEnabled=true;const p=new Panel({config:c,room:'1',callbacks:{}});
   try {
-    assert.deepEqual([...p.root.querySelectorAll('[data-category]')].map(node=>node.textContent),['直播互动','设置']);
+    assert.deepEqual([...p.root.querySelectorAll('[data-category]')].map(node=>node.textContent),['直播互动','扩展工具','设置']);
     p.tab('runtime');
     assert.equal(p.activeTab,'runtime'); assert.equal(p.node('[data-page="runtime"]').hidden,false);
     for (const key of ['gift','welcome','like','keyword']) assert.equal(p.node(`[data-field="${key}.enabled"]`).closest('[data-page]').dataset.page,'features');
     assert.equal(p.node('[data-field="timersEnabled"]').closest('[data-page]').dataset.page,'features');
     assert.equal(p.node('[data-field="ai.enabled"]').closest('[data-page]').dataset.page,'features');
     assert.equal(p.node('[data-field="ai.chatEnabled"]').closest('[data-page]').dataset.page,'features');
+    assert.equal(p.node('[data-field="ai.trigger"]'),null);
+    assert.equal(p.node('[data-field="ai.mentions"]'),null);
     assert.equal(p.node('[data-field="ai.idleEnabled"]').closest('[data-page]').dataset.page,'features');
     assert.equal(p.node('[data-field="moderation.enabled"]').closest('[data-page]').dataset.page,'features');
     assert.equal(p.node('[data-field="gift.enabled"]').checked,true);
@@ -543,7 +725,7 @@ test('所有互动模块在设置中集中启停，禁用后互动页面入口�
     p.node('[data-field="welcome.enabled"]').click();
     assert.equal(p.node('[data-tab="welcome"]').hidden,true);
     assert.equal(p.node('[data-category="interaction"]').hidden,false);
-    assert.equal(p.node('.primary-nav').style.gridTemplateColumns,'repeat(2, minmax(0, 1fr))');
+    assert.equal(p.node('.primary-nav').style.gridTemplateColumns,'repeat(3, minmax(0, 1fr))');
 
     giftSwitch.click();
     assert.equal(p.node('[data-tab="gift"]').hidden,false);
@@ -928,14 +1110,14 @@ test('月报可选多个主播月份，关闭采集后仍可从主播数据查�
   } finally {panel.destroy();dom.window.close();}
 });
 
-test('主播看板按所选日期汇总并分页，不跨 UID 显示收入，稳定数据不重绘', () => {
+test('主播看板按所选直播场次汇总并分页，不跨 UID 显示收入，稳定数据不重绘', () => {
   const dom=setup(),config=copy(DEFAULTS);config.anchorId='101';
   const panel=new Panel({config,room:'1',callbacks:{}}),now=Date.now();
   const stats=new AnchorStats({now:()=>now});
   stats.restore({version:1,records:Array.from({length:25},(_,i)=>({battleKey:`b${i}`,anchorId:'101',name:'主播甲',roomId:'1',opponents:[{anchorId:'202',name:'主播乙'}],startedAt:now-(i===24?2*86400000:1000),endedAt:now-(i===24?2*86400000:0),phase:'ended',score:100,scoreFinal:true,outcome:'win'}))});
   const engine=new Engine({config});engine.anchorStats=stats;
   try {
-    panel.updateAnchorIncome({anchorId:'101',days:[{date:new Date(now+8*3600000).toISOString().slice(0,10),estimatedIncome:12}]});
+    panel.updateAnchorIncome({anchorId:'101',currentSession:{id:'current',startAt:now-3600000,endAt:0,startSource:'platform',estimatedIncome:12},allSessions:[{id:'older',startAt:now-3*86400000,endAt:now-86400000,startSource:'platform',endSource:'platform',estimatedIncome:3}]});
     panel.refresh(engine,{connected:true,frames:1});panel.tab('anchor');
     assert.equal(panel.node('[data-anchor-stat=battles]').textContent,'24');
     assert.match(panel.node('[data-anchor-stat=income]').textContent,/12\.00/);
@@ -1197,10 +1379,12 @@ test('场次面板显示整场金额和边界来源，旧日账不计作直播�
     assert.equal(p.node('[data-gift-diamonds]').textContent,'200');
     assert.match(p.node('[data-gift-estimate-note]').textContent,/结束边界推定/);
     p.updateIncome({room:'1',month:'2026-10',summary:session,sessions:[session],days:[],legacyDays:[]});
-    assert.equal(p.node('[data-income-days]').textContent,'1');
+    assert.equal(p.node('[data-income-sessions]').textContent,'1');
     assert.match(p.node('[data-income-daily]').textContent,/推定边界/);
+    assert.match(p.node('[data-income-daily]').textContent,/开播时间.*下播时间.*直播时长/);
+    assert.match(p.node('[data-income-daily]').textContent,/2 小时/);
     p.updateIncome({room:'1',month:'2026-09',summary:{},sessions:[],days:[{date:'2026-09-01'}],legacyDays:[]});
-    assert.equal(p.node('[data-income-days]').textContent,'0');
+    assert.equal(p.node('[data-income-sessions]').textContent,'0');
   } finally {p.destroy();dom.window.close();}
 });
 
@@ -1226,4 +1410,116 @@ test('房间状态进入真实账本并驱动本场概览，接口失效不制�
     assert.equal(api.panel.node('[data-gift-total-title]').textContent,'最近一场礼物价值');
     assert.equal(engine.running,false);
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});
+
+test('暂停采集时本人送出的真实礼物仍计入本场收入，重复事件只计一次且不触发感谢',async()=>{
+  const dom=setup(),values=new Map();let api,onEvent;
+  const config=copy(DEFAULTS);config.selfId='12345';
+  values.set('live-assistant:config:1234567890',config);
+  const engine=boot({page:dom.window,get:(k,f)=>values.get(k)??f,set:async(k,v)=>values.set(k,structuredClone(v)),del:k=>values.delete(k),all:()=>Object.fromEntries(values),request:()=>{},
+    adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>false};},
+    identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
+  try {
+    const gift={type:'gift',id:'self-gift-1',groupId:'self-combo-1',roomId:'live-1',giftId:'rose',giftName:'玫瑰',count:2,unitValue:100,receivedAt:Date.now(),user:{id:'12345',name:'本人'},final:true};
+    await onEvent(gift);await onEvent(gift);await new Promise(resolve=>setTimeout(resolve,650));
+    assert.equal(api.panel.node('[data-gift-diamonds]').textContent,'200');
+    assert.equal(engine.queue.length,0);assert.equal(engine.running,false);
+    const saved=values.get('live-assistant:income:1234567890');assert.ok(saved.sessions.length);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});
+
+test('主播管理合并UID别名不重复插入当前主播，各地址账本仍可选择',()=>{
+  const dom=setup(),panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
+  try {
+    panel.updateProfiles([{room:'2',rooms:['2','1'],name:'同名主播',anchorId:'101'},{room:'3',name:'同名主播',anchorId:'202'}]);
+    assert.equal(panel.root.querySelectorAll('[data-profiles] .profile-card').length,2);
+    assert.equal(panel.node('[data-profiles] a').href,'https://live.douyin.com/1?anchor_id=101');
+    assert.deepEqual([...panel.node('[data-income-room]').options].map(option=>option.value).sort(),['1','2','3']);
+    panel.node('[data-income-room]').value='2';
+    panel.updateProfiles([{room:'1',rooms:['1','2'],name:'同名主播',anchorId:'101'},{room:'3',name:'同名主播',anchorId:'202'}]);
+    assert.equal(panel.incomeSelection().room,'2');
+    assert.equal(panel.root.querySelectorAll('[data-profiles] .profile-card').length,2);
+  } finally {panel.destroy();dom.window.close();}
+});
+
+test('配置 AI 后可一键填充指定定时组，生成期间防重复，其他设置保持不变',async()=>{
+  const dom=setup(),config=copy(DEFAULTS);config.timersEnabled=true;
+  config.timers=[{...config.timers[0],enabled:true,messages:[],intervalSec:720},{...config.timers[0],id:'other',messages:['第二组自定义']}];
+  let calls=0,release,options;
+  const panel=new Panel({config,room:'1',callbacks:{generatePhrases:async(c,key,remember,value)=>{calls++;options=value;assert.equal(key,'draft-key');return new Promise(resolve=>release=resolve);}}});
+  try {
+    const button=panel.root.querySelector('[data-generate-phrases="timer"]');
+    assert.equal(button.parentElement.hidden,true);
+    panel.node('[data-api-key]').value='draft-key';panel.syncControls();
+    assert.equal(button.parentElement.hidden,false);
+    const pending=panel.fillPhrases(button);
+    assert.equal(button.disabled,true);assert.equal(button.textContent,'正在生成…');
+    await panel.fillPhrases(button);assert.equal(calls,1);
+    release(['欢迎来坐坐，喜欢就点个关注。','欢迎新来的朋友，关注一下下次好找。']);await pending;
+    const result=panel.read();
+    assert.deepEqual(result.timers[0],{...config.timers[0],messages:['欢迎来坐坐，喜欢就点个关注。','欢迎新来的朋友，关注一下下次好找。']});
+    assert.deepEqual(result.timers[1],config.timers[1]);
+    assert.deepEqual(result.gift,config.gift);assert.equal(panel.dirty,true);
+    assert.equal(button.disabled,false);assert.equal(options.kind,'timer');
+    assert.deepEqual(config.timers[0].messages,[]);
+  } finally {panel.destroy();dom.window.close();}
+});
+
+test('AI 生成失败或等待期间编辑内容时保留草稿；支持新增定时组和关键词',async()=>{
+  const dom=setup(),config=copy(DEFAULTS);let release;
+  const panel=new Panel({config,room:'1',callbacks:{hasAIKey:()=>true,generatePhrases:()=>new Promise(resolve=>release=resolve)}});
+  try {
+    const button=panel.root.querySelector('[data-generate-phrases="welcome"]'),field=panel.node('[data-field="welcome.templates"]');
+    assert.equal(button.parentElement.hidden,false);
+    const pending=panel.fillPhrases(button);field.value='我自己写的欢迎';release(['AI 欢迎']);await pending;
+    assert.equal(field.value,'我自己写的欢迎');
+    panel.callbacks.generatePhrases=async()=>{throw new Error('服务繁忙');};await panel.fillPhrases(button);
+    assert.equal(field.value,'我自己写的欢迎');assert.equal(button.disabled,false);
+    const row=panel.addRow('timers');assert.equal(row.querySelector('[data-phrase-generator]').hidden,false);
+    let calls=0;
+    panel.callbacks.generatePhrases=async(c,key,remember,options)=>{calls++;assert.equal(options.kind,'keyword');assert.deepEqual(options.keywords,['你好']);return ['{user} 你好呀'];};
+    const keyword=panel.addRow('keywords'),keyButton=keyword.querySelector('[data-generate-phrases]');
+    await panel.fillPhrases(keyButton);assert.equal(calls,0);
+    keyword.querySelector('[data-item="keywords"]').value='你好';await panel.fillPhrases(keyButton);
+    assert.equal(keyword.querySelector('[data-item="reply"]').value,'{user} 你好呀');assert.equal(calls,1);
+    panel.node('[data-field="ai.endpoint"]').value='https://different.test/v1/chat/completions';
+    panel.callbacks.hasAIKey=()=>false;panel.syncControls();assert.equal(button.parentElement.hidden,true);
+    panel.node('[data-field="ai.endpoint"]').value='http://localhost:11434/v1/chat/completions';panel.syncControls();assert.equal(button.parentElement.hidden,false);
+  } finally {panel.destroy();dom.window.close();}
+});
+
+test('应用 AI 话术生成复用当前服务已存密钥，填充草稿不保存设置或发送弹幕',async()=>{
+  const dom=setup(),values=new Map([['live-assistant:api-key:https://api.deepseek.com','saved-key']]);let api,details,sends=0;
+  const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>false,send:async()=>{sends++;}};
+  boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:(key,value)=>values.set(key,value),del:key=>values.delete(key),
+    request:value=>{details=value;value.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:'["欢迎 {user}，随便坐。","{user} 你好，欢迎来玩。"]'}}]})});},
+    adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>{api=value;}});
+  try {
+    const button=api.panel.root.querySelector('[data-generate-phrases="welcome"]');
+    assert.equal(button.parentElement.hidden,false);
+    button.click();await new Promise(setImmediate);
+    assert.equal(details.headers.Authorization,'Bearer saved-key');
+    assert.equal(api.panel.node('[data-field="welcome.templates"]').value,'欢迎 {user}，随便坐。\n{user} 你好，欢迎来玩。');
+    assert.equal(api.panel.dirty,true);assert.equal(sends,0);
+    assert.equal(values.has('live-assistant:config:1234567890'),false);
+    assert.deepEqual(JSON.parse(details.data).messages.map(message=>message.role),['system','user']);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});
+
+test('内容治理独立设置页可读写 AI 与分级处置，检测记录安全显示并保留配置',()=>{
+  const dom=setup(),c=copy(DEFAULTS);c.moderation.enabled=true;
+  const p=new Panel({config:c,room:'1',callbacks:{}}),e=new Engine({config:c});
+  try{
+    p.tab('moderation');assert.equal(p.node('[data-page="moderation"]').hidden,false);
+    p.node('[data-field="moderation.threshold"]').value='4';p.node('[data-field="moderation.banThreshold"]').value='8';
+    p.node('[data-field="moderation.severeAction"]').value='mute';p.node('[data-field="moderation.sensitiveTerms"]').value='自定义话题\n隐私曝光';
+    p.syncControls();const saved=p.read();assert.equal(saved.moderation.threshold,4);assert.equal(saved.moderation.banThreshold,8);
+    assert.equal(saved.moderation.severeAction,'mute');assert.deepEqual(saved.moderation.sensitiveTerms,['自定义话题','隐私曝光']);
+    assert.match(p.node('[data-moderation-summary]').textContent,/4 次/);
+    e.moderation.records=[{id:1,at:Date.now(),user:{name:'<img src=x onerror=alert(1)>'},category:'abuse',text:'<script>alert(1)</script>',confidence:0.98,source:'ai',action:'ban',status:'unknown',reason:'<b>判定</b>',detail:'结果未知，不自动重试'}];
+    p.refresh(e);assert.match(p.node('[data-moderation-records]').textContent,/结果未知/);
+    assert.equal(p.node('[data-moderation-records]').querySelector('img,script,b'),null);
+    p.node('[data-field="moderation.enabled"]').checked=false;p.syncControls();assert.equal(p.node('[data-moderation-settings]').hidden,true);
+    assert.deepEqual(p.read().moderation.sensitiveTerms,['自定义话题','隐私曝光']);
+  }finally{p.destroy();dom.window.close();}
 });

@@ -7,10 +7,27 @@ use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, Mark
 const clock = new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
 const number = value => Number.isFinite(value) ? value : null;
 
+function scorePoints(samples) {
+  const byTime = new Map();
+  for (const point of samples) {
+    if (!Number.isFinite(point.at)) continue;
+    const previous = byTime.get(point.at);
+    // 同一时间戳可能有多帧增量更新。轴提示会为每个相同 x 的样本生成
+    // 一行，先合并为该时刻最新已知值，避免每位主播在提示里出现多次。
+    byTime.set(point.at, {
+      at:point.at,
+      selfScore:number(point.selfScore) ?? previous?.selfScore ?? null,
+      opponentScore:number(point.opponentScore) ?? previous?.opponentScore ?? null,
+      competitorScores:{...previous?.competitorScores, ...Object.fromEntries(Object.entries(point.competitorScores || {}).filter(([,score])=>Number.isFinite(score)))}
+    });
+  }
+  return [...byTime.values()].sort((left,right)=>left.at-right.at);
+}
+
 // Chart options are shared by the panel and its local preview. Missing sides
 // remain null: a missing observation must never be plotted as a zero score.
 export function pkChartOptions(data, {windowMs = 180000, now = Date.now(), widths = {}, colors = {self:'#006d70',opponent:'#c91d43',text:'#60636d',line:'#e2e3e6'}} = {}) {
-  const all = data.trend || data.history?.filter(item=>item.kind === 'score') || [];
+  const all = scorePoints(data.trend || data.history?.filter(item=>item.kind === 'score') || []);
   const cutoff = windowMs ? now-windowMs : -Infinity;
   const before = all.filter(item=>item.at < cutoff).at(-1);
   const points = [...(before ? [before] : []), ...all.filter(item=>item.at >= cutoff)];
@@ -89,12 +106,20 @@ export class LiveCharts {
       const count=name==='contributions' ? options.contributorCount : name==='activity' ? options.activityCount : name==='gap' ? options.gapCount : options.pointCount;
       element.hidden=!count;
       element.nextElementSibling.hidden=Boolean(count);
-      if(!count || !element.clientWidth || !element.clientHeight)continue;
+      if(!count) {
+        this.instances.get(name)?.dispose(); this.instances.delete(name);
+        continue;
+      }
+      if(!element.clientWidth || !element.clientHeight)continue;
       try {
         let chart=this.instances.get(name);
         if(!chart) {chart=init(element,null,{renderer:'svg'});this.instances.set(name,chart);}
-        chart.resize();chart.setOption(options[name],{notMerge:true,lazyUpdate:true});
+        // With notMerge, lazyUpdate swaps the model before replacing the old
+        // graphics. A mousemove in that frame can call getDataParams on a new
+        // series whose data has not been prepared yet (getRawIndex throws).
+        chart.setOption(options[name],{notMerge:true,lazyUpdate:false});chart.resize();
       } catch {
+        this.instances.get(name)?.dispose(); this.instances.delete(name);
         element.hidden=true;element.nextElementSibling.hidden=false;
         element.nextElementSibling.textContent='图表暂不可用，可展开下方数据明细查看。';
       }

@@ -32,7 +32,8 @@ test('应用入口允许登录账号手动回答，同时保留发送回显过�
     await onEvent({type:'chat',id:'manual',source:'socket',user:self,text:'@Eitan 我想当一名医生'});
     assert.equal(engine.bot.session,null);
     assert.equal(engine.queue.length,2);
-    assert.match(engine.queue[1].text,/Eitan.*医生.*儿时的梦想/u);
+    assert.match(engine.queue[1].text,/^Eitan，.*梦想/u);
+    assert.doesNotMatch(engine.queue[1].text,/一只开心|大明星/u);
   } finally {
     dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();
   }

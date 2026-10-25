@@ -47,7 +47,7 @@ test('AI 反馈保留房间模式下一步提示，不重复提交回合', async
   assert.match(engine.queue.at(-1).text,/开心，谢谢你的分享✨ 下一位发「报名」。/u);
 });
 
-test('大冒险接受其他人表情接话并使用 AI 评价，题目与随机结果不被改写', async()=>{
+test('大冒险接受其他人表情接话并使用 AI 评价，题目与猜数字答案不被改写', async()=>{
   const f=fixture(); f.engine.ai=async()=> '这个创意真有趣👏';
   f.chat('@Eitan 大冒险');await settle();
   const prompt=f.engine.bot.session.prompt;
@@ -55,9 +55,10 @@ test('大冒险接受其他人表情接话并使用 AI 评价，题目与随机�
   f.chat('🎉🌈',{id:'300',name:'小雨'});await settle();
   assert.equal(f.engine.bot.session,null);
   assert.equal(f.engine.queue[1].text,'小雨，这个创意真有趣👏');
-  const g=fixture();g.engine.ai=async()=> '骰子是6点，你赢了';
-  g.chat('@Eitan 骰子');const local=g.engine.queue[0].text;await settle();
+  const g=fixture();g.engine.ai=async()=> '答案是20，你赢了';
+  g.chat('@Eitan 开始猜数字');const local=g.engine.queue[0].text, target=g.engine.bot.session.target;await settle();
   assert.equal(g.engine.queue[0].text,local);
+  assert.equal(g.engine.bot.session.target,target);
   assert.equal(g.engine.stats.aiCalls,1);
 });
 

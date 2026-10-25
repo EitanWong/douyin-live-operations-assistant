@@ -2,6 +2,7 @@ import { decodeFrame } from './protocol.js';
 import { recognizeMilestone } from '../core/milestones.js';
 import { PageRequestSender } from './request-sender.js';
 import { AnchorDataCollector } from './anchor-data.js';
+import { CollectionGuard } from './collection-guard.js';
 
 const MAX_CAPTURE_FRAME_BYTES = 512 * 1024;
 function base64(bytes, page) {
@@ -108,10 +109,10 @@ export function readRoomSnapshot(doc = document) {
 export function readAudienceContributions(doc = document) {
   const chatroom = doc.querySelector('#chatroom');
   if (!chatroom) return [];
-  const threshold = [...chatroom.querySelectorAll('p')].find(element => /1000\s*(?:贡献|票)用户/.test(element.textContent || ''));
-  if (!threshold) return [];
+  const threshold = [...chatroom.querySelectorAll('p,h2,h3,[role="tab"]')].find(element => /1000\s*(?:贡献|票)用户|^(?:本场)?(?:用户榜|贡献榜|千票榜)$/.test((element.textContent || '').trim()));
   const suppliedList = doc.querySelector('#chatroom > div > div.LyAdeVIF.sBRqUw32 > div:nth-child(3) > div > div > div > div:nth-child(1)');
   const thousandVoteList = doc.querySelector('#chatroom > div > div.LyAdeVIF.sBRqUw32 > div:nth-child(3) > div > div > div:nth-child(2) > div.Ypyh0f2S');
+  if (!threshold && !suppliedList && !thousandVoteList) return [];
   // The supplied selectors may point at one row, so include their immediate
   // sibling container. If they drift, inspect only branches beside the label.
   const roots = new Set();
@@ -128,34 +129,62 @@ export function readAudienceContributions(doc = document) {
   const rows = new Map();
   for (const row of candidates) {
     if (!row.children?.length) continue;
-    const leaves = [...row.querySelectorAll('*')].filter(element => element.children.length === 0).map(element => element.textContent.trim()).filter(Boolean);
-    const combined = leaves.map((text,index) => ({...contributionCell(text), index})).filter(cell => cell?.name && cell.name.length <= 60 && !excludedContributionName(cell.name));
-    const numeric = leaves.map((text,index) => ({score:contributionScore(text),index})).filter(item => item.score !== null);
-    const names = leaves.map((text,index) => ({text,index})).filter(({text}) => contributionScore(text) === null && !contributionCell(text)?.name && !excludedContributionName(text) && text.length <= 60);
-    if (combined.length + names.length !== 1) continue;
-    const combinedCell = combined[0];
-    const nameCell = names[0];
-    const score = combinedCell?.score ?? numeric.at(-1)?.score;
-    // A lone leading number is usually the row rank, not the contribution score.
-    const hasScore = score !== undefined && !(numeric.length === 1 && numeric[0].index === 0 && nameCell);
-    const rowName = combinedCell?.name || nameCell?.text;
-    const scoreIsFloor = !hasScore && Boolean(thousandVoteList && (row === thousandVoteList || thousandVoteList.contains(row)));
-    if (!rowName || (!hasScore && !scoreIsFloor)) continue;
-    const rowScore = hasScore ? score : 1000;
-    const orderNode = leaves.length ? [...row.querySelectorAll('*')].filter(element => element.children.length === 0)[combinedCell?.index ?? nameCell?.index] : row;
-    let userId = '';
-    for (let node = row; node && node !== chatroom.parentElement && !userId; node = node.parentElement) {
-      for (const attr of ['data-user-id', 'data-uid', 'data-id']) {
-        const id = node.getAttribute?.(attr);
-        if (id && /^\d{4,30}$/.test(id)) { userId = id; break; }
-      }
-      const href = node.matches?.('a[href]') ? node.getAttribute('href') : node.querySelector?.('a[href]')?.getAttribute('href');
-      const match = href?.match(/\/user\/(\d{4,30})/);
-      if (match) userId = match[1];
+    // Real audience rows separate nickname and score. Reading every leaf
+    // mistakes custom fan-club labels (e.g. 岁小孩) for another user and drops
+    // the highest donor. Keep badge/rank text outside this parser.
+    const nativeRow = row.closest('.LLkRvMAV');
+    const nativeName = nativeRow?.querySelector('._QlQGbi1');
+    const nativeScore = nativeRow?.querySelector('.Ql4e1dvM');
+    if (nativeName && nativeScore && row !== nativeRow) continue;
+    if (!nativeRow && row.querySelector('.LLkRvMAV ._QlQGbi1')) continue;
+    let rowName, rowScore, scoreIsFloor = false, orderNode;
+    if (nativeName && nativeScore) {
+      rowName = nativeName.textContent.trim();
+      const scoreText = nativeScore.cloneNode(true);
+      // A club badge can share the score wrapper; only its remaining number
+      // is the contribution, never a badge name or level.
+      for (const badge of scoreText.querySelectorAll('.xfNuFPXo,[data-fansclub],img')) badge.remove();
+      const direct = [...scoreText.childNodes].filter(node=>node.nodeType === 3).map(node=>contributionScore(node.textContent)).filter(value=>value !== null);
+      const leaf = [...scoreText.querySelectorAll('*')].filter(node=>!node.children.length).map(node=>contributionScore(node.textContent)).filter(value=>value !== null);
+      rowScore = contributionScore(scoreText.textContent) ?? direct.at(-1) ?? leaf.at(-1) ?? null;
+      orderNode = nativeName;
+      if (!rowName || rowName.length > 60 || rowScore === null) continue;
+    } else {
+      const leafNodes = [...row.querySelectorAll('*')].filter(element => element.children.length === 0 && element.textContent.trim());
+      const leaves = leafNodes.map(element=>element.textContent.trim());
+      const combined = leaves.map((text,index) => ({...contributionCell(text), index})).filter(cell => cell?.name && cell.name.length <= 60 && !excludedContributionName(cell.name));
+      const numeric = leaves.map((text,index) => ({score:contributionScore(text),index})).filter(item => item.score !== null);
+      const names = leaves.map((text,index) => ({text,index})).filter(({text}) => contributionScore(text) === null && !contributionCell(text)?.name && !excludedContributionName(text) && text.length <= 60);
+      if (combined.length + names.length !== 1) continue;
+      const combinedCell = combined[0], nameCell = names[0];
+      const score = combinedCell?.score ?? numeric.at(-1)?.score;
+      const hasScore = score !== undefined && !(numeric.length === 1 && numeric[0].index === 0 && nameCell);
+      rowName = combinedCell?.name || nameCell?.text;
+      scoreIsFloor = !hasScore && Boolean(thousandVoteList && (row === thousandVoteList || thousandVoteList.contains(row)));
+      if (!rowName || (!hasScore && !scoreIsFloor)) continue;
+      rowScore = hasScore ? score : 1000;
+      orderNode = leafNodes[combinedCell?.index ?? nameCell?.index] || row;
     }
-    const rowKey = userId ? `uid:${userId}` : `name:${rowName}`;
+    const source = thousandVoteList && (thousandVoteList.contains(row) || row.contains(thousandVoteList)) ? 'thousand' : 'audience';
+    let userId = '';
+    for (let node = row; node && node !== chatroom && !userId; node = node.parentElement) {
+      // Never borrow the first UID/link from a container holding other users.
+      if (node !== row && node.textContent.trim() !== row.textContent.trim()) break;
+      const ids = new Set();
+      for (const element of [node,...node.querySelectorAll('[data-user-id],[data-uid],a[href]')]) {
+        for (const attr of ['data-user-id', 'data-uid']) {
+          const id = element.getAttribute?.(attr);
+          if (id && /^\d{4,30}$/.test(id)) ids.add(id);
+        }
+        const match = element.getAttribute?.('href')?.match(/\/user\/(\d{4,30})(?:[/?#]|$)/);
+        if (match) ids.add(match[1]);
+      }
+      if (ids.size > 1) break;
+      if (ids.size === 1) userId = [...ids][0];
+    }
+    const rowKey = `${source}:${userId ? `uid:${userId}` : `name:${rowName}`}`;
     const previous = rows.get(rowKey);
-    if (!previous) rows.set(rowKey, { name:rowName, score:rowScore, scoreIsFloor, userId, orderNode });
+    if (!previous) rows.set(rowKey, { name:rowName, score:rowScore, scoreIsFloor, userId, source, orderNode });
     else {
       if (rowScore > previous.score || (rowScore === previous.score && previous.scoreIsFloor && !scoreIsFloor)) {
         previous.score = rowScore; previous.scoreIsFloor = scoreIsFloor;
@@ -164,6 +193,25 @@ export function readAudienceContributions(doc = document) {
     }
   }
   return [...rows.values()].sort((a,b) => a.orderNode?.compareDocumentPosition(b.orderNode) & 4 ? -1 : 1).map(({orderNode,...row})=>row);
+}
+
+// Observe list replacement, score changes and virtualized rows, without polling
+// the whole chat tree on every message. A timer coalesces one DOM update batch.
+export function watchAudienceContributions(changed, doc = document) {
+  const view = doc.defaultView;
+  if (!view?.MutationObserver) return () => {};
+  let timer;
+  const observer = new view.MutationObserver(records => {
+    const chatroom = doc.querySelector('#chatroom');
+    if (!chatroom || !records.some(record => chatroom.contains(record.target) || [...record.addedNodes].some(node=>node === chatroom || node.contains?.(chatroom)))) return;
+    const lists = [
+      chatroom.querySelector('.LyAdeVIF.sBRqUw32 > div:nth-child(3)'),
+    ].filter(Boolean);
+    if (lists.length && !records.some(record => lists.some(list=>list.contains(record.target) || [...record.addedNodes].some(node=>node === list || node.contains?.(list))))) return;
+    if (!timer) timer = view.setTimeout(()=>{timer=null;changed();},300);
+  });
+  observer.observe(doc.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-user-id','data-uid']});
+  return () => {observer.disconnect();view.clearTimeout(timer);};
 }
 
 export class DouyinAdapter {
@@ -182,6 +230,8 @@ export class DouyinAdapter {
   }
   hook() {
     this.anchorData.start();
+    this.collectionGuard ||= new CollectionGuard({page:this.page,onStatus:status=>{this.status.collection=status;this.emitStatus();}});
+    this.collectionGuard.start();
     try {
       const Native = this.page.WebSocket, adapter = this;
       if (!Native) throw new Error('没有 WebSocket');
@@ -279,7 +329,7 @@ export class DouyinAdapter {
           this.status.duplicateEvents = (this.status.duplicateEvents || 0) + 1; return false;
         });
         this.status.frames++; this.status.lastFrame = Date.now(); this.status.events += events.length;
-        if (transport === 'http-poll') { this.status.pollFrames = (this.status.pollFrames || 0) + 1; this.status.pollEvents = (this.status.pollEvents || 0) + events.length; }
+        if (transport === 'http-poll') { if (!parseError) this.status.lastPoll = receivedAt; this.status.pollFrames = (this.status.pollFrames || 0) + 1; this.status.pollEvents = (this.status.pollEvents || 0) + events.length; }
         for (const event of events) if (event.type.startsWith('pk-')) {
           this.status.pkEvents = (this.status.pkEvents || 0) + 1;
           this.status.lastPK = { type:event.type, receivedAt, decodedAt:Date.now(), method:event.protocolMethod || '',
@@ -338,8 +388,8 @@ export class DouyinAdapter {
     counts[method] = (counts[method] || 0) + 1;
   }
   emitStatus() { this.onStatus({ ...this.status }); }
-  // 无弹幕不等于断线；连接的 open/close 才决定传输是否可用。
-  healthy() { return Boolean(this.status.connected); }
+  // 无弹幕不等于断线；打开的 socket 或近期成功的长轮询都可接收。
+  healthy() { return Boolean(this.status.connected || this.status.lastPoll && Date.now() - this.status.lastPoll < 90000); }
   readAudienceContributions() { return readAudienceContributions(this.page.document || document); }
   readRoomSnapshot() { return readRoomSnapshot(this.page.document || document); }
   findInput() {
@@ -507,11 +557,23 @@ export class DouyinAdapter {
       this.clickChatControl(mode.toggle);
     }
   }
+  async moderate(action, user, isCurrent) {
+    if (!isCurrent() || location.pathname !== this.roomPath) return {submitted:false,reason:'场控已暂停或直播间已变更'};
+    const prepared=await this.requestSender.prepareModeration(action,{id:user.id,secUid:user.secUid});
+    if (!prepared?.available) return {submitted:false,reason:prepared?.reason || '网页管理接口不可用'};
+    if (!isCurrent() || location.pathname !== this.roomPath) return {submitted:false,reason:'管理操作已取消'};
+    return this.requestSender.commitModeration(prepared.token);
+  }
   async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat' } = {}) {
     if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
     if (!this.healthy()) return { submitted: false, retryable: true, reason: '直播数据重连中，本条未发送' };
     const temporary = reason => Object.assign(new Error(reason), { retryable: true });
-    const prepared = await this.requestSender.prepare(channel);
+    let prepared = await this.requestSender.prepare(channel), requestFallback = '';
+    // 未提交前确认无管理员能力时，可安全使用普通弹幕；提交后的未知结果不重发。
+    if (!prepared?.available && channel === 'admin') {
+      const ordinary = await this.requestSender.prepare('chat');
+      if (ordinary?.available) { prepared = ordinary; channel = 'chat'; requestFallback = '当前账号管理员弹幕不可用'; }
+    }
     if (prepared?.available) {
       const guard = () => {
         if (!isCurrent() || !this.healthy()) return false;
@@ -524,7 +586,8 @@ export class DouyinAdapter {
       await beforeClick();
       if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
       // 从这里开始请求可能已经送达，未知结果不能转 UI 再发一次。
-      return this.requestSender.commit(prepared.token,text);
+      const result = await this.requestSender.commit(prepared.token,text);
+      return {...result,channelUsed:channel,...(requestFallback ? {modeFallback:requestFallback} : {})};
     }
     let input;
     try { input = this.findInput(); this.findSend(input); }

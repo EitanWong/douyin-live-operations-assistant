@@ -7,9 +7,10 @@ export const NAVIGATION_GROUPS = [
     ['gift','礼物感谢','gift'],['welcome','进场欢迎','hand'],['likes','点赞感谢','heart'],
     ['keywords','关键词回复','messages-square'],['bot','@机器人','bot'],['timers','定时消息','timer']
   ]},
+  {key:'tools',label:'扩展工具',items:[['auto-like','自动点赞','heart']]},
   {key:'settings',label:'设置',items:[
     ['features','功能开关','sliders-horizontal'],['appearance','外观','palette'],
-    ['ai','AI 设置','sparkles'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],
+    ['moderation','内容治理','activity'],['ai','AI 设置','sparkles'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],
     ['diagnostics','连接诊断','activity']
   ]}
 ];

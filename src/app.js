@@ -1,12 +1,13 @@
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
-import { DouyinAdapter, RoomLock, pickElement } from './browser/adapter.js';
-import { createAIClient, validateEndpoint } from './services/ai.js';
+import { DouyinAdapter, RoomLock, pickElement, watchAudienceContributions } from './browser/adapter.js';
+import { createAIClient, validateEndpoint, generatePhrases } from './services/ai.js';
 import { Panel } from './ui/panel.js';
 import { IdentityReader, roomAdminStatus } from './browser/identity.js';
-import { GiftLedger, GiftStore, giftDate } from './data/gifts.js';
+import { GiftLedger, GiftStore, giftDate, contributionSnapshot } from './data/gifts.js';
 import { JournalCommitter, RuntimeWriter } from './runtime/journal.js';
 import { failureCode } from './runtime/inbox.js';
 import { audienceAge } from './core/audience.js';
+import { AutoLike } from './core/auto-like.js';
 import { hasUnacknowledgedRuntimeAlert, normalizeRuntimeAlertState, reconcileRuntimeAlertState, runtimeAlertState } from './runtime/health.js';
 
 export function boot(options = {}) {
@@ -35,7 +36,7 @@ export function boot(options = {}) {
   // 账本写入与场控发送解耦：存储短暂失败时保留最新连击进度并自动重试，
   // 不让一次扩展后台/IndexedDB 抖动造成收入遗漏。
   const incomePending = new Map(); let incomeDrainBusy = false, incomeRetryTimer = null;
-  let incomeSummary = null, incomeFailure = '';
+  let incomeSummary = null, incomeFailure = '', incomeContext = null, ledgerAnchorId = '';
   function renderIncomeSummary() {
     if (panel && engine.config.incomeEnabled) panel.updateGiftSummary(incomeSummary || {}, engine.config.gift.yuanPerDiamond, true, { pending:incomePending.size, error:incomeFailure });
   }
@@ -106,14 +107,15 @@ export function boot(options = {}) {
       const incomeAnchorId = engine.config.anchorId;
       const month = giftDate().slice(0, 7);
       const [selected, current] = await Promise.all([
-        repository.report(selection.room, selection.month),
-        selection.room === room && selection.month === month ? null : repository.report(room, month)
+        repository.report(selection.room, selection.month, {includeAllSessions:selection.room === room && selection.month === month}),
+        selection.room === room && selection.month === month ? null : repository.report(room, month, {includeAllSessions:true})
       ]);
-      if (closed || request !== incomeRequest) return;
+      if (closed || request !== incomeRequest || incomeAnchorId !== engine.config.anchorId) return;
       panel.updateIncome(selected);
       const own = current || selected;
       panel.updateAnchorIncome({...own,anchorId:incomeAnchorId});
       incomeSummary = own.currentSession || {totalDiamonds:0,giftCount:0,unknownCount:0,estimatedIncome:0};
+      incomeContext = own.currentSession ? {...own.currentSession,anchorId:incomeAnchorId,at:Date.now(),source:'durable-ledger',month:own.month,summary:own.summary,days:own.days} : null;
       if (!incomePending.size) incomeFailure = '';
       renderIncomeSummary();
     } catch (error) { if (!closed) { incomeFailure = error.message; renderIncomeSummary(); panel.incomeError(error.message); reportPersistenceError(error, '礼物账本读取失败'); } }
@@ -185,7 +187,7 @@ export function boot(options = {}) {
     }, 500);
   };
   const rememberUser = event => {
-    if (engine?.isSelfUser(event?.user)) return;
+    if (engine?.isSelfUser(event?.user) && event?.type !== 'gift') return;
     const user = event?.user;
     if (event?.type === 'gift') {
       const eventUserKey = user?.id ? `uid:${user.id}` : user?.secUid ? `sec:${user.secUid}` : user?.name ? `name:${user.name}` : 'anonymous';
@@ -193,6 +195,7 @@ export function boot(options = {}) {
       const unitValue = event.unitValue > 0 ? event.unitValue : override > 0 ? override : null;
       const record = { type:'gift', id:event.id, groupId:event.groupId, giftId:event.giftId, giftName:event.giftName, roomId:event.roomId, count:Number(event.count) || 1, unitValue, at:event.at, receivedAt:event.receivedAt, capturedAt:event._journalSavedAt || event.receivedAt || Date.now(), final:Boolean(event.final), user:{id:user?.id || ''} };
       giftLedger.observe(record, room, eventUserKey, engine.config.gift.yuanPerDiamond);
+      ledgerAnchorId=engine.config.anchorId;
       if (engine.config.incomeEnabled) queueIncome(record, eventUserKey);
       if (!user?.name) refreshGifts();
     }
@@ -237,13 +240,14 @@ export function boot(options = {}) {
       const { _journalKey, _journalId, _journalSavedAt, ...liveEvent } = event || {};
       // A journal append may finish after pagehide. Keep that record for recovery.
       if (!engine || closed || suspended || location.pathname !== initialPath) return;
+      if (liveEvent.type === 'end') autoLike.stop('直播已结束，已停止点赞');
       const echoed = engine.observeEcho(liveEvent);
-      if (engine.isSelfUser(liveEvent?.user) && (echoed || !engine.acceptsSelfGameChat(liveEvent))) {
+      if (liveEvent.type !== 'gift' && engine.isSelfUser(liveEvent?.user) && (echoed || !engine.acceptsSelfGameChat(liveEvent))) {
         if (journalKey) await options.journal.ack(journalKey);
         return;
       }
       let journalWrite = null;
-      const passiveDataEvent = ['room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season'].includes(liveEvent.type);
+      const passiveDataEvent = ['room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
       if ((engine.running || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
         // Incoming messages are structured-cloned in the extension, but direct
         // integrations/tests may provide frozen objects. Work on a shallow copy
@@ -260,10 +264,10 @@ export function boot(options = {}) {
         const observedAt = liveEvent.observedAt || liveEvent.receivedAt || Date.now();
         const at = Number.isFinite(liveEvent.at) && liveEvent.at > 0 ? liveEvent.at : observedAt;
         const source = liveEvent.source || 'platform', roomId = liveEvent.roomId || '';
-        if (liveEvent.type === 'start') giftLedger.startSession(at, source, roomId, observedAt);
-        else giftLedger.endSession(at, source, roomId);
+        const startAt = liveEvent.startAt || 0;
+        giftLedger.observeSession({type:liveEvent.type,at,source,roomId,observedAt,startAt});
         refreshGifts();
-        try { await repository.recordSession({room,type:liveEvent.type,at,observedAt,roomId,source}); refreshIncome(); }
+        try { await repository.recordSession({room,type:liveEvent.type,at,observedAt,roomId,source,startAt}); refreshIncome(); }
         catch (error) { if (journalWrite) await journalWrite; reportPersistenceError(error, '直播场次边界保存失败'); throw error; }
       }
       // 账本/侧栏错误不能中断场控回复，也不能阻塞同帧中后续的消息。
@@ -295,11 +299,28 @@ export function boot(options = {}) {
       refresh(); wakeSender();
       if ((status.ingestion?.gaps || 0)+(status.bridgeGaps || 0)+(status.frameGaps || 0)+(status.capture?.gaps || 0) !== previousGaps || JSON.stringify(acknowledgedRuntimeAlert) !== previousAcknowledgement) persistRuntime();
     },
-    shouldReadChat: () => engine.running && ((engine.config.ai.enabled && engine.config.ai.chatEnabled) || engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
+    shouldReadChat: () => engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
     shouldReadMilestones: () => engine.running
+  });
+  const autoLike = new AutoLike({
+    transport:demo ? {prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,
+    lock:new RoomLock({room:`auto-like:${room}`}),
+    guard:()=>closed || suspended || location.pathname !== initialPath ? '页面或直播间已切换，已停止'
+      : persistenceDisabled ? '扩展连接已失效，已停止，请刷新直播页'
+      : !demo && (!adapter.healthy() || identity.live?.status && identity.live.status !== 'live') ? '直播已结束或连接中断，已停止' : '',
+    changed:state=>panel?.updateAutoLike(state)
   });
   engine = new Engine({
     config, log, ai: client,
+    liveData: () => {
+      const local=giftLedger.currentSession();
+      const saved=engine.config.incomeEnabled && incomeContext?.anchorId===engine.config.anchorId ? incomeContext : null;
+      const current=engine.pkOperations.broadcast?.roomId;
+      const income=saved && (!current || saved.roomId===current) ? saved : local && ledgerAnchorId===engine.config.anchorId && (!current || local.roomId===current)
+        ? {...local,anchorId:engine.config.anchorId,at:Date.now(),source:'page-ledger'} : null;
+      return {income:income ? {...income,pending:incomePending.size} : null};
+    },
+    manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && location.pathname===initialPath),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
     onStop: () => { lock.release(); autoStartArmed = false; },
     send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : (text, isCurrent, hooks) => adapter.send(text, () => isCurrent() && lock.held && location.pathname === initialPath,hooks)
@@ -323,7 +344,7 @@ export function boot(options = {}) {
     if (next.live && !closed && !suspended && location.pathname === initialPath) {
       const live = next.live, type = live.status === 'live' ? 'start' : 'end';
       const at = type === 'start' ? live.startAt || live.observedAt : live.endAt || live.observedAt;
-      const event = {type, roomId:live.roomId, at, observedAt:live.observedAt, receivedAt:live.observedAt,
+      const event = {type, roomId:live.roomId, at, startAt:live.startAt, observedAt:live.observedAt, receivedAt:live.observedAt,
         source:(type === 'start' ? !live.startAt : !live.endAt) ? 'platform-observed' : 'platform'};
       void Promise.resolve(adapter.dispatch ? adapter.dispatch(event) : adapter.onEvent(event)).catch(error => reportPersistenceError(error, '直播状态保存失败'));
     }
@@ -343,6 +364,7 @@ export function boot(options = {}) {
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   const pause = (reason, { manual = false } = {}) => {
+    autoLike.stop(reason);
     if (manual) manualPause = true;
     autoStartArmed = false;
     engine.stop(reason);
@@ -407,12 +429,15 @@ export function boot(options = {}) {
   }
   async function ready() {
     panel = new Panel({ config: engine.config, room, demo, callbacks: {
+      startAutoLike:value=>autoLike.start(value),stopAutoLike:()=>autoLike.stop(),
       start: () => start(), stop: () => pause('人工暂停，已清空发送队列与弹幕上下文', { manual: true }), lab,
-      debugSend: () => {
+      debugSend: (channel = 'chat') => {
         if (persistenceDisabled) throw contextFailure();
         if (!engine.running || engine.config.mode !== 'auto') throw new Error('请在自动发送模式下开始场控后再测试');
         if (!adapter.healthy()) throw new Error('直播数据未连接，暂不能发送测试消息');
-        if (!engine.enqueue('debug', '调试消息发送测试')) throw new Error('测试消息未能加入发送队列');
+        if (!['chat', 'admin'].includes(channel)) throw new Error('不支持的调试弹幕类型');
+        const text = channel === 'admin' ? '管理员弹幕调试消息发送测试' : '调试消息发送测试';
+        if (!engine.enqueue('debug', text, { channel })) throw new Error('测试消息未能加入发送队列');
         wakeSender();
       },
       identify: async () => { if (demo) { applyIdentity({ anchor:{ id:'1234567890', name:'模拟主播' }, self:{ id:'9876543210', name:'我的场控账号（模拟）' } }); panel.toast('已识别模拟主播和账号'); } else { await identityReader.refresh(); panel.toast('识别完成；未识别的项目可手动补充'); } },
@@ -424,9 +449,14 @@ export function boot(options = {}) {
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
       },
+      hasAIKey: endpoint => Boolean(sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
+      generatePhrases: async (c, key, remember, options) => {
+        await keepKey(c, key, remember);
+        return generatePhrases(client, c, {...options,sharedContext:engine.aiContext(c)});
+      },
       testAI: async (c, key, remember) => {
         await keepKey(c, key, remember);
-        const output = await client({ persona: c.ai.persona, knowledge: c.ai.knowledge, context: [], target: { name: '连接测试', text: '你好，请用一句话打招呼。' }, maxLength: c.sending.maxLength }, c.ai);
+        const output = await client({ persona: c.ai.persona, knowledge: c.ai.knowledge, ...engine.aiContext(c),target: { name: '连接测试', text: '你好，请用一句话打招呼。' }, maxLength: c.sending.maxLength }, c.ai);
         log('ai', `连接测试通过：${output.slice(0, 300)}`); panel.toast('AI 连接测试通过。测试内容不会发送到公屏。');
       },
       diagnose: () => ({...adapter.diagnose(),roomData:engine.roomData}),
@@ -497,42 +527,47 @@ export function boot(options = {}) {
     if (demo) applyIdentity({ anchor:{ id:'1234567890', name:'模拟主播' }, self:{ id:'9876543210', name:'我的场控账号（模拟）' } });
     else void identityReader.refresh().catch(e => log('error', `自动识别暂不可用：${e.message}`));
     let lastDateCheck = 0, lastStorageCheck = 0, lastPKRefresh = 0, lastContributionCheck = 0, lastLiveCheck = Date.now(), contributionCheckBusy = false, incomeDay = giftDate(), waitingForConnection = false;
+    const sampleContributions = async () => {
+      if (closed || suspended || persistenceDisabled || !engine.config.incomeEnabled ||
+        !(repository.recordContributionSnapshot || repository.recordContribution) || !adapter.readAudienceContributions || contributionCheckBusy ||
+        location.pathname !== initialPath || identity.live?.status && identity.live.status !== 'live') return;
+      const session = giftLedger.currentSession();
+      if (!session || session.endAt) return;
+      contributionCheckBusy = true; lastContributionCheck = Date.now();
+      try {
+        const capturedAt = Date.now(), roomId = identity.live?.roomId || session.roomId || '';
+        const rows = adapter.readAudienceContributions();
+        // The restored audience cache retains identities beyond the 60-row UI.
+        const known = [...(engine.audience?.users?.values() || [])].filter(user=>capturedAt-user.observedAt <= engine.audience.retention);
+        known.push(...viewers.values());
+        const snapshot = contributionSnapshot(rows,known);
+        const normalized = snapshot.rows;
+        let updated = false;
+        if (repository.recordContributionSnapshot) {
+          updated = await repository.recordContributionSnapshot({room,roomId,capturedAt,rate:engine.config.gift.yuanPerDiamond,rows:normalized});
+        } else for (const row of snapshot.entries) {
+          updated = await repository.recordContribution({room,roomId,capturedAt,rate:engine.config.gift.yuanPerDiamond,...row}) || updated;
+        }
+        panel?.updateContributionStatus({rows:rows.length,matched:normalized.filter(row=>row.userId).length,checkedAt:capturedAt});
+        if (updated) refreshIncome();
+      } catch (error) { reportPersistenceError(error,'在线贡献榜校准读取失败'); }
+      finally {contributionCheckBusy=false;}
+    };
+    let stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
     const timer = setInterval(async () => {
       if (closed || suspended) return;
+      autoLike.check();
       if (demo) { network.lastFrame = adapter.status.lastFrame = Date.now(); }
       if (!demo && identityReader.refreshRoom && location.pathname === initialPath && Date.now() - lastLiveCheck >= 15000) {
         lastLiveCheck = Date.now();
         // Query failures and a disconnected socket are unknown state, never a broadcast end.
         void identityReader.refreshRoom().catch(() => {});
       }
-      if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
-      if (!persistenceDisabled && engine.config.incomeEnabled && repository.recordContribution && adapter.readAudienceContributions && Date.now() - lastContributionCheck >= 15000 && !contributionCheckBusy) {
-        lastContributionCheck = Date.now(); contributionCheckBusy = true;
-        void (async () => {
-          try {
-            const rows = adapter.readAudienceContributions();
-            const knownByName = new Map();
-            let matched = 0, updated = false;
-            const nameKey = value => String(value || '').replace(/\s+/g, '').trim();
-            for (const viewer of viewers.values()) {
-              const key = nameKey(viewer.name), list = knownByName.get(key) || []; list.push(viewer); knownByName.set(key, list);
-            }
-            for (const row of rows) {
-              const matches = knownByName.get(nameKey(row.name)) || [];
-              const id = row.userId && /^\d{4,30}$/.test(row.userId) ? row.userId : matches.length === 1 ? matches[0].id : '';
-              if (!id) continue;
-              matched++;
-              updated = await repository.recordContribution({ room, date:giftDate(), userId:`uid:${id}`, name:row.name, score:row.score, scoreIsFloor:row.scoreIsFloor }) || updated;
-            }
-            panel?.updateContributionStatus({rows:rows.length,matched,checkedAt:Date.now()});
-            if (updated) refreshIncome();
-          } catch (error) { reportPersistenceError(error, '在线贡献榜校准读取失败'); }
-          finally { contributionCheckBusy = false; }
-        })();
-      }
-      if (location.pathname !== initialPath) { log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
+      if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
+      if (location.pathname !== initialPath) { log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
-      if (engine.pk.current()?.phase === 'active' && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
+      if ((engine.pk.current()?.phase === 'active' || panel.activeTab === 'pk') && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
       void tryAutoStart();
       if (persistenceDisabled) return;
@@ -546,9 +581,10 @@ export function boot(options = {}) {
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, engine.config.gift.yuanPerDiamond);
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
     window.addEventListener('pagehide', event => {
+      autoLike.stop('页面已离开，已停止点赞');
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
       const wasRunning = engine.running || engine.resumeRequested;
-      suspended = true; closed = !event.persisted;
+      suspended = true; closed = !event.persisted; stopContributionWatch();
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
@@ -560,6 +596,8 @@ export function boot(options = {}) {
     window.addEventListener('pageshow', event => {
       if (!event.persisted || closed) return;
       suspended = false;
+      stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
+      void sampleContributions();
       autoStartArmed = resumeAutoStart && !manualPause; autoStartNext = 0;
       journalCommitter?.resume();
       void drainIncome();

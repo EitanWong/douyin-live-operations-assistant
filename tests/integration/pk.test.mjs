@@ -11,6 +11,23 @@ const b = (field, value) => { const bytes = Buffer.from(value); return cat(varin
 const self = '9007199254740993123', rival = '9007199254740993124', room = '7777777777777777777';
 const score = (id, value) => b(17, cat(i(1, value), b(21, id), b(7, String(value))));
 
+test('多人开局推送贯通引擎播报名单，后续局部比分和昵称补全保持多人归属',async()=>{
+  const now=1800000000000,config=copy(DEFAULTS);config.anchorId=self;config.mode='preview';
+  config.pkOperations.enabled=true;config.pkOperations.reportEnabled=false;config.pkOperations.midnightEnabled=false;
+  const engine=new Engine({config,now:()=>now,send:()=>assert.fail('只验证预览')});engine.start();
+  const participant=(id,name,roomId)=>b(6,cat(i(1,id),b(2,cat(b(1,cat(i(1,id),b(2,name))),b(13,roomId)))));
+  const msg=(method,body,id)=>b(1,cat(b(1,method),b(2,cat(b(1,cat(i(3,room),i(4,now/1000))),body)),i(3,id)));
+  const frame=b(8,msg('WebcastLinkMicBattleMethod',cat(b(2,cat(i(2,42),i(3,now),i(4,60))),
+    participant(self,'己方',room),participant(rival,'甲','8888'),participant('9007199254740993125','乙','9999')),100));
+  for (const event of await decodeFrame(frame)) engine.ingest(event);
+  assert.match(engine.queue[0].text,/2位对手：甲、乙/);assert.doesNotMatch(engine.queue[0].text,/待识别|己方/);
+  const update=b(8,msg('WebcastLinkMicMethod',cat(i(104,42),score(self,100),score(rival,50),b(45,cat(b(1028,rival),b(3,'甲新名')))),101));
+  for (const event of await decodeFrame(update)) engine.ingest(event);
+  assert.match(engine.queue[0].text,/甲新名、乙/);
+  assert.deepEqual(engine.pk.current().opponentRoomIds,['8888','9999']);
+  assert.equal(engine.pk.current().opponentScoreObserved,false);
+});
+
 test('gzip PK 推送到暂停的引擎仍更新正确比分和倒计时，重复推送只记一次', async () => {
   const now = 1800000000000, config = copy(DEFAULTS); config.anchorId = self;
   const engine = new Engine({config,now:()=>now,send:()=>assert.fail('PK 统计不得发送弹幕')});

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, copy, Engine, welcomeDecision, matchesUser, validateConfig, mergeConfig, inTimeWindow, recognizeMilestone } from '../../src/core/engine.js';
 import { audienceAddress, audienceAge, audienceGender, renderAudienceTemplate, validAudienceAI } from '../../src/core/audience.js';
+import { giftReplyContext } from '../../src/core/reply-context.js';
 
 const user = { id: '9007199254740993123', name: '青山', wealthLevel: 35, fanClubs: [{ anchorId: '1234567890', level: 8, status: 1 }] };
 function harness(change = () => {}) {
@@ -554,26 +555,26 @@ test('AI 调用频率、每小时预算与最近上下文', async () => {
   advance(60000); await e.requestAI(); assert.equal(prompts.length, 1);
   advance(3600000); await e.requestAI(); assert.equal(prompts.length, 2); assert.equal(prompts[1].context.length, 0);
 });
-test('@登录账号弹幕跳过普通触发条件，AI 可使用此前聊天上下文', async () => {
+test('@登录账号弹幕直接对话，AI 可使用此前聊天上下文', async () => {
   const { e } = harness(c => { c.ai.enabled = true; c.ai.chatEnabled = true; c.ai.trigger = 'question'; });
   e.setIdentity({ self: { id: 'self-1', name: '小助手' } });
   const prompts = []; e.ai = async prompt => { prompts.push(prompt); return '刚才大家提到周末有活动。'; };
   e.ingest({ type: 'chat', id: 'context', user: { id: 'viewer-1', name: '观众甲' }, text: '周末活动安排刚才已经在直播间聊过了' });
   e.ingest({ type: 'chat', id: 'mention', user: { id: 'viewer-2', name: '观众乙' }, text: '请问刚才说的活动几点开始', mentions: ['self-1'] });
   await new Promise(setImmediate);
-  assert.equal(prompts.length, 1); assert.equal(prompts[0].context.length, 2);
-  assert.match(prompts[0].task.instruction, /最近直播间聊天记录/);
-  assert.equal(prompts[0].target.text, '请问刚才说的活动几点开始');
+  assert.equal(prompts.length, 2); assert.equal(prompts[1].context.length, 2);
+  assert.match(prompts[1].task.instruction, /最近直播间聊天记录/);
+  assert.equal(prompts[1].task.data.replyMode,'direct');
+  assert.equal(prompts[1].target.text, '请问刚才说的活动几点开始');
 });
-test('辱骂识别仅计数并在滚动时间窗达到阈值时提醒', () => {
-  const { e, logs, advance } = harness(c => { c.keyword.enabled = false; c.moderation.enabled = true; c.moderation.threshold = 2; c.moderation.windowSec = 60; });
-  e.ingest({ type: 'chat', id: 'bad-1', user, text: '你这个傻逼' });
-  assert.equal(logs.filter(item => item.category === 'moderation').length, 1);
-  e.ingest({ type: 'chat', id: 'bad-2', user, text: '脑残' });
-  assert.equal(logs.filter(item => item.category === 'moderation').length, 3);
-  assert.match(logs.at(-1).text, /未验证，未执行封禁/);
-  advance(61000); e.ingest({ type: 'chat', id: 'bad-3', user, text: '去死' });
-  assert.match(logs.at(-1).text, /1\/2 次/);
+test('本地辱骂检测按滚动窗口计数且预览不执行管理操作', () => {
+  const { e, advance } = harness(c => { c.keyword.enabled=false;c.moderation.enabled=true;c.moderation.detector='local';c.moderation.threshold=2;c.moderation.windowSec=60; });
+  e.ingest({type:'chat',id:'bad-1',user,text:'你这个傻逼'});
+  assert.equal(e.moderation.records.length,1);assert.equal(e.moderation.records[0].action,'notify');
+  e.ingest({type:'chat',id:'bad-2',user,text:'脑残'});
+  assert.equal(e.moderation.records.at(-1).status,'preview');
+  advance(61000);e.ingest({type:'chat',id:'bad-3',user,text:'去死'});
+  assert.match(e.moderation.records.at(-1).detail,/1\/2 次/);
 });
 test('管理员身份未验证不产生管理动作，辱骂提醒可关闭', () => {
   const { e, logs } = harness(c => { c.moderation.enabled = false; });
@@ -600,16 +601,89 @@ test('礼物 AI 模式保留价格阈值并把礼物数据交给模型', async (
   assert.equal(prompt.task.kind, 'gift'); assert.equal(prompt.task.data.giftName, '星星');
   assert.equal(prompt.task.data.totalDiamonds, 50); assert.equal(e.queue[0].kind, 'gift');
 });
+test('不同价值礼物传入钻石分档，未知价格与已知部分严格区分', () => {
+  for (const [price, tier] of [[1,'small'],[9,'small'],[10,'modest'],[99,'modest'],[100,'medium'],[999,'medium'],[1000,'large'],[9999,'large'],[10000,'exceptional']]) {
+    assert.equal(giftReplyContext([{name:'礼物',price,count:1}]).valueTier, tier);
+  }
+  assert.equal(giftReplyContext([{name:'星星',price:1,count:1000}]).valueTier, 'large');
+  const mixed = giftReplyContext([{name:'星星',price:100,count:2},{name:'未知',price:null,count:3}]);
+  assert.equal(mixed.totalDiamonds, null); assert.equal(mixed.knownTotalDiamonds, 200);
+  assert.equal(mixed.valueTier, 'unknown'); assert.equal(mixed.count, 5);
+  assert.equal(mixed.gifts[1].unitDiamonds, null);
+});
+test('礼物和欢迎 AI 获取同 UID 的等级资料与近期弹幕，缺失资料不串用户或房间', async () => {
+  const { e } = harness(c => { c.ai.enabled = true; c.gift.responseMode = 'ai'; c.welcome.responseMode = 'ai'; });
+  const prompts = []; e.ai = async prompt => { prompts.push(prompt); return '青山，谢谢你来直播间坐坐。'; };
+  e.ingest({type:'chat',id:'mood',user,text:'今天有些难过，想安静听你说话'});
+  e.ingest(gift({user:{id:user.id,name:user.name},final:true}));
+  await e.tick(false); await new Promise(setImmediate);
+  assert.equal(prompts[0].target.wealthLevel,35); assert.equal(prompts[0].target.fanLevel,8);
+  assert.equal(prompts[0].target.fanClubLit,true);
+  assert.equal(prompts[0].context[0].text,'今天有些难过，想安静听你说话');
+  assert.equal(prompts[0].task.data.valueTier,'modest');
+  assert.equal(prompts[0].target.id,undefined); assert.equal(prompts[0].target.fanClubs,undefined);
+  e.ingest({type:'enter',id:'welcome-levels',user:{id:user.id,name:user.name}});
+  await new Promise(setImmediate);
+  assert.equal(prompts[1].task.data.wealthLevel,35); assert.equal(prompts[1].task.data.fanLevel,8);
+  assert.equal(prompts[1].context[0].text,prompts[0].context[0].text);
+  e.ingest(gift({id:'other-gift',groupId:'other',user:{id:'other-user',name:user.name,fanClubs:[{anchorId:'other-room',level:30,status:1}]},final:true}));
+  await e.tick(false); await new Promise(setImmediate);
+  assert.equal(prompts[2].target.wealthLevel,null); assert.equal(prompts[2].target.fanLevel,null);
+  assert.equal(prompts[2].target.fanClubLit,null);
+});
+test('未知价格礼物也使用 AI 答谢，且不伪造零价或价值分档', async () => {
+  const { e } = harness(c => { c.ai.enabled = true; c.gift.responseMode = 'ai'; });
+  let prompt; e.ai = async value => { prompt = value; return '青山，谢谢这份心意！'; };
+  e.ingest(gift({unitValue:undefined,final:true})); await e.tick(false); await new Promise(setImmediate);
+  assert.equal(prompt.task.data.unitDiamonds,null); assert.equal(prompt.task.data.totalDiamonds,null);
+  assert.equal(prompt.task.data.valueTier,'unknown'); assert.equal(e.queue[0].aiGenerated,true);
+});
+test('连击合并使旧 AI 文案失效，并为最新多礼物总额重新生成', async () => {
+  const { e, advance } = harness(c => { c.ai.enabled = true; c.gift.responseMode = 'ai'; });
+  const prompts = []; let finish;
+  e.ai = prompt => { prompts.push(prompt); return prompts.length === 1 ? new Promise(resolve => { finish=resolve; }) : Promise.resolve('青山，这份礼物好惊喜，谢谢支持！'); };
+  e.ingest(gift({count:1,final:true})); await e.tick(false);
+  e.ingest(gift({count:20,final:true})); await e.tick(false);
+  e.ingest(gift({giftId:'second',giftName:'玫瑰',groupId:'second',unitValue:10,count:2,final:true})); await e.tick(false);
+  finish('青山，谢谢你的一颗星星'); await new Promise(setImmediate);
+  assert.ok(!e.queue[0].text.includes('一颗星星'));
+  await e.tick(false); await new Promise(setImmediate);
+  assert.equal(prompts.length,2); assert.equal(prompts[1].task.data.totalDiamonds,1020);
+  assert.equal(prompts[1].task.data.valueTier,'large'); assert.equal(prompts[1].task.data.gifts.length,2);
+  assert.equal(prompts[1].task.data.gifts[0].count,20);
+  assert.equal(e.queue[0].text,'青山，这份礼物好惊喜，谢谢支持！');
+  assert.equal(e.queue[0].aiGenerated,true);
+  // 成功生成的情绪化文案不被多人模板合并覆盖。
+  e.config.gift.responseMode='rules';
+  for (const id of ['b','c']) e.ingest(gift({user:{id,name:id},groupId:id,final:true}));
+  await e.tick(false); advance(2500);
+  const batch=e.giftBatch(e.queue[0],e.now());
+  assert.equal(batch.jobs.length,1); assert.equal(batch.text,e.queue[0].text);
+  assert.ok(!e.giftBatch(e.queue[1],e.now()).jobs.includes(e.queue[0]));
+});
+test('礼物 AI 可在五秒窗口内完成；超时后仍发预设且迟到响应不覆盖', async () => {
+  for (const late of [false,true]) {
+    const { e, advance } = harness(c => { c.ai.enabled = true; c.gift.responseMode = 'ai'; });
+    let finish; e.ai = () => new Promise(resolve => { finish=resolve; });
+    e.ingest(gift({final:true})); await e.tick(false);
+    advance(late ? 5001 : 2000); await e.tick(false);
+    finish('青山，谢谢你送来的这份心意！'); await new Promise(setImmediate);
+    assert.equal(e.queue[0].aiGenerated,!late);
+    await e.tick(); assert.equal(e.stats.previews,1);
+  }
+});
 test('进场欢迎和定时消息可独立使用 AI 生成', async () => {
   const welcome = harness(c => { c.ai.enabled = true; c.welcome.responseMode = 'ai'; });
   let prompt; welcome.e.ai = async value => { prompt = value; return '欢迎青山哥来到直播间！'; };
-  welcome.e.ingest({ type: 'enter', user }); await new Promise(setImmediate);
+  welcome.e.ingest({ type: 'enter', user:{...user,gender:1} }); await new Promise(setImmediate);
   assert.equal(prompt.task.kind, 'welcome'); assert.equal(welcome.e.queue[0].kind, 'welcome');
 
   const timer = harness(c => { c.ai.enabled = true; c.timersEnabled = true; c.timers[0].enabled = true; c.timers[0].responseMode = 'ai'; c.timers[0].intervalSec = 30; });
   timer.e.ai = async value => { prompt = value; return '喜欢的话点点关注，一起聊聊吧！'; };
   await timer.e.tick(); timer.advance(31000); await timer.e.tick(); await new Promise(setImmediate);
   assert.equal(prompt.task.kind, 'timer'); assert.equal(timer.e.queue[0].kind, 'timer');
+  assert.equal(prompt.task.data.reference, timer.e.config.timers[0].messages[0]);
+  assert.ok(Array.isArray(prompt.recentReplies));
 });
 test('定时任务跨午夜、优先避让互动、恢复后台不补发', async () => {
   assert.equal(inTimeWindow('22:00', '02:00', Date.parse('2026-10-14T23:00:00+08:00')), true);
@@ -783,4 +857,95 @@ test('按单价门槛过滤的礼物不忙循环；可重试异常退避后只�
   advance(999); await e.tick(); assert.equal(calls, 2);
   advance(1); await e.tick(); assert.equal(calls, 3);
   assert.equal(e.stats.submitted, 1); assert.equal(e.queue.length, 0);
+});
+
+test('入场欢迎按明确性别纠正旧模板称呼，未知和未成年用户只用昵称', () => {
+  for (const template of ['欢迎 {user} 哥','欢迎 {user} 大哥','欢迎 {user}{title}','欢迎 {address} 姐','欢迎 {nickname} 小哥哥']) {
+    for (const [profile,expected] of [
+      [{...user,gender:2},'欢迎 青山姐'],
+      [{...user,gender:1},'欢迎 青山哥'],
+      [user,'欢迎 青山'],
+      [{...user,gender:2,birthdayValid:true,birthdayDescription:'2020-01-01'},'欢迎 青山']
+    ]) {
+      const {e}=harness(c=>{c.welcome.templates=[template];});
+      e.ingest({type:'enter',user:profile});
+      assert.equal(e.queue[0]?.text,expected,template);
+    }
+  }
+  const {e}=harness(c=>{c.welcome.templates=['欢迎 {nickname}，等级{level}，灯牌{fanLevel}'];});
+  e.ingest({type:'enter',user:{...user,gender:2}});
+  assert.equal(e.queue[0].text,'欢迎 青山，等级35，灯牌8');
+  assert.equal(renderAudienceTemplate('欢迎 {user}{title}',{name:'青山姐',gender:2}),'欢迎 青山姐');
+});
+
+test('入场欢迎仅复用同 UID 的明确性别资料，不按昵称猜测', () => {
+  const {e}=harness(c=>{c.welcome.templates=['欢迎 {user}'];});
+  e.ingest({type:'chat',user:{...user,gender:2},text:'你好'});
+  e.ingest({type:'enter',user});
+  assert.equal(e.queue[0].text,'欢迎 青山姐');
+  e.ingest({type:'enter',user:{...user,id:'another',name:'青山'}});
+  assert.equal(e.queue[1].text,'欢迎 青山');
+});
+
+test('AI 入场欢迎称呼不符时回退预设，正确称呼保留', async () => {
+  for (const [gender,output,expected] of [
+    [2,'欢迎青山哥来玩','欢迎 青山姐'],
+    [1,'欢迎青山姐来玩','欢迎 青山哥'],
+    [null,'欢迎青山哥来玩','欢迎 青山'],
+    [2,'青山姐，欢迎来玩呀','青山姐，欢迎来玩呀']
+  ]) {
+    const {e}=harness(c=>{c.ai.enabled=true;c.welcome.responseMode='ai';c.welcome.templates=['欢迎 {user}'];});
+    let prompt; e.ai=async value=>{prompt=value;return output;};
+    e.ingest({type:'enter',user:{...user,gender}});
+    await new Promise(setImmediate);
+    assert.equal(e.queue[0]?.text,expected);
+    assert.equal(prompt.target.address,gender===2?'青山姐':gender===1?'青山哥':'青山');
+  }
+});
+
+test('AI 欢迎不使用代主持或停留分析话术，正常简短欢迎可发送',async()=>{
+  for (const [output,expected] of [
+    ['可以先留一会儿听听，再决定是否继续停留。','欢迎 青山。'],
+    ['大家有想听的话题可以打在公屏上，我帮你们转达。','欢迎 青山。'],
+    ['大家有想聊的话题可以发在公屏，我来转达。','欢迎 青山。'],
+    ['公屏说说想聊什么。','欢迎 青山。'],
+    ['欢迎青山。','欢迎青山。']
+  ]) {
+    const {e}=harness(c=>{c.ai.enabled=true;c.welcome.responseMode='ai';c.welcome.templates=['欢迎 {user}。'];});
+    e.ai=async()=>output;e.ingest({type:'enter',user});await new Promise(setImmediate);
+    assert.equal(e.queue[0]?.text,expected);
+  }
+});
+
+test('AI 定时主动跳过不补发，调用失败仍保留预设兜底',async()=>{
+  for (const failed of [false,true]) {
+    const {e,advance}=harness(c=>{c.ai.enabled=true;c.timersEnabled=true;c.timers[0].enabled=true;c.timers[0].responseMode='ai';c.timers[0].intervalSec=30;});
+    e.ai=async()=>{if(failed)throw new Error('服务繁忙');return '[SKIP]';};
+    await e.tick();advance(31000);await e.tick();await new Promise(setImmediate);
+    assert.equal(e.stats.aiCalls,1);assert.equal(e.queue.length,failed?1:0);
+    await e.tick();assert.equal(e.stats.aiCalls,1);
+  }
+});
+
+test('普通 AI 不发送代主持话术，昵称碰巧包含转达用语时不误判',async()=>{
+  for (const output of ['我帮大家转达。','大家有想聊的话题可以发在公屏，我来转达。','有什么话题可以发在公屏。','公屏说说想聊什么。','我 来 转 达。']) {
+    const {e}=harness(c=>{c.ai.enabled=true;});
+    e.ai=async()=>output;await e.requestAI({type:'chat',user,text:'你好'});assert.equal(e.queue.length,0,output);
+  }
+  const {e}=harness(c=>{c.ai.enabled=true;});
+  const profile={...user,name:'我帮你转达'};
+  e.ai=async()=> '欢迎我帮你转达。';await e.requestAI({type:'welcome',user:profile},{kind:'welcome'});
+  assert.equal(e.queue[0]?.text,'欢迎我帮你转达。');
+});
+
+test('默认 AI 额度支持连续高频调用，旧默认更新而自定义额度保留',async()=>{
+  assert.equal(DEFAULTS.ai.maxPerHour,3600);
+  assert.equal(mergeConfig({ai:{maxPerHour:30}}).ai.maxPerHour,3600);
+  assert.equal(mergeConfig({ai:{maxPerHour:70}}).ai.maxPerHour,70);
+  assert.equal(validateConfig(mergeConfig({ai:{maxPerHour:36000}})).ai.maxPerHour,36000);
+  assert.throws(()=>validateConfig(mergeConfig({ai:{maxPerHour:36001}})),/AI 每小时调用上限/);
+  const {e}=harness(c=>{c.ai.enabled=true;});
+  e.ai=async()=> '[SKIP]';
+  for(let index=0;index<120;index++) await e.requestAI({user,text:'你好'});
+  assert.equal(e.stats.aiCalls,120);assert.equal(e.calls.length,120);
 });

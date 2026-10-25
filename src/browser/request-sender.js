@@ -1,8 +1,15 @@
+import { ModerationRequests } from './moderation-requests.js';
+import { LikeRequests } from './like-requests.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
 // remain in charge. No cookies, signatures, remote code, or paid endpoints cross
 // the extension bridge.
 export class PageRequestSender {
-  constructor(page) { this.page = page; this.tickets = new Map(); }
+  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); }
+  prepareLike() { return this.likes.prepare(); }
+  commitLike(token,count,sequence) { return this.likes.commit(token,count,sequence); }
+  stopLike(token) { return this.likes.stop(token); }
+  prepareModeration(action,target) { return this.moderation.prepare(action,target); }
+  commitModeration(token) { return this.moderation.commit(token); }
   client() {
     const chunks = this.page.webpackChunkdouyin_live_v2;
     if (!Array.isArray(chunks) || !Object.hasOwn(chunks, 'push')) return null;
@@ -129,11 +136,16 @@ export class RequestBridgeClient {
         const data=event.data;
         if(event.source===this.page && event.origin===this.page.location.origin && data?.source==='live-assistant-page-v1' && data.type==='send-api-result' && data.room===this.room && data.id===id) finish(data.result);
       };
-      const timer=this.page.setTimeout(()=>finish(operation==='prepare'?{available:false}:{submitted:false,clicked:true,transport:'request',reason:'请求响应超时，等待公屏回显，不自动重发'}),timeout);
+      const timer=this.page.setTimeout(()=>finish(operation.startsWith('prepare')?{available:false}:operation==='commit-like'?{submitted:false,unknown:true,reason:'点赞响应超时，已停止，不自动重试'}:operation==='commit-moderation'?{submitted:false,unknown:true,reason:'管理响应超时，不自动重试'}:{submitted:false,clicked:true,transport:'request',reason:'请求响应超时，等待公屏回显，不自动重发'}),timeout);
       this.page.addEventListener('message',receive);
       this.page.postMessage({source:'live-assistant-content-v1',type:'send-api',room:this.room,id,operation,...payload},this.page.location.origin);
     });
   }
+  prepareModeration(action,target) { return this.call('prepare-moderation',{action,target},800); }
+  prepareLike() { return this.call('prepare-like',{},10000); }
+  commitLike(token,count,sequence) { return this.call('commit-like',{token,count,sequence},10000); }
+  stopLike(token) { return this.call('stop-like',{token},800); }
+  commitModeration(token) { return this.call('commit-moderation',{token},10000); }
   prepare(channel) { return this.call('prepare',{channel},800); }
   commit(token,text) { return this.call('commit',{token,text},10000); }
 }

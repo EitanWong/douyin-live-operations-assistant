@@ -203,6 +203,24 @@ test('三人及四人 PK 分别追踪各主播比分并输出总和为 100% 的�
   assert.deepEqual(tracker.results.at(-1).winnerIds,['self']);
 });
 
+test('多人名单跨帧合并，按房间识别己方并保留每个对手房间，不将局部更新降为单对手', () => {
+  const tracker=new PKTracker({now:()=>8_600_000});
+  tracker.ingest({type:'pk-start',battleId:'roster',roomId:'r',participants:[
+    {anchorId:'self',name:'己方',roomId:'r'},{anchorId:'b',name:'乙',roomId:'rb'},{anchorId:'c',name:'丙',roomId:'rc'}]});
+  let state=tracker.current();
+  assert.equal(state.competitors.find(item=>item.anchorId==='self').isSelf,true);
+  assert.deepEqual(state.opponentRoomIds,['rb','rc']);
+  tracker.ingest({type:'pk-score',battleId:'roster',participants:[{anchorId:'self'},{anchorId:'b',name:'乙新名'}],scores:[{anchorId:'self',score:100},{anchorId:'b',score:50}]});
+  state=tracker.current();
+  assert.equal(state.opponentId,'');assert.equal(state.opponentScoreObserved,false);
+  assert.equal(state.competitors.find(item=>item.anchorId==='c').name,'丙');
+  assert.equal(state.competitors.find(item=>item.anchorId==='b').name,'乙新名');
+  for (const roomId of ['rb','rc']) tracker.ingest({type:'chat',roomId,text:'加油'});
+  tracker.ingest({type:'gift',battleId:'roster',recipientId:'c',user:{id:'viewer'},unitValue:10});
+  assert.equal(tracker.current().chatSignals.opponent.total,2);
+  assert.equal(tracker.current().opponentGifts,1);
+});
+
 test('无 ID 比分按房间并入已知战局，不串到最近打开的另一房间', () => {
   const tracker = new PKTracker({now:()=>9_000_000});
   tracker.ingest({type:'pk-start',battleId:'a',roomId:'r1'});

@@ -18,8 +18,8 @@ export function statBars(points, {label, format = anchorNumber} = {}) {
   const maximum = Math.max(1, ...points.map(point => Number.isFinite(point.value) ? point.value : 0));
   return `<div class="stat-bars" role="list" aria-label="${anchorEscape(label)}" style="--stat-columns:${points.length}">${points.map(point => {
     const known = Number.isFinite(point.value), value = known ? format(point.value) : '未知';
-    const description = `${point.date} · ${value}${point.note ? ` · ${point.note}` : ''}`;
-    return `<div class="stat-bar" role="listitem" tabindex="0" aria-label="${anchorEscape(description)}" title="${anchorEscape(description)}"><span class="stat-bar-value">${anchorEscape(value)}</span><div class="stat-bar-track"><span class="stat-bar-fill" style="transform:scaleY(${known ? Math.max(0, point.value) / maximum : 0})"></span>${!known ? '<span class="stat-bar-unknown">?</span>' : ''}</div><time datetime="${anchorEscape(point.date)}">${anchorEscape(point.date.slice(5))}</time></div>`;
+    const description = `${point.label || point.date} · ${value}${point.note ? ` · ${point.note}` : ''}`;
+    return `<div class="stat-bar" role="listitem" tabindex="0" aria-label="${anchorEscape(description)}" title="${anchorEscape(description)}"><span class="stat-bar-value">${anchorEscape(value)}</span><div class="stat-bar-track"><span class="stat-bar-fill" style="transform:scaleY(${known ? Math.max(0, point.value) / maximum : 0})"></span>${!known ? '<span class="stat-bar-unknown">?</span>' : ''}</div><time datetime="${anchorEscape(point.date)}">${anchorEscape(point.label || point.date.slice(5))}</time></div>`;
   }).join('')}</div>`;
 }
 
