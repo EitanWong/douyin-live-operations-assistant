@@ -14,14 +14,27 @@ function setup() {
   const root = dom.window.document.querySelector('div').attachShadow({mode:'open'});
   root.innerHTML = anchorPageTemplate('1');
   const stats = new AnchorStats({now:()=>now}), engine = {config:{anchorId:'101',incomeEnabled:true},anchorStats:stats};
-  const income = {anchorId:'101',month:'2026-10',days:[{date:'2026-10-23',estimatedIncome:0,unknownCount:2},{date:'2026-10-22',estimatedIncome:50}]};
+  const sessions = Array.from({length:35},(_,i)=>({id:`live-${i}`,roomId:`broadcast-${i}`,startAt:now-i*DAY-3600000,endAt:i ? now-i*DAY+1000 : 0,startSource:'platform',endSource:i ? 'platform' : '',estimatedIncome:i ? 50 : 0,unknownCount:i ? 0 : 2}));
+  const income = {anchorId:'101',month:'2026-10',days:[{date:'2026-10-23',estimatedIncome:99999}],allSessions:sessions,currentSession:sessions[0]};
   const dashboard = new AnchorDashboard(root,()=>dashboard.render(engine,{income}));
   const select = (selector,value) => {const node=root.querySelector(selector);node.value=value;node.dispatchEvent(new dom.window.Event('change',{bubbles:true}));};
   const text = selector => root.querySelector(selector).textContent;
   return {dom,root,stats,engine,dashboard,income,select,text,close:()=>{dashboard.destroy();dom.window.close();}};
 }
 
-test('时间筛选统一驱动汇总、趋势和全量导出，分页不截断导出且昵称不执行 HTML',()=>{
+test('主播段位区关联展馆保级观测，保留实际 PK 段位并提示过期',()=>{
+  const view=setup();
+  try {
+    view.stats.ingest({type:'pk-rank-season',anchorId:'101',id:'rank',receivedAt:now,afterRank:{detail:'钻石'}});
+    view.stats.ingest({type:'anchor-exhibition-retention',source:'web-exhibition',anchorId:'101',roomId:'1',receivedAt:now-130000,name:'甄选展馆',remaining:1});
+    view.dashboard.render(view.engine,{income:view.income});
+    assert.equal(view.text('[data-anchor-rank]'),'钻石');
+    assert.match(view.text('[data-anchor-rank-note]'),/甄选展馆.*还差1款.*过期/);
+    assert.equal(view.dashboard.exportReport().exhibitionRetention.remaining,1);
+  } finally {view.close();}
+});
+
+test('直播场次筛选统一驱动汇总、趋势和全量导出，分页不截断导出且昵称不执行 HTML',()=>{
   const view=setup();
   try {
     for(let i=0;i<25;i++) view.stats.ingestBattle(battle(`today-${i}`,now-i*1000));
@@ -57,13 +70,14 @@ test('收入按 UID 隔离，零收入可展示，关闭统计后不能继续导
     assert.match(view.text('[data-anchor-income-note]'),/2.*未知/);
     view.select('[data-anchor-picker]','202');
     assert.equal(view.text('[data-anchor-stat=income]'),'未知');
-    assert.equal(view.text('[data-anchor-stat=winRate]'),'0%');
+    assert.equal(view.text('[data-anchor-stat=winRate]'),'未知');
     assert.equal(view.dashboard.exportReport().income,null);
     view.select('[data-anchor-picker]','');
     view.engine.config.incomeEnabled=false;
     view.dashboard.render(view.engine,{income:view.income});
     assert.equal(view.text('[data-anchor-stat=income]'),'未知');
     assert.equal(view.dashboard.exportReport().income,null);
+    assert.equal(view.dashboard.exportReport().sessions[0].estimatedIncome,undefined);
     assert.match(view.text('[data-anchor-income-note]'),/未启用/);
   } finally {view.close();}
 });
@@ -91,7 +105,7 @@ test('展馆进度支持零值和任务分页筛选，段位数字字符串可�
   } finally {view.close();}
 });
 
-test('无关直播刷新不聚合或重建图表；新数据、主播切换和北京时间跨日会更新',()=>{
+test('无关直播刷新不聚合或重建图表；新数据会更新，跨日不重置本场统计',()=>{
   const view=setup();
   try {
     let observedAt=now, reports=0;
@@ -104,7 +118,44 @@ test('无关直播刷新不聚合或重建图表；新数据、主播切换和�
     view.stats.ingestBattle(battle('round2',now));view.dashboard.render(view.engine,{income:view.income});
     assert.equal(view.text('[data-anchor-stat=battles]'),'2');assert.equal(reports,2);
     observedAt+=DAY;view.dashboard.render(view.engine,{income:view.income});
-    assert.equal(view.dashboard.exportReport().summary.battles,0);assert.equal(reports,3);
+    assert.equal(view.dashboard.exportReport().summary.battles,2);assert.equal(reports,3);
     view.select('[data-anchor-picker]','202');assert.equal(reports,4);
+  } finally {view.close();}
+});
+
+
+test('选择历史单场同步收入和 PK，开播下播时长与导出保留整场边界',()=>{
+  const view=setup();
+  try {
+    view.stats.ingestBattle(battle('latest',now));
+    view.stats.ingestBattle(battle('older',now-DAY));
+    view.dashboard.render(view.engine,{income:view.income});
+    assert.match(view.text('[data-anchor-end]'),/直播中/);
+    view.select('[data-anchor-session-picker]','live-1');
+    assert.match(view.text('[data-anchor-stat=income]'),/50\.00/);
+    assert.equal(view.text('[data-anchor-stat=battles]'),'1');
+    assert.match(view.text('[data-anchor-period-note]'),/所选场次/);
+    assert.match(view.text('[data-anchor-start]'),/2026.*10.*22.*11:00:00/);
+    assert.match(view.text('[data-anchor-end]'),/12:00:01/);
+    assert.match(view.text('[data-anchor-duration]'),/1 小时/);
+    const exported=view.dashboard.exportReport();
+    assert.equal(exported.sessions.length,1);
+    assert.equal(exported.session.id,'live-1');
+    assert.equal(exported.income.sessions[0].estimatedIncome,50);
+    view.root.querySelector('[data-anchor-period=session]').click();
+    assert.match(view.text('[data-anchor-stat=income]'),/0\.00/);
+    assert.match(view.text('[data-anchor-end]'),/直播中/);
+  } finally {view.close();}
+});
+
+test('没有场次边界的旧日账不用于当前收入，零礼物场次仍显示开播记录',()=>{
+  const view=setup();
+  try {
+    view.dashboard.render(view.engine,{income:{anchorId:'101',days:[{date:'2026-10-23',estimatedIncome:999}]}});
+    assert.equal(view.text('[data-anchor-stat=income]'),'未知');
+    assert.equal(view.text('[data-anchor-start]'),'未采集');
+    view.dashboard.render(view.engine,{income:view.income});
+    assert.match(view.text('[data-anchor-stat=income]'),/0\.00/);
+    assert.match(view.text('[data-anchor-start]'),/11:00:00/);
   } finally {view.close();}
 });

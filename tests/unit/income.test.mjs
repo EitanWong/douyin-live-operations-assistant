@@ -225,3 +225,244 @@ test('刷新和后台重启沿用同一直播ID，并用平台时间补齐首次
   assert.equal(report.sessions.length,1);assert.equal(report.currentSession.startAt,at-3600000);
   assert.equal(report.currentSession.giftCount,1);assert.equal(report.currentSession.startSource,'platform');
 });
+
+
+test('概览可读取跨月场次，月报默认只返回开播月份；场次数据不会借用日汇总', async()=>{
+  const {store}=setup();let now=Date.parse('2026-09-30T15:00:00Z');store.now=()=>now;
+  await store.recordSession({room:'1',type:'start',roomId:'September',at:now});
+  await store.record({...record('sept'),event:{...record('sept').event,roomId:'September',receivedAt:now}});
+  now+=7200000;await store.recordSession({room:'1',type:'end',roomId:'September',at:now});
+  now+=3600000;await store.recordSession({room:'1',type:'start',roomId:'October',at:now});
+  const monthly=await store.report('1','2026-10');
+  assert.equal(monthly.sessions.length,1);assert.equal(monthly.sessions[0].giftCount,0);
+  assert.equal(monthly.allSessions,undefined);
+  const overview=await store.report('1','2026-10',{includeAllSessions:true});
+  assert.equal(overview.allSessions.length,2);
+  assert.equal(overview.allSessions[1].estimatedIncome,5);
+  assert.equal(overview.currentSession.estimatedIncome,0);
+});
+
+test('平台补到真实时间可修正历史推定边界，不影响正在直播的新场次', async()=>{
+  const {store,options}=setup();let now=options.now();store.now=()=>now;
+  await store.recordSession({room:'1',type:'start',roomId:'A',at:now,source:'platform-observed'});
+  now+=3600000;
+  await store.recordSession({room:'1',type:'start',roomId:'B',at:now,source:'platform'});
+  const actualStart=now-7200000,actualEnd=now-10000;
+  await store.recordSession({room:'1',type:'end',roomId:'A',at:actualEnd,startAt:actualStart,observedAt:now,source:'platform'});
+  const report=await store.report('1','2026-10');
+  const old=report.sessions.find(row=>row.roomId==='A');
+  assert.equal(old.startAt,actualStart);assert.equal(old.endAt,actualEnd);
+  assert.equal(old.startSource,'platform');assert.equal(old.endSource,'platform');
+  assert.equal(report.currentSession.roomId,'B');assert.equal(report.currentSession.endAt,0);
+});
+
+test('同场千票榜与用户榜按UID最高累计值补差，礼物前后到达与重启均不重复',async()=>{
+  const {store,options}=setup(),capturedAt=options.now(),roomId='session-1';
+  await store.recordSession({room:'1',type:'start',roomId,at:capturedAt});
+  const sample={room:'1',capturedAt,roomId,rate:0.1,userId:'uid:9',name:'用户甲'};
+  await store.record(record()); // ¥5 already captured
+  await store.recordContribution({...sample,score:1000,scoreIsFloor:true});
+  assert.equal(await store.recordContribution({...sample,score:1000,scoreIsFloor:true}),false);
+  await store.recordContribution({...sample,score:1200});
+  assert.equal(await store.recordContribution({...sample,score:1100}),false);
+  let report=await store.report('1','2026-10');
+  assert.equal(report.currentSession.estimatedIncome,120);
+  assert.equal(report.currentSession.totalDiamonds,1200);
+  assert.equal(report.currentSession.giftDiamonds,100);assert.equal(report.currentSession.calibrationDiamonds,1100);
+  assert.equal(report.summary.giftIncome,5);assert.equal(report.summary.calibrationIncome,115);
+  assert.equal(report.calibration.users,1);assert.equal(report.calibration.hasFloor,false);
+  const restarted=new GiftStore(options);
+  const recovered=record('recovered');recovered.event.count=23; // ¥115 fills the inferred gap
+  await restarted.record(recovered);await restarted.record(recovered);
+  report=await restarted.report('1','2026-10');
+  assert.equal(report.currentSession.estimatedIncome,120);assert.equal(report.currentSession.calibrationIncome,0);
+  assert.equal(report.currentSession.totalDiamonds,2400);assert.equal(report.currentSession.calibrationDiamonds,0);
+  await restarted.record(record('new-gift'));
+  assert.equal((await restarted.report('1','2026-10')).summary.estimatedIncome,125);
+  await restarted.recordContribution({...sample,score:1250});
+  assert.equal((await restarted.report('1','2026-10')).summary.estimatedIncome,125);
+});
+
+test('同名不同UID独立补差；未知礼物价格补齐后自动抵扣，匿名礼物保守避免重叠',async()=>{
+  const {store,options}=setup(),capturedAt=options.now(),roomId='session-1';
+  await store.recordSession({room:'1',type:'start',roomId,at:capturedAt});
+  for(const userId of ['uid:9','uid:10']) await store.recordContribution({room:'1',roomId,capturedAt,userId,name:'同名',score:2000});
+  const unknown=record('unknown');unknown.event.unitValue=null;unknown.event.count=20;
+  await store.record(unknown);
+  assert.equal((await store.report('1','2026-10')).summary.estimatedIncome,200);
+  unknown.event.unitValue=100;
+  await store.record(unknown);
+  let report=await store.report('1','2026-10');
+  assert.equal(report.summary.estimatedIncome,200);assert.equal(report.summary.calibrationIncome,100);
+  assert.equal(report.summary.totalDiamonds,4000);assert.equal(report.summary.giftDiamonds,2000);assert.equal(report.summary.calibrationDiamonds,2000);
+  await store.record({...record('anonymous'),userKey:'anonymous',event:{...record('anonymous').event,count:10}});
+  report=await store.report('1','2026-10');
+  assert.equal(report.summary.estimatedIncome,200);assert.equal(report.summary.calibrationIncome,50);
+  assert.equal(report.summary.totalDiamonds,4000);assert.equal(report.summary.calibrationDiamonds,1000);
+});
+
+test('榜单跨日跨月仍属同场，同一UID重开后分开校准，离线与旧场残留不入新场',async()=>{
+  const {store}=setup();let now=Date.parse('2026-10-31T15:59:00Z');store.now=()=>now;
+  const sample=(roomId,score)=>({room:'1',roomId,capturedAt:now,rate:0.1,userId:'uid:9',score});
+  assert.equal(await store.recordContribution(sample('A',1000)),false,'未识别场次不凭榜单造场');
+  await store.recordSession({room:'1',type:'start',roomId:'A',at:now});
+  await store.recordContribution(sample('A',1000));now+=120000;
+  await store.recordContribution(sample('A',1200));
+  assert.equal((await store.report('1','2026-10')).summary.estimatedIncome,120);
+  assert.equal((await store.report('1','2026-11')).summary.estimatedIncome,0);
+  await store.recordSession({room:'1',type:'end',roomId:'A',at:now});now+=1000;
+  assert.equal(await store.recordContribution(sample('A',1500)),false);
+  await store.recordSession({room:'1',type:'start',roomId:'B',at:now});
+  await store.recordContribution(sample('B',1000));
+  assert.equal(await store.recordContribution(sample('A',2000)),false);
+  assert.equal((await store.report('1','2026-11')).summary.estimatedIncome,100);
+});
+
+test('新版用户累计脱离连击缓存，旧版历史未保留UID时不重复补足已记录金额',async()=>{
+  const {store,options,values}=setup(),now=options.now();
+  await store.record(record());
+  const state=values['live-assistant:income:1'];state.active=[];state.finalized=[];
+  await store.recordContribution({room:'1',roomId:'session-1',capturedAt:now,userId:'uid:9',score:200});
+  assert.equal((await store.report('1','2026-10')).summary.estimatedIncome,10);
+  const legacy=values['live-assistant:income:1'];
+  delete legacy.sessions[0][1].giftUsers;legacy.version=3;
+  await store.recordContribution({room:'1',roomId:'session-1',capturedAt:now,userId:'uid:10',score:100});
+  assert.equal((await store.report('1','2026-10')).summary.estimatedIncome,15,'无法归属的旧礼物先抵扣榜单差额');
+});
+
+test('主播管理按UID合并多地址与旧配置，保留原账本；同名不同UID不合并',async()=>{
+  const {store,values}=setup();
+  values['live-assistant:config:1']={anchorId:'101'};
+  values['live-assistant:profile:1']={room:1,name:'主播甲',anchorId:''};
+  await store.profile({room:'2',anchorId:'101',name:'主播甲'});
+  await store.profile({room:'3',anchorId:'202',name:'主播甲'});
+  await store.profile({room:'02',anchorId:'101',name:'主播甲'});
+  await store.record(record());
+  const profiles=await store.profiles();
+  assert.equal(profiles.length,2);
+  assert.deepEqual(profiles.find(p=>p.anchorId==='101').rooms.sort(),['1','2']);
+  assert.equal(profiles.find(p=>p.anchorId==='202').room,'3');
+  assert.equal((await store.report('1','2026-10')).summary.estimatedIncome,5);
+  assert.equal(values['live-assistant:config:1'].anchorId,'101');
+});
+
+test('榜单与礼物统一收入比例而非礼物面值；比例变化只作用新增分数',async()=>{
+  const {store,options}=setup(),capturedAt=options.now();
+  const gift=record('full');gift.event.count=10;
+  await store.record(gift);
+  const sample={room:'1',roomId:'session-1',capturedAt,userId:'uid:9',score:1000};
+  await store.recordContribution(sample);
+  assert.equal((await store.report('1','2026-10')).summary.estimatedIncome,50,'已收全1000钻时不再按100元面值补差');
+  await store.recordContribution({...sample,score:1200,rate:0.03});
+  await store.recordContribution({...sample,score:1200,rate:0.1});
+  const report=await store.report('1','2026-10');
+  assert.equal(report.summary.estimatedIncome,56);
+  assert.equal(report.summary.totalDiamonds,1200,'钻石按礼物与榜单原始分值补差，不按当前人民币比例反推');
+  assert.equal(report.summary.giftDiamonds,1000);assert.equal(report.summary.calibrationDiamonds,200);
+});
+
+test('无UID观众榜兜底抬高本场收入，重复行、多榜、榜单换人或消失不重复累计',async()=>{
+  const {store,options}=setup(),capturedAt=options.now(),roomId='session-1';
+  await store.record(record());
+  const sample={room:'1',roomId,capturedAt,rate:0.05,rows:[
+    {name:'LILAC',score:6297,source:'audience'},
+    {name:'LILAC',score:6297,source:'audience'},
+    {name:'用户甲',score:1001,source:'audience'},
+    {name:'LILAC',score:1000,source:'thousand',scoreIsFloor:true}
+  ]};
+  assert.equal(await store.recordContributionSnapshot(sample),true);
+  let report=await store.report('1','2026-10');
+  assert.ok(Math.abs(report.summary.estimatedIncome-364.9)<1e-8);
+  assert.equal(report.calibration.users,0);assert.equal(report.calibration.visibleUsers,2);
+  assert.equal(report.summary.giftCount,1);assert.equal(report.summary.totalDiamonds,7298);
+  assert.equal(report.summary.giftDiamonds,100);assert.equal(report.summary.calibrationDiamonds,7198);
+  assert.equal(await store.recordContributionSnapshot(sample),false);
+  await store.recordContributionSnapshot({...sample,rows:[{name:'改名后',score:6297}]});
+  await store.recordContributionSnapshot({...sample,rows:[]});
+  const restarted=new GiftStore(options);
+  report=await restarted.report('1','2026-10');
+  assert.ok(Math.abs(report.summary.estimatedIncome-364.9)<1e-8);
+  assert.equal(report.currentSession.totalDiamonds,7298);assert.equal(report.sessions[0].totalDiamonds,7298);
+  const late=record('late');late.event.count=7298;late.event.unitValue=1;
+  await restarted.record(late);
+  report=await restarted.report('1','2026-10');
+  assert.ok(Math.abs(report.summary.estimatedIncome-369.9)<1e-8,'礼物补回后消耗整榜补差，不叠加整榜金额');
+  assert.equal(report.summary.calibrationIncome,0);
+  assert.equal(report.summary.totalDiamonds,7398);assert.equal(report.summary.calibrationDiamonds,0);
+});
+
+test('钻石按不同UID补差，逐用户累计在连击缓存清理和重启后仍保留',async()=>{
+  const {store,options,values}=setup(),capturedAt=options.now();
+  await store.record(record());
+  const other=record('other');other.userKey='uid:10';other.event.count=10;
+  await store.record(other);
+  const saved=values['live-assistant:income:1'];saved.active=[];saved.finalized=[];
+  const restarted=new GiftStore(options);
+  const sample={room:'1',roomId:'session-1',capturedAt,userId:'uid:9',score:1000,rate:0.05};
+  await restarted.recordContribution(sample);await restarted.recordContribution(sample);
+  const report=await restarted.report('1','2026-10');
+  assert.equal(report.summary.totalDiamonds,2000,'不能以其他用户的礼物抵扣已确认UID的榜单差额');
+  assert.equal(report.summary.giftDiamonds,1100);assert.equal(report.summary.calibrationDiamonds,900);
+  assert.equal(report.summary.estimatedIncome,100);assert.equal(report.summary.giftCount,11);
+  assert.equal(values['live-assistant:income:1'].sessions[0][1].totalDiamonds,1100,'持久原始礼物总额不混入榜单估值');
+});
+
+test('v4旧账本恢复逐用户钻石，缺少历史连击时保守抵扣且不改变人民币',async()=>{
+  for(const retained of [true,false]) {
+    const {store,values,options}=setup(),capturedAt=options.now();
+    await store.record(record());
+    const state=values['live-assistant:income:1'];state.version=4;
+    delete state.sessions[0][1].giftUserDiamonds;
+    if(!retained){state.active=[];state.finalized=[];}
+    const restarted=new GiftStore(options);
+    await restarted.recordContribution({room:'1',roomId:'session-1',capturedAt,userId:'uid:9',score:1000,rate:0.05});
+    let report=await restarted.report('1','2026-10');
+    assert.equal(report.summary.totalDiamonds,1000);assert.equal(report.summary.calibrationDiamonds,900);
+    assert.equal(report.summary.estimatedIncome,50);assert.equal(report.summary.giftCount,1);
+    assert.equal(values['live-assistant:income:1'].version,5);
+    report=await new GiftStore(options).report('1','2026-10');
+    assert.equal(report.summary.totalDiamonds,1000);assert.equal(report.summary.estimatedIncome,50);
+  }
+});
+
+test('收入比例为零时仍按榜单校准钻石，跨场不会合并面值',async()=>{
+  const {store,options}=setup();let capturedAt=options.now();
+  await store.record(record());
+  await store.recordContribution({room:'1',roomId:'session-1',capturedAt,userId:'uid:9',score:1000,rate:0});
+  let report=await store.report('1','2026-10');
+  assert.equal(report.summary.totalDiamonds,1000);assert.equal(report.summary.estimatedIncome,5);
+  capturedAt+=1000;store.now=()=>capturedAt;
+  await store.recordSession({room:'1',type:'start',roomId:'session-2',at:capturedAt});
+  await store.recordContribution({room:'1',roomId:'session-2',capturedAt,userId:'uid:9',score:2000,rate:0});
+  report=await store.report('1','2026-10');
+  assert.equal(report.summary.totalDiamonds,3000);assert.equal(report.currentSession.totalDiamonds,2000);
+  assert.equal(report.summary.estimatedIncome,5);assert.equal(report.currentSession.estimatedIncome,0);
+});
+
+test('整榜与逐用户补差取较高下限；同UID跨榜更名、身份补齐不会重复算',async()=>{
+  const {store,options}=setup(),capturedAt=options.now(),roomId='session-1';
+  await store.record(record());
+  const sample={room:'1',roomId,capturedAt,rows:[{name:'甲',score:2000},{name:'乙',score:1000}]};
+  await store.recordContributionSnapshot(sample);
+  assert.equal((await store.report('1','2026-10')).summary.estimatedIncome,150);
+  await store.recordContributionSnapshot({...sample,rows:[
+    {userId:'uid:9',name:'甲',score:2000},
+    {userId:'uid:9',name:'甲的新昵称',score:2100,source:'thousand'},
+    {name:'甲',score:2000}, {userId:'uid:10',name:'乙',score:1000}
+  ]});
+  const report=await store.report('1','2026-10');
+  assert.equal(report.summary.estimatedIncome,155);
+  assert.equal(report.calibration.users,2);
+  assert.equal(report.calibration.unmatched,0);
+});
+
+test('整榜采样不能创建场次、跨场抬高或接受非法身份',async()=>{
+  const {store,options}=setup(),capturedAt=options.now();
+  const sample={room:'1',roomId:'session-1',capturedAt,rows:[{name:'甲',score:1000}]};
+  assert.equal(await store.recordContributionSnapshot(sample),false);
+  await store.record(record());
+  await assert.rejects(store.recordContributionSnapshot({...sample,rows:[{name:'甲',userId:'name:甲',score:1000}]}),/榜单校准/);
+  assert.equal(await store.recordContributionSnapshot({...sample,roomId:'different'}),false);
+  await store.recordSession({room:'1',type:'end',roomId:'session-1',at:capturedAt});
+  assert.equal(await store.recordContributionSnapshot({...sample,capturedAt:capturedAt+1}),false);
+});

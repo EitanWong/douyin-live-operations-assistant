@@ -58,3 +58,36 @@ test('没有PK时活动图仍使用自身时间轴，贡献分排序不使用礼
   assert.equal(options.contributorCount,2);assert.equal(options.contributions.series[0].data.at(-1).value,50);
   assert.equal(options.activity.xAxis.min,now-20000);assert.deepEqual(options.activity.series[0].data,[[now-20000,3],[now-10000,0],[now,0]]);
 });
+
+test('各图表独立调整刻度密度，紧凑视图保留全部样本与贡献者',()=>{
+  const now=1000000,data={trend:[{at:now,selfScore:20,opponentScore:null}],selfUsers:Array.from({length:8},(_,i)=>({name:`观众${i}`,score:i+1}))};
+  const compact=pkChartOptions(data,{now,widths:{scores:280,gap:300,activity:280,contributions:280}});
+  const wide=pkChartOptions(data,{now,widths:{scores:760,gap:400,activity:760,contributions:500}});
+  assert.equal(compact.scores.xAxis.splitNumber,2);assert.equal(wide.scores.xAxis.splitNumber,6);
+  assert.equal(wide.gap.xAxis.splitNumber,4);
+  assert.ok(compact.contributions.yAxis.axisLabel.width<wide.contributions.yAxis.axisLabel.width);
+  assert.equal(compact.contributorCount,8);
+  assert.deepEqual(compact.scores.series,wide.scores.series);
+  assert.equal(compact.scores.series[1].data[0][1],null);
+});
+
+test('多人同时间比分帧合并后每位主播只有一个点，保留零分、最新分数和此前已知侧',()=>{
+  const now=1000000;
+  const data={competitors:[{anchorId:'a',name:'同名'},{anchorId:'b',name:'同名'},{anchorId:'c',name:'丙'}],trend:[
+    {at:now,selfScore:20,opponentScore:10,competitorScores:{a:20,b:10}},
+    {at:now-1000,competitorScores:{a:5,b:4}},
+    {at:now,selfScore:0,opponentScore:null,competitorScores:{a:0,b:null,c:7}},
+    {at:now,competitorScores:{b:15,c:NaN}},
+    {at:NaN,competitorScores:{a:100}}
+  ]};
+  const before=structuredClone(data), options=pkChartOptions(data,{now});
+  assert.equal(options.pointCount,2);
+  assert.deepEqual(options.scores.series.map(series=>series.data),[
+    [[now-1000,5],[now,0]],[[now-1000,4],[now,15]],[[now-1000,null],[now,7]]
+  ]);
+  assert.equal(options.scores.series.length,3);
+  const pair=pkChartOptions({history:data.trend.map(point=>({...point,kind:'score'}))},{now});
+  assert.deepEqual(pair.scores.series.map(series=>series.data.at(-1)),[[now,0],[now,10]]);
+  assert.deepEqual(pair.gap.series[0].data.at(-1),[now,-10]);
+  assert.deepEqual(data,before);
+});

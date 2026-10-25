@@ -69,9 +69,11 @@ export class AnchorStats {
   constructor({now = Date.now} = {}) {
     this.now = now; this.revision = 0; this.records = new Map(); this.exhibition = new Map(); this.exhibitionChunks = new Map();
     this.rank = new Map(); this.unknownRanks = []; this.seenRankEvents = new Set();
+    this.retention = new Map();
   }
   ingest(event, context = {}) {
     if (!event || typeof event !== 'object') return false;
+    if (event.type === 'anchor-exhibition-retention' || event.type === 'room-indicator' && event.exhibitionRetention) return this.ingestRetention(event,context);
     if (event.type === 'anchor-exhibition') return this.ingestExhibition(event, context);
     if (event.type === 'pk-rank-season') return this.ingestRank(event, context);
     return false;
@@ -109,6 +111,9 @@ export class AnchorStats {
     if (event.summary && typeof event.summary === 'object') {
       const summary = event.summary;
       aggregate.summary = {...aggregate.summary,
+        ...(count(summary.keepTarget) !== null ? {keepTarget:count(summary.keepTarget)} : {}),
+        ...(count(summary.gapToNextLevel) !== null ? {gapToNextLevel:count(summary.gapToNextLevel)} : {}),
+        ...(count(summary.exhibitionType) !== null ? {exhibitionType:count(summary.exhibitionType)} : {}),
         ...(text(summary.name) ? {name:text(summary.name)} : {}), ...(text(summary.title) ? {title:text(summary.title)} : {}),
         ...(count(summary.level) !== null ? {level:count(summary.level)} : {}), ...(count(summary.gradeLevel) !== null ? {floor:count(summary.gradeLevel)} : {}),
         ...(summary.stars && typeof summary.stars === 'object' ? {stars:{current:count(summary.stars.current),target:count(summary.stars.target),completedStage:count(summary.stars.completedStage)}} : {})};
@@ -146,11 +151,28 @@ export class AnchorStats {
     this.revision++;
     return true;
   }
+  ingestRetention(event, context = {}) {
+    const anchorId = identity(event.anchorId) || identity(context.anchorId), value = event.exhibitionRetention || event;
+    const remaining = count(value.remaining), observedAt = time(event.receivedAt) || time(event.at);
+    if (!anchorId || remaining === null || remaining > 10000 || !observedAt) return false;
+    const source = event.type === 'room-indicator' ? 'protocol' : event.source;
+    if (!['protocol','web-exhibition','native-indicator'].includes(source)) return false;
+    const old = this.retention.get(anchorId), priority = s => s === 'native-indicator' ? 0 : 1;
+    if (old && (old.observedAt > observedAt || observedAt-old.observedAt < 120000 && priority(old.source) > priority(source))) return false;
+    this.retention.set(anchorId,{anchorId,roomId:identity(event.roomId),name:text(value.name),remaining,text:text(value.text),source,observedAt});
+    this.revision++;
+    return true;
+  }
+  retentionFor(anchorId) {
+    const value = this.retention.get(anchorId);
+    return value ? {...value,stale:this.now()-value.observedAt > 120000} : null;
+  }
   exhibitionFor(anchorId) {
     const value = this.exhibition.get(anchorId); if (!value) return null;
     const items = value.items instanceof Map ? [...value.items.values()] : Array.isArray(value.items) ? value.items : [];
     return {anchorId:value.anchorId,snapshotId:value.snapshotId,updatedAt:value.updatedAt || null,name:value.summary.name || '',title:value.summary.title || '',
       level:value.summary.level ?? null,floor:value.summary.floor ?? null,stars:value.summary.stars || null,lightedCount:value.lightedCount || 0,totalCount:value.totalCount || 0,
+      keepTarget:value.summary.keepTarget ?? null,gapToNextLevel:value.summary.gapToNextLevel ?? null,exhibitionType:value.summary.exhibitionType ?? null,
       sections:copyAnchorStats(value.sections),tasks:copyAnchorStats(value.tasks || []),items:copyAnchorStats(items.slice(0,2000)),truncated:items.length > 2000 || Object.values(value.sections || {}).some(row => row.truncated),partial:Object.values(value.sections || {}).some(row => row.received < row.totalItems)};
   }
   ingestBattle(state) {
@@ -233,7 +255,7 @@ export class AnchorStats {
     if (changed) this.revision++;
     return changed || previousRevision !== this.revision;
   }
-  snapshot() { return {version:1,records:copyAnchorStats([...this.records.values()]),exhibition:copyAnchorStats([...this.exhibition.entries()].filter(([key]) => !key.includes('"')).map(([key]) => [key,this.exhibitionFor(key)])),rank:copyAnchorStats([...this.rank.entries()]),unknownRanks:copyAnchorStats(this.unknownRanks)}; }
+  snapshot() { return {version:1,records:copyAnchorStats([...this.records.values()]),exhibition:copyAnchorStats([...this.exhibition.entries()].filter(([key]) => !key.includes('"')).map(([key]) => [key,this.exhibitionFor(key)])),rank:copyAnchorStats([...this.rank.entries()]),retention:copyAnchorStats([...this.retention.entries()]),unknownRanks:copyAnchorStats(this.unknownRanks)}; }
   restore(saved) {
     if (saved?.version !== 1 || !Array.isArray(saved.records)) return false;
     const records = new Map();
@@ -243,14 +265,15 @@ export class AnchorStats {
       if (!old || (!old.scoreFinal && row.scoreFinal) || (!old.scoreFinal && (row.updatedAt || 0) >= (old.updatedAt || 0))) records.set(key, row);
     }
     this.records = records;
-    this.exhibition.clear(); this.exhibitionChunks.clear(); this.rank.clear(); this.unknownRanks = [];
+    this.exhibition.clear(); this.exhibitionChunks.clear(); this.rank.clear(); this.retention.clear(); this.unknownRanks = [];
     for (const item of saved.exhibition || []) if (Array.isArray(item) && identity(item[0]) && item[1]) {
-      const savedValue = item[1], value = {...savedValue, summary:{name:savedValue.name || '',title:savedValue.title || '',level:savedValue.level ?? null,floor:savedValue.floor ?? null,stars:savedValue.stars || null},
+      const savedValue = item[1], value = {...savedValue, summary:{name:savedValue.name || '',title:savedValue.title || '',level:savedValue.level ?? null,floor:savedValue.floor ?? null,stars:savedValue.stars || null,keepTarget:savedValue.keepTarget ?? null,gapToNextLevel:savedValue.gapToNextLevel ?? null,exhibitionType:savedValue.exhibitionType ?? null},
         sections:savedValue.sections || {}, items:new Map((savedValue.items || []).slice(0,2000).map(row => [row.giftId,row]))};
       this.exhibition.set(item[0], value);
       if (value.snapshotId) this.exhibition.set(JSON.stringify([item[0],value.snapshotId]), value);
     }
     for (const item of saved.rank || []) if (Array.isArray(item) && identity(item[0]) && item[1]) this.rank.set(item[0], item[1]);
+    for (const item of saved.retention || []) if (Array.isArray(item) && identity(item[0]) && item[1]) this.ingestRetention({...item[1],type:'anchor-exhibition-retention',anchorId:item[0],receivedAt:item[1].observedAt});
     this.unknownRanks = Array.isArray(saved.unknownRanks) ? saved.unknownRanks.slice(-100) : [];
     this.revision++;
     return true;
@@ -265,6 +288,7 @@ export class AnchorStats {
     }
     // An exhibition or rank can arrive before the first PK.
     for (const [anchorId, rank] of this.rank) if (!anchors.has(anchorId)) anchors.set(anchorId, {anchorId,name:'',lastAt:rank.observedAt,battles:0});
+    for (const [anchorId, retention] of this.retention) if (!anchors.has(anchorId)) anchors.set(anchorId,{anchorId,name:'',lastAt:retention.observedAt,battles:0});
     for (const [anchorId, exhibition] of this.exhibition) {
       if (anchorId !== exhibition.anchorId) continue;
       const old = anchors.get(anchorId) || {anchorId,name:'',lastAt:null,battles:0};
@@ -286,7 +310,7 @@ export class AnchorStats {
       return {date,...summarizeAnchorBattles(buckets.get(date) || [])};
     });
     const name = this.anchors().find(anchor => anchor.anchorId === anchorId)?.name || '';
-    return {anchorId,name,timeZone:'Asia/Shanghai',exhibition:this.exhibitionFor(anchorId),rank:this.rank.get(anchorId) ? copyAnchorStats(this.rank.get(anchorId)) : null,
+    return {anchorId,name,timeZone:'Asia/Shanghai',exhibition:this.exhibitionFor(anchorId),exhibitionRetention:this.retentionFor(anchorId),rank:this.rank.get(anchorId) ? {...copyAnchorStats(this.rank.get(anchorId)),exhibitionRetention:this.retentionFor(anchorId)} : null,
       rankUnknown:copyAnchorStats(this.unknownRanks.slice(-20)),today:{date:today,...summarizeAnchorBattles(rows.filter(row => row.date && row.date === today))},
       month:{month,...summarizeAnchorBattles(rows.filter(row => row.date && row.date.startsWith(month || '!')))},total:summarizeAnchorBattles(rows),trend,battles:copyAnchorStats(rows),
       basis:'仅统计本机已观测场次；按北京时间结束日归属，未结束按开始日。胜率=胜场/(胜+负+平)，平局计入分母、不计胜场；多人场最高分并列者记平局，其余记负。仅明确终局比分计入 PK 总分及胜负，未知保留待确认。'};

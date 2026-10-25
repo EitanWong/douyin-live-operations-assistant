@@ -5,9 +5,49 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
+import vm from 'node:vm';
 import { installDevelopmentReload } from '../../extension/development-reload.js';
 const run = promisify(execFile);
 const a = 'a'.repeat(64), b = 'b'.repeat(64);
+
+test('开发页心跳在扩展重载或上下文失效时静默停止，不抛出页面错误', async () => {
+  const source = await readFile(new URL('../../extension/development-content.js', import.meta.url), 'utf8');
+  const intervals = [], cleared = [], listeners = new Map();
+  const page = { location:{pathname:'/123'}, addEventListener:(name,fn)=>listeners.set(name,fn), removeEventListener:()=>{} };
+  const chrome = { runtime:{ connect:()=>{ throw new Error('Extension context invalidated.'); } } };
+  assert.doesNotThrow(() => vm.runInNewContext(source,{chrome,location:page.location,window:page,setInterval:fn=>{intervals.push(fn);return fn;},clearInterval:id=>cleared.push(id)}));
+  assert.equal(intervals.length,0);
+
+  let ping;
+  const port = { postMessage:()=>{ throw new Error('Extension context invalidated.'); }, disconnect:()=>{}, onDisconnect:{addListener:fn=>ping=fn,removeListener:()=>{}} };
+  const context = { chrome:{runtime:{connect:()=>port,lastError:null}}, location:page.location, window:page,
+    setInterval:fn=>{intervals.push(fn);return fn;}, clearInterval:id=>cleared.push(id) };
+  vm.runInNewContext(source,context); assert.equal(intervals.length,1);
+  assert.doesNotThrow(() => intervals.at(-1)()); assert.ok(cleared.includes(intervals.at(-1)));
+  assert.doesNotThrow(() => ping?.());
+});
+
+test('开发心跳正常发送，断开时消费 lastError；页面销毁或清理失效均不残留心跳',async()=>{
+  const source=await readFile(new URL('../../extension/development-content.js',import.meta.url),'utf8');
+  for(const reason of ['disconnect','pagehide','postMessage','listener']){
+    const intervals=new Map(),listeners=new Map();let disconnectListener,checks=0,disconnects=0,errorReads=0,invalid=false;
+    const port={
+      postMessage:()=>{if(invalid)throw new Error('Extension context invalidated.');checks++;},
+      disconnect:()=>{disconnects++;throw new Error('Extension context invalidated.');},
+      onDisconnect:{addListener:fn=>{disconnectListener=fn;if(reason==='listener')throw new Error('Extension context invalidated.');},removeListener:()=>{throw new Error('Extension context invalidated.');}}
+    };
+    const runtime={connect:()=>port,get lastError(){errorReads++;return {message:'The message port closed.'};}};
+    const page={addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name)};
+    assert.doesNotThrow(()=>vm.runInNewContext(source,{chrome:{runtime},window:page,location:{pathname:'/123'},setInterval:fn=>{intervals.set(1,fn);return 1;},clearInterval:id=>intervals.delete(id)}));
+    if(reason==='listener'){assert.equal(checks,0);assert.equal(intervals.size,0);assert.equal(disconnects,1);continue;}
+    assert.equal(checks,1);const tick=intervals.get(1);tick();assert.equal(checks,2);
+    if(reason==='disconnect'){assert.doesNotThrow(disconnectListener);assert.equal(errorReads,1);}
+    if(reason==='pagehide')assert.doesNotThrow(listeners.get('pagehide'));
+    if(reason==='postMessage'){invalid=true;assert.doesNotThrow(tick);}
+    assert.equal(intervals.size,0);assert.equal(listeners.size,0);assert.equal(disconnects,1);
+    assert.doesNotThrow(tick);assert.equal(checks,2);assert.doesNotThrow(disconnectListener);assert.equal(disconnects,1);
+  }
+});
 
 function harness({revision=a,values={},fetchUpdate,beforeReload,prepareReload=async()=>({ok:true}),alarmsAvailable=true}={}) {
   let alarm,connect,reloads=0,flushed=0;
@@ -100,7 +140,7 @@ test('开发构建分离本地权限，正式构建不包含自动重载入口�
     await writeFile(join(dist,'development-watch.lock'),String(process.pid));
     await run(process.execPath,['scripts/build.mjs'],{env});
     const production=JSON.parse(await readFile(join(ext,'manifest.json'),'utf8'));
-    assert.deepEqual(production.permissions,['storage','unlimitedStorage']);assert.doesNotMatch(await readFile(join(ext,'background.js'),'utf8'),/installDevelopmentReload/);
+    assert.deepEqual(production.permissions,['storage','unlimitedStorage','alarms','power']);assert.doesNotMatch(await readFile(join(ext,'background.js'),'utf8'),/installDevelopmentReload/);
     assert.ok(!production.content_scripts.some(script=>script.js.includes('development-content.js')));
   } finally {await rm(dist,{recursive:true,force:true});}
 });

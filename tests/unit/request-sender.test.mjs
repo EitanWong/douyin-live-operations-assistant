@@ -106,3 +106,41 @@ test('请求桥只接受同页面同房间同请求ID的结果',async()=>{
     assert.deepEqual(await pending,{available:true,token:'ok'});
   } finally {f.dom.window.close();}
 });
+
+test('管理请求使用原生禁言与拉黑参数，按票据只提交一次并保护主播、管理员和本人',async()=>{
+  const f=fixture(), target={id:'9007199254740993123',secUid:'sec-target'};
+  try {
+    const room=f.page.__STORE__.roomStore.roomInfo.room;
+    room.owner={id_str:'456'};room.admin_user_ids_str=['789','888'];
+    for(const [action,url,key,sec] of [['mute','/webcast/room/silence/','user_id','sec_user_id'],['ban','/webcast/room/kick/user/','kick_uid','sec_kick_uid']]){
+      const prepared=f.sender.prepareModeration(action,target);assert.equal(prepared.available,true);
+      const first=f.sender.commitModeration(prepared.token),second=f.sender.commitModeration(prepared.token);
+      assert.equal(first,second);assert.equal((await first).submitted,true);
+      const request=f.requests.at(-1);assert.equal(request.url,url);assert.equal(request.method,'post');
+      assert.equal(request.params[key],target.id);assert.equal(request.params[sec],target.secUid);
+      assert.equal(request.params.room_id,'7698776476925443611');
+    }
+    assert.equal(f.requests.length,2);
+    for(const id of ['456','789','888','name:x'])assert.equal(f.sender.prepareModeration('ban',{...target,id}).available,false);
+    assert.equal(f.sender.prepareModeration('ban',{id:target.id}).available,false);
+    assert.equal(f.sender.prepareModeration('delete',target).available,false);
+  }finally{f.dom.window.close();}
+});
+test('管理提交前重新核对权限、账号和房间；服务端拒绝与未知结果分开，不重试',async()=>{
+  for(const mutate of [f=>{f.page.__STORE__.roomStore.roomInfo.room.admin_user_ids_str=[];},f=>{f.page.__STORE__.userStore.userInfo.id_str='10';},f=>{f.page.__STORE__.roomStore.roomInfo.room.web_rid='999';},f=>{f.page.__STORE__.roomStore.roomInfo.room.admin_user_ids_str.push('999');}]){
+    const f=fixture();try{
+      const room=f.page.__STORE__.roomStore.roomInfo.room;room.owner={id_str:'456'};room.admin_user_ids_str=['789'];
+      const p=f.sender.prepareModeration('ban',{id:'999',secUid:'sec-target'});assert.equal(p.available,true);mutate(f);
+      assert.equal((await f.sender.commitModeration(p.token)).submitted,false);assert.equal(f.requests.length,0);
+    }finally{f.dom.window.close();}
+  }
+  const f=fixture();try{
+    f.page.__STORE__.roomStore.roomInfo.room.owner={id_str:'456'};f.page.__STORE__.roomStore.roomInfo.room.admin_user_ids_str=['789'];
+    for(const fail of [false,true]){
+      let calls=0;f.client.request=async()=>{calls++;if(fail)throw Error('timeout');return {data:{status_code:403}};};
+      const p=f.sender.prepareModeration('mute',{id:'999',secUid:'sec-target'});
+      const result=await f.sender.commitModeration(p.token);await f.sender.commitModeration(p.token);
+      assert.equal(result.submitted,false);assert.equal(Boolean(result.unknown),fail);assert.equal(calls,1);
+    }
+  }finally{f.dom.window.close();}
+});

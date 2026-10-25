@@ -4,17 +4,46 @@ import { readFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
+import { build } from 'esbuild';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { validateEndpoint } from '../../src/services/ai.js';
 import { GiftStore } from '../../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from '../../extension/durable-storage.js';
 import { EventInbox } from '../../src/runtime/inbox.js';
+import { installCollectionKeeper } from '../../extension/collection-keeper.js';
 import { RequestBridgeClient } from '../../src/browser/request-sender.js';
 import { webLocks } from '../helpers/web-locks.mjs';
 import { buildFixture } from '../helpers/build.mjs';
 const {dist:testDist, cleanup} = await buildFixture();
 after(cleanup);
 const file=name=>join(testDist,'chrome-extension',name);
+test('构建后的 MAIN 与隔离点赞桥完成三批，重复批次只发一次，停止票据立即失效',async()=>{
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,requests=[];
+  try {
+    Object.assign(page,{TextDecoder,TextEncoder});
+    page.__STORE__={roomStore:{roomInfo:{roomId:'7700231539170609947',room:{web_rid:'1',status:2,room_auth:{Digg:true}}}},userStore:{userInfo:{id_str:'987654321'}}};
+    const source=await readFile(file('page.js'),'utf8'),bootstrap=await readFile(new URL('../../extension/page.js',import.meta.url),'utf8');
+    page.eval(source.replace(bootstrap,'window.likeSender=new PageRequestSender(window);'));
+    page.likeSender.client=()=>({request:async request=>{requests.push(request);return {data:{status_code:0}};}});
+    page.DouyinAdapter=class{constructor(){this.requestSender=page.likeSender;}hook(){}emitStatus(){}};
+    page.DEFAULTS={};page.copy=value=>value;
+    page.postMessage=data=>queueMicrotask(()=>page.dispatchEvent(new page.MessageEvent('message',{source:page,origin:page.location.origin,data})));
+    page.eval(bootstrap);
+    const bridge=new RequestBridgeClient(page),prepared=await bridge.prepareLike();
+    assert.equal(prepared.available,true);
+    let now=page.Date.now();page.Date.now=()=>now;
+    for(const [i,count] of [3,3,1].entries()){
+      now+=1;
+      const result=await bridge.commitLike(prepared.token,count,i+1);
+      assert.equal(result.submitted,true);assert.equal(result.count,count);
+      assert.equal((await bridge.commitLike(prepared.token,count,i+1)).submitted,true);
+    }
+    assert.deepEqual(requests.map(request=>request.params.count),[3,3,1]);
+    await bridge.stopLike(prepared.token);
+    assert.equal((await bridge.commitLike(prepared.token,3,4)).submitted,false);
+    assert.equal(requests.length,3);
+  }finally{page.close();}
+});
 async function worker(values = {}, indexedDB = new IDBFactory()) {
   let usedBytes = 0, listener,changed; const sent=[], requests=[]; let allowed=true;
   const WorkerDurableStorage = class extends DurableStorage {
@@ -22,18 +51,88 @@ async function worker(values = {}, indexedDB = new IDBFactory()) {
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>sent.push([id,m])}};
   const code=(await readFile(file('background.js'),'utf8')).replace(/^import .*;\n/gm,'');
-  vm.runInNewContext(code,{chrome,validateEndpoint,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,AbortController,setTimeout,clearTimeout,URL,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
+  vm.runInNewContext(code,{chrome,installCollectionKeeper,validateEndpoint,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,AbortController,setTimeout,clearTimeout,URL,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,r)),deny:()=>allowed=false};
 }
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
-  assert.deepEqual(m.permissions,['storage','unlimitedStorage']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
+  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
   for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
   const main=await readFile(file('page.js'),'utf8'); assert.doesNotMatch(main,/chrome\.storage|GM_getValue|api-key:|GM_xmlhttpRequest/);
   assert.match(main,/class AnchorStats\b/); assert.match(main,/new AnchorStats\(/);
+});
+
+test('展馆 iframe 保级消息仅可从已知指标页转交同标签主页，错误来源与 UID 被拒绝',async()=>{
+  const w=await worker();
+  const frameURL='https://lf-normal-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html?anchor_id=123&room_id=456';
+  const sender={frameId:2,url:frameURL,tab:{id:1,url:'https://live.douyin.com/1'}};
+  const event={type:'anchor-exhibition-retention',source:'native-indicator',anchorId:'123',roomId:'456',name:'甄选展馆',text:'甄选展馆差1款保级',remaining:1};
+  await w.send({type:'exhibition-indicator',event},sender);
+  assert.equal(w.sent.length,1);assert.equal(w.sent[0][0],1);assert.equal(w.sent[0][1].event.remaining,1);
+  for(const invalid of [{...sender,url:frameURL.replace('bytegecko.com','example.com')},{...sender,frameId:0}]) {
+    assert.equal((await w.send({type:'exhibition-indicator',event},invalid)).ok,false);
+  }
+  assert.equal((await w.send({type:'exhibition-indicator',event:{...event,anchorId:'789'}},sender)).ok,false);
+  assert.equal(w.sent.length,1);
+});
+
+test('构建后的指标脚本在动态展馆提示出现后采集且不注入场控 UI',async()=>{
+  const source=await readFile(file('indicator-frame.js'),'utf8');
+  const dom=new JSDOM('<body><div><span>甄选展馆</span><span>差1款保级</span></div></body>',{url:'https://lf-normal-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html?anchor_id=123&room_id=456',runScripts:'outside-only'});
+  const calls=[],page=dom.window;
+  try {
+    // 测试环境模拟被嵌入的 frame，避免接触真实直播间发送通道。
+    const code=source.replace(/window !== window.top/g,'true');
+    page.chrome={runtime:{id:'test',sendMessage:async message=>{calls.push(message);return {ok:true};}}};
+    page.eval(code);await new Promise(setImmediate);
+    assert.equal(calls[0].event.remaining,1);assert.equal(calls[0].event.anchorId,'123');
+    assert.equal(page.document.querySelector('[data-live-assistant]'),null);
+    page.dispatchEvent(new page.Event('pagehide'));
+  } finally {page.close();}
+});
+test('后台与弹窗的完整模块依赖均可从扩展产物内解析', async()=>{
+  const result = await build({
+    absWorkingDir:join(testDist,'chrome-extension'),
+    entryPoints:['background.js','popup.js'],
+    bundle:true,write:false,outdir:'module-check',format:'esm',platform:'browser',
+    metafile:true,logLevel:'silent'
+  });
+  for (const path of Object.keys(result.metafile.inputs)) {
+    assert.ok(!path.startsWith('../'),`模块依赖不能越出扩展目录：${path}`);
+  }
+  for (const output of Object.values(result.metafile.outputs)) {
+    assert.deepEqual(output.imports,[],'所有模块依赖必须包含在扩展产物中');
+  }
+});
+test('油猴、隔离脚本和 MAIN 产物均包含并可执行礼物与观众回复上下文', async () => {
+  for (const entry of ['userscript','content','page']) {
+    const path = entry === 'userscript' ? join(testDist,'douyin-live-assistant.user.js') : file(`${entry}.js`);
+    const source = await readFile(path,'utf8');
+    const bootstrap = entry === 'userscript' ? '\nboot();\n' : await readFile(new URL(`../../extension/${entry}.js`,import.meta.url),'utf8');
+    assert.ok(source.includes(bootstrap));
+    const dom = new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
+    try {
+      Object.assign(dom.window,{TextDecoder,TextEncoder});
+      dom.window.eval(source.replace(bootstrap,'\nglobalThis.replyTest = {Engine, copy, DEFAULTS};\n'));
+      const {Engine,copy,DEFAULTS} = dom.window.replyTest;
+      assert.equal(DEFAULTS.pkOperations.durationSec,300,entry);
+      const config=copy(DEFAULTS);config.ai.enabled=true;config.gift.responseMode='ai';config.mode='preview';config.anchorId='1234567890';
+      let prompt;
+      const engine=new Engine({config,ai:async value=>{prompt=value;return '青山，这份礼物好惊喜，谢谢支持！';}});
+      assert.ok(engine.pkOperations.view().plan,`${entry}: PK 依赖可初始化`);
+      engine.start();
+      engine.ingest({type:'gift',id:'bundled-gift',user:{id:'viewer',name:'青山',wealthLevel:50,fanClubs:[{anchorId:'1234567890',level:12,status:1}]},giftId:'star',giftName:'星星',unitValue:100,count:20,final:true});
+      await engine.tick(false);await new Promise(setImmediate);
+      assert.equal(prompt.task.data.totalDiamonds,2000,entry);
+      assert.equal(prompt.task.data.valueTier,'large',entry);
+      assert.equal(prompt.target.wealthLevel,50,entry);assert.equal(prompt.target.fanLevel,12,entry);
+      assert.equal(engine.queue[0].aiGenerated,true,entry);
+      engine.stop();
+    } finally {dom.window.close();}
+  }
 });
 
 test('room_id 查询链接的 MAIN 观察器和后台均识别同一直播间',async()=>{
@@ -60,7 +159,10 @@ test('MAIN 观察器在 content 握手之前完整缓存事件，握手只回放
     for(let n=0;n<160;n++)captured.onEvent({type:n % 2 ? 'chat' : 'gift',id:String(n),text:`消息${n}`});
     assert.equal(received.length,0);
     const hello=()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-content-v1',type:'hello'}}));
-    hello(); hello(); await new Promise(r=>setTimeout(r,20));
+    hello(); hello();
+    // The bridge yields between batches; concurrent test workers can exceed a fixed 20 ms.
+    const deadline=Date.now()+2000;
+    while(received.length<160 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
     assert.equal(received.length,160); assert.equal(received[159].id,'159'); assert.equal(received.filter(e=>e.type==='chat').length,80);
   } finally {dom.window.close();}
 });
@@ -388,7 +490,7 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 
-test('实际扩展接收点赞和礼物，过滤本人事件且保留同名观众的互动',async()=>{
+test('实际扩展接收点赞和礼物，本人礼物入账但不自发感谢，并保留同名观众互动',async()=>{
   const selfId='9007199254740993123';
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
   Object.defineProperty(dom.window.navigator,'locks',{value:webLocks()});
@@ -421,8 +523,8 @@ test('实际扩展接收点赞和礼物，过滤本人事件且保留同名观�
     emit({type:'like',id:'self-like',user,count:30});
     emit({type:'gift',id:'self-gift',user,giftId:'1',giftName:'本人的礼物',unitValue:500,count:1,groupId:'self',final:true});
     await new Promise(r=>setTimeout(r,550));
-    assert.equal(root.querySelector('[data-gift-diamonds]').textContent,'0');
-    assert.doesNotMatch(root.querySelector('[data-recent-gifts]').textContent,/本人的礼物/);
+    assert.equal(root.querySelector('[data-gift-diamonds]').textContent,'500');
+    assert.match(root.querySelector('[data-recent-gifts]').textContent,/本人的礼物/);
     assert.doesNotMatch(root.querySelector('[data-logs]').textContent,/like：|gift：/);
 
     const other={id:'9007199254740993124',name:user.name};
@@ -433,11 +535,11 @@ test('实际扩展接收点赞和礼物，过滤本人事件且保留同名观�
     assert.match(root.querySelector('[data-logs]').textContent,/like：.*同名账号/);
     assert.match(root.querySelector('[data-logs]').textContent,/gift：.*同名账号/);
     const incomeDeadline=Date.now()+2000;
-    while(Date.now()<incomeDeadline && root.querySelector('[data-gift-diamonds]').textContent!=='500')await new Promise(r=>setTimeout(r,25));
-    assert.equal(root.querySelector('[data-gift-diamonds]').textContent,'500');
-    assert.equal(values['live-assistant:income:1'].days[0][1].totalDiamonds,500);
+    while(Date.now()<incomeDeadline && root.querySelector('[data-gift-diamonds]').textContent!=='1,000')await new Promise(r=>setTimeout(r,25));
+    assert.equal(root.querySelector('[data-gift-diamonds]').textContent,'1,000');
+    assert.equal(values['live-assistant:income:1'].days[0][1].totalDiamonds,1000);
     assert.match(root.querySelector('[data-recent-gifts]').textContent,/观众的礼物/);
-    assert.doesNotMatch(root.querySelector('[data-recent-gifts]').textContent,/本人的礼物/);
+    assert.match(root.querySelector('[data-recent-gifts]').textContent,/本人的礼物/);
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 
@@ -456,9 +558,9 @@ test('实际后台持久存储月报，重启后仍去重；两个主播配置�
   const report=await again.send({type:'income-report',room:'1',month});
   assert.equal(report.ok,true);assert.equal(report.value.summary.estimatedIncome,10);
   assert.equal((await again.send({type:'income-report',room:'2',month})).value.summary.totalDiamonds,0);
-  assert.equal((await again.send({type:'gift-record',event:{...event,groupId:'self',user:{id:'10'}},userKey:'uid:10',rate:0.05})).value,false);
+  assert.equal((await again.send({type:'gift-record',event:{...event,groupId:'self',user:{id:'10'}},userKey:'uid:10',rate:0.05})).value,true);
   await again.send(message);
-  assert.equal((await again.send({type:'income-report',room:'1',month})).value.summary.giftCount,2);
+  assert.equal((await again.send({type:'income-report',room:'1',month})).value.summary.giftCount,4);
   const initial=(await again.send({type:'init'})).value;
   assert.equal(initial['live-assistant:config:1'].ai.model,'model-a');assert.equal(initial['live-assistant:config:2'].ai.model,'model-b');
   assert.equal(initial['live-assistant:income:1'],undefined);
@@ -535,4 +637,99 @@ test('场次后台接口绑定来源房间，支持零礼物场次和后台重�
   assert.equal(own.value.sessions[0].giftCount,0);
   const other=await restarted.send({type:'income-report',room:'2',month:'2026-10'});
   assert.equal(other.value.sessions.length,0);
+});
+
+
+test('概览场次读取跨月历史，月度导出不会混入其他月份场次', async()=>{
+  const w=await worker();
+  const at=Date.parse('2026-09-30T23:00:00+08:00');
+  await w.send({type:'income-session',boundaryType:'start',roomId:'old-live',at,source:'platform'});
+  await w.send({type:'income-session',boundaryType:'end',roomId:'old-live',at:at+7200000,source:'platform'});
+  await w.send({type:'income-session',boundaryType:'start',roomId:'new-live',at:at+10800000,source:'platform'});
+  const restarted=await worker(w.values,w.indexedDB);
+  const monthly=(await restarted.send({type:'income-report',room:'1',month:'2026-10'})).value;
+  assert.equal(monthly.sessions.length,1);assert.equal(monthly.allSessions,undefined);
+  const overview=(await restarted.send({type:'income-report',room:'1',month:'2026-10',includeAllSessions:true})).value;
+  assert.equal(overview.allSessions.length,2);assert.equal(overview.currentSession.roomId,'new-live');
+});
+
+test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保活，下播释放待机保护',{timeout:15000},async()=>{
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+  // jsdom's postMessage omits source/origin; model the browser's same-window bridge.
+  dom.window.postMessage=(data,origin)=>dom.window.setTimeout(()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{data,origin,source:dom.window})),0);
+  const listeners=[];let moves=0;const leases=[];
+  Object.assign(dom.window,{TextDecoder,TextEncoder,chrome:{runtime:{sendMessage:async request=>{
+    if(request.type==='init')return {ok:true,value:{}};
+    if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
+    if(request.type==='collection-state'){leases.push(request.active);return {ok:true,value:{awake:request.active}};}
+    return {ok:true,value:true};
+  },onMessage:{addListener:f=>listeners.push(f)}}}});
+  dom.window.__STORE__={roomStore:{roomInfo:{roomId:'100',room:{web_rid:'1',status:2}}}};
+  dom.window.document.addEventListener('mousemove',()=>moves++);
+  const wake=()=>new Promise(resolve=>{for(const listener of listeners)listener({type:'collection-wake'},{},resolve);});
+  try {
+    dom.window.eval(await readFile(file('page.js'),'utf8'));
+    dom.window.eval(await readFile(file('content.js'),'utf8'));
+    await new Promise(resolve=>setTimeout(resolve,120));
+    assert.equal((await wake()).active,true);assert.ok(moves>0);assert.ok(leases.includes(true));
+    const panel=dom.window.document.querySelector('#douyin-live-assistant').shadowRoot;
+    assert.equal(panel.querySelector('[data-state]').textContent,'已暂停');
+    dom.window.__STORE__.roomStore.roomInfo.room.status=4;
+    assert.equal((await wake()).active,false);
+    await new Promise(resolve=>setTimeout(resolve,30));assert.equal(leases.at(-1),false);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
+});
+
+test('后台场次榜单校准与原始礼物共用持久事务，来源隔离和重启后不重复补差',async()=>{
+  const w=await worker(),capturedAt=Date.now();
+  await w.send({type:'income-session',boundaryType:'start',at:capturedAt,roomId:'broadcast'});
+  const sample={type:'contribution-record',room:'2',roomId:'broadcast',capturedAt,userId:'uid:30',score:1000,rate:0.05};
+  await Promise.all([w.send(sample),w.send(sample)]);
+  const month=new Date(capturedAt+8*3600000).toISOString().slice(0,7);
+  let report=(await w.send({type:'income-report',room:'1',month})).value;
+  assert.equal(report.summary.estimatedIncome,50);assert.equal(report.summary.giftCount,0);
+  const restarted=await worker(w.values,w.indexedDB);
+  await restarted.send({type:'gift-record',event:{type:'gift',roomId:'broadcast',giftId:'g',groupId:'late',count:10,unitValue:100,user:{id:'30'},final:true},userKey:'uid:30',rate:0.05});
+  await restarted.send(sample);
+  report=(await restarted.send({type:'income-report',room:'1',month})).value;
+  assert.equal(report.summary.estimatedIncome,50);assert.equal(report.summary.calibrationIncome,0);
+  assert.equal(report.summary.giftCount,10);
+  assert.equal((await restarted.send({type:'income-report',room:'2',month})).value.summary.estimatedIncome,0);
+});
+
+test('整榜快照通过后台原子去重，绑定来源房间并遵守收入关闭开关',async()=>{
+  const w=await worker(),capturedAt=Date.now(),month=new Date(capturedAt+8*3600000).toISOString().slice(0,7);
+  await w.send({type:'income-session',boundaryType:'start',at:capturedAt,roomId:'live'});
+  const snapshot={type:'contribution-snapshot',room:'2',roomId:'live',capturedAt,rows:[{name:'未知UID观众',score:6297}],rate:0.05};
+  const responses=await Promise.all([w.send(snapshot),w.send(snapshot)]);
+  assert.ok(responses.every(response=>response.ok));
+  const restarted=await worker(w.values,w.indexedDB);
+  assert.equal((await restarted.send(snapshot)).value,false);
+  const report=(await restarted.send({type:'income-report',room:'1',month})).value;
+  assert.ok(Math.abs(report.currentSession.estimatedIncome-314.85)<1e-8);
+  assert.equal((await restarted.send({type:'income-report',room:'2',month})).value.summary.estimatedIncome,0);
+  await restarted.send({type:'set',key:'live-assistant:config:1',value:{incomeEnabled:false}});
+  assert.equal((await restarted.send({...snapshot,rows:[{name:'未知UID观众',score:9000}]})).value,false);
+});
+
+test('MAIN 管理桥只提交当前房间白名单动作，票据重复投递不重复禁言',async()=>{
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/123',runScripts:'outside-only',pretendToBeVisual:true});
+  const page=dom.window,requests=[];
+  try{
+    Object.assign(page,{TextDecoder,TextEncoder});
+    page.__STORE__={roomStore:{roomInfo:{roomId:'7698776476925443611',room:{web_rid:'123',owner:{id_str:'456'},admin_user_ids_str:['789']}}},userStore:{userInfo:{id_str:'789'}}};
+    const client={defaults:{baseURL:'https://live.douyin.com',withCredentials:true},request:async request=>{requests.push(request);return {data:{status_code:0}};}};
+    const require=()=>({ZP:client});require.m={request:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
+    page.webpackChunkdouyin_live_v2=[];page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
+    page.postMessage=data=>page.setTimeout(()=>page.dispatchEvent(new page.MessageEvent('message',{source:page,origin:page.location.origin,data})),0);
+    page.eval(await readFile(file('page.js'),'utf8'));
+    const bridge=new RequestBridgeClient(page),target={id:'999',secUid:'sec-viewer'};
+    const prepared=await bridge.prepareModeration('mute',target);assert.equal(prepared.available,true);
+    assert.equal((await bridge.commitModeration(prepared.token)).submitted,true);
+    assert.equal((await bridge.commitModeration(prepared.token)).submitted,true);
+    assert.equal(requests.length,1);assert.equal(requests[0].url,'/webcast/room/silence/');
+    assert.equal(requests[0].params.user_id,'999');
+    const ban=await bridge.prepareModeration('ban',target);page.__STORE__.roomStore.roomInfo.room.admin_user_ids_str=[];
+    assert.equal((await bridge.commitModeration(ban.token)).submitted,false);assert.equal(requests.length,1);
+  }finally{page.close();}
 });

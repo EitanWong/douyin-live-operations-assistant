@@ -1,3 +1,5 @@
+import { parseExhibitionRetention, readExhibitionRetention, retentionFromIndicatorResponse } from './exhibition-retention.js';
+
 // Fields verified against the live web exhibition response. Keep request
 // credentials, presentation schemas and unrelated response fields out of events.
 const exhibitionText = value => typeof value === 'string' ? value.slice(0, 120) : '';
@@ -44,6 +46,62 @@ export function exhibitionEvents(kind, response, context, capturedAt = Date.now(
   return events;
 }
 
+// Only read explicit labels inside a visible native task panel. Chat text,
+// assistant shadow DOM and a closed/missing task panel cannot establish tasks.
+export function readPKTasks(document) {
+  const values = {valid:new Set(),wins:new Set(),firstWin:new Set()};
+  const excluded = node => node.closest('#chatroom, [data-e2e*="chat-message"], [data-live-assistant]');
+  const visible = node => {
+    for (let el=node; el && el.nodeType===1; el=el.parentElement) {
+      if (el.hidden || el.getAttribute('aria-hidden') === 'true') return false;
+      const style = document.defaultView?.getComputedStyle(el);
+      if (style?.display === 'none' || style?.visibility === 'hidden') return false;
+    }
+    return true;
+  };
+  const labelPattern = /^(?:每日|今日)(?:(?:有效PK次数)|(?:首胜)|(?:首场胜利)|(?:[0-9]{1,4}场有效PK(?:胜利)?))/i;
+  const readRow = text => {
+    const normalized = text.replace(/\s/g,'').replace(/（/g,'(').replace(/）/g,')');
+    const label = normalized.match(labelPattern)?.[0];
+    if (!label) return;
+    const value = normalized.slice(label.length);
+    const first = /首胜|首场胜利/.test(label);
+    if (first && /^(已完成|未完成)$/.test(value)) {values.firstWin.add(value === '已完成');return;}
+    const match = value.match(/^(?:\((\d{1,4})\/(\d{1,4})\)|(\d{1,4})\/(\d{1,4}))(?:次|场)?$/);
+    if (!match) return;
+    const current = Number(match[1] ?? match[3]), target = Number(match[2] ?? match[4]);
+    if (!target || current > target || current > 10000 || target > 10000) return;
+    const statedTarget = label.match(/(\d+)场/);
+    if (statedTarget && Number(statedTarget[1]) !== target) return;
+    if (first) {if (target === 1) values.firstWin.add(current === 1);}
+    else values[/胜利/.test(label) ? 'wins' : 'valid'].add(`${current}/${target}`);
+  };
+  const selector = '[data-e2e*="task"], [class*="taskPanel"], [role="dialog"], [class*="profile"], [class*="Profile"], [class*="pkSeason"], [class*="PKSeason"]';
+  for (const panel of [...document.querySelectorAll(selector)].slice(0, 60)) {
+    if (excluded(panel) || !visible(panel)) continue;
+    const text = panel.textContent || '';
+    if (text.length > 6000 || !/PK任务|每日任务|每日PK任务|PK段位|观众英雄榜/i.test(text)) continue;
+    for (const label of [...panel.querySelectorAll('span,p,dt,label,div,li')].slice(0, 300)) {
+      if (excluded(label) || !visible(label)) continue;
+      if (!labelPattern.test((label.textContent || '').replace(/\s/g,''))) continue;
+      // Read a compact row, including split label/progress spans. Never include
+      // hidden children or a neighbouring task when walking to its parent.
+      let row = label;
+      for (let depth=0; row && row !== panel && depth<3; depth++,row=row.parentElement) {
+        if (row.textContent.length > 100 || !visible(row) || excluded(row)) break;
+        const parts = [...row.querySelectorAll('*')];
+        if (parts.some(node => !visible(node) || excluded(node))) continue;
+        readRow(row.textContent);
+      }
+    }
+  }
+  const single = set => set.size === 1 ? [...set][0] : null;
+  const progress = set => single(set)?.split('/').map(Number) || [null,null];
+  const [valid,target] = progress(values.valid), [validWins,winTarget] = progress(values.wins);
+  const result = {valid,target,firstWin:single(values.firstWin),validWins,winTarget};
+  return Object.values(result).some(value => value !== null) ? result : null;
+}
+
 export class AnchorDataCollector {
   constructor({page,sender,onEvent,onStatus = () => {}}) {
     this.page = page; this.sender = sender; this.onEvent = onEvent; this.onStatus = onStatus;
@@ -58,13 +116,38 @@ export class AnchorDataCollector {
     const anchorId = exhibitionId(owner?.id_str) || exhibitionId(owner?.id) || exhibitionId(new URL(this.page.location.href).searchParams.get('anchor_id'));
     return anchorId ? {anchorId,roomId:current.roomId} : null;
   }
+  async collectTasks(snapshotId = `dom-${Date.now()}`) {
+    const context = this.context();
+    if (!context) return;
+    const tasks = readPKTasks(this.page.document), capturedAt = Date.now();
+    const key = JSON.stringify([context,tasks]);
+    if (key === this.taskKey && (!tasks || capturedAt-this.taskAt < 30000)) return;
+    this.taskKey = key; this.taskAt = capturedAt;
+    // Publish an unknown snapshot on panel removal, without producing an
+    // identical journal entry every few seconds while no panel is open.
+    await this.onEvent({type:'anchor-pk-tasks',source:'native-task-panel',...context,
+      id:`pk-tasks:${snapshotId}`,at:capturedAt,receivedAt:capturedAt,
+      ...(tasks || {valid:null,target:null,firstWin:null,validWins:null,winTarget:null})});
+  }
   async refresh() {
     if (this.busy) return false;
     const context = this.context(), client = context && this.sender.client();
-    if (!client) return false;
+    if (!context) return false;
     this.busy = true;
     const snapshotId = `${Date.now()}-${++this.serial}`;
     try {
+      await this.collectTasks(snapshotId);
+      const capturedAt = Date.now();
+      const retention = readExhibitionRetention(this.page.document);
+      if (retention) await this.onEvent({type:'anchor-exhibition-retention',source:'native-indicator',...context,
+        id:`retention:${snapshotId}`,receivedAt:capturedAt,...retention});
+      if (!client) return false;
+      try {
+        const result = await client.get('/webcast/gift/play/indicator/',{params:{aid:6383,app_name:'douyin_web',activity_id:'exhibition_section',room_id:context.roomId,anchor_id:context.anchorId},timeout:10000});
+        const current = this.context(), retention = retentionFromIndicatorResponse(result?.data);
+        if (!current || current.anchorId !== context.anchorId || current.roomId !== context.roomId) return false;
+        if (retention) await this.onEvent({type:'anchor-exhibition-retention',source:'web-exhibition',...context,id:`retention:indicator:${snapshotId}`,receivedAt:Date.now(),...retention});
+      } catch { this.onStatus('retention',{at:Date.now(),status:'failed'}); }
       for (const kind of ['home','rare']) {
         try {
           const params = {aid:6383,app_name:'douyin_web',room_id:context.roomId,
@@ -74,6 +157,9 @@ export class AnchorDataCollector {
           if (!current || current.anchorId !== context.anchorId || current.roomId !== context.roomId) return false;
           const response = result?.data;
           this.onStatus(kind,{at:Date.now(),status:response?.status_code === 0 ? 'ok' : 'unavailable',code:response?.status_code ?? null});
+          const retention = kind === 'home' && response?.status_code === 0 && parseExhibitionRetention(response.data?.title);
+          if (retention && (response.data.anchor_id == null || exhibitionId(response.data.anchor_id) === context.anchorId)) await this.onEvent({
+            type:'anchor-exhibition-retention',source:'web-exhibition',...context,id:`retention:response:${snapshotId}`,receivedAt:Date.now(),...retention});
           for (const event of exhibitionEvents(kind,response,context,Date.now(),snapshotId)) {
             if (!this.context()) return false;
             await this.onEvent(event);
@@ -86,6 +172,8 @@ export class AnchorDataCollector {
   start() {
     if (this.started) return;
     this.started = true;
+    // Task/profile popovers can close before the slower exhibition HTTP poll.
+    this.taskTimer = this.page.setInterval(()=>{void this.collectTasks().catch(()=>{});},3000);
     const tick = async () => {
       if (this.stopped || this.page.location.pathname !== this.path) return;
       let ready = false;
@@ -94,5 +182,5 @@ export class AnchorDataCollector {
     };
     this.timer = this.page.setTimeout(tick,1000);
   }
-  stop() { this.stopped = true; this.page.clearTimeout(this.timer); }
+  stop() { this.stopped = true; this.page.clearTimeout(this.timer); this.page.clearInterval(this.taskTimer); }
 }

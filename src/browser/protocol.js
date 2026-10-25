@@ -1,3 +1,4 @@
+import { parseExhibitionRetention } from './exhibition-retention.js';
 // 字段编号参考 TikTokLiveJava webcast.proto 与 opedium/douyin-live-proto；atUser 为字段 12。
 // 独立实现 protobuf wire reader；不加载第三方脚本，不使用 Number 保存 64 位 UID。
 const decoder = new TextDecoder('utf-8', { fatal: false });
@@ -214,8 +215,17 @@ function decodeBattleMessage(method, bytes, outerId) {
     const scores = battleScores(m, 17), rawBattleId = textAt(m, 114) || idAt(m, 104), battleId = validId(rawBattleId) ? rawBattleId : '';
     const contributions = contributionEvents(event, m, 22, 'linkmic', { battleId });
     if (!scores.length) return contributions.length ? contributions : null; // 普通连麦不能建立 PK 战局。
+    // 中途入场或开局名单迟到时，用已核对的连麦用户字段补全昵称，且只接受比分中的参战 UID。
+    const scoreIds = new Set(scores.map(item => item.anchorId)), participants = new Map();
+    const users = [...(m.get(45) || []), ...messagesAt(m, 58).map(item => bytesAt(item, 1))];
+    for (const bytes of users) {
+      if (!(bytes instanceof Uint8Array)) continue;
+      const user = decodeUser(bytes);
+      if (scoreIds.has(user.id) && user.name) participants.set(user.id, {anchorId:user.id, name:user.name});
+    }
     const startedAt = numberAt(m, 26), duration = numberAt(m, 16);
     const results = [{ ...event, type: 'pk-score', battleId, scores,
+      ...(participants.size ? {participants:[...participants.values()]} : {}),
       ...(startedAt > 0 && duration > 0 && duration <= 7200 ? { startedAt, durationMs: duration * 1000, endsAt: startedAt + duration * 1000 } : {}),
       ...(textAt(m, 82) ? { scoreUpdateId: textAt(m, 82) } : {}) }, ...contributions];
     return results.length === 1 ? results[0] : results;
@@ -538,9 +548,15 @@ function decodeProtocolEvent(method, m, event) {
     const scene=/^[\p{L}\p{N}_-]{1,100}$/u.test(directScene) ? directScene : textAt(nested(m, 4), 1);
     return { ...event, type:'gift-panel-state', sortType:numberAt(m, 2), scene };
   }
-  if (method === 'WebcastRoomIndicatorMessage') return {
-    ...event, type:'room-indicator', indicatorType:numberAt(m, 2), subType:numberAt(m, 3), dataBytes:bytesAt(m, 4)?.length || 0
-  };
+  if (method === 'WebcastRoomIndicatorMessage') {
+    let contents = [];
+    try { contents = messagesAt(nested(m,4),2).slice(0,20).map(row => ({
+      type:numberAt(row,1),number:idAt(row,2),text:textAt(row,3).slice(0,200),endText:textAt(row,7).slice(0,200)
+    })); } catch { /* 未知业务载荷仍保留外层指标事件。 */ }
+    const retention = parseExhibitionRetention(contents.map(row => row.text).join(''));
+    return { ...event, type:'room-indicator', indicatorType:numberAt(m,2), subType:numberAt(m,3), dataBytes:bytesAt(m,4)?.length || 0,
+      ...(contents.length ? {contents} : {}), ...(retention ? {exhibitionRetention:retention} : {}) };
+  }
   if (method === 'WebcastPreviewCjRpMessage') {
     const packet = nested(m, 1);
     return { ...event, type:'red-packet', packetId:textAt(packet, 1), startTime:idAt(packet, 2), endTime:idAt(packet, 3),

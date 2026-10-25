@@ -1,3 +1,4 @@
+import { IDIOM_GAME_DEFAULTS, normalizeIdiom, lookupIdiom, idiomReading, looksLikeIdiomAnswer, randomIdiomSeed, createIdiomGame, attemptIdiomGame, idiomStandings, idiomGameResult, idiomMessagePages, idiomResultMessages, nextIdiomGame, idiomHintToken, idiomHintCandidate } from './idiom-game.js';
 import { TRUTH_QUESTIONS, DARE_QUESTIONS, INTERACTION_TOPICS } from '../data/interaction-questions.js';
 
 const botLength = text => [...text].length;
@@ -29,46 +30,22 @@ export function addressedToSelf(event, self, configuredId = '') {
 }
 
 export const BOT_COMMANDS = [
-  { key:'diceEnabled', label:'掷骰子', menu:'🎲骰子', example:'骰子', aliases:['骰子','掷骰子','roll'] },
-  { key:'coinEnabled', label:'抛硬币', menu:'🪙硬币', example:'硬币', aliases:['硬币','抛硬币','coin'] },
-  { key:'choiceEnabled', label:'帮我选择', menu:'🎯选择', example:'选择 唱歌/聊天', aliases:['选择','帮我选','choose'] },
-  { key:'idiomEnabled', label:'成语接龙', menu:'🔤接龙', example:'接龙', aliases:['接龙','成语接龙','idiom'] },
-  { key:'rpsEnabled', label:'猜拳', menu:'✊猜拳', example:'猜拳 石头', aliases:['猜拳','石头剪刀布','rps'] },
-  { key:'guessEnabled', label:'猜数字', menu:'🔢猜数字', example:'开始猜数字', aliases:['猜数字','数字游戏','guess'] },
-  { key:'truthEnabled', label:'真心话', menu:'💬真心话', example:'开始真心话', aliases:['真心话','truth'] },
-  { key:'dareEnabled', label:'大冒险', menu:'🎭大冒险', example:'开始大冒险', aliases:['大冒险','dare'] }
+  { key:'idiomEnabled', label:'成语接龙', menu:'🔤接龙', example:'开始接龙', description:'全场接续、个人积分与冠军结算', aliases:['接龙','成语接龙','idiom'] },
+  { key:'guessEnabled', label:'猜数字', menu:'🔢猜数字', example:'开始猜数字', description:'全场共猜，根据大小提示缩小范围', aliases:['猜数字','数字游戏','guess'] },
+  { key:'truthEnabled', label:'真心话', menu:'💬真心话', example:'开始真心话', description:'轮流报名答题，主播与观众都能接话', aliases:['真心话','truth'] },
+  { key:'dareEnabled', label:'大冒险', menu:'🎭大冒险', example:'开始大冒险', description:'轮流报名挑战，用文字或表情参与', aliases:['大冒险','dare'] }
 ];
 const answerText = text => String(text || '').trim().replace(/^(?:(?:我来回答|我的回答|我的答案|回答|答案)(?:是)?[\s:：，,]*|答[\s:：，,]+)/u, '').trim();
 const skipAnswer = text => /^(?:跳过(?:这题|这一题)?|换一题|换个题|换个问题|下一题|不回答|不想回答|不想说|不方便说|保密|退出|算了)(?:吧|了|啦|一下)?[。！!～~]*$/u.test(text);
 const casualChat = text => /^(?:是的|是|嗯+|哦+|啊+|好(?:的|了)?|行|可以|收到|知道了|ok(?:了)?|再试一下\/?|有延迟|测试|哈哈+|[哈呵嘿]+|你好|来了|在吗|报名|参加|我来|来|开始|真心话|大冒险|菜单\d*|游戏状态|状态|进度)[\s。！!？?～~]*$/iu.test(text);
-// Keep a local lexicon of common idioms so ordinary four-character chat is not treated as a move.
-const idioms = new Set(('一心一意 意气风发 发扬光大 大有可为 为所欲为 为人师表 表里如一 一马当先 先声夺人 人山人海 海阔天空 空前绝后 后来居上 上善若水 水到渠成 成千上万 万众一心 心想事成 成人之美 美不胜收 收放自如 如鱼得水 水落石出 出生入死 死里逃生 生龙活虎 虎头蛇尾 尾大不掉 掉以轻心 心花怒放 放任自流 流连忘返 返老还童 童叟无欺 欺人太甚 甚嚣尘上 上下同心 心平气和 和气生财 财源广进 进退两难 难能可贵 贵人多忘 忘乎所以 以德报怨 怨天尤人 人定胜天 天长地久 久别重逢 逢凶化吉 吉星高照 照本宣科 科班出身 身体力行 行云流水 水深火热 热火朝天 天南地北 北雁南飞 飞黄腾达 达官贵人 人才辈出 出人头地 地久天长 长驱直入 入木三分 入不敷出 出谋划策 策马扬鞭 鞭长莫及 及锋而试 拭目以待 待人接物 物极必反 反客为主 主客颠倒 倒背如流 分秒必争 争先恐后 后起之秀 秀外慧中 中流砥柱 新陈代谢 岁月如梭 梭天摸地 地大物博 博大精深 深入浅出 出类拔萃 萃取精华 华而不实 实事求是 是非分明 明哲保身 身经百战 战无不胜 胜券在握 握手言欢 欢天喜地 地久天长 长治久安 安居乐业 业精于勤 勤能补拙 拙嘴笨舌 舌战群儒 儒雅风流 流芳百世 世外桃源 源远流长 长驱直入').split(' '));
-
-// Tone is omitted. Similar initials/finals (for example sh/s and in/ing) are accepted.
-const pinyinByChar = new Map(Object.entries({
-  一:'yi',万:'wan',上:'shang',中:'zhong',为:'wei',久:'jiu',争:'zheng',人:'ren',以:'yi',先:'xian',入:'ru',出:'chu',分:'fen',北:'bei',发:'fa',吉:'ji',后:'hou',和:'he',地:'di',大:'da',天:'tian',如:'ru',尾:'wei',心:'xin',忘:'wang',怨:'yuan',意:'yi',成:'cheng',掉:'diao',收:'shou',放:'fang',柱:'zhu',欺:'qi',死:'si',水:'shui',流:'liu',海:'hai',热:'re',照:'zhao',甚:'shen',生:'sheng',秀:'xiu',科:'ke',空:'kong',童:'tong',美:'mei',虎:'hu',行:'xing',表:'biao',财:'cai',贵:'gui',身:'shen',达:'da',返:'fan',进:'jin',逢:'feng',长:'chang',难:'nan',飞:'fei',新:'xin',谢:'xie',岁:'sui',月:'yue',梭:'suo',敷:'fu',谋:'mou',策:'ce',扬:'yang',鞭:'bian',及:'ji',锋:'feng',试:'shi',拭:'shi',目:'mu',待:'dai',物:'wu',极:'ji',反:'fan',客:'ke',主:'zhu',倒:'dao',背:'bei',博:'bo',深:'shen',浅:'qian',拔:'ba',萃:'cui',华:'hua',实:'shi',是:'shi',哲:'zhe',保:'bao',经:'jing',战:'zhan',胜:'sheng',券:'quan',握:'wo',欢:'huan',芳:'fang',世:'shi',源:'yuan',治:'zhi',安:'an',居:'ju',乐:'le',勤:'qin',补:'bu',拙:'zhuo',嘴:'zui',舌:'she',儒:'ru',雅:'ya'
-}));
-const pinyinInitial = value => value.match(/^(zh|ch|sh|[bpmfdtnlgkhjqxrzcswy])?/u)?.[0] || '';
-const pinyinFinal = value => value.slice(pinyinInitial(value).length);
-const nearPinyin = (left, right) => {
-  if (!left || !right) return false;
-  if (left === right) return true;
-  const initials = value => ({ zh:'z', ch:'c', sh:'s', n:'l' })[pinyinInitial(value)] || pinyinInitial(value);
-  const finals = value => ({ ang:'an', eng:'en', ing:'in', ui:'ei' })[pinyinFinal(value)] || pinyinFinal(value);
-  return initials(left) === initials(right) && finals(left) === finals(right);
-};
-const soundsLike = (left, right) => left === right || nearPinyin(pinyinByChar.get(left), pinyinByChar.get(right));
-const isFourChinese = value => /^[\u4e00-\u9fff]{4}$/u.test(String(value || ''));
-const playableIdioms = [...idioms].filter(word => [...idioms].some(next => next !== word && soundsLike([...next][0], [...word].at(-1))));
-
 export class RoomBot {
-  constructor({ now = Date.now, random = Math.random } = {}) { this.now = now; this.random = random; this.questionHistory = {truth:[],dare:[]}; this.reset(); }
+  constructor({ now = Date.now, random = Math.random } = {}) { this.now = now; this.random = random; this.questionHistory = {truth:[],dare:[]}; this.lastIdiomResult = null; this.idiomSerial = 0; this.reset(); }
   reset() { this.chain = null; this.session = null; }
   sessionSummary() {
-    if (!this.session) return '📍当前没有进行中的游戏。';
+    if (!this.session) return this.lastIdiomResult ? idiomResultMessages(this.lastIdiomResult).join(' ') : '📍当前没有进行中的游戏。';
     const labels = { idiom:'成语接龙', truth:'真心话', dare:'大冒险', guess:'猜数字' };
     const session = this.session;
-    if (session.type === 'idiom') return `🔤${labels[session.type]}进行中 · 当前「${session.word}」；无需 @，直接发成语。`;
+    if (session.type === 'idiom') return `🔤第${session.gameNumber}/${session.gamesToPlay}局「${session.word}」，接 ${idiomReading(session.word)}${session.nasalRelaxed ? '（前后鼻音通用）' : ''}；剩${session.maxAttempts-session.attempts}次${session.countCorrectOnly ? '答对' : '作答'}，答对+${session.pointsPerCorrect}分。`;
     if (session.type === 'guess') return `🔢${labels[session.type]}进行中 · ${session.min}～${session.max}；无需 @，直接发数字。`;
     if (session.phase === 'answer') return `${labels[session.type]}：${session.prompt} 主播和观众都可直接接话。`;
     return `🎮${labels[session.type]}进行中 · 等待发送「报名」参加。`;
@@ -76,7 +53,7 @@ export class RoomBot {
   expire(now = this.now()) {
     const session = this.session;
     if (!session) return null;
-    // 成语接龙是房间级持续玩法，直到主持人明确结束；其他游戏仍使用超时回收。
+    // 接龙以作答次数或手动结束结算，等待期间不消耗次数。
     if (session.type === 'idiom') return null;
     const limit = session.phase === 'answer' ? 60000 : 300000;
     if (now - session.lastAt < limit) return null;
@@ -84,13 +61,14 @@ export class RoomBot {
     this.reset();
     return `⏱️${label}因${session.phase === 'answer' ? '回答超时' : '长时间无人参与'}结束；发「开始${label}」再开一局。`;
   }
-  startSession(type, name = '', userKey = '', idiomSeed = '') {
+  startSession(type, name = '', userKey = '', idiomSeed = '', config = IDIOM_GAME_DEFAULTS) {
     const now = this.now();
     if (this.session) return false;
     if (type === 'idiom') {
-      const word = idiomSeed || this.randomIdiom();
-      this.chain = { word, used:new Set([word]), at:now };
-      this.session = { type, word, used:new Set([word]), round:0, errors:0, lastAt:now, startedBy:userKey, startedByName:name };
+      const game = this.createIdiomSession(idiomSeed || this.randomIdiom(), name, userKey, config, now);
+      if (!game) return false;
+      this.lastIdiomResult = null;
+      this.applyIdiomGame(game);
     } else if (type === 'guess') {
       this.session = { type, min:1, max:20, target:1 + Math.floor(this.random() * 20), attempts:0, maxAttempts:6, lastAt:now, startedBy:userKey, startedByName:name };
     } else this.session = { type, phase:'join', lastAt:now, rounds:0, currentUserKey:'', currentName:'', prompt:'' , startedBy:userKey, startedByName:name };
@@ -120,10 +98,55 @@ export class RoomBot {
   questionFor(session) {
     return this.questionBank(session.type).find(item => item.id === session.questionId || item.prompt === session.prompt);
   }
-  randomIdiom() {
-    const random = Number(this.random());
-    const index = Math.floor(Math.max(0, Math.min(0.999999999, Number.isFinite(random) ? random : 0)) * playableIdioms.length);
-    return playableIdioms[index] || '一心一意';
+  randomIdiom() { return randomIdiomSeed(this.random); }
+  createIdiomSession(word, name, userKey, config, now = this.now()) {
+    const game = createIdiomGame(word, name, userKey, config, now);
+    if (game) game.sessionId = `${now}:${++this.idiomSerial}`;
+    return game;
+  }
+  isIdiomHintCommand(text) { return /^(?:接龙[\s:：]*)?(?:提示|求提示|给个提示|给我提示|下一条提示|接龙提示)[！!。？?]*$/u.test(String(text || '').trim()); }
+  hintToken() { return idiomHintToken(this.session); }
+  idiomHint(maxLength, automatic = false) {
+    const session=this.session, now=this.now();
+    if (session?.type !== 'idiom') return automatic ? null : this.idiomReplyMessages(['当前没有成语接龙，发「开始接龙」开局。'],maxLength);
+    if (!session.hintsEnabled) return automatic ? null : this.idiomReplyMessages(['本场接龙未开启提示。'],maxLength);
+    if (session.hintLevel>=3) return automatic ? null : {...this.idiomReplyMessages([`已给出完整示例「${session.hintWord}」，直接发送即可接龙。`],maxLength),hintToken:idiomHintToken(session)};
+    const lastHint=session.lastHintAt;
+    if (automatic && now-(lastHint ?? session.lastProgressAt)<session.hintIntervalSec*1000) return null;
+    if (!automatic && lastHint !== null && now-lastHint<5000) return this.idiomReplyMessages(['刚给过提示，5秒后可再求提示；提示不扣分、不计次。'],maxLength);
+    const word=idiomHintCandidate(session);
+    if (!word) return automatic ? null : this.idiomReplyMessages(['当前暂无未使用的可接成语。'],maxLength);
+    const level=session.hintLevel+1, chars=[...word], token=idiomHintToken(session);
+    const shown=level>=3 ? word : chars.map((char,index)=>index<(level===1 ? 1 : Math.max(1,Math.min(2,chars.length-1))) ? char : '□').join('');
+    const message=level===3 ? `💡提示3：示例「${word}」，直接发出可接龙。` : `💡提示${level}：可接「${shown}」（${chars.length}字）；发「提示」继续。`;
+    return {...this.idiomReplyMessages([message],maxLength,()=>{
+      if (this.session!==session || idiomHintToken(session)!==token || session.hintLevel!==level-1) return;
+      session.hintLevel=level; session.hintWord=word; session.lastHintAt=now;
+    }), hintToken:token};
+  }
+  applyIdiomGame(game) {
+    this.session = game;
+    this.chain = {word:game.word, used:new Set(game.used), at:game.lastAt};
+  }
+  restoreIdiomGame(saved, config) {
+    const game = this.createIdiomSession(saved.word, saved.startedByName, saved.startedBy, config, saved.lastAt);
+    if (!game) { this.reset(); return; }
+    Object.assign(game, saved, {used:new Set([...saved.used || []].filter(word => lookupIdiom(word))),
+      players:Array.isArray(saved.players) ? saved.players.map(player=>({...player,incorrect:player.incorrect || 0})) : [],
+      // Existing games retain their original rules when upgraded mid-game.
+      nasalRelaxed:saved.nasalRelaxed ?? false, countCorrectOnly:saved.countCorrectOnly ?? false,
+      penalty:saved.penalty ?? 0, gamesToPlay:saved.gamesToPlay ?? 1,
+      totalAttempts:saved.totalAttempts ?? saved.attempts ?? (saved.round || 0)+(saved.errors || 0),
+      totalCorrect:saved.totalCorrect ?? saved.round ?? 0, lastProgressAt:saved.lastProgressAt ?? saved.lastAt,
+      maxAttempts:saved.maxAttempts ?? game.maxAttempts, pointsPerCorrect:saved.pointsPerCorrect ?? game.pointsPerCorrect,
+      attempts:saved.attempts ?? Math.min(game.maxAttempts - 1, (saved.round || 0) + (saved.errors || 0))});
+    game.used.add(game.word);
+    this.applyIdiomGame(game);
+  }
+  idiomScores() { return idiomStandings(this.session?.type === 'idiom' ? this.session : this.lastIdiomResult); }
+  idiomReplyMessages(messages, maxLength, commit = null) {
+    const pages = idiomMessagePages(messages, maxLength);
+    return {text:pages[0], messages:pages.slice(1), localOnly:true, commit};
   }
   endSession() { const had = Boolean(this.session); this.reset(); return had; }
   gameType(text) {
@@ -148,23 +171,12 @@ export class RoomBot {
     if (!config[`${type}Enabled`]) return { text:this.format('此互动已关闭，发「菜单」看可用玩法。', maxLength, name), commit:null };
     if (!this.session) {
       if (type === 'idiom') {
-        const seed = this.randomIdiom();
-        const tail = [...seed].at(-1);
+        const game = this.createIdiomSession(this.randomIdiom(), name, userKey, config);
         const candidate = args.join('');
-        const valid = Boolean(candidate) && (idioms.has(candidate) || isFourChinese(candidate)) && soundsLike([...candidate][0], tail);
-        const body = valid
-          ? `✅${candidate}，接得好！下接「${[...candidate].at(-1)}」。`
-          : `🔤接龙开始！随机起始「${seed}」，请接「${tail}」开头或近音；之后无需 @。`;
-        return {
-          text:this.format(body, maxLength, name),
-          commit:()=>{
-            this.startSession(type, name, userKey, seed);
-            if (valid) {
-              const advance = this.idiomAttempt(candidate, config, maxLength, name);
-              advance.commit?.();
-            }
-          }
-        };
+        if (candidate) return this.idiomAttempt(candidate, config, maxLength, name, userKey, game);
+        return this.idiomReplyMessages([
+          `🔤接龙开始！1/${game.gamesToPlay}局「${game.word}」接${idiomReading(game.word)}；${game.maxAttempts}次${game.countCorrectOnly ? '答对' : '作答'}，对+${game.pointsPerCorrect}/错-${game.penalty}分${game.hintsEnabled ? '；发「提示」' : ''}。`
+        ], maxLength, () => { if (!this.session) { this.lastIdiomResult=null; this.applyIdiomGame(game); } });
       }
       const body = type === 'guess'
         ? '🔢猜数字开始！答案在 1～20；无需 @，直接发数字，猜中即结束。'
@@ -174,28 +186,36 @@ export class RoomBot {
     if (this.session.type !== type) return { text:this.format(this.sessionSummary(), maxLength, name), commit:null };
     if (type === 'idiom') {
       const word = args.join('');
-      if (!word) return { text:this.format(`当前词「${this.session.word}」，请接「${[...this.session.word].at(-1)}」开头。`, maxLength, name), commit:null };
-      return this.idiomAttempt(word, config, maxLength, name);
+      if (this.isIdiomHintCommand(word)) return this.idiomHint(maxLength);
+      if (!word) return this.idiomReplyMessages([`当前词「${this.session.word}」，接 ${idiomReading(this.session.word)}，剩${this.session.maxAttempts-this.session.attempts}次。`], maxLength);
+      return this.idiomAttempt(word, config, maxLength, name, userKey);
     }
     if (type === 'guess') return this.guessAttempt(args.join(''), maxLength, name);
     return this.truthAttempt(args.join(' '), userKey, name, type, maxLength);
   }
-  idiomAttempt(word, config, maxLength, name) {
-    const session = this.session;
-    const tail = [...session.word].at(-1);
-    let body, commit = null;
-    if (!idioms.has(word) && !isFourChinese(word)) { body = `⚠️「${word}」请发四字成语，本局继续。`; }
-    else if (session.used.has(word)) { body = `⚠️这个成语已用过，本局继续。`; }
-    else if (!soundsLike([...word][0], tail)) { body = `⚠️应接「${tail}」开头或近音，本局继续。`; }
-    else {
-      body = `✅${word}，接得好！下接「${[...word].at(-1)}」。`;
-      commit = () => {
-        session.word = word; session.used.add(word); session.round++; session.errors = 0; session.lastAt = this.now();
-        this.chain = { word, used:new Set(session.used), at:session.lastAt };
-      };
-    }
-    if (!commit) commit = () => { session.errors = Math.min(3, session.errors + 1); session.lastAt = this.now(); };
-    return { text:this.format(body, maxLength, name), commit };
+  idiomAttempt(input, config, maxLength, name, userKey = `name:${name || ''}`, initialGame = null) {
+    const session = initialGame || this.session, previousAttempts = session.totalAttempts;
+    const {next, reason, finished, pointsDelta} = attemptIdiomGame(session, input, userKey, name, this.now());
+    const left = next.maxAttempts - next.attempts;
+    const player = next.players.find(item => item.key === userKey);
+    const body = reason === 'unknown' ? '⚠️未在成语词典收录，请换一个成语。'
+      : reason === 'repeated' ? '⚠️这个成语已用过，请换一个。'
+      : reason === 'mismatch' ? `⚠️应接 ${idiomReading(session.word)}，声调不限。`
+      : `✅${next.word}，+${next.pointsPerCorrect}分（共${player.points}分）！接 ${idiomReading(next.word)}。`;
+    const continuing=finished && next.gameNumber<next.gamesToPlay;
+    const continuation=continuing ? nextIdiomGame(next,this.randomIdiom(),this.now()) : null;
+    const result = finished && !continuing ? idiomGameResult(next, finished, this.now()) : null;
+    const penaltyText=reason ? (next.penalty ? `扣${-pointsDelta}分，现${player.points}分。` : '不扣分。') : '';
+    return {...this.idiomReplyMessages([
+      ...(initialGame && reason ? [`🔤起始「${session.word}」，接 ${idiomReading(session.word)}。`] : []),
+      `${name ? botClip(name,6)+'，' : ''}${body}${penaltyText}剩${left}次${next.countCorrectOnly ? '答对' : ''}。`,
+      ...(continuation ? [`第${next.gameNumber}局结束（${finished}），积分累计；第${continuation.gameNumber}/${continuation.gamesToPlay}局「${continuation.word}」，接 ${idiomReading(continuation.word)}。`] : []),
+      ...(result ? idiomResultMessages(result) : [])], maxLength, () => {
+      if (initialGame ? Boolean(this.session) : this.session !== session || session.totalAttempts !== previousAttempts) return;
+      if (initialGame) this.lastIdiomResult=null;
+      if (result) { this.lastIdiomResult=result; this.reset(); }
+      else { Object.assign(session, continuation || next); this.applyIdiomGame(session); }
+    }), persistent:Boolean(finished)};
   }
   truthAttempt(text, userKey, name, type, maxLength, addressed = false) {
     const session = this.session;
@@ -232,6 +252,8 @@ export class RoomBot {
     if (casualChat(value) || this.startType(value) || /^(?:结束|停止)(?:游戏|互动)?$/u.test(value) || /^@/u.test(value)) return false;
     const answer = answerText(value);
     if (!answer || !/[\p{L}\p{N}\p{Extended_Pictographic}]/u.test(answer)) return false;
+    // @ 提问可与游戏并行；除显式“回答：”外，不将新的聊天问题当作答题。
+    if (addressed && answer === value && /[?？]|怎么|如何|几点|什么时候|多少钱|天气/u.test(value)) return false;
     if (userKey === session.currentUserKey || addressed || answer !== value || /^(?:我也|我的(?:梦想|理想|心情)|对我来说)/u.test(value)) return true;
     const topic = INTERACTION_TOPICS[this.questionFor(session)?.category];
     if (topic?.match.test(value)) return true;
@@ -241,14 +263,15 @@ export class RoomBot {
   }
   answerFeedback(text, name, session) {
     const answer = answerText(text);
-    let reaction;
-    if (session.type === 'dare') reaction = `收到「${botClip(answer, 10)}」，谢谢你参与挑战👏`;
-    else if (this.questionFor(session)?.category === 'dream' && /明星|歌手|演员/u.test(answer)) reaction = '有个舞台梦呀，愿你一直闪闪发光✨';
-    else {
-      const category = this.questionFor(session)?.category;
-      const thanks = category === 'dream' && session.prompt !== '你小时候的梦想是什么？' ? '谢谢你分享心里的愿望✨' : INTERACTION_TOPICS[category]?.feedback || '谢谢你认真分享✨';
-      reaction = `收到「${botClip(answer, 10)}」，${thanks}`;
-    }
+    const category = this.questionFor(session)?.category;
+    const topic = INTERACTION_TOPICS[session.type === 'dare' ? 'creative' : category];
+    let choices = topic ? [topic.feedback, ...topic.alternatives] : ['收到，想接着聊就说。', '嗯，听你说。', '好，其他人也可以接着聊。'];
+    if (session.type === 'truth' && session.prompt === '你小时候的梦想是什么？') choices = ['原来你小时候是这样想的。', '这个梦想，现在还惦记着吗？', '小时候的梦想，长大了想法也可能会变。'];
+    if (session.type === 'truth' && category === 'dream' && /明星|歌手|演员/u.test(answer)) choices = ['原来有个舞台梦呀。', '有个舞台梦，你更想唱歌还是演戏？', '舞台梦呀，现在还想试试吗？'];
+    // 同类回答也换换说法；只取答案的散列，不影响游戏结果的随机数。
+    let hash = 0;
+    for (const char of answer) hash = (hash * 31 + char.codePointAt(0)) >>> 0;
+    const reaction = choices[hash % choices.length];
     return `${botClip(String(name || '朋友'), 6)}，${reaction}`;
   }
   guessAttempt(value, maxLength, name = '') {
@@ -279,14 +302,13 @@ export class RoomBot {
     const value = String(text || '').trim();
     const key = user?.id || user?.secUid || `name:${user?.name || ''}`;
     if (session.type === 'idiom') {
+      if (this.isIdiomHintCommand(value)) return {...this.idiomHint(maxLength),handled:true};
       const candidate = value.replace(/^接龙[\s:：]*/u, '');
       const explicit = /^接龙[\s:：]/u.test(value);
-      // Any viewer, including the host, can play without @. Unknown four-character words
-      // are accepted when their first character matches the current tail; unrelated chat passes through.
-      const tail = [...session.word].at(-1);
-      const matchingShape = isFourChinese(candidate) && soundsLike([...candidate][0], tail);
-      if (!candidate || (!idioms.has(candidate) && !matchingShape && !explicit)) return { handled:false };
-      const result = this.idiomAttempt(candidate, config, maxLength, user?.name || '');
+      // Known idioms and explicit attempts receive a verdict. Unrelated chat passes through.
+      const normalized = normalizeIdiom(candidate);
+      if (!candidate || (!lookupIdiom(normalized) && !looksLikeIdiomAnswer(normalized, session.word,session.nasalRelaxed) && !explicit)) return { handled:false };
+      const result = this.idiomAttempt(normalized, config, maxLength, user?.name || '', key);
       return { ...result, handled:true };
     }
     if (session.type === 'guess') {
@@ -301,7 +323,8 @@ export class RoomBot {
   }
   menu(config, maxLength, page = 1) {
     const short = maxLength < 18;
-    const labels = BOT_COMMANDS.filter(item => config[item.key]).map(item => short ? item.aliases[0] : (item.menu || item.aliases[0]));
+    const commands = BOT_COMMANDS.filter(item => config[item.key]);
+    const labels = commands.map(item => short ? item.aliases[0] : (item.menu || item.aliases[0]));
     if (!labels.length) return '📋互动未开启，请在设置打开玩法。';
     const pages = []; let part = '';
     // 给页码、分隔符和“下一页”提示预留空间，避免弹幕平台截掉操作引导。
@@ -313,7 +336,7 @@ export class RoomBot {
     if (part) pages.push(part);
     const index = Math.min(Math.max(1, page), pages.length) - 1;
     const head = pages.length === 1 ? '🎮菜单：' : `🎮菜单${index+1}/${pages.length}：`;
-    const guide = pages.length > 1 ? (index < pages.length - 1 ? `·发菜单${index + 2}看下页` : '·发菜单1回首页') : '·发菜单看用法';
+    const guide = pages.length > 1 ? (index < pages.length - 1 ? `·发菜单${index + 2}看下页` : '·发菜单1回首页') : `·发「${commands[0].example}」`;
     const full = `${head}${pages[index]}${guide}`;
     return botLength(full) <= maxLength ? full : `${botClip(`${head}${pages[index]}`, Math.max(1, maxLength - 1))}…`;
   }
@@ -327,14 +350,22 @@ export class RoomBot {
     const startType = this.startType(text);
     const explicitStop = /^(?:结束|停止|退出)(?:游戏|互动)?$/u.test(text);
     const status = /^(?:游戏状态|状态|进度)$/u.test(text);
+    if (this.isIdiomHintCommand(text) && config.idiomEnabled) return this.idiomHint(maxLength);
     if (startType) return this.sessionReply(startType, [], config, maxLength, name, userKey);
-    if (!explicitStop && !status && !help && this.session?.type === 'idiom' && (idioms.has(text) || isFourChinese(text) || /^接龙[\s:：]/u.test(text))) {
+    if (!explicitStop && !status && !help && this.session?.type === 'idiom' && (lookupIdiom(text) || looksLikeIdiomAnswer(normalizeIdiom(text), this.session.word, this.session.nasalRelaxed) || /^接龙[\s:：]/u.test(text))) {
       return this.sessionReply('idiom', [text.replace(/^接龙[\s:：]*/u, '')], config, maxLength, name, userKey);
     }
     if (explicitStop) {
+      if (this.session?.type === 'idiom') {
+        const session=this.session, result=idiomGameResult(session, '手动结束', this.now());
+        return {...this.idiomReplyMessages(idiomResultMessages(result), maxLength, () => { if (this.session === session) { this.lastIdiomResult=result; this.endSession(); } }), persistent:true};
+      }
       body = this.session ? `${this.sessionSummary()} 已结束。` : '当前没有进行中的游戏。';
       commit = () => this.endSession();
-    } else if (status) body = this.sessionSummary();
+    } else if (status) {
+      if (this.session?.type === 'idiom' || this.lastIdiomResult) return this.idiomReplyMessages([this.sessionSummary()], maxLength);
+      body = this.sessionSummary();
+    }
     else if (help) body = this.menu(config, maxLength, Number(help[1] || args[0]) || 1);
     else {
       const item = BOT_COMMANDS.find(item => item.aliases.includes(token));
@@ -346,23 +377,7 @@ export class RoomBot {
         return null;
       }
       if (!config[item.key]) body = '此互动已关闭，发「菜单」看可用玩法。';
-      else if (item.key === 'diceEnabled') body = `🎲骰子：${1 + Math.floor(this.random() * 6)} 点`;
-      else if (item.key === 'coinEnabled') body = `🪙硬币：${this.random() < 0.5 ? '正面' : '反面'}`;
-      else if (item.key === 'choiceEnabled') {
-        const choices = args.join(' ').split(/[\/|、，,]/u).map(s => s.trim()).filter(Boolean);
-        body = choices.length < 2 || choices.length > 8 || choices.some(s => botLength(s) > 24)
-          ? '用法：选择 唱歌/聊天（2～8项）'
-          : `🎯帮你选：${choices[Math.floor(this.random() * choices.length)]}`;
-      } else if (item.key === 'rpsEnabled') {
-        const aliases = { '石头':'石头', '剪刀':'剪刀', '布':'布', 'rock':'石头', 'scissors':'剪刀', 'paper':'布' };
-        const mine = aliases[String(args[0] || '').toLocaleLowerCase()];
-        if (!mine) body = '用法：猜拳 石头/剪刀/布';
-        else {
-          const options = ['石头','剪刀','布'], bot = options[Math.floor(this.random() * options.length)];
-          const result = mine === bot ? '平局' : ((mine === '石头' && bot === '剪刀') || (mine === '剪刀' && bot === '布') || (mine === '布' && bot === '石头') ? '你赢啦' : '我赢啦');
-          body = `✊你${mine}｜我${bot}｜${result}`;
-        }
-      } else if (item.key === 'truthEnabled' || item.key === 'dareEnabled') {
+      else if (item.key === 'truthEnabled' || item.key === 'dareEnabled') {
         const type = item.key === 'truthEnabled' ? 'truth' : 'dare';
         if (this.session?.type === type) {
           if (!args.length) return { text:this.format(this.session.phase === 'answer' ? `${this.session.currentName}，${this.session.prompt}（直接回答即可）` : this.sessionSummary(), maxLength), commit:null };

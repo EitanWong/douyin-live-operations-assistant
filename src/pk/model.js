@@ -49,6 +49,7 @@ function ensureState(state, event) {
 
 function orientScores(state, event) {
   const participants = Array.isArray(event.participants) ? event.participants : [];
+  const scores = Array.isArray(event.scores) ? event.scores : [];
   for (const item of participants) {
     if (!item?.anchorId) continue;
     const id = String(item.anchorId), old = state.competitors[id] || { anchorId:id, score:0, scoreObserved:false, scoreAt:null, scoreMeta:{} };
@@ -56,21 +57,32 @@ function orientScores(state, event) {
       ...(item.grade ? { grade:item.grade } : {}), ...(item.gradeChange ? { gradeChange:item.gradeChange } : {}),
       ...(item.pkStageDescription ? { pkStageDescription:String(item.pkStageDescription).slice(0,200) } : {}) };
   }
-  const self = participants.find(item => item.anchorId && String(item.anchorId) === state.anchorId)
-    || participants.find(item => item.roomId && String(item.roomId) === state.roomId);
+  const roster = Object.values(state.competitors);
+  const self = roster.find(item => item.anchorId === state.anchorId)
+    || (!state.anchorId ? roster.find(item => item.roomId && item.roomId === state.roomId) : null);
   if (!state.anchorId && self) state.anchorId = String(self.anchorId || '');
   if (self?.name) state.anchorName = self.name;
-  const rivals = participants.filter(item => String(item.anchorId) !== state.anchorId);
-  const rival = rivals.find(item => String(item.anchorId) === state.opponentId) || (self && rivals.length === 1 ? rivals[0] : null);
+  for (const item of roster) {
+    item.isSelf = item.anchorId === state.anchorId;
+    if (state.anchorId && !item.isSelf && item.roomId && item.roomId !== state.roomId && !state.opponentRoomIds.includes(item.roomId)) state.opponentRoomIds.push(item.roomId);
+  }
+  state.opponentRoomIds = state.opponentRoomIds.filter(id => id !== state.roomId && id !== self?.roomId).slice(-8);
+  // 累积名单与比分共同决定参战人数；单帧仅含两个主播不代表整局是双人 PK。
+  const multi = new Set([...roster.map(item => item.anchorId), ...scores.filter(item => item?.anchorId).map(item => String(item.anchorId))]).size >= 3;
+  if (multi) {
+    state.opponentId = ''; state.opponentName = ''; state.opponentScore = 0;
+    state.opponentScoreObserved = false; state.opponentScoreAt = null; state.opponentScoreMeta = {};
+  }
+  const rivals = roster.filter(item => item.anchorId !== state.anchorId);
+  const rival = !multi && (rivals.find(item => item.anchorId === state.opponentId) || (self && rivals.length === 1 ? rivals[0] : null));
   if (rival) {
     state.opponentId = String(rival.anchorId); state.opponentName = rival.name || state.opponentName;
     if (rival.roomId && !state.opponentRoomIds.includes(String(rival.roomId))) state.opponentRoomIds.push(String(rival.roomId));
   }
-  const scores = Array.isArray(event.scores) ? event.scores : [];
   const ownScore = scores.find(item => item.anchorId && String(item.anchorId) === state.anchorId);
   const others = scores.filter(item => String(item.anchorId) !== state.anchorId);
-  const otherScore = scores.find(item => item.anchorId && String(item.anchorId) === state.opponentId)
-    || (ownScore && others.length === 1 ? others[0] : null);
+  const otherScore = !multi && (scores.find(item => item.anchorId && String(item.anchorId) === state.opponentId)
+    || (ownScore && others.length === 1 ? others[0] : null));
   if (otherScore && !state.opponentId) state.opponentId = String(otherScore.anchorId);
   const meta = item => Object.fromEntries(['scoreVersion', 'contributorCount', 'buffScoreRatio', 'final'].filter(field => item[field] != null).map(field => [field, item[field]]));
   const names = new Map(participants.map(item => [String(item.anchorId), item.name || '']));
@@ -80,7 +92,7 @@ function orientScores(state, event) {
     ...(item.grade ? { grade:item.grade } : {}), ...(item.gradeChange ? { gradeChange:item.gradeChange } : {}),
     ...(item.pkStageDescription ? { pkStageDescription:String(item.pkStageDescription).slice(0,200) } : {})
   }));
-  return { ...event, ...(competitorScores.length ? { competitorScores } : {}), ...(ownScore ? { selfScore: ownScore.score, selfScoreMeta: meta(ownScore) } : {}), ...(otherScore ? { opponentScore: otherScore.score, opponentScoreMeta: meta(otherScore) } : {}) };
+  return { ...event, ...(multi ? {opponentScore:undefined, opponentScoreMeta:undefined} : {}), ...(competitorScores.length ? { competitorScores } : {}), ...(ownScore ? { selfScore: ownScore.score, selfScoreMeta: meta(ownScore) } : {}), ...(otherScore ? { opponentScore: otherScore.score, opponentScoreMeta: meta(otherScore) } : {}) };
 }
 
 function multiPrediction(state, now, sampleSize) {
@@ -178,6 +190,7 @@ function sideForGift(state, event) {
   const id = String(event.recipientId || event.targetAnchorId || event.anchorId || event.user?.anchorId || '');
   if (id && id === state.opponentId) return 'opponent';
   if (id && id === state.anchorId) return 'self';
+  if (id && state.anchorId && state.competitors[id]) return 'opponent';
   if (event.isOpponent === true) return 'opponent';
   if (id) return null;
   if (event.roomId && String(event.roomId) === state.roomId) return 'self';

@@ -35,7 +35,8 @@ export function audienceAddress(user, now = Date.now(), maxName = 60) {
 export function renderAudienceTemplate(template, user, variables = {}, now = Date.now()) {
   const address = audienceAddress(user,now);
   // 兼容旧模板中写死的「{user} 哥」，避免女性或未知用户被错误称呼。
-  const dynamic = String(template).replace(/\{(?:user|nickname|address)\}\s*(?:哥哥|姐姐|哥|姐)/gu,'{address}');
+  const dynamic = String(template)
+    .replace(/\{(?:user|nickname|address)\}\s*(?:\{title\}|小哥哥|小姐姐|大哥哥|大姐姐|哥哥|姐姐|大哥|大姐|哥|姐|先生|女士)/gu,'{address}');
   const values = {...variables,user:address,address,nickname:user?.name || '观众',title:audienceTitle(user,now)};
   return dynamic.replace(/\{([a-zA-Z]+)\}/g,(original,key)=>Object.hasOwn(values,key) ? String(values[key]) : original);
 }
@@ -63,10 +64,10 @@ export class AudienceProfiles {
     if (previous && this.now()-previous.observedAt > this.retention) previous=null;
     const next = {...previous,observedAt:this.now()};
     for (const field of ['id','secUid','name']) if (user[field]) next[field]=String(user[field]);
-    for (const field of ['gender','birthdayDescription','birthdayValid']) if (Object.hasOwn(user,field)) next[field]=user[field];
+    for (const field of ['gender','birthdayDescription','birthdayValid','wealthLevel','fanClubs']) if (Object.hasOwn(user,field)) next[field]=user[field];
     this.users.delete(key); this.users.set(key,next);
     while (this.users.size > this.limit) this.users.delete(this.users.keys().next().value);
-    return {...user,...Object.fromEntries(['name','gender','birthdayDescription','birthdayValid'].filter(field=>Object.hasOwn(next,field)).map(field=>[field,next[field]]))};
+    return {...user,...Object.fromEntries(['name','gender','birthdayDescription','birthdayValid','wealthLevel','fanClubs'].filter(field=>Object.hasOwn(next,field)).map(field=>[field,next[field]]))};
   }
   findByName(name) {
     const matches=[...this.users.values()].filter(user=>this.now()-user.observedAt <= this.retention && (user.name === name || audienceAddress(user,this.now()) === name));

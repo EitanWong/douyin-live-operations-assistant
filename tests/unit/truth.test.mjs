@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { TRUTH_QUESTIONS } from '../../src/data/interaction-questions.js';
+import { RoomBot } from '../../src/core/bot.js';
+import { INTERACTION_TOPICS } from '../../src/data/interaction-questions.js';
 import { Engine, DEFAULTS, copy } from '../../src/core/engine.js';
 
 const self = {id:'100',name:'Eitan'};
@@ -26,7 +28,7 @@ test('AI 未启用时，快捷真心话忽略调试消息并用内置反馈回�
   assert.equal(engine.bot.session?.phase,'answer');
   chat('梦想成为一个大明星');
   assert.equal(engine.queue.length,2);
-  assert.match(engine.queue[1].text,/一只开心🎀.*舞台梦.*闪闪发光/u);
+  assert.match(engine.queue[1].text,/一只开心🎀.*舞台梦/u);
   assert.equal(engine.bot.session,null);
   assert.equal(engine.stats.aiCalls,0);
 });
@@ -38,7 +40,7 @@ test('被提问者可用简短、口语、表情或带 @ 的任意自然答案�
     chat(answer);
     assert.equal(engine.bot.session,null,answer);
     assert.equal(engine.queue.length,2,answer);
-    assert.match(engine.queue[1].text,/谢谢你分享儿时的梦想/u);
+    assert.match(engine.queue[1].text,/小时候|梦想/u);
     assert.ok([...engine.queue[1].text].length<=50);
   }
 });
@@ -63,7 +65,9 @@ test('自然接话适用于全部真心话题目，昵称相同也按实际用�
     chat('@Eitan 真心话');
     chat(answer,{id:'300',name:anchor.name});
     assert.equal(engine.bot.session,null,answer);
-    assert.match(engine.queue[1].text,/收到|舞台梦/u);
+    const topic = INTERACTION_TOPICS[TRUTH_QUESTIONS[index].category];
+    const candidates = index === 5 ? ['原来你小时候是这样想的。', '这个梦想，现在还惦记着吗？', '小时候的梦想，长大了想法也可能会变。'] : [topic.feedback, ...topic.alternatives];
+    assert.ok(candidates.some(reply => engine.queue[1].text === `${anchor.name}，${reply}`));
   });
 });
 
@@ -95,7 +99,7 @@ test('房间模式报名和答题兼容口语，带 @ 回答后回到报名阶�
   chat('@Eitan 想当医生',{id:'300',name:'报名观众'});
   assert.equal(engine.bot.session?.phase,'join');
   assert.equal(engine.bot.session?.rounds,1);
-  assert.match(engine.queue.at(-1).text,/报名观众.*儿时的梦想.*下一位/u);
+  assert.match(engine.queue.at(-1).text,/报名观众.*小时候.*下一位/u);
 });
 
 test('大冒险也等待直接回答并反馈，不因快捷出题漏掉后续消息', () => {
@@ -103,7 +107,7 @@ test('大冒险也等待直接回答并反馈，不因快捷出题漏掉后续�
   chat('@Eitan 大冒险');
   chat('@Eitan 吃葡萄不吐葡萄皮');
   assert.equal(engine.bot.session,null);
-  assert.match(engine.queue[1].text,/吃葡萄不吐葡萄皮.*参与挑战/u);
+  assert.match(engine.queue[1].text,/一只开心🎀，(?:收到|好，)/u);
 });
 
 test('反馈入队失败继续等待，重试回答和重复帧只产生一次反馈', () => {
@@ -141,5 +145,13 @@ test('刷新恢复快捷题上下文后仍能识别回答并只反馈一次', ()
   const restored = fixture(); restored.engine.restore(first.engine.snapshot());
   restored.chat('梦想成为一个大明星',anchor,{id:'after-restore'});
   assert.equal(restored.engine.bot.session,null);
-  assert.match(restored.engine.queue.at(-1).text,/闪闪发光/u);
+  assert.match(restored.engine.queue.at(-1).text,/舞台梦/u);
+});
+
+test('同类回答有多种接话，不消耗游戏随机数，也不套用儿时梦想到其他愿望题', () => {
+  const bot = new RoomBot({random:()=>assert.fail('反馈不能改变游戏随机结果')});
+  const session = {type:'truth',prompt:'你今年最想完成什么？',questionId:'truth-033'};
+  const replies = ['学做饭','去旅游','少熬夜','学吉他','跑步'].map(answer => bot.answerFeedback(answer,'小雨',session));
+  assert.ok(new Set(replies).size > 1);
+  assert.ok(replies.every(reply => reply.startsWith('小雨，') && !/小时候|闪闪发光|✨|收到「/u.test(reply)));
 });
