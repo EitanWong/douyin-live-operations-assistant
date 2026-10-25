@@ -20,7 +20,7 @@ if (!development && !process.env.DOUYIN_DIST_DIR) {
 const header = `// ==UserScript==
 // @name         抖音直播运营助手
 // @namespace    local.douyin-live-assistant
-// @version      0.1.1
+// @version      0.1.2
 // @description  抖音直播互动场控助手，支持仅预览或自动发送；按需启用各模块。
 // @match        https://live.douyin.com/*
 // @run-at       document-start
