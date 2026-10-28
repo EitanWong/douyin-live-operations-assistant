@@ -271,6 +271,17 @@ test('后台日志和配置拒绝不可 JSON 序列化输入并返回明确错�
   const giftResult=await w.send({type:'gift-record',event:{type:'gift',unitValue:1n}});
   assert.equal(giftResult.ok,false); assert.equal(giftResult.code,'INVALID_EVENT');
 });
+test('原生点赞快照可以通过扩展后台持久化并在重启后回放',async()=>{
+  const w=await worker();
+  const event={type:'room-likes',source:'native-room',anchorId:'4007055676415213',roomId:'7701733692930411306',total:15000,display:'1.5万',approximate:true,receivedAt:1800000000000};
+  const saved=await w.send({type:'event-append',id:'likes-event-00000001',event});
+  assert.equal(saved.ok,true);
+  const restarted=await worker(w.values,w.indexedDB);
+  const pending=await restarted.send({type:'event-list'});
+  assert.equal(pending.value.length,1);
+  assert.equal(pending.value[0].event.display,'1.5万');
+  assert.equal(pending.value[0].event.roomId,event.roomId);
+});
 test('事件日志先持久化、后台重启后可回放，并严格隔离主播房间', async()=>{
   const w=await worker(), other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
   const event={type:'gift',id:'gift-event-1',roomId:'stream-1',giftId:'rose',groupId:'combo-1',count:3,final:true,user:{id:'viewer-1',name:'观众'}};

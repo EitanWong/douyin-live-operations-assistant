@@ -3,6 +3,7 @@ import { recognizeMilestone } from '../core/milestones.js';
 import { PageRequestSender } from './request-sender.js';
 import { AnchorDataCollector } from './anchor-data.js';
 import { CollectionGuard } from './collection-guard.js';
+import { readRoomLikes } from './room-likes.js';
 
 const MAX_CAPTURE_FRAME_BYTES = 512 * 1024;
 function base64(bytes, page) {
@@ -93,11 +94,7 @@ function readLabeledCount(root, label, before = false) {
 export function readRoomSnapshot(doc = document) {
   const chatroom = doc.querySelector('#chatroom');
   if (!chatroom) return null;
-  const likeMatches = [...doc.querySelectorAll('*')]
-    .filter(node => node.children.length === 0)
-    .map(node => node.textContent.trim().match(/^(\d[\d,，]*(?:\.\d+)?(?:万|亿)?)\s*本场点赞$/)?.[1])
-    .filter(Boolean).map(parseDisplayCount).filter(value => value !== null);
-  const likeTotal = likeMatches.length && likeMatches.every(value => value === likeMatches[0]) ? likeMatches[0] : null;
+  const likeTotal = readRoomLikes(doc)?.total ?? null;
   return {
     capturedAt: Date.now(), source: 'dom',
     onlineCount: readLabeledCount(chatroom, '在线观众'),

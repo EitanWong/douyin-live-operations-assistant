@@ -6,6 +6,29 @@ import {AnchorDashboard} from '../../src/ui/anchor-dashboard.js';
 import {anchorPageTemplate} from '../../src/ui/anchor-template.js';
 
 const now = Date.parse('2026-10-23T12:00:00+08:00'), DAY = 86400000;
+test('主播数据页展示匹配直播场次的点赞，保留缩略口径、零值、历史隔离与导出',()=>{
+  const view=setup();
+  try {
+    view.income.allSessions.forEach((row,i)=>{row.roomId=String(100+i);});
+    const event={type:'room-likes',source:'native-room',anchorId:'101',roomId:'100',total:15000,display:'1.5万',approximate:true,receivedAt:now};
+    view.stats.ingest(event);view.dashboard.render(view.engine,{income:view.income});
+    assert.equal(view.text('[data-anchor-likes]'),'1.5万');
+    assert.match(view.text('[data-anchor-likes-note]'),/缩略/);
+    assert.equal(view.dashboard.exportReport().likes[0].total,15000);
+    view.stats.ingest({...event,type:'like',source:'websocket',total:15432,approximate:false});
+    view.dashboard.render(view.engine,{income:view.income});
+    assert.equal(view.text('[data-anchor-likes]'),'15,432');
+    view.select('[data-anchor-session-picker]','live-1');
+    assert.equal(view.text('[data-anchor-likes]'),'未知');
+    view.stats.ingest({...event,roomId:'101',total:0,display:'0',approximate:false});
+    view.dashboard.render(view.engine,{income:view.income});
+    assert.equal(view.text('[data-anchor-likes]'),'0');
+    view.stats.ingest({type:'pk-rank-season',anchorId:'999',id:'other-rank',receivedAt:now,afterRank:{detail:'钻石'}});
+    view.dashboard.render(view.engine,{income:view.income});
+    view.select('[data-anchor-picker]','999');
+    assert.equal(view.text('[data-anchor-likes]'),'未知');
+  } finally {view.close();}
+});
 const battle = (key, endedAt, selfScore=100, opponentScore=50) => ({key,roomId:'1',anchorId:'101',anchorName:'<主播甲>',opponentId:'202',opponentName:'<img src=x>',
   phase:'ended',provisional:false,startedAt:endedAt-60000,endedAt,lastEventAt:endedAt,selfScore,opponentScore,selfScoreObserved:true,opponentScoreObserved:true,
   selfScoreAt:endedAt,opponentScoreAt:endedAt,selfScoreMeta:{final:true},opponentScoreMeta:{final:true}});
