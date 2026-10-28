@@ -242,7 +242,7 @@ export function boot(options = {}) {
       if (!engine || closed || suspended || location.pathname !== initialPath) return;
       if (liveEvent.type === 'end') autoLike.stop('直播已结束，已停止点赞');
       const echoed = engine.observeEcho(liveEvent);
-      if (liveEvent.type === 'like' && engine.isSelfUser(liveEvent?.user)) {
+      if (['like','fansclub','fansclub-push'].includes(liveEvent.type) && engine.isSelfUser(liveEvent?.user)) {
         engine.ingest(liveEvent);refresh();persistRuntime();
       }
       if (liveEvent.type !== 'gift' && engine.isSelfUser(liveEvent?.user) && (echoed || !engine.acceptsSelfGameChat(liveEvent))) {
@@ -250,7 +250,7 @@ export function boot(options = {}) {
         return;
       }
       let journalWrite = null;
-      const passiveDataEvent = ['room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
+      const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
       if ((engine.running || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
         // Incoming messages are structured-cloned in the extension, but direct
         // integrations/tests may provide frozen objects. Work on a shallow copy

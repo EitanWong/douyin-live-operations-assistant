@@ -12,7 +12,8 @@
   "content_scripts": [
     { "matches": ["https://live.douyin.com/*"], "js": ["page.js"], "run_at": "document_start", "world": "MAIN" },
     { "matches": ["https://live.douyin.com/*"], "js": ["content.js"], "run_at": "document_start", "world": "ISOLATED" },
-    { "matches": ["https://lf-normal-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html*"], "js": ["indicator-frame.js"], "run_at": "document_idle", "world": "ISOLATED", "all_frames": true }
+    { "matches": ["https://lf-normal-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html*"], "js": ["indicator-frame.js"], "run_at": "document_idle", "world": "ISOLATED", "all_frames": true },
+    { "matches": ["https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html*"], "js": ["fanclub-frame.js"], "run_at": "document_idle", "world": "ISOLATED", "all_frames": true }
   ],
   "minimum_chrome_version": "120"
 }

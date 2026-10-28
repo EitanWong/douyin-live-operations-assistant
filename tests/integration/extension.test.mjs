@@ -1,3 +1,4 @@
+import { fanclubFrameContext, cleanFanclubSnapshot } from '../../src/data/fanclub.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, access } from 'node:fs/promises';
@@ -49,9 +50,9 @@ async function worker(values = {}, indexedDB = new IDBFactory()) {
   const WorkerDurableStorage = class extends DurableStorage {
     constructor(options = {}) { super({...options, indexedDB: options.indexedDB || indexedDB, IDBKeyRange}); }
   };
-  const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>sent.push([id,m])}};
+  const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
   const code=(await readFile(file('background.js'),'utf8')).replace(/^import .*;\n/gm,'');
-  vm.runInNewContext(code,{chrome,installCollectionKeeper,validateEndpoint,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,AbortController,setTimeout,clearTimeout,URL,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
+  vm.runInNewContext(code,{fanclubFrameContext,cleanFanclubSnapshot,chrome,installCollectionKeeper,validateEndpoint,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,AbortController,setTimeout,clearTimeout,URL,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,r)),deny:()=>allowed=false};
@@ -63,6 +64,38 @@ test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
   const main=await readFile(file('page.js'),'utf8'); assert.doesNotMatch(main,/chrome\.storage|GM_getValue|api-key:|GM_xmlhttpRequest/);
   assert.match(main,/class AnchorStats\b/); assert.match(main,/new AnchorStats\(/);
+});
+
+test('粉丝团跨域快照只转交同标签主页，拒绝错误来源、UID、过量成员并持久化回放',async()=>{
+  const w=await worker(),frameURL='https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html?anchor_id=123&room_id=456&user_id=321&fans_level=6&light_status=1';
+  const sender={frameId:2,url:frameURL,tab:{id:1,url:'https://live.douyin.com/1'}};
+  const event={type:'anchor-fanclub',source:'native-fanclub',anchorId:'123',roomId:'456',fansCount:'14343',lightedCount:'88',members:[],receivedAt:Date.now()-10000};
+  assert.equal((await w.send({type:'fanclub-frame',event},sender)).ok,true);
+  assert.equal(w.sent.length,1);assert.equal(w.sent[0][0],1);
+  assert.equal(w.sent[0][1].event.viewer.level,6);
+  assert.equal(w.sent[0][1].event.receivedAt,event.receivedAt);
+  for(const invalid of [{...sender,url:frameURL.replace('bytegecko.com','evil.test')},{...sender,frameId:0}]) assert.equal((await w.send({type:'fanclub-frame',event},invalid)).ok,false);
+  assert.equal((await w.send({type:'fanclub-frame',event:{...event,anchorId:'999'}},sender)).ok,false);
+  assert.equal((await w.send({type:'fanclub-frame',event:{...event,members:Array(11).fill({})}},sender)).ok,false);
+  const saved=await w.send({type:'event-append',id:'fansclub-event-00000001',event:w.sent[0][1].event});
+  assert.equal(saved.ok,true);
+  const restarted=await worker(w.values,w.indexedDB);
+  assert.equal((await restarted.send({type:'event-list'})).value[0].event.fansCount,'14343');
+});
+
+test('生成的粉丝团 iframe 脚本读取原生字段并分块发送，未加载字段不伪造',async()=>{
+  const rows=Array.from({length:21},(_,i)=>`<div class="item"><span class="fansclub-list-item-nickname">成员${i}</span><span class="fmlchlci-right">0</span></div>`).join('');
+  const dom=new JSDOM(`<div class="title-bar-text">主播粉丝团</div><div class="fmlc-hasfans-header-left">共14343位"粉丝"，88位勋章点亮中</div><div class="list-scroll">${rows}</div>`,{url:'https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html?anchor_id=123&room_id=456',runScripts:'outside-only'});
+  const calls=[],page=dom.window;
+  try {
+    const source=(await readFile(file('fanclub-frame.js'),'utf8')).replace(/window\s*!==\s*window\.top/g,'true');
+    page.chrome={runtime:{id:'test',sendMessage:async message=>{calls.push(message);return {ok:true};}}};
+    page.eval(source);await new Promise(setImmediate);
+    assert.deepEqual(calls.map(row=>row.event.members.length),[10,10,1]);
+    assert.equal(calls[2].event.totalRows,21);assert.equal(calls[2].event.members[0].position,21);
+    assert.equal(calls[2].event.members[0].level,null);
+    page.dispatchEvent(new page.Event('pagehide'));
+  } finally {page.close();}
 });
 
 test('展馆 iframe 保级消息仅可从已知指标页转交同标签主页，错误来源与 UID 被拒绝',async()=>{

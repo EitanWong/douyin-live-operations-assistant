@@ -1,3 +1,4 @@
+import { fanclubFrameContext, cleanFanclubSnapshot } from './fanclub-data.js';
 import { validateEndpoint } from './ai.js';
 import { GiftStore } from './gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
@@ -41,7 +42,7 @@ const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
 };
-const eventTypes = new Set(['room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season']);
+const eventTypes = new Set(['anchor-fanclub','room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season']);
 const validEvent = (event, maxBytes) => {
   try {
     const size = jsonLength(event);
@@ -116,6 +117,23 @@ async function writeStorage(key, value) {
   }
 }
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
+  if (message?.type === 'fanclub-frame') {
+    void (async()=>{
+      try {
+        const context=fanclubFrameContext(sender.url),input=message.event;
+        if (!context || sender.frameId<=0 || !sender.tab?.id || !roomFromUrl(sender.tab.url)
+          || input?.type!=='anchor-fanclub' || input.source!=='native-fanclub'
+          || input.anchorId!==context.anchorId || input.roomId!==context.roomId
+          || !Array.isArray(input.members) || input.members.length>10) throw new Error('粉丝团来源无效');
+        const event=cleanFanclubSnapshot({...input,viewer:context.viewer,clubId:context.clubId});
+        if (!event || event.receivedAt>Date.now()+1000 || !validEvent(event,12000)) throw new Error('粉丝团数据无效');
+        event.id=`fansclub:frame:${sender.frameId}:${event.snapshotId}:${event.chunk}`;
+        const result=await chrome.tabs.sendMessage(sender.tab.id,{type:'fanclub-frame',frameURL:sender.url,event},{frameId:0});
+        reply({ok:result?.ok===true});
+      } catch {reply({ok:false});}
+    })();
+    return true;
+  }
   if (message?.type === 'exhibition-indicator') {
     void (async()=>{
       try {

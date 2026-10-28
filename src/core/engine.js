@@ -551,7 +551,7 @@ export class Engine {
     if (event.type === 'start') this.pkOperations.observeBroadcast(event);
     this.ingestPK(event);
     if (event.type === 'anchor-pk-tasks') this.pkOperations.ingestTasks(event);
-    if (['room-likes','like','anchor-exhibition','pk-rank-season','anchor-exhibition-retention','room-indicator'].includes(event.type)) this.anchorStats.ingest(event, {anchorId:this.config.anchorId,roomId:event.roomId});
+    if (['anchor-fanclub','fansclub-statistics','fansclub','fansclub-push','room-likes','like','anchor-exhibition','pk-rank-season','anchor-exhibition-retention','room-indicator'].includes(event.type)) this.anchorStats.ingest(event, {anchorId:this.config.anchorId,roomId:event.roomId});
     // 按帧实际到达时间区分历史补推；主线程解码积压不能让实时消息变成历史消息。
     const hasReceipt = Number.isFinite(event.receivedAt) && event.receivedAt <= now;
     const hasRecentReceipt = hasReceipt && now - event.receivedAt < 600000;

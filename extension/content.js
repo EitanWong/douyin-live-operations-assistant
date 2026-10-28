@@ -15,7 +15,7 @@ if (room) {
     if (data.type === 'event') {
       const event = data.event;
       let valid = true;
-      try { valid = Boolean(event) && ['room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','anchor-exhibition-retention','pk-rank-season'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
+      try { valid = Boolean(event) && ['anchor-fanclub','room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','anchor-exhibition-retention','pk-rank-season'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
       catch { valid = false; }
       if (!valid) return;
       if (receive) receive(event);
@@ -101,7 +101,7 @@ if (room) {
     ackMany: keys => message({type:'event-ack-many',keys})
   };
   chrome.runtime.onMessage.addListener((request,sender,reply) => {
-    if (request.type === 'exhibition-indicator') {
+    if (request.type === 'exhibition-indicator' || request.type === 'fanclub-frame') {
       const event = request.event;
       const frame = [...document.querySelectorAll('iframe')].find(el => el.src === request.frameURL);
       if (!frame || !activeAdapter || event?.anchorId !== panel?.config.anchorId || contextInvalidated) {reply({ok:false});return;}

@@ -6,6 +6,26 @@ import {AnchorDashboard} from '../../src/ui/anchor-dashboard.js';
 import {anchorPageTemplate} from '../../src/ui/anchor-template.js';
 
 const now = Date.parse('2026-10-23T12:00:00+08:00'), DAY = 86400000;
+test('主播数据展示粉丝团人数、点亮人数、成员等级亲密度和数据范围，导出保留且切主播隔离',()=>{
+  const view=setup();
+  try {
+    view.stats.ingest({type:'anchor-fanclub',source:'native-fanclub',anchorId:'101',roomId:'100',receivedAt:now,
+      title:'一只开心的粉丝团',fansCount:'14343',lightedCount:'88',hiddenInactive:true,
+      members:[{position:1,name:'<img src=x>',level:18,badgeName:'只开心',intimacy:'1609000',intimacyDisplay:'160.9万',intimacyApproximate:true}]});
+    view.dashboard.render(view.engine,{income:view.income});
+    assert.equal(view.text('[data-anchor-fanclub-count]'),'14,343');
+    assert.equal(view.text('[data-anchor-fanclub-lighted]'),'88');
+    assert.match(view.text('[data-anchor-fanclub-members]'),/18.*160.9万/);
+    assert.equal(view.root.querySelector('[data-anchor-fanclub-members] img'),null);
+    assert.match(view.text('[data-anchor-fanclub-note]'),/不活跃成员.*隐藏/);
+    assert.equal(view.dashboard.exportReport().fanclub.members.length,1);
+    view.stats.ingest({type:'fansclub-statistics',anchorId:'999',roomId:'999',receivedAt:now,fansCount:'0',name:'另一团'});
+    view.dashboard.render(view.engine,{income:view.income});view.select('[data-anchor-picker]','999');
+    assert.equal(view.text('[data-anchor-fanclub-count]'),'0');
+    assert.equal(view.text('[data-anchor-fanclub-lighted]'),'未知');
+    assert.doesNotMatch(view.text('[data-anchor-fanclub-members]'),/160.9万/);
+  } finally {view.close();}
+});
 test('主播数据页展示匹配直播场次的点赞，保留缩略口径、零值、历史隔离与导出',()=>{
   const view=setup();
   try {

@@ -1,4 +1,5 @@
 import { RoomLikes } from './room-likes.js';
+import { AnchorFanclub } from './fanclub.js';
 // 累积页面实际观测的 PK，不受 PKTracker 的运行时场次保留数量影响。
 // 每个战局 + 明确主播 UID 只有一行；没有平台终局比分证据的比赛保留待确认。
 const DAY = 86400000, OFFSET = 8 * 3600000;
@@ -72,9 +73,15 @@ export class AnchorStats {
     this.rank = new Map(); this.unknownRanks = []; this.seenRankEvents = new Set();
     this.retention = new Map();
     this.likes = new RoomLikes();
+    this.fanclub = new AnchorFanclub();
   }
   ingest(event, context = {}) {
     if (!event || typeof event !== 'object') return false;
+    if (['anchor-fanclub','fansclub-statistics','fansclub','fansclub-push'].includes(event.type)) {
+      const changed=this.fanclub.ingest(event,context);
+      if (changed) this.revision++;
+      return changed;
+    }
     if (event.type==='room-likes' || event.type==='like') {
       const changed=this.likes.ingest(event,context);
       if (changed) this.revision++;
@@ -262,7 +269,7 @@ export class AnchorStats {
     if (changed) this.revision++;
     return changed || previousRevision !== this.revision;
   }
-  snapshot() { return {version:1,likes:this.likes.snapshot(),records:copyAnchorStats([...this.records.values()]),exhibition:copyAnchorStats([...this.exhibition.entries()].filter(([key]) => !key.includes('"')).map(([key]) => [key,this.exhibitionFor(key)])),rank:copyAnchorStats([...this.rank.entries()]),retention:copyAnchorStats([...this.retention.entries()]),unknownRanks:copyAnchorStats(this.unknownRanks)}; }
+  snapshot() { return {version:1,fanclub:this.fanclub.snapshot(),likes:this.likes.snapshot(),records:copyAnchorStats([...this.records.values()]),exhibition:copyAnchorStats([...this.exhibition.entries()].filter(([key]) => !key.includes('"')).map(([key]) => [key,this.exhibitionFor(key)])),rank:copyAnchorStats([...this.rank.entries()]),retention:copyAnchorStats([...this.retention.entries()]),unknownRanks:copyAnchorStats(this.unknownRanks)}; }
   restore(saved) {
     if (saved?.version !== 1 || !Array.isArray(saved.records)) return false;
     const records = new Map();
@@ -273,6 +280,7 @@ export class AnchorStats {
     }
     this.records = records;
     this.likes.restore(saved.likes);
+    this.fanclub.restore(saved.fanclub);
     this.exhibition.clear(); this.exhibitionChunks.clear(); this.rank.clear(); this.retention.clear(); this.unknownRanks = [];
     for (const item of saved.exhibition || []) if (Array.isArray(item) && identity(item[0]) && item[1]) {
       const savedValue = item[1], value = {...savedValue, summary:{name:savedValue.name || '',title:savedValue.title || '',level:savedValue.level ?? null,floor:savedValue.floor ?? null,stars:savedValue.stars || null,keepTarget:savedValue.keepTarget ?? null,gapToNextLevel:savedValue.gapToNextLevel ?? null,exhibitionType:savedValue.exhibitionType ?? null},
@@ -295,6 +303,7 @@ export class AnchorStats {
       anchors.set(row.anchorId,old);
     }
     for (const row of this.likes.snapshot()) if (!anchors.has(row.anchorId)) anchors.set(row.anchorId,{anchorId:row.anchorId,name:'',lastAt:row.observedAt,battles:0});
+    for (const row of this.fanclub.snapshot()) if (!anchors.has(row.anchorId)) anchors.set(row.anchorId,{anchorId:row.anchorId,name:'',lastAt:row.observedAt,battles:0});
     // An exhibition or rank can arrive before the first PK.
     for (const [anchorId, rank] of this.rank) if (!anchors.has(anchorId)) anchors.set(anchorId, {anchorId,name:'',lastAt:rank.observedAt,battles:0});
     for (const [anchorId, retention] of this.retention) if (!anchors.has(anchorId)) anchors.set(anchorId,{anchorId,name:'',lastAt:retention.observedAt,battles:0});
@@ -319,7 +328,7 @@ export class AnchorStats {
       return {date,...summarizeAnchorBattles(buckets.get(date) || [])};
     });
     const name = this.anchors().find(anchor => anchor.anchorId === anchorId)?.name || '';
-    return {anchorId,name,timeZone:'Asia/Shanghai',likes:this.likes.forAnchor(anchorId),exhibition:this.exhibitionFor(anchorId),exhibitionRetention:this.retentionFor(anchorId),rank:this.rank.get(anchorId) ? {...copyAnchorStats(this.rank.get(anchorId)),exhibitionRetention:this.retentionFor(anchorId)} : null,
+    return {anchorId,name,timeZone:'Asia/Shanghai',fanclub:this.fanclub.forAnchor(anchorId),likes:this.likes.forAnchor(anchorId),exhibition:this.exhibitionFor(anchorId),exhibitionRetention:this.retentionFor(anchorId),rank:this.rank.get(anchorId) ? {...copyAnchorStats(this.rank.get(anchorId)),exhibitionRetention:this.retentionFor(anchorId)} : null,
       rankUnknown:copyAnchorStats(this.unknownRanks.slice(-20)),today:{date:today,...summarizeAnchorBattles(rows.filter(row => row.date && row.date === today))},
       month:{month,...summarizeAnchorBattles(rows.filter(row => row.date && row.date.startsWith(month || '!')))},total:summarizeAnchorBattles(rows),trend,battles:copyAnchorStats(rows),
       basis:'仅统计本机已观测场次；按北京时间结束日归属，未结束按开始日。胜率=胜场/(胜+负+平)，平局计入分母、不计胜场；多人场最高分并列者记平局，其余记负。仅明确终局比分计入 PK 总分及胜负，未知保留待确认。'};
