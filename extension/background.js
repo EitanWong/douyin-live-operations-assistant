@@ -1,6 +1,9 @@
-import { fanclubFrameContext, cleanFanclubSnapshot } from './fanclub-data.js';
-import { validateEndpoint } from './ai.js';
-import { GiftStore } from './gifts.js';
+import { roomFromURL } from '../src/browser/room-context.js';
+import { accessPage } from './page-access.js';
+import { ProtocolCache } from './protocol-cache.js';
+import { fanclubFrameContext, cleanFanclubSnapshot } from '../src/data/fanclub.js';
+import { validateEndpoint } from '../src/services/ai.js';
+import { GiftStore } from '../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
 import { installCollectionKeeper } from './collection-keeper.js';
 
@@ -33,10 +36,10 @@ const roomFromUrl = value => {
   try {
     const url = new URL(value);
     if (url.origin !== 'https://live.douyin.com') return null;
-    return url.pathname.match(/^\/(\d+)\/?$/)?.[1] || url.searchParams.get('room_id')?.match(/^\d+$/)?.[0] || null;
+    return roomFromURL(url);
   } catch { return null; }
 };
-const isRoom = sender => sender.frameId === 0 && Boolean(roomFromUrl(sender.tab?.url));
+const isRoom = sender => sender.frameId === 0 && Boolean(roomFromUrl(sender.tab?.url)) && (!sender.url || roomFromUrl(sender.url) === roomFromUrl(sender.tab.url));
 const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|income-calibration:\d+|event:\d+:[a-z\d-]+|api-key:https?:\/\/[^\s/]+)$/.test(key);
 const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
@@ -79,30 +82,9 @@ async function storageUsage() {
 }
 // Diagnostic history is disposable. Unacknowledged events, runtime checkpoints,
 // settings and income data are never candidates, including from other rooms.
-// Callers serialize maintenance with writes using the same transaction queue.
-let lastPruned = null;
-async function maintainStorage(reserveBytes = 0, force = false) {
-  const before = await storageUsage();
-  const candidates = Object.entries(await chrome.storage.local.get(null))
-    .filter(([key]) => /^live-assistant:protocol:\d+:[a-z\d-]+$/i.test(key))
-    .map(([key, record]) => ({key,savedAt:Number(record?.savedAt) || 0}))
-    .sort((a,b) => a.savedAt - b.savedAt || a.key.localeCompare(b.key));
-  const cutoff = Date.now() - 24*60*60*1000;
-  if (!force && candidates.length <= 1000 && !candidates.some(item=>item.savedAt < cutoff) && (before.used == null || before.used + reserveBytes < before.quota * .8)) return {...before,pruned:lastPruned};
-  const target = Math.max(0, before.quota * .65 - reserveBytes);
-  let after = before, deleted = 0, remaining = candidates.length;
-  for (let offset = 0; offset < candidates.length; offset += 50) {
-    const keys = candidates.slice(offset, offset + 50)
-      .filter(item=>item.savedAt < cutoff || after.used != null && after.used > target || remaining > 800)
-      .map(item=>item.key);
-    if (!keys.length) break;
-    await chrome.storage.local.remove(keys);
-    deleted += keys.length; remaining -= keys.length;
-    after = await storageUsage();
-  }
-  if (deleted) lastPruned = {deleted,bytes:Math.max(0, (before.used || 0) - (after.used || 0)),at:Date.now()};
-  return {...after,pruned:lastPruned};
-}
+// ProtocolCache owns diagnostic writes and maintenance independently of the ledger.
+const protocolCache = new ProtocolCache({local:chrome.storage.local,usage:storageUsage});
+const maintainStorage = (reserveBytes=0,force=false) => protocolCache.maintain(reserveBytes,force);
 async function storageStatus() {
   const cache = await maintainStorage(), durable = await durableStorage.usage();
   return {...cache,durable};
@@ -159,7 +141,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
     try {
       await storageReady;
       let value;
-      if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
+      if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
+      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
       else if (message.type === 'collection-state' && isRoom(sender)) value = await collectionKeeper.update(sender,message.active);
       else if (message.type === 'theme-get' && (isRoom(sender) || extensionPage)) value = await readRecord(themeKey) ?? 'system';
       else if (message.type === 'theme-set' && (isRoom(sender) || extensionPage) && themeValues.has(message.value)) {
@@ -190,30 +173,17 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         if (!validProtocolFrame(record)) throw Object.assign(new Error('协议帧记录无效或超过单条上限'),{code:'INVALID_PROTOCOL_FRAME'});
         const id = typeof message.id === 'string' && /^[a-z\d-]{16,64}$/i.test(message.id) ? message.id : crypto.randomUUID();
         const key = `live-assistant:protocol:${room}:${id}`;
-        value = await giftStore.transaction(async()=>{
-          if ((await chrome.storage.local.get(key))[key]) return {key};
-          const usage = await maintainStorage((key.length + jsonLength(record)) * 3);
-          if (usage.ratio != null && usage.ratio >= .8) throw Object.assign(new Error('本地存储已达80%，已停止新增协议帧；请先导出恢复数据并释放空间'),{code:'STORAGE_PRESSURE'});
-          await writeStorage(key,{record,savedAt:Date.now()}); return {key};
-        });
+        value = await protocolCache.append(key,record);
       }
       else if (message.type === 'protocol-list' && isRoom(sender)) {
-        const room = roomFromUrl(sender.tab.url), prefix = `live-assistant:protocol:${room}:`;
-        value = Object.entries(await chrome.storage.local.get(null)).filter(([key])=>key.startsWith(prefix)).map(([key,entry])=>({key,...entry})).sort((a,b)=>a.savedAt-b.savedAt || a.key.localeCompare(b.key));
-        const cursor = message.after;
-        if (cursor) value = value.filter(entry=>entry.savedAt > cursor.savedAt || entry.savedAt === cursor.savedAt && entry.key.localeCompare(String(cursor.key)) > 0);
-        value = value.slice(0,Math.min(100,Math.max(1,Number(message.limit) || 100)));
+        value = await protocolCache.list(roomFromUrl(sender.tab.url),message.after,Math.min(100,Math.max(1,Number(message.limit)||100)));
       }
       else if (message.type === 'event-list' && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url), prefix = `live-assistant:event:${room}:`;
         value = await durableStorage.listEvents(room,message.after,Math.min(256,Math.max(1,Number(message.limit) || 256)));
       }
-      else if (message.type === 'storage-status' && isRoom(sender)) value = await giftStore.transaction(storageStatus);
-      else if (message.type === 'storage-clear-cache' && isRoom(sender)) value = await giftStore.transaction(async()=>{
-        const keys = Object.keys(await chrome.storage.local.get(null)).filter(key=>/^live-assistant:protocol:\d+:[a-z\d-]+$/i.test(key));
-        if (keys.length) await chrome.storage.local.remove(keys);
-        return storageStatus();
-      });
+      else if (message.type === 'storage-status' && isRoom(sender)) value = await storageStatus();
+      else if (message.type === 'storage-clear-cache' && isRoom(sender)) value = await (async()=>{ await protocolCache.clear();return storageStatus(); })();
       else if (message.type === 'event-ack' && isRoom(sender) && typeof message.key === 'string') {
         const room = roomFromUrl(sender.tab.url), prefix = `live-assistant:event:${room}:`;
         if (!message.key.startsWith(prefix) || !keyAllowed(message.key)) throw new Error('事件确认范围无效');

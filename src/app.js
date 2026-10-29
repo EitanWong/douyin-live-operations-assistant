@@ -1,3 +1,4 @@
+import { RoomContext } from './browser/room-context.js';
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
 import { DouyinAdapter, RoomLock, pickElement, watchAudienceContributions } from './browser/adapter.js';
 import { createAIClient, validateEndpoint, generatePhrases } from './services/ai.js';
@@ -13,9 +14,9 @@ import { hasUnacknowledgedRuntimeAlert, normalizeRuntimeAlertState, reconcileRun
 export function boot(options = {}) {
   const demo = Boolean(options.demo);
   const page = options.page || (demo ? window : unsafeWindow);
-  const room = demo ? 'demo' : location.pathname.match(/^\/(\d+)\/?$/)?.[1] || new URLSearchParams(location.search).get('room_id')?.match(/^\d+$/)?.[0];
+  const roomContext = new RoomContext(window);
+  const room = demo ? 'demo' : roomContext.room;
   if (!room || document.getElementById('douyin-live-assistant')) return;
-  const initialPath = location.pathname;
   const get = options.get || ((key, fallback) => GM_getValue(key, fallback));
   const set = options.set || ((key, value) => GM_setValue(key, value));
   const del = options.del || (key => GM_deleteValue(key));
@@ -78,14 +79,14 @@ export function boot(options = {}) {
   const refresh = () => { if (panel && !closed && !suspended && !renderTimer) renderTimer = setTimeout(() => { renderTimer = null; panel.refresh(engine, network); }, 100); };
   let sendingScheduled = false, senderActive = false;
   const wakeSender = () => {
-    if (persistenceDisabled || sendingScheduled || senderActive || !engine?.running || engine.busy || closed || suspended || location.pathname !== initialPath) return;
+    if (persistenceDisabled || sendingScheduled || senderActive || !engine?.running || engine.busy || closed || suspended || !roomContext.current()) return;
     const now = Date.now();
     if (!engine.queue.some(job => engine.giftReady(job, now)) && ![...engine.gifts.values()].some(gift => gift.due <= now && gift.count > gift.credited)) return;
     if (!demo && engine.config.mode !== 'preview' && !adapter.healthy()) return;
     sendingScheduled = true;
     queueMicrotask(async () => {
       sendingScheduled = false;
-      if (persistenceDisabled || !engine.running || engine.busy || closed || suspended || location.pathname !== initialPath) return;
+      if (persistenceDisabled || !engine.running || engine.busy || closed || suspended || !roomContext.current()) return;
       const beforeJob = engine.selectNextJob(engine.queue, Date.now())?.id;
       const beforeSent = engine.stats.submitted + engine.stats.previews;
       senderActive = true;
@@ -231,7 +232,7 @@ export function boot(options = {}) {
     page,
     getConfig: () => engine.config,
     onPK:event=>{
-      if (!engine || closed || suspended || location.pathname !== initialPath) return;
+      if (!engine || closed || suspended || !roomContext.current()) return;
       if (engine.ingestPK(event)) {refresh();persistRuntime();}
     },
     onEcho:event=>engine?.observeEcho(event),
@@ -239,7 +240,7 @@ export function boot(options = {}) {
       const journalKey = event?._journalKey;
       const { _journalKey, _journalId, _journalSavedAt, ...liveEvent } = event || {};
       // A journal append may finish after pagehide. Keep that record for recovery.
-      if (!engine || closed || suspended || location.pathname !== initialPath) return;
+      if (!engine || closed || suspended || !roomContext.current()) return;
       if (liveEvent.type === 'end') autoLike.stop('直播已结束，已停止点赞');
       const echoed = engine.observeEcho(liveEvent);
       if (['like','fansclub','fansclub-push'].includes(liveEvent.type) && engine.isSelfUser(liveEvent?.user)) {
@@ -262,7 +263,7 @@ export function boot(options = {}) {
         catch (error) { reportPersistenceError(error, '事件日志写入失败，直播互动已继续处理'); }
         if (!event.id) event.id = `journal:${journalId}`;
       } else event = {...liveEvent,...(journalKey ? {_journalKey:journalKey,_journalSavedAt} : {})};
-      if (closed || suspended || location.pathname !== initialPath) return;
+      if (closed || suspended || !roomContext.current()) return;
       if (!persistenceDisabled && ['start','end'].includes(liveEvent.type)) {
         const observedAt = liveEvent.observedAt || liveEvent.receivedAt || Date.now();
         const at = Number.isFinite(liveEvent.at) && liveEvent.at > 0 ? liveEvent.at : observedAt;
@@ -308,7 +309,7 @@ export function boot(options = {}) {
   const autoLike = new AutoLike({
     transport:demo ? {prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,
     lock:new RoomLock({room:`auto-like:${room}`}),
-    guard:()=>closed || suspended || location.pathname !== initialPath ? '页面或直播间已切换，已停止'
+    guard:()=>closed || suspended || !roomContext.current() ? '页面或直播间已切换，已停止'
       : persistenceDisabled ? '扩展连接已失效，已停止，请刷新直播页'
       : !demo && (!adapter.healthy() || identity.live?.status && identity.live.status !== 'live') ? '直播已结束或连接中断，已停止' : '',
     changed:state=>panel?.updateAutoLike(state)
@@ -323,10 +324,10 @@ export function boot(options = {}) {
         ? {...local,anchorId:engine.config.anchorId,at:Date.now(),source:'page-ledger'} : null;
       return {income:income ? {...income,pending:incomePending.size} : null};
     },
-    manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && location.pathname===initialPath),
+    manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
     onStop: () => { lock.release(); autoStartArmed = false; },
-    send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : (text, isCurrent, hooks) => adapter.send(text, () => isCurrent() && lock.held && location.pathname === initialPath,hooks)
+    send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : (text, isCurrent, hooks) => adapter.send(text, () => isCurrent() && lock.held && roomContext.current(),hooks)
   });
   if (runtimeSnapshot?.version === 1 && Array.isArray(runtimeSnapshot.incomePending)) for (const entry of copy(runtimeSnapshot.incomePending)) {
       if (Array.isArray(entry) && typeof entry[0] === 'string' && entry[1]?.event) incomePending.set(entry[0], entry[1]);
@@ -336,6 +337,7 @@ export function boot(options = {}) {
     if (engine.resumeRequested) log('system', '已恢复上次运行状态，连接就绪后自动续跑');
   }
   function applyIdentity(next) {
+    if(closed || suspended || !roomContext.current())return;
     identity = { ...next, admin: roomAdminStatus(next.self, next.adminUserIds) }; const c = engine.config;
     engine.setIdentity(identity);
     if (next.anchor && c.identity.autoAnchor) {
@@ -344,7 +346,7 @@ export function boot(options = {}) {
     }
     if (c.identity.autoSelf && Object.hasOwn(next,'self')) c.selfId = next.self?.id || '';
     panel?.updateIdentity(identity); refresh();
-    if (next.live && !closed && !suspended && location.pathname === initialPath) {
+    if (next.live && !closed && !suspended && roomContext.current()) {
       const live = next.live, type = live.status === 'live' ? 'start' : 'end';
       const at = type === 'start' ? live.startAt || live.observedAt : live.endAt || live.observedAt;
       const event = {type, roomId:live.roomId, at, startAt:live.startAt, observedAt:live.observedAt, receivedAt:live.observedAt,
@@ -394,7 +396,7 @@ export function boot(options = {}) {
         if (automatic) return false;
         throw new Error('此直播间已有另一个标签页运行场控，请先暂停另一页');
       }
-      if (location.pathname !== initialPath) { lock.release(); throw new Error('直播间已切换，请刷新页面'); }
+      if (!roomContext.current()) { lock.release(); throw new Error('直播间已切换，请刷新页面'); }
       engine.start();
       if (options.journal && adapter.replayJournal) void adapter.replayJournal().catch(error => reportPersistenceError(error, '恢复事件日志失败'));
       autoStartError = '';
@@ -533,7 +535,7 @@ export function boot(options = {}) {
     const sampleContributions = async () => {
       if (closed || suspended || persistenceDisabled || !engine.config.incomeEnabled ||
         !(repository.recordContributionSnapshot || repository.recordContribution) || !adapter.readAudienceContributions || contributionCheckBusy ||
-        location.pathname !== initialPath || identity.live?.status && identity.live.status !== 'live') return;
+        !roomContext.current() || identity.live?.status && identity.live.status !== 'live') return;
       const session = giftLedger.currentSession();
       if (!session || session.endAt) return;
       contributionCheckBusy = true; lastContributionCheck = Date.now();
@@ -561,14 +563,14 @@ export function boot(options = {}) {
       if (closed || suspended) return;
       autoLike.check();
       if (demo) { network.lastFrame = adapter.status.lastFrame = Date.now(); }
-      if (!demo && identityReader.refreshRoom && location.pathname === initialPath && Date.now() - lastLiveCheck >= 15000) {
+      if (!demo && identityReader.refreshRoom && roomContext.current() && Date.now() - lastLiveCheck >= 15000) {
         lastLiveCheck = Date.now();
         // Query failures and a disconnected socket are unknown state, never a broadcast end.
         void identityReader.refreshRoom().catch(() => {});
       }
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
-      if (location.pathname !== initialPath) { log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (!roomContext.current()) { log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
       if ((engine.pk.current()?.phase === 'active' || panel.activeTab === 'pk') && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }

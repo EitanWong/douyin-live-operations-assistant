@@ -1,3 +1,4 @@
+import { RoomContext } from './room-context.js';
 import { parseExhibitionRetention, readExhibitionRetention, retentionFromIndicatorResponse } from './exhibition-retention.js';
 import { readRoomLikes } from './room-likes.js';
 
@@ -106,10 +107,10 @@ export function readPKTasks(document) {
 export class AnchorDataCollector {
   constructor({page,sender,onEvent,onStatus = () => {}}) {
     this.page = page; this.sender = sender; this.onEvent = onEvent; this.onStatus = onStatus;
-    this.path = page.location.pathname; this.stopped = false; this.serial = 0;
+    this.roomContext = new RoomContext(page); this.stopped = false; this.serial = 0;
   }
   context() {
-    if (this.stopped || this.page.location.pathname !== this.path) return null;
+    if (this.stopped || !this.roomContext.current()) return null;
     const current = this.sender.context();
     if (!current) return null;
     const info = this.page.__STORE__?.roomStore?.roomInfo;
@@ -185,10 +186,10 @@ export class AnchorDataCollector {
     // Task/profile popovers can close before the slower exhibition HTTP poll.
     this.taskTimer = this.page.setInterval(()=>{void this.collectTasks().catch(()=>{});void this.collectLikes().catch(()=>{});},3000);
     const tick = async () => {
-      if (this.stopped || this.page.location.pathname !== this.path) return;
+      if (this.stopped || !this.roomContext.current()) return;
       let ready = false;
       try { ready = await this.refresh(); } catch {}
-      if (!this.stopped && this.page.location.pathname === this.path) this.timer = this.page.setTimeout(tick,ready ? 60000 : 5000);
+      if (!this.stopped && this.roomContext.current()) this.timer = this.page.setTimeout(tick,ready ? 60000 : 5000);
     };
     this.timer = this.page.setTimeout(tick,1000);
   }

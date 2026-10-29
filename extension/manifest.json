@@ -3,7 +3,7 @@
   "name": "抖音直播运营助手",
   "version": "0.1.2",
   "description": "抖音直播互动助手，支持自动感谢、欢迎、AI互动、定时消息和多主播月度礼物账本。",
-  "permissions": ["storage", "unlimitedStorage", "alarms", "power"],
+  "permissions": ["storage", "unlimitedStorage", "alarms", "power", "scripting"],
   "host_permissions": ["https://live.douyin.com/*"],
   "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": { "service_worker": "background.js", "type": "module" },

@@ -1,17 +1,23 @@
+import { boot } from '../src/app.js';
+import { DouyinAdapter } from '../src/browser/adapter.js';
+import { RequestBridgeClient } from '../src/browser/request-sender.js';
+import { IdentityReader } from '../src/browser/identity.js';
+import { EventInbox } from '../src/runtime/inbox.js';
+import { roomFromURL } from '../src/browser/room-context.js';
+
+async function startContent() {
 const jsonBytes = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length * 2 : null; }
   catch { return null; }
 };
-const room = location.pathname.match(/^\/(\d+)\/?$/)?.[1] || new URLSearchParams(location.search).get('room_id')?.match(/^\d+$/)?.[0];
+const room = roomFromURL(location);
 if (room) {
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
   const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint, activeAdapter;
-  const collectionPulses = new Map(); let lastCollectionActive, collectionPower = {awake:false};
+  let lastCollectionActive, collectionPower = {awake:false};
   let captureWrites = Promise.resolve(), capturePending = 0, capturePendingBytes = 0, captureSaved = 0, captureGaps = 0, captureErrors = 0;
   // 事件桥不传递密钥；发送桥只允许本房弹幕及经权限核对的禁言/拉黑票据。
-  window.addEventListener('message', e => {
-    const data = e.data;
-    if (e.source !== window || e.origin !== location.origin || data?.source !== 'live-assistant-page-v1' || data.room !== room) return;
+  const receivePacket = data => {
     if (data.type === 'event') {
       const event = data.event;
       let valid = true;
@@ -42,15 +48,14 @@ if (room) {
       liveStatus = { ...data.status };
       void updateCollectionLease(liveStatus.collection?.active === true && !contextInvalidated);
     }
-    if (data.type === 'collection-result') collectionPulses.get(data.id)?.(data.active === true);
-  });
+  };
   let liveStatus = { hook:false, sockets:0, frames:0, events:0, errors:0, connected:false, lastFrame:0 };
   let contextInvalidated = false;
   const isContextError = error => error?.code === 'CONTEXT_INVALID' || /context invalidated|扩展上下文|receiving end does not exist/i.test(String(error?.message || error));
   const contextFailure = () => Object.assign(new Error('扩展上下文已失效，请先导出恢复数据，再刷新直播页'), {code:'CONTEXT_INVALID'});
   const invalidateContext = () => {
     contextInvalidated = true;
-    window.postMessage({source:'live-assistant-content-v1',room,type:'collection-stop'},location.origin);
+    void (async()=>{try {await chrome.runtime.sendMessage({type:'page-command',command:{type:'collection-stop'}});}catch {}})();
     activeAdapter?.sync();
     return contextFailure();
   };
@@ -110,11 +115,10 @@ if (room) {
     }
     if (request.type === 'collection-wake') {
       if (contextInvalidated) { reply({active:false}); return; }
-      const id = crypto.randomUUID();
-      const timer = window.setTimeout(()=>finish(false),8000);
-      const finish = active => { window.clearTimeout(timer); collectionPulses.delete(id); reply({active}); };
-      collectionPulses.set(id,finish);
-      window.postMessage({source:'live-assistant-content-v1',room,type:'collection-pulse',id},location.origin);
+      void (async()=>{
+        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}});await updateCollectionLease(active===true);reply({active:active===true});}
+        catch {reply({active:false});}
+      })();
       return true;
     }
     if (request.type === 'prepare-reload') {
@@ -131,6 +135,22 @@ if (room) {
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
     if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', ready:Boolean(panel) });
   });
+  let bridgeTimer,bridgePending=false,bridgeStopped=false;
+  const drainBridge=async()=>{
+    if(bridgeStopped || bridgePending || contextInvalidated)return;
+    bridgePending=true;let more=false;
+    try {
+      const batch=await message({type:'page-command',command:{type:'drain',paused:Boolean(activeAdapter?.flowPaused)}});
+      if(bridgeStopped || !batch || typeof batch!=='object')return;
+      for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
+      for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
+      receivePacket({type:'status',status:batch.status});activeAdapter?.sync();more=batch.more===true;
+    } catch(error) {if(!contextInvalidated)liveStatus={...liveStatus,connected:false,bridgeError:error.message};}
+    finally {bridgePending=false;if(!bridgeStopped && !contextInvalidated)bridgeTimer=window.setTimeout(drainBridge,more?0:200);}
+  };
+  const startBridge=()=>{bridgeStopped=false;window.clearTimeout(bridgeTimer);void drainBridge();};
+  window.addEventListener('pagehide',()=>{bridgeStopped=true;window.clearTimeout(bridgeTimer);});
+  window.addEventListener('pageshow',event=>{if(event.persisted)startBridge();});
   class ExtensionAdapter extends DouyinAdapter {
     constructor(options) {
       super(options); this.replayPromise = null; activeAdapter = this;
@@ -138,7 +158,7 @@ if (room) {
       this.inbox = new EventInbox({handle:event=>this.onEvent(event),onStatus:health=>{
         this.ingestion = health; this.sync();
         const paused = Boolean(this.replayPromise) || health.blocked || health.state === 'buffering';
-        if (paused !== this.flowPaused) { this.flowPaused = paused; window.postMessage({source:'live-assistant-content-v1',room,type:'flow',paused},location.origin); }
+        this.flowPaused = paused;
       }});
     }
     get eventQueue() { return this.inbox.queue; }
@@ -223,7 +243,7 @@ if (room) {
       if (initialGaps) { this.inbox.health.gaps += initialGaps; this.inbox.health.reason = '初始化缓冲已满，存在采集缺口'; }
       this.sync();
       for (const event of events.splice(0)) receive(event); eventsBytes = 0;
-      window.postMessage({source:'live-assistant-content-v1',type:'hello'},location.origin);
+      startBridge();
     }
     sync() { this.status = {...liveStatus,collectionPower,contextInvalidated,bridgeGaps:(this.priorBridgeGaps || 0)+(liveStatus.bridgeGaps || 0),frameGaps:(this.priorFrameGaps || 0)+(liveStatus.frameGaps || 0),capture:{saved:captureSaved,pending:capturePending,gaps:(this.priorCaptureGaps || 0)+captureGaps+(liveStatus.captureBridgeGaps || 0),errors:captureErrors},ingestion:this.inbox.status(),storage:this.storage}; this.emitStatus(); }
   }
@@ -248,3 +268,6 @@ if (room) {
   };
   boot({ page:window, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>panel.root.querySelector('[data-field="ai.endpoint"]').value;} });
 }
+
+}
+startContent();

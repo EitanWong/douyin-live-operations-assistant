@@ -34,9 +34,9 @@ export class LikeRequests {
     if (token && this.session?.token === token) this.session = null;
     return {stopped:true};
   }
-  commit(token, count, sequence) {
+  commit(token, count, sequence, signal) {
     const session = this.session;
-    if (!session || session.token !== token) return Promise.resolve({submitted:false,reason:'点赞任务已停止或失效'});
+    if (signal?.aborted || !session || session.token !== token) return Promise.resolve({submitted:false,reason:'点赞任务已停止或失效'});
     if (sequence === session.sequence && session.result) return session.result;
     if (!Number.isInteger(count) || count < 1 || count > 100 || sequence !== session.sequence+1
       || !Number.isSafeInteger(sequence) || this.pending || Date.now()-this.lastAt < AUTO_LIKE_MIN_INTERVAL_SEC*1000) {
@@ -50,13 +50,13 @@ export class LikeRequests {
       return Promise.resolve({submitted:false,reason:'账号、房间或点赞权限已变化，已停止'});
     }
     session.sequence = sequence; this.pending = true; this.lastAt = Date.now();
-    session.result = this.perform(session, count);
+    session.result = this.perform(session, count, signal);
     return session.result;
   }
-  async perform(session, count) {
+  async perform(session, count, signal) {
     try {
       const response = await session.client.request({url:'/webcast/room/like/',method:'post',data:{},
-        params:{room_id:session.context.roomId,count},timeout:8000});
+        params:{room_id:session.context.roomId,count},timeout:8000,...(signal ? {signal} : {})});
       if (response?.data?.status_code === 0) return {submitted:true,count};
       this.stop(session.token);
       if (Number.isInteger(response?.data?.status_code)) return {submitted:false,reason:`平台拒绝点赞（${response.data.status_code}），已停止，请稍后再试`};

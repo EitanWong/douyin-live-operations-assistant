@@ -1,3 +1,4 @@
+import { RoomContext } from './room-context.js';
 import { decodeFrame } from './protocol.js';
 import { recognizeMilestone } from '../core/milestones.js';
 import { PageRequestSender } from './request-sender.js';
@@ -216,7 +217,7 @@ export class DouyinAdapter {
     this.page = page; this.getConfig = getConfig; this.shouldReadChat = shouldReadChat; this.shouldReadMilestones = shouldReadMilestones; this.onEvent = onEvent; this.onLog = onLog; this.onStatus = onStatus;
     this.onEcho = onEcho; this.onPK = onPK; this.onCapture = onCapture;
     this.status = { hook: false, sockets: 0, frames: 0, events: 0, errors: 0, lastFrame: 0, connected: false };
-    this.pending = 0; this.pendingBytes = 0; this.decodedCacheBytes = 0; this.chain = Promise.resolve(); this.decodeChain = Promise.resolve(); this.roomPath = location.pathname;
+    this.pending = 0; this.pendingBytes = 0; this.decodedCacheBytes = 0; this.chain = Promise.resolve(); this.decodeChain = Promise.resolve(); this.roomContext = new RoomContext(page);
     this.activeSockets = new Set(); this.domSeen = new WeakMap(); this.domActive = false; this.lastSocketChat = 0;
     this.seenProtocolEvents = new Map();
     this.ownedDraft = null;
@@ -267,11 +268,11 @@ export class DouyinAdapter {
     };
     proto.send = function(...args) {
       const request = this.__liveAssistantPoll;
-      if (request?.method === 'GET' && location.pathname === adapter.roomPath) {
+      if (request?.method === 'GET' && adapter.roomContext.current()) {
         const xhr = this;
         adapter.status.pollRequests = (adapter.status.pollRequests || 0) + 1;
         xhr.addEventListener('load', () => {
-          if (location.pathname !== adapter.roomPath) return;
+          if (!adapter.roomContext.current()) return;
           if (xhr.status < 200 || xhr.status >= 300) { adapter.status.pollFailed = (adapter.status.pollFailed || 0) + 1; adapter.emitStatus(); return; }
           let response, responseType = '';
           try { response = xhr.response; responseType = xhr.responseType || ''; }
@@ -294,7 +295,7 @@ export class DouyinAdapter {
     this.status.pollHook = true;
   }
   acceptFrame(data, transport = 'socket') {
-    if (location.pathname !== this.roomPath) return;
+    if (!this.roomContext.current()) return;
     const frameBytes = typeof data === 'string' ? data.length * 2 : data?.byteLength || data?.size || 0;
     if (this.pending >= 256 || this.pendingBytes + frameBytes > 16 * 1024 * 1024) {
       this.status.frameGaps = (this.status.frameGaps || 0) + 1; this.emitStatus(); return;
@@ -555,10 +556,10 @@ export class DouyinAdapter {
     }
   }
   async moderate(action, user, isCurrent) {
-    if (!isCurrent() || location.pathname !== this.roomPath) return {submitted:false,reason:'场控已暂停或直播间已变更'};
+    if (!isCurrent() || !this.roomContext.current()) return {submitted:false,reason:'场控已暂停或直播间已变更'};
     const prepared=await this.requestSender.prepareModeration(action,{id:user.id,secUid:user.secUid});
     if (!prepared?.available) return {submitted:false,reason:prepared?.reason || '网页管理接口不可用'};
-    if (!isCurrent() || location.pathname !== this.roomPath) return {submitted:false,reason:'管理操作已取消'};
+    if (!isCurrent() || !this.roomContext.current()) return {submitted:false,reason:'管理操作已取消'};
     return this.requestSender.commitModeration(prepared.token);
   }
   async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat' } = {}) {

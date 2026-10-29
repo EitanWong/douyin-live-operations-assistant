@@ -95,15 +95,33 @@ test('请求拒绝和网络结果未知分开报告，不因异常执行第二�
     const denied=f.sender.prepare('admin'); assert.equal((await f.sender.commit(denied.token,'欢迎')).failed,true);
   } finally {f.dom.window.close();}
 });
-test('请求桥只接受同页面同房间同请求ID的结果',async()=>{
-  const f=fixture();
+test('请求桥忽略页面伪造的成功响应，只消费扩展调用结果',async()=>{
+  const f=fixture();let complete,outbound;
   try {
-    const bridge=new RequestBridgeClient(f.page); let outbound;
     f.page.postMessage=data=>{outbound=data;};
+    const bridge=new RequestBridgeClient(f.page,()=>new Promise(resolve=>{complete=resolve;}));
     const pending=bridge.prepare('admin');
-    const reply=(changes={},source=f.page)=>f.page.dispatchEvent(new f.page.MessageEvent('message',{source,origin:f.page.location.origin,data:{source:'live-assistant-page-v1',type:'send-api-result',room:'123',id:outbound.id,result:{available:true,token:'ok'},...changes}}));
-    reply({room:'other'}); reply({id:'other'}); reply({},null); reply();
-    assert.deepEqual(await pending,{available:true,token:'ok'});
+    f.page.dispatchEvent(new f.page.MessageEvent('message',{source:f.page,origin:f.page.location.origin,
+      data:{source:'live-assistant-page-v1',type:'send-api-result',room:'123',id:outbound?.id,result:{available:true,token:'forged'}}}));
+    complete?.({ok:true,value:{available:true,token:'trusted'}});
+    assert.deepEqual(await pending,{available:true,token:'trusted'});
+  } finally {f.dom.window.close();}
+});
+
+test('扩展上下文失效导致取消同步抛错时，仍等待实际请求结算',async()=>{
+  const f=fixture();let cancel,complete,settled=false;
+  try {
+    f.page.setTimeout=callback=>{cancel=callback;return 1;};
+    f.page.clearTimeout=()=>{};
+    const bridge=new RequestBridgeClient(f.page,message=>{
+      if(message.command.type==='cancel')throw Error('Extension context invalidated');
+      return new Promise(resolve=>{complete=resolve;});
+    });
+    const pending=bridge.commitLike('ticket',1,1).then(result=>{settled=true;return result;});
+    assert.doesNotThrow(()=>cancel());
+    await Promise.resolve();assert.equal(settled,false);
+    complete({ok:true,value:{submitted:true}});
+    assert.equal((await pending).submitted,true);
   } finally {f.dom.window.close();}
 });
 

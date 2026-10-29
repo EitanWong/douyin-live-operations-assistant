@@ -1,3 +1,4 @@
+import { RoomContext, roomMatchesStore, roomFromURL } from './room-context.js';
 import { ModerationRequests } from './moderation-requests.js';
 import { LikeRequests } from './like-requests.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
@@ -5,8 +6,8 @@ import { LikeRequests } from './like-requests.js';
 // the extension bridge.
 export class PageRequestSender {
   constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); }
-  prepareLike() { return this.likes.prepare(); }
-  commitLike(token,count,sequence) { return this.likes.commit(token,count,sequence); }
+  prepareLike({signal} = {}) { return signal?.aborted ? {available:false} : this.likes.prepare(); }
+  commitLike(token,count,sequence,{signal} = {}) { return this.likes.commit(token,count,sequence,signal); }
   stopLike(token) { return this.likes.stop(token); }
   prepareModeration(action,target) { return this.moderation.prepare(action,target); }
   commitModeration(token) { return this.moderation.commit(token); }
@@ -37,11 +38,10 @@ export class PageRequestSender {
   context() {
     const info = this.page.__STORE__?.roomStore?.roomInfo;
     const room = info?.room;
-    const webRid = String(room?.web_rid || info?.web_rid || info?.webRid || '');
     const id = info?.roomId || room?.id_str;
-    if (!/^\d+$/.test(id || '') || typeof id !== 'string' || webRid !== this.page.location.pathname.match(/^\/(\d+)\/?$/)?.[1]) return null;
+    if (!/^\d+$/.test(id || '') || typeof id !== 'string' || !roomMatchesStore(info,this.page.location)) return null;
     const user = this.page.__STORE__?.userStore?.userInfo;
-    return {roomId:id, path:this.page.location.pathname, userId:user?.id_str, admin:[true,1].includes(user?.user_attr?.is_admin)};
+    return {roomId:id, path:roomFromURL(this.page.location), userId:user?.id_str, admin:[true,1].includes(user?.user_attr?.is_admin)};
   }
   chatDisplay() {
     const messages = this.page.__STORE__?.singletonStore?.message;
@@ -127,25 +127,27 @@ export class PageRequestSender {
 }
 
 export class RequestBridgeClient {
-  constructor(page) { this.page=page; this.room=page.location.pathname.match(/^\/(\d+)\/?$/)?.[1]; }
-  call(operation, payload, timeout) {
-    return new Promise(resolve=>{
-      const id=this.page.crypto.randomUUID();
-      const finish = result => { this.page.clearTimeout(timer); this.page.removeEventListener('message',receive); resolve(result); };
-      const receive = event => {
-        const data=event.data;
-        if(event.source===this.page && event.origin===this.page.location.origin && data?.source==='live-assistant-page-v1' && data.type==='send-api-result' && data.room===this.room && data.id===id) finish(data.result);
-      };
-      const timer=this.page.setTimeout(()=>finish(operation.startsWith('prepare')?{available:false}:operation==='commit-like'?{submitted:false,unknown:true,reason:'点赞响应超时，已停止，不自动重试'}:operation==='commit-moderation'?{submitted:false,unknown:true,reason:'管理响应超时，不自动重试'}:{submitted:false,clicked:true,transport:'request',reason:'请求响应超时，等待公屏回显，不自动重发'}),timeout);
-      this.page.addEventListener('message',receive);
-      this.page.postMessage({source:'live-assistant-content-v1',type:'send-api',room:this.room,id,operation,...payload},this.page.location.origin);
-    });
+  constructor(page,send=payload=>page.chrome.runtime.sendMessage(payload)) { this.page=page;this.send=send;this.context=new RoomContext(page);this.room=this.context.room; }
+  async call(operation,payload,timeout,{signal}={}) {
+    const unavailable=()=>operation.startsWith('prepare')?{available:false}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
+    if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
+    const id=this.page.crypto.randomUUID();
+    const cancel=async()=>{try {await this.send({type:'page-command',command:{type:'cancel',id}});}catch {}};
+    signal?.addEventListener('abort',cancel,{once:true});
+    const timer=this.page.setTimeout(cancel,timeout);
+    try {
+      // Await the actual injected request, including after cancellation. Unknown
+      // in-flight work continues to block unsafe replacement in the tool host.
+      const result=await this.send({type:'page-command',command:{type:'send-api',id,operation,...payload}});
+      return result?.ok && this.context.current() ? result.value : unavailable();
+    } catch { return unavailable(); }
+    finally {this.page.clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
   }
-  prepareModeration(action,target) { return this.call('prepare-moderation',{action,target},800); }
-  prepareLike() { return this.call('prepare-like',{},10000); }
-  commitLike(token,count,sequence) { return this.call('commit-like',{token,count,sequence},10000); }
-  stopLike(token) { return this.call('stop-like',{token},800); }
-  commitModeration(token) { return this.call('commit-moderation',{token},10000); }
-  prepare(channel) { return this.call('prepare',{channel},800); }
-  commit(token,text) { return this.call('commit',{token,text},10000); }
+  prepareModeration(action,target) {return this.call('prepare-moderation',{action,target},800);}
+  prepareLike(options) {return this.call('prepare-like',{},10000,options);}
+  commitLike(token,count,sequence,options) {return this.call('commit-like',{token,count,sequence},10000,options);}
+  stopLike(token) {return this.call('stop-like',{token},800);}
+  commitModeration(token) {return this.call('commit-moderation',{token},10000);}
+  prepare(channel) {return this.call('prepare',{channel},800);}
+  commit(token,text) {return this.call('commit',{token,text},10000);}
 }
