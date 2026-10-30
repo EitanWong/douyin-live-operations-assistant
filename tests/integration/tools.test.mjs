@@ -21,25 +21,31 @@ function page(html='') {
   return dom;
 }
 const bag='<section class="gbRklVwV" data-activity-id="bag-1"><div>福袋 总30钻</div><div>倒计时 01:58</div><button data-participate>立即参与</button></section>';
+function lotteryServices(page) {
+  const now=Math.floor(Date.now()/1000),roomId='7702463172476701483',lotteryId='7702521633959316287';
+  return {page,log(){},selfId:()=>'987654321',roomId:()=>roomId,
+    rewardEvents:()=>[{type:'activity-signal',activityKind:'lottery-start',roomId,lotteryId,startedAt:String(now-10),drawAt:String(now+120)}]};
+}
 
 test('两个真实工具共用宿主，点赞未知结果不重发且不阻塞福袋；重建后活动仍去重',async()=>{
   const dom=page(bag),config=copy(DEFAULTS);config.rewards.enabled=true;
-  let clicks=0,commits=0,guard='';
+  let clicks=0,commits=0,lotteryCommits=0,guard='';
   dom.window.document.querySelector('[data-participate]').onclick=()=>{clicks++;};
-  const host=new ToolRuntime({registry:bundledTools,room:'123',guard:()=>guard,getConfig:id=>config[id],services:{page:dom.window,log(){}},
+  const host=new ToolRuntime({registry:bundledTools,room:'123',guard:()=>guard,getConfig:id=>config[id],services:lotteryServices(dom.window),
     createLock:()=>{const lock={held:false,acquire:async()=>{lock.held=true;return true;},release:()=>{lock.held=false;}};return lock;},
-    operations:toolOperations({transport:{prepareLike:async()=>({available:true,token:'t'}),commitLike:async()=>{commits++;return {submitted:false,reason:'结果未知'};},stopLike:async()=>{}},
-      click:node=>node.click(),saveConfig:async(key,value)=>{config[key]=value;}})});
+    operations:toolOperations({transport:{prepareLike:async()=>({available:true,token:'t'}),commitLike:async()=>{commits++;return {submitted:false,reason:'结果未知'};},stopLike:async()=>{},
+      prepareLottery:async()=>({available:true,token:'lottery'}),commitLottery:async()=>{lotteryCommits++;return {submitted:false,dispatched:true,unknown:true};},stopLottery:async()=>{}},
+      getRewardsConfig:()=>config.rewards,selfId:()=>'987654321',click:node=>node.click(),saveConfig:async(key,value)=>{config[key]=value;}})});
   try {
     await host.start();await host.invoke('auto-like','start',{batch:20,intervalSec:2,target:100});
     assert.equal(commits,1);assert.equal(host.state('auto-like').phase,'stopped');
-    host.notify('tick');await flush();assert.equal(clicks,1);assert.equal(host.state('rewards').submitted,1);
-    await host.restart('rewards');host.notify('tick');await flush();assert.equal(clicks,1,'未知点击跨实例仍不重复');
+    host.notify('tick');await flush();assert.equal(lotteryCommits,1);assert.equal(host.state('rewards').submitted,1);assert.equal(clicks,0);
+    await host.restart('rewards');host.notify('tick');await flush();assert.equal(lotteryCommits,1,'未知请求跨实例仍不重复');
     await host.disable('auto-like');await host.suspend();await host.resume();
     assert.equal(host.status().find(x=>x.id==='auto-like').phase,'disabled','BFCache 恢复不重启手动停用的工具');
     assert.equal(host.status().find(x=>x.id==='rewards').phase,'active');
     guard='连接中断';await host.invoke('rewards','stop');assert.equal(config.rewards.enabled,false,'断线时仍可关闭自动参与设置');
-    assert.equal(commits,1);assert.equal(clicks,1);
+    assert.equal(commits,1);assert.equal(lotteryCommits,1);assert.equal(clicks,0);
   } finally {await host.close();dom.window.close();}
 });
 
@@ -111,10 +117,11 @@ test('应用只用当前场次的下播停止工具，query 切房后不再接�
 test('真实工具按钮处理非法参数、运行中停止和福袋配置落盘，状态与控件保持一致',async()=>{
   const dom=page(bag),config=copy(DEFAULTS),locks=[];config.rewards.enabled=true;
   let commits=0,panel;
-  const host=new ToolRuntime({registry:bundledTools,room:'123',getConfig:id=>config[id],services:{page:dom.window,log(){}},
+  const host=new ToolRuntime({registry:bundledTools,room:'123',getConfig:id=>config[id],services:lotteryServices(dom.window),
     createLock:()=>{const lock={held:false,acquire:async()=>{lock.held=true;return true;},release(){this.held=false;}};locks.push(lock);return lock;},
-    operations:toolOperations({transport:{prepareLike:async()=>({available:true,token:'local'}),commitLike:async(token,count)=>{commits++;return {submitted:true,count};},stopLike:async()=>{}},
-      click:node=>node.click(),saveConfig:async(id,value)=>{config[id]=value;}}),
+    operations:toolOperations({transport:{prepareLike:async()=>({available:true,token:'local'}),commitLike:async(token,count)=>{commits++;return {submitted:true,count};},stopLike:async()=>{},
+      prepareLottery:async()=>({available:true,token:'lottery'}),commitLottery:async()=>({submitted:true,dispatched:true}),stopLottery:async()=>{}},
+      getRewardsConfig:()=>config.rewards,selfId:()=>'987654321',click:node=>node.click(),saveConfig:async(id,value)=>{config[id]=value;}}),
     changed:(id,state)=>panel?.updateToolState(id,state)});
   panel=new Panel({room:'123',config,tools:bundledTools,callbacks:{toolAction:(...args)=>host.invoke(...args)}});
   const until=async(predicate)=>{for(let i=0;i<50&&!predicate();i++)await flush();assert.ok(predicate());};

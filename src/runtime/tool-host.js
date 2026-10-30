@@ -13,7 +13,7 @@ export function createPageTools({page,room,engine,adapter,demo,current,unavailab
   return new ToolRuntime({registry:bundledTools,room,guard,createLock:key=>new RoomLock({room:key}),
     getConfig:id=>engine.config[id],services:{page,log,selfId:()=>engine.config.selfId,rewardStorage,
       rewardEvents:()=>engine.roomData.activities,roomId:getRoomId || (()=>engine.liveMode?.roomId || '')},
-    operations:toolOperations({selfId:()=>engine.config.selfId,saveConfig,
+    operations:toolOperations({selfId:()=>engine.config.selfId,saveConfig,getRewardsConfig:()=>engine.config.rewards,
       transport:demo ? {prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,
       click:node=>{
         const style=node?.ownerDocument===page.document && page.getComputedStyle(node);

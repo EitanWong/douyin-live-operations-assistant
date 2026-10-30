@@ -61,7 +61,12 @@ export class ToolGateway {
   }
 }
 
-export function toolOperations({transport, click, saveConfig, selfId = () => ''}) {
+export function toolOperations({transport, click, saveConfig, selfId = () => '', getRewardsConfig = () => ({enabled:false})}) {
+  const lotteryAllowed = (session,ctx) => {
+    const config=getRewardsConfig();
+    return ctx.isCurrent() && !ctx.signal?.aborted && session.account===selfId() && config.enabled && config.luckyBag && config.nativePassword===session.allowPassword;
+  };
+  const lotterySignal = (value,ctx) => value.signal ? AbortSignal.any([ctx.signal,value.signal]) : ctx.signal;
   return {
     'like.prepare': {run:async (budget, ctx) => {
       if (!Number.isInteger(budget) || budget < 1 || budget > 1000000) throw new Error('点赞目标无效');
@@ -87,6 +92,40 @@ export function toolOperations({transport, click, saveConfig, selfId = () => ''}
       return transport.stopLike(token);
     }},
     'rewards.click': {run:(node, ctx) => { ctx.assertCurrent(); return click(node); }},
+    'rewards.prepare': {run:async (value,ctx) => {
+      if(typeof value?.lotteryId!=='string' || !/^[1-9]\d{0,19}$/.test(value.lotteryId) || typeof value.allowPassword!=='boolean')throw new Error('福袋准备参数无效');
+      if(ctx.session.lottery)throw new Error('已有福袋请求准备');
+      const session={account:selfId(),allowPassword:value.allowPassword};let retained=false;
+      if(!lotteryAllowed(session,ctx))return {available:false,reason:'账号或福袋设置已变化'};
+      ctx.session.lottery=session;
+      try {
+        const signal=lotterySignal(value,ctx);
+        const prepared=await transport.prepareLottery(value.lotteryId,{allowPassword:value.allowPassword,signal});
+        if(typeof prepared?.token==='string') {
+          session.token=prepared.token;
+          if(!lotteryAllowed(session,ctx) || signal?.aborted) {
+            await transport.stopLottery(session.token);
+            return {available:false,reason:'账号或福袋设置已变化，准备已撤销'};
+          }
+          retained=prepared.available===true;
+          if(!retained)await transport.stopLottery(session.token);
+          return prepared;
+        }
+        return prepared;
+      } finally {if(!retained && ctx.session.lottery===session)delete ctx.session.lottery;}
+    }},
+    'rewards.commit': {run:async (value,ctx) => {
+      const session=ctx.session.lottery;
+      if(!session?.token || value?.token!==session.token || session.committed)throw Object.assign(new Error('福袋准备票据已失效或已提交'),{dispatched:false});
+      if(!lotteryAllowed(session,ctx))throw Object.assign(new Error('账号或福袋设置已变化'),{dispatched:false});
+      session.committed=true;
+      return transport.commitLottery(session.token,{signal:lotterySignal(value,ctx)});
+    }},
+    'rewards.stop': {cleanup:true,run:async (token,ctx) => {
+      if(!token || token!==ctx.session.lottery?.token)return;
+      delete ctx.session.lottery;
+      return transport.stopLottery(token);
+    }},
     'rewards.configure': {lock:false, local:true, run:value => saveConfig('rewards', value)}
   };
 }

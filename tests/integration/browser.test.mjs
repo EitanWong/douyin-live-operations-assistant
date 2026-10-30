@@ -34,8 +34,8 @@ test('福袋红包工具可导航、独立保存配置，立即停止同步关�
     panel.node('[data-action=save]').click();await new Promise(setImmediate);
     assert.equal(saved.rewards.enabled,true);assert.equal(saved.rewards.luckyBag,false);assert.equal(saved.rewards.redPacket,true);
     assert.equal(saved.rewards.entryXPath,DEFAULTS.rewards.entryXPath);
-    panel.updateToolState('rewards',{reason:'福袋参与结果未确认，本轮不会重复点击',submitted:1,confirmed:0});
-    assert.match(panel.node('[data-rewards-progress]').textContent,/点击参与 1 次 · 页面确认 0 次/);
+    panel.updateToolState('rewards',{reason:'福袋参与结果未确认，本轮不会重复提交',submitted:1,confirmed:0});
+    assert.match(panel.node('[data-rewards-progress]').textContent,/提交参与 1 次 · 页面确认 0 次/);
     panel.node('[data-action=rewards-stop]').click();await new Promise(setImmediate);
     assert.equal(stops,1);assert.equal(enabled.checked,false);assert.equal(panel.read().rewards.enabled,false);
   } finally {panel.destroy();dom.window.close();}

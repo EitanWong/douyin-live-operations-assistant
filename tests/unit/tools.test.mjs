@@ -27,6 +27,7 @@ test('工具注册拒绝重复 ID、无效版本和不兼容 API，声明能力�
   assert.throws(()=>new ToolRegistry([{...item,apiVersion:2}]),/版本/);
   assert.throws(()=>new ToolRegistry([{...item,id:'bad"id'}]),/定义/);
   assert.throws(()=>new ToolRegistry([{...item,version:'latest'}]),/定义/);
+  for(const timeoutMs of [0,60001,NaN,'30000'])assert.throws(()=>new ToolRegistry([{...item,timeoutMs}]),/定义/);
 });
 
 test('100 次启停后计时器、DOM 监听、登记资源全部释放，旧上下文不能继续调用操作',async()=>{
@@ -105,6 +106,21 @@ test('单个工具同步抛错或异步挂起时其他工具继续，超时旧�
   assert.equal(f.host.status().find(x=>x.id==='hangs').phase,'failed');
   await assert.rejects(oldContext.operations.call('act'),/停用/);late.resolve();
   f.host.notify('tick');assert.equal(healthy,2);assert.equal(calls,0);await f.host.close();
+});
+
+test('工具独立超时覆盖整个通知和网关请求，其他工具仍按默认超时',async()=>{
+  const pending=deferred(),short=deferred();let completed=0;
+  const f=runtime([
+    {...definition('slow',ctx=>({tick:async()=>{await ctx.operations.call('act');completed++;}}),['act']),timeoutMs:120},
+    definition('short',()=>({tick:()=>short.promise}))
+  ],{timeout:20,operations:{act:{lock:false,run:()=>pending.promise}}});
+  try {
+    await f.host.start();f.host.notify('tick');await new Promise(resolve=>setTimeout(resolve,50));
+    assert.equal(f.host.status().find(row=>row.id==='slow').phase,'active');
+    assert.equal(f.host.status().find(row=>row.id==='short').phase,'failed');
+    pending.resolve();short.resolve();await flush();assert.equal(completed,1);
+    assert.equal(f.host.status().find(row=>row.id==='slow').phase,'active');
+  } finally {pending.resolve();short.resolve();await f.host.close();}
 });
 
 test('挂载失败回收部分资源，迟到完成的挂载也回收后才允许替代实例',async()=>{

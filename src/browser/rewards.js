@@ -14,11 +14,11 @@ const rewardText = node => String(node?.textContent || '').replace(/\s+/g,' ').t
 const nativePasswordText = text => /^(?:发送口令|口令|参与口令)\s*[:：]/.test(text) &&
   !/(?:送礼|赠送|支付|购买|充值|消耗|开通|粉丝团|灯牌|会员|关注主播|先关注|分享直播|验证|登录)/.test(text);
 
-// Keep all DOM access in the content world; native click events reach the page's
-// React handlers without a new API bridge or additional extension permissions.
+// Detection and reservations live in the content world. Lottery requests use a
+// scoped transport; red packets retain their native page controls.
 export class RewardAutomation {
-  constructor({page,room,getConfig,lock,guard=()=>'',changed=()=>{},log=()=>{},now=Date.now,click=node=>node.click(),getAccount=()=>'default',storage,getRoomId=()=>'',getEvents=()=>[]}) {
-    Object.assign(this,{page,room,getConfig,lock,guard,changed,log,now,click,getAccount,getRoomId,getEvents});
+  constructor({page,room,getConfig,lock,guard=()=>'',changed=()=>{},log=()=>{},now=Date.now,click=node=>node.click(),getAccount=()=>'default',storage,getRoomId=()=>'',getEvents=()=>[],lotteryRequests}) {
+    Object.assign(this,{page,room,getConfig,lock,guard,changed,log,now,click,getAccount,getRoomId,getEvents,lotteryRequests});
     this.storage=storage || {get:key=>JSON.parse(page.localStorage.getItem(key) || '[]'),set:(key,value)=>page.localStorage.setItem(key,JSON.stringify(value))};
     this.document=page.document; this.records=[]; this.generation=0; this.nextAt=0;
     this.state={phase:'idle',reason:'自动参与已关闭',submitted:0,confirmed:0,serverConfirmed:0,lottery:null,redPacket:null};
@@ -60,10 +60,11 @@ export class RewardAutomation {
     await this.storage.set(this.storageKey,this.records);
   }
   stop(reason='本页已停止自动参与，保存设置后可恢复') {
+    this.requestController?.abort();
     ++this.generation; this.paused=true; this.opened=null; if(!this.busy)this.lock.release();
     this.update({phase:'stopped',reason});
   }
-  resume() {this.paused=false;this.nextAt=0;}
+  resume() {++this.generation;this.requestController?.abort();this.paused=false;this.nextAt=0;}
   kind(node) {
     if(node.matches('.gbRklVwV,[data-e2e*="lottery"],[data-testid*="lottery"]'))return 'luckyBag';
     const text=rewardText(node);
@@ -197,6 +198,67 @@ export class RewardAutomation {
       !this.hasConditions(panel) && !rewardEnded.test(rewardText(panel)) && !/(?:倒计时\s*)?00[:：]00/.test(rewardText(panel)) &&
       !this.controls(panel).some(node=>rewardDone.test(rewardText(node))) && !this.blockReason(identity,kind) && this.identity(panel,kind).key===identity.key;
   }
+  async forget(identity) {
+    this.records=this.records.filter(record=>record.key!==identity.key);
+    await this.saveRecords();
+  }
+  lotteryReady(activity,current,allowPassword) {
+    const config=this.getConfig(),latest=this.readActivities().lotteries[0];
+    return current() && config.luckyBag && config.nativePassword===allowPassword && latest?.activityId===activity.activityId &&
+      !rewardBlockReason(latest,this.now());
+  }
+  lotteryStatus(reason,phase='watching') {
+    this.requestReason=reason;
+    this.update({phase,reason});
+  }
+  async dispatchLottery(prepared,identity,signal,current) {
+    let result;
+    try {result=await this.lotteryRequests.commit(prepared.token,{signal});}
+    catch(error) {result={submitted:false,dispatched:error?.dispatched!==false,unknown:true,reason:String(error?.message || error)};}
+    if(result?.dispatched===false) {
+      await this.forget(identity);
+      if(current())this.lotteryStatus(result.reason || '福袋请求未派发，等待重新读取资格','waiting');
+      return false;
+    }
+    if(!result?.submitted)await this.remember('luckyBag',identity,'unknown');
+    this.update({submitted:this.state.submitted+1});
+    if(current())this.lotteryStatus(result?.submitted ? '福袋请求已提交，等待本人服务器参与回执' : result?.reason || '福袋参与结果未知，本轮不自动重试');
+    this.log('system',result?.submitted ? '自动参与福袋：请求已提交，等待服务器确认' : '自动参与福袋：请求结果未知，本轮不重复提交');
+    return true;
+  }
+  async requestLottery(current) {
+    if(!this.lotteryRequests || !this.enabled('luckyBag'))return false;
+    const activity=this.readActivities().lotteries[0];
+    if(!activity)return false;
+    const identity=rewardReservation(activity),block=rewardBlockReason(activity,this.now());
+    if(block) {this.lotteryStatus(block);return false;}
+    const previous=this.findRecord('luckyBag',identity);
+    if(previous) {
+      if(previous.status==='submitted' && this.now()-previous.at>=15000)await this.remember('luckyBag',identity,'unknown');
+      if(current())this.lotteryStatus(previous.status==='submitted' ? '福袋请求已提交，等待本人服务器参与回执' : '福袋本轮参与结果已记录；未确认时不自动重试');
+      return false;
+    }
+    const allowPassword=this.getConfig().nativePassword,key=`${this.getAccount()}:${activity.activityId}:${allowPassword}`;
+    if(this.lastLotteryQuery?.key===key && this.now()-this.lastLotteryQuery.at<10000) {
+      this.lotteryStatus(this.lastLotteryQuery.reason || '等待重新读取福袋资格','waiting');return false;
+    }
+    this.lastLotteryQuery={key,at:this.now()};
+    const controller=new AbortController();this.requestController=controller;let prepared;
+    try {
+      prepared=await this.lotteryRequests.prepare(activity.activityId,{allowPassword,signal:controller.signal});
+      if(!this.lotteryReady(activity,current,allowPassword))return false;
+      if(!prepared?.available || typeof prepared.token!=='string') {
+        this.lastLotteryQuery.reason=prepared?.reason || '网页福袋请求能力暂不可用';
+        this.lotteryStatus(this.lastLotteryQuery.reason,'waiting');return false;
+      }
+      await this.remember('luckyBag',identity,'submitted');
+      if(!this.lotteryReady(activity,current,allowPassword)) {await this.forget(identity);return false;}
+      return await this.dispatchLottery(prepared,identity,controller.signal,current);
+    } finally {
+      if(prepared?.token)await this.lotteryRequests.stop(prepared.token);
+      if(this.requestController===controller)this.requestController=null;
+    }
+  }
   async tick() {
     if(this.busy)return;
     this.detect();
@@ -217,9 +279,17 @@ export class RewardAutomation {
       await this.reconcileActivities(current);
       if(!current())return;
       this.detect();
+      this.requestReason='';
+      if(await this.requestLottery(current))return;
+      if(!current())return;
       const panels=this.panels();
       for(const panel of panels) {
-        const kind=this.kind(panel), name=rewardNames[kind], identity=this.identity(panel,kind), controls=this.controls(panel);
+        const kind=this.kind(panel);
+        if(kind==='luckyBag' && this.lotteryRequests) {
+          if(!this.requestReason)this.lotteryStatus('等待福袋精确轮次和参与资格','waiting');
+          continue;
+        }
+        const name=rewardNames[kind], identity=this.identity(panel,kind), controls=this.controls(panel);
         const previous=this.findRecord(kind,identity),block=this.blockReason(identity,kind);
         if(controls.some(node=>rewardDone.test(rewardText(node)))) {
           const confirmed=previous && !previous.pageConfirmed;
@@ -271,7 +341,7 @@ export class RewardAutomation {
         this.update({phase:'watching',reason:`发现${rewardNames[kind]}，正在打开详情`});
         await this.click(entry);return;
       }
-      if(panels.length)return;
+      if(panels.length || this.requestReason)return;
       this.opened=null;this.update({phase:'watching',reason:'正在等待本直播间的福袋或红包'});
     } catch(error) {if(current())this.update({phase:'waiting',reason:`活动读取失败：${String(error?.message || error).slice(0,160)}`});}
     finally {this.busy=false;if(this.paused || this.guard() || !this.getConfig().enabled)this.lock.release();}

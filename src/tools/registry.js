@@ -11,6 +11,7 @@ export class ToolRegistry {
         !/^\d+\.\d+\.\d+$/.test(definition.version) || definition.apiVersion !== TOOL_API_VERSION ||
         typeof definition.mount !== 'function' || !Array.isArray(definition.capabilities) ||
         definition.capabilities.some(name => typeof name !== 'string') ||
+        definition.timeoutMs != null && (!Number.isInteger(definition.timeoutMs) || definition.timeoutMs < 1 || definition.timeoutMs > 60000) ||
         typeof definition.view?.template !== 'function' || typeof definition.view?.update !== 'function' ||
         typeof definition.label !== 'string' || !definition.label || !/^[a-z0-9-]+$/.test(definition.icon)) {
       throw new Error('工具定义或宿主接口版本无效');
