@@ -1,11 +1,15 @@
 import { RoomContext, roomMatchesStore, roomFromURL } from './room-context.js';
 import { ModerationRequests } from './moderation-requests.js';
 import { LikeRequests } from './like-requests.js';
+import { LotteryRequests } from './lottery-requests.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
 // remain in charge. No cookies, signatures, remote code, or paid endpoints cross
 // the extension bridge.
 export class PageRequestSender {
-  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); }
+  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); }
+  prepareLottery(lotteryId,options) { return this.lotteries.prepare(lotteryId,options); }
+  commitLottery(token,options) { return this.lotteries.commit(token,options); }
+  stopLottery(token) { return this.lotteries.stop(token); }
   prepareLike({signal} = {}) { return signal?.aborted ? {available:false} : this.likes.prepare(); }
   commitLike(token,count,sequence,{signal} = {}) { return this.likes.commit(token,count,sequence,signal); }
   stopLike(token) { return this.likes.stop(token); }
@@ -148,6 +152,7 @@ export class RequestBridgeClient {
         // MAIN may have completed preparation before its reply was canceled.
         // Revoke that session before allowing another attempt.
         if(operation==='prepare-like' && result?.ok && typeof result.value?.token==='string')await this.stopLike(result.value.token);
+        if(operation==='prepare-lottery' && result?.ok && typeof result.value?.token==='string')await this.stopLottery(result.value.token);
         return unavailable();
       }
       return result?.ok && this.context.current() ? result.value : unavailable();
@@ -156,6 +161,9 @@ export class RequestBridgeClient {
   }
   prepareModeration(action,target) {return this.call('prepare-moderation',{action,target},800);}
   prepareLike(options) {return this.call('prepare-like',{},10000,options);}
+  prepareLottery(lotteryId,{allowPassword=false,signal}={}) {return this.call('prepare-lottery',{lotteryId,allowPassword},10000,{signal});}
+  commitLottery(token,options) {return this.call('commit-lottery',{token},20000,options);}
+  stopLottery(token) {return this.call('stop-lottery',{token},800);}
   commitLike(token,count,sequence,options) {return this.call('commit-like',{token,count,sequence},10000,options);}
   stopLike(token) {return this.call('stop-like',{token},800);}
   commitModeration(token) {return this.call('commit-moderation',{token},10000);}
