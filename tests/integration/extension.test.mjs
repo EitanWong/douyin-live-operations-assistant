@@ -833,3 +833,26 @@ test('上下文同步失效时更新诊断并停止重试，取消保活失败�
     assert.match((await adapter.exportEvents()).error,/导出恢复数据/);
   }finally{dom.window.close();}
 });
+
+
+test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不因等待超时被移除',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),listeners=[],saved={};
+  const tab={id:1,url:dom.window.location.href};let keeper;
+  const chrome={storage:{session:{get:async key=>({[key]:saved[key]}),set:async values=>Object.assign(saved,values)}},
+    alarms:{create(){},onAlarm:{addListener(){}}},power:{requestKeepAwake(){},releaseKeepAwake(){}},
+    tabs:{query:async()=>keeper?[tab]:[],sendMessage:()=>new Promise(resolve=>listeners[0]({type:'collection-wake'},{},resolve))}};
+  keeper=installCollectionKeeper(chrome,{wakeTimeoutMs:50});await keeper.refresh();
+  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+    DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},boot:()=>{},
+    chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async message=>{
+      if(message.type==='init')return {ok:true,value:{}};
+      if(message.type==='page-command')return {ok:true,value:true};
+      if(message.type==='collection-state')return {ok:true,value:await keeper.update({frameId:0,tab},message.active)};
+      return {ok:true};
+    }}}});
+  try {
+    await dom.window.eval(`(async()=>{${await rawEntry('content')}})()`);
+    assert.equal((await keeper.refresh()).awake,true);
+    assert.equal(saved['live-assistant:collection-leases']['1'],tab.url);
+  }finally{dom.window.close();}
+});

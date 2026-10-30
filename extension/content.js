@@ -116,7 +116,7 @@ if (room) {
     if (request.type === 'collection-wake') {
       if (contextInvalidated) { reply({active:false}); return; }
       void (async()=>{
-        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}});await updateCollectionLease(active===true);reply({active:active===true});}
+        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}});reply({active:active===true});void updateCollectionLease(active===true).catch(()=>{});}
         catch {reply({active:false});}
       })();
       return true;
