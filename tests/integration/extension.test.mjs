@@ -186,6 +186,31 @@ test('油猴与隔离脚本产物均可执行礼物与观众回复上下文', as
   }
 });
 
+test('油猴与隔离产物内置 Cordis，浏览器无 Node 全局也能注入服务、回收与重建工具',async()=>{
+  for (const entry of ['userscript','content']) {
+    const path=entry==='userscript'?join(testDist,'douyin-live-assistant.user.js'):file('content.js');
+    const source=await readFile(path,'utf8');
+    const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
+    let host;
+    try {
+      Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone});
+      dom.window.eval(source.replace(/(?:boot|startContent)\(\);\s*}\)\(\);\s*$/, 'globalThis.toolTest = {ToolRuntime, ToolRegistry};})();'));
+      assert.equal(dom.window.process,undefined);assert.equal(dom.window.require,undefined);
+      const {ToolRuntime,ToolRegistry}=dom.window.toolTest;let mounts=0,disposed=0;
+      host=new ToolRuntime({room:'1',services:{page:dom.window},createLock:()=>({release(){}}),registry:new ToolRegistry([{
+        id:'sample',label:'样例',icon:'heart',version:'1.0.0',apiVersion:1,capabilities:[],view:{template:()=>'',update(){}},
+        mount:ctx=>{mounts++;assert.equal(ctx.services.page,dom.window);ctx.scope.listen(dom.window,'probe',()=>assert.fail('卸载后不能回调'));return {dispose:()=>{disposed++;}};}
+      }])});
+      await host.start();assert.equal(host.diagnostics().backend,'cordis');assert.equal(host.diagnostics().plugins,1);
+      await host.restart('sample');assert.equal(mounts,2);assert.equal(disposed,1);
+      await host.close();dom.window.dispatchEvent(new dom.window.Event('probe'));
+      assert.equal(disposed,2);assert.equal(host.diagnostics().plugins,0);assert.equal(host.diagnostics().scopes,0);
+      assert.match(source,/Copyright \(c\) 2021-present Shigma/);
+    } finally {await host?.close();dom.window.close();}
+  }
+  assert.doesNotMatch(await readFile(file('page.js'),'utf8'),/CordisToolAdapter/,'MAIN 桥不加载工具宿主');
+});
+
 test('room_id 查询链接的 MAIN 观察器和后台均识别同一直播间',async()=>{
   const w=await worker(),sender={frameId:0,tab:{url:'https://live.douyin.com/?room_id=1'}};
   assert.equal((await w.send({type:'init'},sender)).ok,true);
@@ -812,6 +837,15 @@ test('MAIN 忽略页面伪造的发送命令和事件，提前取消也不会迟
     bridge.call({type:'cancel',id:'canceled'});
     assert.equal((await bridge.call({type:'send-api',id:'canceled',operation:'prepare-like'})).available,false);assert.equal(prepares,0);
   } finally {page.close();}
+});
+
+test('福袋记录按来源房间和账号持久化，后台重启后接管者可读且不能越房写入',async()=>{
+  const w=await worker(),key='live-assistant:rewards:1:789',records=[{kind:'luckyBag',key:'luckyBag:activity',status:'unknown',at:Date.now()}];
+  assert.equal((await w.send({type:'rewards-write',key,records})).ok,true);
+  const restored=await worker(w.values,w.indexedDB);
+  assert.deepEqual((await restored.send({type:'rewards-read',key})).value,records);
+  assert.deepEqual((await restored.send({type:'rewards-read',key:'live-assistant:rewards:1:456'})).value,[]);
+  assert.equal((await restored.send({type:'rewards-write',key:'live-assistant:rewards:2:789',records})).ok,false);
 });
 
 test('上下文同步失效时更新诊断并停止重试，取消保活失败不覆盖恢复提示',async()=>{

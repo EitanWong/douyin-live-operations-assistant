@@ -266,7 +266,7 @@ if (room) {
     recordContributionSnapshot: snapshot => message({type:'contribution-snapshot',...snapshot}),
     report: (room, month, {includeAllSessions = false} = {}) => message({ type:'income-report', room, month, includeAllSessions })
   };
-  boot({ page:window, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>panel.root.querySelector('[data-field="ai.endpoint"]').value;} });
+  boot({ page:window, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>panel.root.querySelector('[data-field="ai.endpoint"]').value;} });
 }
 
 }

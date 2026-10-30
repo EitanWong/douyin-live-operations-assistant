@@ -21,6 +21,7 @@
     "jsdom": "^26.1.0"
   },
   "dependencies": {
+    "cordis": "4.0.0-rc.12",
     "echarts": "^6.1.0"
   }
 }

@@ -8,7 +8,7 @@ import { GiftLedger, GiftStore, giftDate, contributionSnapshot } from './data/gi
 import { JournalCommitter, RuntimeWriter } from './runtime/journal.js';
 import { failureCode } from './runtime/inbox.js';
 import { audienceAge } from './core/audience.js';
-import { AutoLike } from './core/auto-like.js';
+import { createPageTools } from './runtime/tool-host.js';
 import { hasUnacknowledgedRuntimeAlert, normalizeRuntimeAlertState, reconcileRuntimeAlertState, runtimeAlertState } from './runtime/health.js';
 
 export function boot(options = {}) {
@@ -29,7 +29,7 @@ export function boot(options = {}) {
   try { config = validateConfig(mergeConfig(get(configKey, {}))); }
   catch (e) { config = copy(DEFAULTS); configError = `旧配置无效，已使用默认值：${e.message}`; }
   if (!config.anchorId) config.anchorId = new URLSearchParams(location.search).get('anchor_id')?.match(/^\d+$/)?.[0] || '';
-  const sessionKeys = new Map(); let panel, engine, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false, persistenceDisabled = false;
+  const sessionKeys = new Map(); let panel, engine, tools, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false, persistenceDisabled = false;
   const runtimeWriter = new RuntimeWriter(snapshot => set(runtimeKey, snapshot));
   // 自动开启只在本页首次进入时保持武装；只有用户明确点击暂停才关闭。
   let autoStartArmed = true, resumeAutoStart = false, manualPause = false, autoStartNext = 0, autoStartError = '';
@@ -228,12 +228,19 @@ export function boot(options = {}) {
   const client = createAIClient({ request, getKey: endpoint => sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '') });
   const lock = options.lock || new RoomLock({ room });
   const makeAdapter = options.adapterFactory || (settings => new DouyinAdapter(settings));
+  let stoppedBroadcast = '';
+  const stopEndedTools = () => {
+    const state = engine.liveMode;
+    const key = state.endedAt ? JSON.stringify([state.roomId,state.endedAt]) : '';
+    if (key && key !== stoppedBroadcast) tools?.notify('stop', '直播已结束，已停止工具任务');
+    stoppedBroadcast = key;
+  };
   const adapter = makeAdapter({
     page,
     getConfig: () => engine.config,
     onPK:event=>{
       if (!engine || closed || suspended || !roomContext.current()) return;
-      if (engine.ingestPK(event)) {refresh();persistRuntime();}
+      if (engine.ingestPK(event)) {stopEndedTools();refresh();persistRuntime();}
     },
     onEcho:event=>engine?.observeEcho(event),
     onEvent: async event => {
@@ -241,7 +248,7 @@ export function boot(options = {}) {
       const { _journalKey, _journalId, _journalSavedAt, ...liveEvent } = event || {};
       // A journal append may finish after pagehide. Keep that record for recovery.
       if (!engine || closed || suspended || !roomContext.current()) return;
-      if (liveEvent.type === 'end') autoLike.stop('直播已结束，已停止点赞');
+      if(['start','end'].includes(liveEvent.type)) {engine.ingestPK(liveEvent);stopEndedTools();}
       const echoed = engine.observeEcho(liveEvent);
       if (['like','fansclub','fansclub-push'].includes(liveEvent.type) && engine.isSelfUser(liveEvent?.user)) {
         engine.ingest(liveEvent);refresh();persistRuntime();
@@ -282,6 +289,7 @@ export function boot(options = {}) {
         }
       } catch (error) { log('error', `互动资料更新失败：${error.message}`); }
       engine.ingest(event);
+      stopEndedTools();
       if (journalWrite) {
         void (async () => {
           try {
@@ -306,14 +314,6 @@ export function boot(options = {}) {
     shouldReadChat: () => engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
     shouldReadMilestones: () => engine.running
   });
-  const autoLike = new AutoLike({
-    transport:demo ? {prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,
-    lock:new RoomLock({room:`auto-like:${room}`}),
-    guard:()=>closed || suspended || !roomContext.current() ? '页面或直播间已切换，已停止'
-      : persistenceDisabled ? '扩展连接已失效，已停止，请刷新直播页'
-      : !demo && (!adapter.healthy() || identity.live?.status && identity.live.status !== 'live') ? '直播已结束或连接中断，已停止' : '',
-    changed:state=>panel?.updateAutoLike(state)
-  });
   engine = new Engine({
     config, log, ai: client,
     liveData: () => {
@@ -328,6 +328,15 @@ export function boot(options = {}) {
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
     onStop: () => { lock.release(); autoStartArmed = false; },
     send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : (text, isCurrent, hooks) => adapter.send(text, () => isCurrent() && lock.held && roomContext.current(),hooks)
+  });
+  tools = createPageTools({page:window,room,engine,adapter,demo,log,
+    getRoomId:()=>identity.live?.roomId || engine.liveMode?.roomId || '',
+    current:()=>!closed && !suspended && roomContext.current(),unavailable:()=>persistenceDisabled,liveStatus:()=>identity.live?.status,
+    rewardStorage:options.rewardStorage || {get:key=>get(key,[]),set},
+    saveConfig:async (key,value)=>{
+      if(closed || suspended || persistenceDisabled || !roomContext.current())throw new Error('页面状态已变化，请刷新后保存');
+      const c=copy(engine.config);c[key]=value;validateConfig(c);await set(configKey,c);engine.update(c);
+    },changed:(id,state)=>panel?.updateToolState(id,state)
   });
   if (runtimeSnapshot?.version === 1 && Array.isArray(runtimeSnapshot.incomePending)) for (const entry of copy(runtimeSnapshot.incomePending)) {
       if (Array.isArray(entry) && typeof entry[0] === 'string' && entry[1]?.event) incomePending.set(entry[0], entry[1]);
@@ -369,7 +378,7 @@ export function boot(options = {}) {
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   const pause = (reason, { manual = false } = {}) => {
-    autoLike.stop(reason);
+    tools.notify('stop', reason);
     if (manual) manualPause = true;
     autoStartArmed = false;
     engine.stop(reason);
@@ -377,7 +386,7 @@ export function boot(options = {}) {
   async function start({ automatic = false } = {}) {
     if (persistenceDisabled) throw contextFailure();
     if (engine.running || starting || closed || suspended) return;
-    if (!automatic) { manualPause = false; autoStartArmed = true; autoStartError = ''; }
+    if (!automatic) { manualPause = false; tools.notify('resume'); autoStartArmed = true; autoStartError = ''; }
     adapter.sync?.();
     if (!demo && engine.config.mode !== 'preview') {
       if (!adapter.healthy()) {
@@ -434,7 +443,8 @@ export function boot(options = {}) {
   }
   async function ready() {
     panel = new Panel({ config: engine.config, room, demo, callbacks: {
-      startAutoLike:value=>autoLike.start(value),stopAutoLike:()=>autoLike.stop(),
+      toolAction:(id, action, value) => tools.invoke(id, action, value),
+      toolControl:(id, action) => action === 'restart' ? tools.restart(id) : tools.disable(id),
       start: () => start(), stop: () => pause('人工暂停，已清空发送队列与弹幕上下文', { manual: true }), lab,
       debugSend: (channel = 'chat') => {
         if (persistenceDisabled) throw contextFailure();
@@ -450,7 +460,7 @@ export function boot(options = {}) {
         await keepKey(c, key, remember);
         if (c.identity.autoAnchor && identity.anchor) c.anchorId = identity.anchor.id;
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
-        await set(configKey, c); engine.update(c); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
+        await set(configKey, c); engine.update(c); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
       },
@@ -529,6 +539,7 @@ export function boot(options = {}) {
       if (typeof GM_registerMenuCommand === 'function') GM_registerMenuCommand('打开抖音直播运营助手', () => { if (!panel.open) panel.toggleOpen(); });
     }
     panel.refresh(engine, network);
+    tools.ready = tools.start();
     if (demo) applyIdentity({ anchor:{ id:'1234567890', name:'模拟主播' }, self:{ id:'9876543210', name:'我的场控账号（模拟）' } });
     else void identityReader.refresh().catch(e => log('error', `自动识别暂不可用：${e.message}`));
     let lastDateCheck = 0, lastStorageCheck = 0, lastPKRefresh = 0, lastContributionCheck = 0, lastLiveCheck = Date.now(), contributionCheckBusy = false, incomeDay = giftDate(), waitingForConnection = false;
@@ -561,7 +572,7 @@ export function boot(options = {}) {
     let stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
     const timer = setInterval(async () => {
       if (closed || suspended) return;
-      autoLike.check();
+      tools.notify('tick');
       if (demo) { network.lastFrame = adapter.status.lastFrame = Date.now(); }
       if (!demo && identityReader.refreshRoom && roomContext.current() && Date.now() - lastLiveCheck >= 15000) {
         lastLiveCheck = Date.now();
@@ -570,7 +581,7 @@ export function boot(options = {}) {
       }
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
-      if (!roomContext.current()) { log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (!roomContext.current()) { void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
       if ((engine.pk.current()?.phase === 'active' || panel.activeTab === 'pk') && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
@@ -586,7 +597,7 @@ export function boot(options = {}) {
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, engine.config.gift.yuanPerDiamond);
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
     window.addEventListener('pagehide', event => {
-      autoLike.stop('页面已离开，已停止点赞');
+      void (event.persisted ? tools.suspend() : tools.close());
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
       const wasRunning = engine.running || engine.resumeRequested;
       suspended = true; closed = !event.persisted; stopContributionWatch();
@@ -601,6 +612,7 @@ export function boot(options = {}) {
     window.addEventListener('pageshow', event => {
       if (!event.persisted || closed) return;
       suspended = false;
+      void tools.resume().then(() => { if (manualPause) tools.notify('stop', '本页已手动暂停'); });
       stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
       void sampleContributions();
       autoStartArmed = resumeAutoStart && !manualPause; autoStartNext = 0;
@@ -611,7 +623,7 @@ export function boot(options = {}) {
       refresh(); refreshGifts(); void loadIncome({profiles:true});
     });
     void drainIncome();
-    options.onReady?.({ engine, panel, adapter, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
+    options.onReady?.({ engine, panel, adapter, tools, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });
   return engine;

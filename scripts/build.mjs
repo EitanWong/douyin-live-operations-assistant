@@ -37,9 +37,13 @@ const header = `// ==UserScript==
 // @license      MIT
 // ==/UserScript==
 `;
+const cordisLicense=await readFile(`${root}vendor/cordis/LICENSE`,'utf8');
+const cosmokitLicense=await readFile(`${root}node_modules/cosmokit/LICENSE`,'utf8');
+const toolNotice=`/*! Cordis · MIT\n${cordisLicense}\nCosmokit · MIT\n${cosmokitLicense}\n*/`;
 const iconLicense=await readFile(`${root}vendor/lucide/LICENSE`,'utf8');
-const bundleNotice=`/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
+const bundleNotice=`${toolNotice}\n/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
 await mkdir(dist, { recursive: true });
+await build({entryPoints:[`${root}src/tools/cordis-adapter.js`],bundle:true,platform:'browser',format:'esm',minify:true,legalComments:'inline',target:'chrome111',banner:{js:toolNotice},outfile:`${dist}/tool-runtime.js`});
 await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/live-charts.js`});
 await writeFile(`${dist}/douyin-live-assistant.user.js`,await bundleStandalone({entry:`${root}src/userscript.js`,banner:header+'\n'+bundleNotice,target:'chrome111'}));
 console.log('Built dist/douyin-live-assistant.user.js (standalone; no runtime dependencies)');
@@ -67,6 +71,7 @@ for(const name of ['echarts/LICENSE','echarts/NOTICE','echarts/licenses/LICENSE-
 chartLicenses += `chinese-dictionary (vendor/chinese-dictionary)\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n`;
 chartLicenses += `chinese-xinhua (vendor/chinese-xinhua)\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\n`;
 chartLicenses += `Lucide icon subset (vendor/lucide)\n${iconLicense}\n`;
+chartLicenses += `Cordis 4.0.0-rc.12 (vendor/cordis)\n${cordisLicense}\nCosmokit\n${cosmokitLicense}\n`;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 console.log('Built dist/chrome-extension (Manifest V3)');

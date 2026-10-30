@@ -25,6 +25,8 @@ export class AutoLike {
     this.state = {phase:'idle',accepted:0,batches:0,reason:'尚未开始'}; this.generation = 0;
   }
   update(values) { Object.assign(this.state,values); this.changed({...this.state}); }
+  whenIdle() { return this.busy ? new Promise(resolve => (this.idleWaiters ||= []).push(resolve)) : Promise.resolve(); }
+  settled() { for (const resolve of this.idleWaiters?.splice(0) || []) resolve(); }
   async start(value) {
     if (this.busy || ['starting','running','stopping'].includes(this.state.phase)) throw new Error('已有点赞任务正在处理，请稍候');
     const config = validateAutoLike(value), error = this.guard();
@@ -47,6 +49,7 @@ export class AutoLike {
     } finally {
       this.busy = false;
       if (generation !== this.generation) this.finishStop();
+      this.settled();
     }
     if (generation === this.generation && this.state.phase === 'running') await this.tick();
   }
@@ -85,6 +88,7 @@ export class AutoLike {
     finally {
       this.busy = false;
       if (generation !== this.generation) this.finishStop();
+      this.settled();
     }
   }
 }

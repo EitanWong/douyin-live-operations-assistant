@@ -71,6 +71,46 @@ const idAt = (m, n) => intAt(m, n)?.toString() || '';
 // milliseconds. Preserve both observed layouts before applying freshness checks.
 const commonTime = common => { const value = numberAt(common, 4) || 0; return value < 1e12 ? value * 1000 : value; };
 const nested = (m, n) => wire(bytesAt(m, n) || new Uint8Array());
+function repeatedIds(fields, field, limit = 1024) {
+  const result = [];
+  for (const value of fields.get(field) || []) {
+    const add = item => {
+      if (result.length >= limit) throw new Error('重复整数数量过多');
+      result.push(BigInt.asIntN(64, item).toString());
+    };
+    if (typeof value === 'bigint') { add(value); continue; }
+    let position = 0;
+    while (position < value.length) {
+      let number = 0n;
+      for (let byte = 0; byte < 10; byte++) {
+        if (position >= value.length) throw new Error('packed 整数不完整');
+        const item = value[position++];
+        if (byte === 9 && item > 1) throw new Error('packed 整数溢出');
+        number |= BigInt(item & 127) << BigInt(byte * 7);
+        if (!(item & 128)) { add(number); break; }
+      }
+    }
+  }
+  return result;
+}
+function decodeLotteryEvent(method, m, event) {
+  const kinds = {WebcastLotteryEventNewMessage:'lottery-start', WebcastLotteryCandidateEventMessage:'lottery-candidate',
+    WebcastLotteryDrawResultEventMessage:'lottery-result'};
+  if (!kinds[method]) return null;
+  const base = {...event, type:'activity-signal', activityKind:kinds[method], lotteryId:idAt(m, 2)};
+  if (base.activityKind === 'lottery-start') return {...base, lotteryStatusRaw:idAt(m, 3), startedAt:idAt(m, 4), drawAt:idAt(m, 5),
+    serverNow:idAt(m, 6), prizeTypeRaw:idAt(m, 8), conditionTypes:repeatedIds(m, 10), prizeCount:idAt(m, 13), luckyCount:idAt(m, 14),
+    awardName:textAt(m, 18), conditions:messagesAt(m, 21).slice(0, 32).map(row => ({typeRaw:idAt(row, 1), content:textAt(row, 2).slice(0, 500),
+      needDiamondCount:idAt(row, 3), minFansLevel:idAt(row, 4), remarks:textAt(row, 5).slice(0, 500)}))};
+  if (base.activityKind === 'lottery-candidate') return {...base, userId:idAt(m, 3), version:idAt(m, 5),
+    participateSuccess:intAt(m, 4) === 1n ? true : intAt(m, 4) === 0n ? false : null};
+  let candidateCount = null;
+  try {
+    const count = JSON.parse(textAt(m, 4)).candidate_num;
+    if (typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 || typeof count === 'string' && /^\d{1,20}$/.test(count)) candidateCount = String(count);
+  } catch { /* Unknown result extras do not establish a candidate count. */ }
+  return {...base, reportedUserIds:repeatedIds(m, 3), candidateCount};
+}
 function decodeClub(bytes) {
   const m = wire(bytes);
   return { name: textAt(m, 1), level: numberAt(m, 2), status: numberAt(m, 3), anchorId: idAt(m, 6) };
@@ -563,8 +603,9 @@ function decodeProtocolEvent(method, m, event) {
       count:numberAt(packet, 4), packetType:numberAt(packet, 5), currency:textAt(packet, 6), status:textAt(packet, 8),
       totalAmount:numberAt(packet, 9), unitAmount:numberAt(packet, 11) };
   }
+  const lottery = decodeLotteryEvent(method, m, event);
+  if (lottery) return lottery;
   const activityKinds = {
-    WebcastLotteryDrawResultEventMessage:'lottery-result', WebcastLotteryEventNewMessage:'lottery-start',
     WebcastLuckyBoxMessage:'lucky-box', WebcastLuckyBoxEndMessage:'lucky-box-end',
     WebcastLuckyBoxRewardMessage:'lucky-box-reward', WebcastLuckyBoxTempStatusMessage:'lucky-box-status'
   };
@@ -574,7 +615,7 @@ function decodeProtocolEvent(method, m, event) {
   return null;
 }
 const KNOWN_BATTLE_METHODS = new Set(['LinkMicMethod','LinkMicMethodMessage','LinkMicBattleMethod','LinkmicBattleMessage','LinkMicBattleFinishMethod','LinkmicBattleFinishMessage','LinkMicArmiesMethod','LinkMicArmies','BattleStateSyncMessage','BattleRankSeasonMessage']);
-const KNOWN_PROTOCOL_METHODS = new Set(['WebcastChatMessage','WebcastGiftMessage','WebcastLikeMessage','WebcastMemberMessage','WebcastControlMessage','WebcastRoomStatsMessage','WebcastRoomUserSeqMessage','WebcastSocialMessage','WebcastFansclubMessage','WebcastEmojiChatMessage','WebcastScreenChatMessage','WebcastPrivilegeScreenChatMessage','WebcastRoomMessage','WebcastRoomRankMessage','WebcastRankUpdateMessage','WebcastRoomNotifyMessage','WebcastRoomDataSyncMessage','RoomDataSyncMessage','WebcastAudioChatMessage','WebcastHighlightCommentMessage','WebcastLightGiftMessage','WebcastLiveShoppingMessage','WebcastProductChangeMessage','WebcastInRoomBannerMessage','WebcastRanklistAwardMessage','WebcastPreviewCjRpMessage','WebcastLotteryDrawResultEventMessage','WebcastLotteryEventNewMessage','WebcastLuckyBoxMessage','WebcastLuckyBoxEndMessage','WebcastLuckyBoxRewardMessage','WebcastLuckyBoxTempStatusMessage','WebcastPrizeNoticeMessage','WebcastChatLikeMessage','WebcastUpdateFanTicketMessage','WebcastProfitGameStatusMessage','WebcastGiftSortMessage','WebcastRoomIndicatorMessage','GroupLiveContainerChangeMessage','WebcastBattleBonusMessage','WebcastBattlePropertyMessage','BattleSeasonHonorMessage','PopularCardMessage','WebcastPopularCardMessage','FansclubStatisticsMessage','GroupLiveMemberChangeMessage','GroupLiveIncomeChangeMessage','RoomTicketMessage','LinkMicPositionMessage','LinkmicGuestLinkMessage','FansclubV1PushMessage']);
+const KNOWN_PROTOCOL_METHODS = new Set(['WebcastChatMessage','WebcastGiftMessage','WebcastLikeMessage','WebcastMemberMessage','WebcastControlMessage','WebcastRoomStatsMessage','WebcastRoomUserSeqMessage','WebcastSocialMessage','WebcastFansclubMessage','WebcastEmojiChatMessage','WebcastScreenChatMessage','WebcastPrivilegeScreenChatMessage','WebcastRoomMessage','WebcastRoomRankMessage','WebcastRankUpdateMessage','WebcastRoomNotifyMessage','WebcastRoomDataSyncMessage','RoomDataSyncMessage','WebcastAudioChatMessage','WebcastHighlightCommentMessage','WebcastLightGiftMessage','WebcastLiveShoppingMessage','WebcastProductChangeMessage','WebcastInRoomBannerMessage','WebcastRanklistAwardMessage','WebcastPreviewCjRpMessage','WebcastLotteryDrawResultEventMessage','WebcastLotteryEventNewMessage','WebcastLotteryCandidateEventMessage','WebcastLuckyBoxMessage','WebcastLuckyBoxEndMessage','WebcastLuckyBoxRewardMessage','WebcastLuckyBoxTempStatusMessage','WebcastPrizeNoticeMessage','WebcastChatLikeMessage','WebcastUpdateFanTicketMessage','WebcastProfitGameStatusMessage','WebcastGiftSortMessage','WebcastRoomIndicatorMessage','GroupLiveContainerChangeMessage','WebcastBattleBonusMessage','WebcastBattlePropertyMessage','BattleSeasonHonorMessage','PopularCardMessage','WebcastPopularCardMessage','FansclubStatisticsMessage','GroupLiveMemberChangeMessage','GroupLiveIncomeChangeMessage','RoomTicketMessage','LinkMicPositionMessage','LinkmicGuestLinkMessage','FansclubV1PushMessage']);
 const knownProtocolMethod = method => KNOWN_PROTOCOL_METHODS.has(method) || KNOWN_BATTLE_METHODS.has(String(method).replace(/^Webcast/, ''));
 export function decodeMessage(method, bytes, outerId = '') {
   if (KNOWN_BATTLE_METHODS.has(method) || KNOWN_BATTLE_METHODS.has(String(method).replace(/^Webcast/, ''))) return decodeBattleMessage(method, bytes, outerId);

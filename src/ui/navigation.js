@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
 import { Spring } from './spring.js';
+import { bundledTools } from '../tools/bundled.js';
 
 export const NAVIGATION_GROUPS = [
   {key:'interaction',label:'直播互动',items:[
@@ -7,7 +8,7 @@ export const NAVIGATION_GROUPS = [
     ['gift','礼物感谢','gift'],['welcome','进场欢迎','hand'],['likes','点赞感谢','heart'],
     ['keywords','关键词回复','messages-square'],['bot','@机器人','bot'],['timers','定时消息','timer']
   ]},
-  {key:'tools',label:'扩展工具',items:[['auto-like','自动点赞','heart']]},
+  {key:'tools',label:'扩展工具',items:[]},
   {key:'settings',label:'设置',items:[
     ['features','功能开关','sliders-horizontal'],['appearance','外观','palette'],
     ['moderation','内容治理','activity'],['ai','AI 设置','sparkles'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],
@@ -15,11 +16,12 @@ export const NAVIGATION_GROUPS = [
   ]}
 ];
 
-export function navigationTemplate(activeTab = 'pk') {
+export function navigationTemplate(activeTab = 'pk', tools = bundledTools) {
+  const groups = NAVIGATION_GROUPS.map(group => group.key === 'tools' ? {...group,items:[...group.items,...tools.list().map(tool => [tool.id,tool.label,tool.icon])]} : group);
   return `<nav class="nav" aria-label="功能导航">
     <div class="sidebar-heading"><span class="nav-label">功能导航</span><button type="button" data-sidebar-toggle aria-expanded="true" aria-controls="assistant-navigation-items" aria-label="折叠侧边栏" title="折叠侧边栏">${icon('panel-right')}</button></div>
-    <div class="primary-nav" role="group" aria-label="功能分类">${NAVIGATION_GROUPS.map(group=>`<button type="button" data-category="${group.key}" aria-pressed="${group.key==='interaction'}">${group.label}</button>`).join('')}</div>
-    <div id="assistant-navigation-items">${NAVIGATION_GROUPS.map(group=>`<section class="nav-group" data-nav-group="${group.key}"><h2 class="nav-group-title">${group.label}</h2><div class="subnav" data-subnav="${group.key}" role="tablist" aria-label="${group.label}功能" aria-orientation="horizontal" ${group.key!=='interaction'?'hidden':''}>${group.items.map(([key,label,glyph])=>`<button type="button" role="tab" id="tab-${key}" aria-controls="page-${key}" data-tab="${key}" title="${label}" aria-label="${label}" aria-selected="${key===activeTab}" tabindex="${key===activeTab?0:-1}">${icon(glyph)}<span class="nav-label">${label}</span></button>`).join('')}</div></section>`).join('')}</div>
+    <div class="primary-nav" role="group" aria-label="功能分类">${groups.map(group=>`<button type="button" data-category="${group.key}" aria-pressed="${group.key==='interaction'}">${group.label}</button>`).join('')}</div>
+    <div id="assistant-navigation-items">${groups.map(group=>`<section class="nav-group" data-nav-group="${group.key}"><h2 class="nav-group-title">${group.label}</h2><div class="subnav" data-subnav="${group.key}" role="tablist" aria-label="${group.label}功能" aria-orientation="horizontal" ${group.key!=='interaction'?'hidden':''}>${group.items.map(([key,label,glyph])=>`<button type="button" role="tab" id="tab-${key}" aria-controls="page-${key}" data-tab="${key}" title="${label}" aria-label="${label}" aria-selected="${key===activeTab}" tabindex="${key===activeTab?0:-1}">${icon(glyph)}<span class="nav-label">${label}</span></button>`).join('')}</div></section>`).join('')}</div>
   </nav>`;
 }
 

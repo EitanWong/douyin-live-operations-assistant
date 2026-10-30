@@ -24,9 +24,25 @@ function setup(body = '') {
   for (const el of dom.window.document.querySelectorAll('*')) el.getClientRects = () => [{ width: 100, height: 30 }];
   return dom;
 }
+test('福袋红包工具可导航、独立保存配置，立即停止同步关闭开关并显示确认进度',async()=>{
+  const dom=setup();let saved,stops=0;
+  const panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{save:async c=>{saved=c;},toolAction:async(id,action)=>{assert.equal(id,'rewards');assert.equal(action,'stop');stops++;}}});
+  try {
+    panel.tab('rewards');assert.equal(panel.activeCategory,'tools');assert.equal(panel.node('[data-page=rewards]').hidden,false);
+    const enabled=panel.node('[data-field="rewards.enabled"]'),bag=panel.node('[data-field="rewards.luckyBag"]');
+    assert.equal(enabled.checked,false);assert.equal(bag.checked,true);enabled.click();bag.click();
+    panel.node('[data-action=save]').click();await new Promise(setImmediate);
+    assert.equal(saved.rewards.enabled,true);assert.equal(saved.rewards.luckyBag,false);assert.equal(saved.rewards.redPacket,true);
+    assert.equal(saved.rewards.entryXPath,DEFAULTS.rewards.entryXPath);
+    panel.updateToolState('rewards',{reason:'福袋参与结果未确认，本轮不会重复点击',submitted:1,confirmed:0});
+    assert.match(panel.node('[data-rewards-progress]').textContent,/点击参与 1 次 · 页面确认 0 次/);
+    panel.node('[data-action=rewards-stop]').click();await new Promise(setImmediate);
+    assert.equal(stops,1);assert.equal(enabled.checked,false);assert.equal(panel.read().rewards.enabled,false);
+  } finally {panel.destroy();dom.window.close();}
+});
 test('扩展工具自动点赞独立于回复模式：输入不会污染配置，状态和停止按钮可用',async()=>{
   const dom=setup(),config=copy(DEFAULTS),calls=[];
-  const panel=new Panel({config,room:'1',callbacks:{startAutoLike:async options=>calls.push(options),stopAutoLike:()=>calls.push('stop')}});
+  const panel=new Panel({config,room:'1',callbacks:{toolAction:(id,action,value)=>{assert.equal(id,'auto-like');calls.push(action==='start'?value:action);}}});
   try {
     panel.node('[data-category=tools]').click();
     assert.equal(panel.activeTab,'auto-like');assert.equal(panel.node('[data-page=auto-like]').hidden,false);
@@ -39,12 +55,12 @@ test('扩展工具自动点赞独立于回复模式：输入不会污染配置�
     panel.node('[data-auto-like=target]').value='65';
     panel.node('[data-action=auto-like-start]').click();await new Promise(setImmediate);
     assert.deepEqual(calls[0],{batch:30,intervalSec:0.001,target:65});assert.deepEqual(panel.read(),config);assert.equal(panel.dirty,false);
-    panel.updateAutoLike({phase:'running',accepted:30,batches:1,reason:'正在自动点赞'});
+    panel.updateToolState('auto-like',{phase:'running',accepted:30,batches:1,reason:'正在自动点赞'});
     assert.equal(panel.node('[data-action=auto-like-start]').disabled,true);
     assert.equal(panel.node('[data-auto-like=batch]').disabled,true);
     assert.match(panel.node('[data-auto-like-progress]').textContent,/30 次 · 1 批/);
     panel.node('[data-action=auto-like-stop]').click();assert.equal(calls.at(-1),'stop');
-    panel.updateAutoLike({phase:'stopped',accepted:30,batches:1,reason:'已停止'});
+    panel.updateToolState('auto-like',{phase:'stopped',accepted:30,batches:1,reason:'已停止'});
     assert.equal(panel.node('[data-action=auto-like-start]').disabled,false);
     assert.equal(panel.node('[data-action=auto-like-stop]').disabled,true);
   } finally {panel.destroy();dom.window.close();}

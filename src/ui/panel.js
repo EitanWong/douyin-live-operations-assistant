@@ -1,7 +1,7 @@
 import { pkSettingsTemplate } from './pk-settings-template.js';
 import { PK_SETTINGS_CSS } from './pk-settings-styles.js';
 import { moderationTemplate } from './moderation-template.js';
-import { AUTO_LIKE_MIN_INTERVAL_SEC } from '../core/auto-like.js';
+import { bundledTools } from '../tools/bundled.js';
 import { calculateMidnightPKStart, strategyRegime } from '../pk/operations.js';
 import { MODERATION_LABELS } from '../core/moderation.js';
 import { uniqueAnchorProfiles } from '../data/gifts.js';
@@ -116,7 +116,8 @@ summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-hei
 `;
 
 export class Panel {
-  constructor({ config, room, demo = false, callbacks }) {
+  constructor({ config, room, demo = false, callbacks, tools = bundledTools }) {
+    this.tools = tools; this.toolStates = new Map();
     this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
@@ -173,7 +174,7 @@ export class Panel {
         ${this.demo ? '<p class="banner">本地演示：弹幕和礼物均为模拟数据，消息不会发到抖音。</p>' : ''}
         <div class="banner" data-runtime-alert role="status" hidden><strong data-runtime-alert-text></strong> <button type="button" data-go="diagnostics" data-ack-runtime-alert>查看并处理</button></div>
         <div class="workspace">
-        ${navigationTemplate(this.activeTab)}
+        ${navigationTemplate(this.activeTab, this.tools)}
         <main class="workspace-content" aria-label="功能页面">
         <div class="toast" role="status" hidden></div>
         <div class="scroll"><form autocomplete="off">
@@ -359,17 +360,9 @@ export class Panel {
             <p class="hint">每组独立循环，话术每行一条。时段留空表示全天，支持跨午夜。</p>
           </section>
           ${moderationTemplate(this)}
-          <section class="page" role="tabpanel" id="page-auto-like" aria-labelledby="tab-auto-like" data-page="auto-like" hidden>
-            <h2>自动点赞</h2><p class="intro">使用当前登录账号，为当前直播间批量点赞。点击开始后立即执行，独立于场控回复模式。</p>
-            <div class="grid">
-              <label class="field"><span>每批点赞数</span><input type="number" data-auto-like="batch" value="20" min="1" max="100" step="1"><small>1～100 次；平台接受后计入进度。</small></label>
-              <label class="field"><span>批次间隔 / 秒</span><input type="number" data-auto-like="intervalSec" value="2" min="${AUTO_LIKE_MIN_INTERVAL_SEC}" max="60" step="${AUTO_LIKE_MIN_INTERVAL_SEC}"><small>${AUTO_LIKE_MIN_INTERVAL_SEC}～60 秒，0.001 秒 = 1 毫秒；响应后等待，实际间隔受网络和浏览器影响。低于 2 秒为实验设置，遇拒绝即停。</small></label>
-              <label class="field"><span>本次目标点赞数</span><input type="number" data-auto-like="target" value="1000" min="1" max="1000000" step="1"><small>达到目标自动停止；刷新后需重新开始。</small></label>
-            </div>
-            <div class="actions"><button type="button" class="primary" data-action="auto-like-start">开始点赞</button><button type="button" class="danger" data-action="auto-like-stop" disabled>停止点赞</button></div>
-            <p role="status" aria-live="polite" data-auto-like-status>尚未开始</p><p class="hint" data-auto-like-progress>本次平台已接受 0 次 · 0 批</p>
-            <p class="hint">平台拒绝或结果未知时停止。切换房间、账号、下播或断线后需重新开始。停止后，已提交的批次仍可能生效；平台接受次数不代表直播间最终展示增量。</p>
-          </section>
+          ${this.tools.list().map(tool => tool.view.template().replace(/<\/section>\s*$/, `<details class="advanced"><summary>工具管理</summary><p data-tool-health="${tool.id}" role="status">正在准备工具</p><div class="actions"><button type="button" data-tool-control="restart" data-tool-id="${tool.id}">重新启用工具</button><button type="button" data-tool-control="disable" data-tool-id="${tool.id}">停用工具</button></div><p class="hint">只影响当前工具。本次手动任务需重新开始。</p></details></section>`)).join('')}
+
+
           <section class="page" role="tabpanel" id="page-diagnostics" aria-labelledby="tab-diagnostics" data-page="diagnostics" hidden>
             <h2>连接</h2><p class="intro">检查直播数据、账号识别与页面发送控件。</p>
             <div class="identity section"><strong data-anchor-name>正在识别主播…</strong><p data-self-name>正在识别登录账号…</p><p data-admin-status>管理员身份：未验证，管理操作不可用</p><p data-identity-warning hidden></p><details><summary>账号不对？</summary><div class="actions"><button type="button" data-action="identify">重新识别</button><button type="button" data-action="identity-settings">手动补充</button></div></details></div>
@@ -701,14 +694,13 @@ export class Panel {
     const node = this.root.querySelector('.toast'); node.textContent = message; node.classList.toggle('error', error); node.hidden = false;
     clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { node.hidden = true; }, 8000);
   }
-  updateAutoLike(state) {
-    this.autoLikeState = state;
-    const active = ['starting','running','stopping'].includes(state.phase);
-    this.disabled('[data-action=auto-like-start]',active);
-    this.disabled('[data-action=auto-like-stop]',!active || state.phase === 'stopping');
-    for (const input of this.root.querySelectorAll('[data-auto-like]')) input.disabled = active;
-    this.text('[data-auto-like-status]',`${this.demo ? '模拟演练 · ' : ''}${state.reason}`);
-    this.text('[data-auto-like-progress]',`本次${this.demo ? '模拟接受' : '平台已接受'} ${state.accepted} 次 · ${state.batches} 批`);
+  updateToolState(id, state) {
+    this.toolStates.set(id, {...state});
+    this.tools.get(id)?.view.update(this, state);
+    const enabled = state.hostPhase === 'active';
+    this.text(`[data-tool-health="${id}"]`, enabled ? '工具已就绪' : state.reason || '工具已停用');
+    for (const button of this.root.querySelectorAll(`[data-tool-id="${id}"]`)) button.disabled = button.dataset.toolControl === 'disable' && !enabled;
+    if (state.hostPhase && !enabled) for (const button of this.root.querySelectorAll(`[data-page="${id}"] [data-action]`)) button.disabled = true;
   }
   syncLauncher() {
     const launcher = this.node('.launcher'), running = Boolean(this.latest?.[0].running);
@@ -859,7 +851,7 @@ export class Panel {
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
     if (['anchor','profiles'].includes(key)) void this.callbacks.income?.();
-    const category = interactionPages.includes(key) ? 'interaction' : key === 'auto-like' ? 'tools' : 'settings';
+    const category = this.tools.get(key) ? 'tools' : interactionPages.includes(key) ? 'interaction' : 'settings';
     this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
@@ -923,16 +915,23 @@ export class Panel {
       }
       const anchorView = e.target.closest('[data-anchor-view]'); if (anchorView) { this.setAnchorView(anchorView.dataset.anchorView); return; }
       const tab = e.target.closest('[data-tab]'); if (tab) this.tab(tab.dataset.tab);
+      const control = e.target.closest('[data-tool-control]');
+      if (control && !control.disabled) {
+        control.disabled = true;
+        try { await this.callbacks.toolControl?.(control.dataset.toolId, control.dataset.toolControl); }
+        catch (error) { this.toast(error.message,true); }
+        finally { const state=this.toolStates.get(control.dataset.toolId); if (state) this.updateToolState(control.dataset.toolId,state); }
+        return;
+      }
       const button = e.target.closest('[data-action]'); if (!button || button.disabled || button.hidden) return;
       const action = button.dataset.action;
       try {
-        if (action === 'auto-like-start') {
-          this.disabled('[data-action=auto-like-start]',true);
-          try { await this.callbacks.startAutoLike?.(Object.fromEntries([...this.root.querySelectorAll('[data-auto-like]')].map(input=>[input.dataset.autoLike,Number(input.value)]))); }
-          finally { this.updateAutoLike(this.autoLikeState || {phase:'idle',accepted:0,batches:0,reason:'尚未开始'}); }
+        const tool = this.tools.list().find(definition => Object.keys(definition.view.actions || {}).some(name => `${definition.id}-${name}` === action));
+        if (tool) {
+          const name = action.slice(tool.id.length + 1);
+          await tool.view.actions[name](this, (command, value) => this.callbacks.toolAction?.(tool.id, command, value));
           return;
         }
-        if (action === 'auto-like-stop') { this.callbacks.stopAutoLike?.(); return; }
         if (action === 'export-income') { this.setBusy(action,true); await this.callbacks.exportIncome?.(); return; }
         if (action === 'export-anchor') { await this.callbacks.exportAnchor?.(this.anchorDashboard.exportReport()); return; }
         if (action === 'refresh-anchor') { this.setBusy(action,true); await this.callbacks.income?.(); const refreshed = await this.callbacks.refreshAnchor?.(); this.toast(refreshed ? '主播统计已刷新。' : '本地统计已刷新；展馆暂不可用，请确认已登录并打开直播间。', !refreshed); return; }

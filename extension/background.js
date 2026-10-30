@@ -143,6 +143,15 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       let value;
       if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
       else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
+      else if (['rewards-read','rewards-write'].includes(message.type) && isRoom(sender)) {
+        const room = roomFromUrl(sender.tab.url);
+        if (typeof message.key !== 'string' || !new RegExp(`^live-assistant:rewards:${room}:[1-9]\\d{0,24}$`).test(message.key)) throw new Error('活动记录范围无效');
+        if (message.type === 'rewards-read') value = await durableStorage.get(message.key) || [];
+        else {
+          if (!Array.isArray(message.records) || message.records.length > 100 || jsonLength(message.records) > 50000) throw new Error('活动记录无效');
+          await durableStorage.set(message.key,message.records);value=true;
+        }
+      }
       else if (message.type === 'collection-state' && isRoom(sender)) value = await collectionKeeper.update(sender,message.active);
       else if (message.type === 'theme-get' && (isRoom(sender) || extensionPage)) value = await readRecord(themeKey) ?? 'system';
       else if (message.type === 'theme-set' && (isRoom(sender) || extensionPage) && themeValues.has(message.value)) {

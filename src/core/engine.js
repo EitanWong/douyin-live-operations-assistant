@@ -5,6 +5,8 @@ import { DEFAULT_PHRASES, DEFAULT_TIMER_PHRASES, DEFAULT_KEYWORD_RULES, choosePh
 import { LEGACY_PHRASES, LEGACY_TIMER_PHRASES, PREVIOUS_DEFAULT_PHRASES } from './legacy-phrases.js';
 import { DeliveryTracker } from '../runtime/delivery.js';
 import { LiveMetrics } from '../runtime/live-metrics.js';
+import { REWARDS_DEFAULTS } from '../browser/rewards.js';
+import { LiveModeTracker, isLiveModeEvent } from '../runtime/live-mode.js';
 import { PKTracker, PK_EVENT_TYPES } from '../pk/model.js';
 import { PKOperations, PK_OPERATIONS_DEFAULTS, buildPKStrategyContext, strategyRegime } from '../pk/operations.js';
 import { milestoneThankYou, recognizeMilestone } from './milestones.js';
@@ -18,6 +20,7 @@ export const DEFAULTS = {
   version: 2,
   mode: 'auto',
   automation: { autoStart: false },
+  rewards: REWARDS_DEFAULTS,
   anchorId: '', selfId: '', ignored: [], blockedWords: [],
   identity: { autoAnchor: true, autoSelf: true },
   moderation: MODERATION_DEFAULTS,
@@ -103,6 +106,8 @@ export function validateConfig(c) {
   const choice = (v, values, name) => { if (!values.includes(v)) throw new Error(`${name}无效`); };
   const strings = (v, name) => { if (!Array.isArray(v) || v.length > 200 || v.some(x => typeof x !== 'string' || x.length > 4000)) throw new Error(`${name}必须是文本数组（最多 200 条）`); };
   choice(c.mode, ['preview', 'auto'], '发送模式');
+  for (const key of ['enabled','luckyBag','redPacket','nativePassword']) if (typeof c.rewards[key] !== 'boolean') throw new Error('福袋红包自动参与开关无效');
+  if (typeof c.rewards.entryXPath !== 'string' || c.rewards.entryXPath.length > 2000 || c.rewards.entryXPath && !c.rewards.entryXPath.startsWith('/')) throw new Error('福袋入口 XPath 应以 / 开头，最多 2000 字符');
   if (typeof c.automation.autoStart !== 'boolean' || typeof c.gift.batchEnabled !== 'boolean') throw new Error('自动开启或合并感谢开关无效');
   if (typeof c.timersEnabled !== 'boolean') throw new Error('定时消息开关无效');
   for (const key of ['enabled','announceLifecycle','reportEnabled','midnightEnabled','aiEnabled']) if (typeof c.pkOperations[key] !== 'boolean') throw new Error('PK 播报开关无效');
@@ -239,6 +244,7 @@ export class Engine {
     this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity;
     this.pk = new PKTracker({ now });
     this.liveMetrics = new LiveMetrics({now});
+    this.liveMode = new LiveModeTracker({now});
     this.pkSeen = new Map();
     this.roomData = {stats:null,audience:null,activities:[]};
     this.anchorStats = new AnchorStats({now});
@@ -266,7 +272,7 @@ export class Engine {
       timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen), milestoneSession:this.milestoneSession,
       moderation:this.moderation.snapshot(), history: this.history.slice(-80), contextChat:this.contextChat.slice(-100),replyEvents:this.replyEvents.slice(-40),stats: this.stats, serial: this.serial,
       lastInteraction: this.lastInteraction, lastChat: this.lastChat,
-      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), audience:this.audience.snapshot()
+      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), liveMode:this.liveMode.snapshot(), audience:this.audience.snapshot()
       , pk: this.pk.export(), roomData:this.roomData, anchorStats:this.anchorStats.snapshot(), pkOperations:this.pkOperations.snapshot()
     });
   }
@@ -306,6 +312,7 @@ export class Engine {
     this.anchorStats.restore(snapshot.anchorStats || {});
     this.pkOperations.restore(snapshot.pkOperations);
     this.liveMetrics.restore(snapshot.liveMetrics);
+    this.liveMode.restore(snapshot.liveMode);
     if (snapshot.roomData && typeof snapshot.roomData === 'object') this.roomData = {
       stats:snapshot.roomData.stats && typeof snapshot.roomData.stats === 'object' ? snapshot.roomData.stats : null,
       audience:snapshot.roomData.audience && typeof snapshot.roomData.audience === 'object' ? snapshot.roomData.audience : null,
@@ -512,6 +519,10 @@ export class Engine {
     try { this.ingestEvent(event); } finally { this.changed(); }
   }
   ingestPK(event) {
+    if (isLiveModeEvent(event)) {
+      this.liveMode.ingest(event, {anchorId:this.config.anchorId});
+      if (event.type !== 'room-state') return true;
+    }
     if (!PK_EVENT_TYPES.has(event?.type) && !['room-state','gift','chat'].includes(event?.type)) return false;
     // The read-only PK path runs before the durable interaction inbox. Use an
     // independent bounded identity map so journal replay cannot count it twice.
@@ -533,6 +544,7 @@ export class Engine {
       for (const side of ['self','opponent']) if (Number.isFinite(normalized[`${side}Score`])) normalized[`${side}ScoreMeta`] = {...normalized[`${side}ScoreMeta`],final:true};
     }
     const state = this.pk.ingest(normalized);
+    this.liveMode.ingest(normalized, {anchorId:this.config.anchorId,pk:state});
     if (state?.key) this.anchorStats.ingestBattle(state);
     this.pkOperations.lifecycle(normalized, state);
     return true;
