@@ -162,3 +162,38 @@ test('管理提交前重新核对权限、账号和房间；服务端拒绝与�
     }
   }finally{f.dom.window.close();}
 });
+
+test('达到票据容量后，五分钟过期使能力恢复且旧票据不能重发',async t=>{
+  let now=1800000000000;t.mock.method(Date,'now',()=>now);const f=fixture();
+  try {
+    let first;
+    for(let i=0;i<128;i++){const ticket=f.sender.prepare('chat');assert.equal(ticket.available,true);first ||= ticket.token;}
+    assert.equal(f.sender.available('chat'),false);
+    now+=300001;
+    assert.equal(f.sender.available('chat'),true);
+    assert.equal((await f.sender.commit(first,'过期消息')).submitted,false);
+    const next=f.sender.prepare('chat');assert.equal(next.available,true);
+    assert.equal((await f.sender.commit(next.token,'正常消息')).submitted,true);assert.equal(f.requests.length,1);
+  }finally{f.page.close();}
+});
+
+test('点赞准备响应迟到时取消或超时都不返回可用会话，并注销已创建票据',async()=>{
+  for(const mode of ['abort','timeout']) {
+    const f=fixture(),controller=new AbortController();let complete,cancel;
+    f.page.__STORE__.roomStore.roomInfo.room.status=2;f.page.__STORE__.roomStore.roomInfo.room.room_auth={Digg:true};
+    f.page.setTimeout=callback=>{cancel=callback;return 1;};f.page.clearTimeout=()=>{};
+    const bridge=new RequestBridgeClient(f.page,message=>{
+      const command=message.command;
+      if(command.type==='cancel')return Promise.resolve({ok:true});
+      if(command.operation==='stop-like')return Promise.resolve({ok:true,value:f.sender.stopLike(command.token)});
+      const prepared=f.sender.prepareLike();assert.equal(prepared.available,true);
+      return new Promise(resolve=>{complete=()=>resolve({ok:true,value:prepared});});
+    });
+    try {
+      const pending=bridge.prepareLike({signal:controller.signal});
+      if(mode==='abort')controller.abort();else await cancel();
+      complete();assert.equal((await pending).available,false,mode);
+      assert.equal(f.sender.prepareLike().available,true,mode+' 必须注销迟到会话');assert.equal(f.requests.length,0);
+    }finally{f.page.close();}
+  }
+});

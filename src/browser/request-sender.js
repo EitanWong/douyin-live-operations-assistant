@@ -60,9 +60,13 @@ export class PageRequestSender {
       payload:{content, common:{msg_id:msg_id_str}, user, rtf_content_v2}, show_identity, identity_label});
     return true;
   }
+  pruneTickets(now = Date.now()) {
+    for (const [id,ticket] of this.tickets) if (now-ticket.at > 300000) this.tickets.delete(id);
+  }
   available(channel = 'chat') {
     if (!['chat','admin'].includes(channel)) return false;
     try {
+      this.pruneTickets();
       const context = this.context();
       return Boolean(context && typeof context.userId === 'string' && /^\d+$/.test(context.userId)
         && this.client() && (channel === 'admin' ? context.admin : this.chatDisplay()) && this.tickets.size < 128);
@@ -78,7 +82,7 @@ export class PageRequestSender {
       // flow. Otherwise the server echo is deliberately hidden on this page.
       if (channel === 'chat' && !this.chatDisplay()) return {available:false};
       const now = Date.now();
-      for (const [id,ticket] of this.tickets) if (now-ticket.at > 300000) this.tickets.delete(id);
+      this.pruneTickets(now);
       if (this.tickets.size >= 128) return {available:false};
       const token = this.page.crypto.randomUUID();
       this.tickets.set(token, {context,client,channel,at:now});
@@ -132,13 +136,20 @@ export class RequestBridgeClient {
     const unavailable=()=>operation.startsWith('prepare')?{available:false}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
     if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const id=this.page.crypto.randomUUID();
-    const cancel=async()=>{try {await this.send({type:'page-command',command:{type:'cancel',id}});}catch {}};
+    let canceled=false;
+    const cancel=async()=>{canceled=true;try {await this.send({type:'page-command',command:{type:'cancel',id}});}catch {}};
     signal?.addEventListener('abort',cancel,{once:true});
     const timer=this.page.setTimeout(cancel,timeout);
     try {
       // Await the actual injected request, including after cancellation. Unknown
       // in-flight work continues to block unsafe replacement in the tool host.
       const result=await this.send({type:'page-command',command:{type:'send-api',id,operation,...payload}});
+      if(canceled && operation.startsWith('prepare')) {
+        // MAIN may have completed preparation before its reply was canceled.
+        // Revoke that session before allowing another attempt.
+        if(operation==='prepare-like' && result?.ok && typeof result.value?.token==='string')await this.stopLike(result.value.token);
+        return unavailable();
+      }
       return result?.ok && this.context.current() ? result.value : unavailable();
     } catch { return unavailable(); }
     finally {this.page.clearTimeout(timer);signal?.removeEventListener('abort',cancel);}

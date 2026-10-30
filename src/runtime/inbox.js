@@ -37,6 +37,7 @@ export class EventInbox {
   status() { return {...this.health,pending:this.queue.length-this.head,bytes:this.bytes+this.quarantineBytes,quarantined:this.quarantine.length,blocked:this.blocked}; }
   emit() { this.onStatus(this.status()); }
   admit(event, front = false) {
+    if (this.closed) return Promise.resolve(false);
     const bytes = serializedBytes(event);
     if (bytes == null) {
       this.health = {...this.health,state:'degraded',code:'INVALID_EVENT',reason:'事件无法安全序列化，已丢弃'};
@@ -76,7 +77,7 @@ export class EventInbox {
           try { await this.handle(item.event); item.resolve(true); done = true; break; }
           catch (error) {
             const code = failureCode(error);
-            this.health = {...this.health,state:'retrying',code,reason:String(error.message || error)}; this.emit();
+            this.health = {...this.health,state:'retrying',code,reason:String(error?.message || error)}; this.emit();
             if (['STORAGE_QUOTA','STORAGE_PRESSURE','JOURNAL_LIMIT','BACKPRESSURE','CONTEXT_INVALID'].includes(code)) { this.blocked = true; break; }
             if (attempt < 3 && code !== 'INVALID_EVENT') { await this.wait(250 * 2 ** (attempt-1)); continue; }
             if (this.quarantine.length >= this.quarantineLimit) { this.blocked = true; break; }

@@ -59,7 +59,7 @@ export class AutoLike {
     this.stopReason = reason;
     ++this.generation; this.cancel(this.timer); this.timer = null;
     const token = this.token; this.token = null;
-    if (token) void Promise.resolve(this.transport.stopLike(token)).catch(()=>{});
+    if (token) { try { void Promise.resolve(this.transport.stopLike(token)).catch(()=>{}); } catch {} }
     if (!this.busy) this.lock.release();
     this.update({phase:this.busy ? 'stopping':'stopped',reason:this.busy ? `${reason}；正在等待已提交批次结果` : reason});
   }
@@ -80,7 +80,7 @@ export class AutoLike {
       if (generation !== this.generation) return;
       if (result?.submitted !== true || result.count !== count) { this.stop(result?.reason || '点赞结果未知，已停止，不自动重试'); return; }
       if (this.state.accepted >= this.config.target) { this.stop('已达到本次目标'); this.update({phase:'completed'}); return; }
-      this.timer = this.schedule(()=>{this.timer=null;void this.tick();},Math.round(this.config.intervalSec*1000));
+      this.timer = this.schedule(()=>{this.timer=null;return this.tick();},Math.round(this.config.intervalSec*1000));
     } catch { if (generation === this.generation) this.stop('点赞请求异常，已停止，不自动重试'); }
     finally {
       this.busy = false;

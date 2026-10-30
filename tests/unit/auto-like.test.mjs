@@ -160,3 +160,11 @@ test('默认浏览器定时器保持正确 receiver 并能继续第二批',async
   try{await runner.start({batch:3,intervalSec:2,target:7});assert.equal(timers[0].ms,2000);await timers.shift().fn();await new Promise(setImmediate);assert.equal(runner.state.accepted,6);runner.stop();}
   finally{globalThis.setTimeout=originalSet;globalThis.clearTimeout=originalClear;}
 });
+
+test('停止接口同步抛错仍撤销后续批次、发布停止状态并释放运行锁',async()=>{
+  const f=controller({stopLike:()=>{throw Error('extension invalidated');}});
+  await f.runner.start(AUTO_LIKE_DEFAULTS);
+  assert.doesNotThrow(()=>f.runner.stop());
+  assert.equal(f.runner.state.phase,'stopped');assert.equal(f.lock.held,false);assert.equal(f.timers.length,0);
+  await f.runner.tick();assert.equal(f.requests.length,1);
+});
