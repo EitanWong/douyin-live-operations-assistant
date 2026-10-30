@@ -38,7 +38,7 @@
 | 生命周期 | `src/runtime/live-mode.js`、`src/core/auto-like.js` 的在途结算接口，以及 `src/app.js` 和 `src/core/engine.js` 的相关接线：及时停止当前场次任务并排除旧场次下播消息 |
 | 展示与配置 | `src/ui/panel.js`、`src/ui/navigation.js` 的工具注册、按钮与状态接线；主播数据导航位置保持提交前行为 |
 | 共享记录 | `extension/background.js`、`extension/content.js`、`extension/durable-storage.js` 的福袋记录接口：按来源房间限制访问，后台重启后仍可去重 |
-| 依赖及构建 | 固定 `cordis@4.0.0-rc.12`、其锁定依赖 Cosmokit、许可证；`scripts/build.mjs`、`scripts/check.mjs` 和 `demo/index.html` 的内置打包与本地模拟器接线 |
+| 依赖及构建 | 固定 `cordis@4.0.0-rc.12` 及 lockfile 中的 Cosmokit、`@standard-schema/spec`；后者只用于类型声明。运行产物保留 Cordis／Cosmokit 许可证；`scripts/build.mjs`、`scripts/check.mjs` 和 `demo/index.html` 提供内置打包与本地模拟器接线 |
 | 验证与说明 | 福袋协议、领域、自动参与及工具测试，扩展产物与存储测试，使用指南、工具接口文档、本报告和行动日志 |
 
 没有提交搜索／意图识别依赖、AI 问答、贡献榜播报、图表、PK 策略或其他界面调整；原始 HAR、恢复 JSON、实际账号 UID 和 URL 令牌没有进入提交。
@@ -54,4 +54,4 @@
 - 独立副本生产依赖审计为 0 个已知漏洞。crapper、dryer、mutator 在 PATH 及可调用工具中均不可用，**未执行**；不将测试或审计当作这些工具的结果。
 - 本地模拟器导航与生产面板状态夹具完成 1440×960、390×844 浏览器检查；长摘要自然换行，页面与工作区无横向溢出，自动参与和口令参与保持默认关闭。Impeccable 最终检测无发现。截图位于本机忽略目录 `output/playwright/`；唯一控制台加载错误为测试夹具未提供 favicon。
 
-最终提交／推送信息见行动日志。真实直播自动参与、真实红包领取、Chrome 重载后长时间多标签页接管仍未完成在线验收；平台页面改版、不可访问的跨域活动和缺失协议数据仍可能使工具等待手动处理。当前实现不保证中奖。
+功能提交 `57e7403` 已推送 `origin/dev`；详细交付、清理与后续独立工作区差异见行动日志。准确产物保留在本机 `output/rewards-development-2026-10-31/delivery-dist`，未重载真实直播页。真实直播自动参与、真实红包领取、Chrome 重载后长时间多标签页接管仍未完成在线验收；平台页面改版、不可访问的跨域活动和缺失协议数据仍可能使工具等待手动处理。当前实现不保证中奖。
