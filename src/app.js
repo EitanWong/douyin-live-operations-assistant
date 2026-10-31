@@ -278,7 +278,7 @@ export function boot(options = {}) {
       }
       let journalWrite = null;
       const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
-      if ((engine.running || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
+      if ((engine.running || tools?.state('giveaway')?.receiving || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
         // Incoming messages are structured-cloned in the extension, but direct
         // integrations/tests may provide frozen objects. Work on a shallow copy
         // before attaching recovery metadata so a read-only event cannot abort
@@ -309,6 +309,11 @@ export function boot(options = {}) {
       } catch (error) { log('error', `互动资料更新失败：${error.message}`); }
       engine.ingest(event);
       stopEndedTools();
+      if(['chat','gift'].includes(liveEvent.type)) {
+        await tools?.ready;
+        try{await tools?.dispatch('event',liveEvent);}
+        catch(error){if(journalWrite)await journalWrite;throw error;}
+      }
       if (journalWrite) {
         void (async () => {
           try {
@@ -330,7 +335,7 @@ export function boot(options = {}) {
       refresh(); wakeSender();
       if ((status.ingestion?.gaps || 0)+(status.bridgeGaps || 0)+(status.frameGaps || 0)+(status.capture?.gaps || 0) !== previousGaps || JSON.stringify(acknowledgedRuntimeAlert) !== previousAcknowledgement) persistRuntime();
     },
-    shouldReadChat: () => engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
+    shouldReadChat: () => tools?.state('giveaway')?.phase==='running' || engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
@@ -353,6 +358,8 @@ export function boot(options = {}) {
     getRoomId:()=>identity.live?.roomId || engine.liveMode?.roomId || '',
     current:()=>!closed && !suspended && roomContext.current(),unavailable:()=>persistenceDisabled,liveStatus:()=>identity.live?.status,
     rewardStorage:options.rewardStorage || {get:key=>get(key,[]),set},
+    giveawayStorage:options.giveawayStorage || {get:key=>get(key,null),set},
+    giveawayPendingEvents:options.journal?.pending ? after=>options.journal.pending(after) : undefined,
     saveConfig:async (key,value)=>{
       if(closed || suspended || persistenceDisabled || !roomContext.current())throw new Error('页面状态已变化，请刷新后保存');
       const c=copy(engine.config);c[key]=value;validateConfig(c);await set(configKey,c);engine.update(c);

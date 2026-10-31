@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createGiveaway, enterGiveaway, drawGiveaway, validateGiveawayConfig, giveawayCSV} from '../../src/core/giveaway.js';
+import {createGiveaway, enterGiveaway, drawGiveaway, validateGiveawayConfig, giveawayCSV,parseGiveawayState,secureRandomInt} from '../../src/core/giveaway.js';
 
 const config = overrides => ({prize:'直播周边',winners:2,durationSec:60,chatEnabled:true,keyword:'参与抽奖',giftEnabled:true,gifts:'玫瑰, 小心心',giftMin:3,...overrides});
 const round = overrides => createGiveaway(config(overrides),{id:'round-1',room:'123',broadcastId:'room-1',now:1000});
@@ -50,4 +50,18 @@ test('CSV 包含每轮规则、参与方式、用户标识与中奖记录，防�
   const r=drawGiveaway(enterGiveaway(round({prize:'礼盒,"特别版"'}),{...chat('1'),user:{id:'1',name:'=SUM(1,2)'}},2000),61000,()=>0);
   const csv=giveawayCSV({version:1,rounds:[r,drawGiveaway(round(),61000,()=>0)]});
   assert.ok(csv.startsWith('\ufeff'));assert.match(csv,/用户ID/);assert.match(csv,/'=SUM/);assert.match(csv,/礼盒,""特别版""/);assert.match(csv,/中奖/);assert.match(csv,/无人参与/);
+});
+
+test('拒绝冲突或损坏的持久轮次，历史结果不能包含陌生中奖者',()=>{
+  const r=round();assert.deepEqual(parseGiveawayState(null,'123'),{version:1,rounds:[]});
+  assert.deepEqual(parseGiveawayState({version:1,rounds:[r]},'123').rounds[0],r);
+  for(const bad of [{version:2,rounds:[]},{version:1,rounds:[r,r]},{version:1,rounds:[{...r,room:'other'}]},{version:1,rounds:[{...r,winnerIds:['stranger']}]},{version:1,rounds:[{...r,entrants:[{userName:'匿名'}]}]}])assert.throws(()=>parseGiveawayState(bad,'123'));
+  const entered=enterGiveaway(r,chat('1'),2000);
+  assert.throws(()=>parseGiveawayState({version:1,rounds:[{...entered,winnerIds:['1']}]},'123'));
+  assert.throws(()=>parseGiveawayState({version:1,rounds:[{...entered,status:'drawn',closedAt:2000,winnerIds:['1']}]},'123'));
+});
+
+test('安全随机抽取通过拒绝采样去掉取模偏差',t=>{
+  const samples=[0xffffffff,8];const mock=t.mock.method(crypto,'getRandomValues',buffer=>{buffer[0]=samples.shift();return buffer;});
+  assert.equal(secureRandomInt(3),2);assert.equal(mock.mock.callCount(),2);
 });

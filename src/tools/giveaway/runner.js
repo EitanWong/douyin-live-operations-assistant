@@ -51,7 +51,7 @@ export class GiveawayRunner {
       if(!this.storage){this.publish('抽奖存储尚未就绪');return;}
       await this.load();
       await this.check();
-      this.publish(this.current() ? this.owned ? '已恢复本轮抽奖' : '本轮由其他页面运行，可查看记录' : '尚未开始抽奖');
+      this.publish(this.current() ? this.owned ? '已恢复本轮抽奖' : this.guard() || '本轮由其他页面运行，可查看记录' : this.data.rounds.at(-1)?.reason || '尚未开始抽奖');
     });
   }
   start(value) {

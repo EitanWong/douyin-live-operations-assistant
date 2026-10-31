@@ -87,6 +87,8 @@ export function parseGiveawayState(value,room) {
       || !Number.isFinite(round.startedAt) || !Number.isFinite(round.endsAt) || round.endsAt<=round.startedAt
       || !Array.isArray(round.entrants) || !Array.isArray(round.giftProgress) || !Array.isArray(round.winnerIds)) throw new Error('抽奖轮次记录无效');
     validateGiveawayConfig(round.config);
+    if(round.status==='running' ? round.closedAt!==null || round.winnerIds.length!==0
+      : !Number.isFinite(round.closedAt) || round.closedAt<round.startedAt || (round.status==='drawn' ? round.closedAt<round.endsAt || round.winnerIds.length>round.config.winners : round.winnerIds.length!==0)) throw new Error('抽奖结果状态无效');
     if (round.entrants.some(row=>!row || !boundedText(row.userId,200) || typeof row.userName!=='string' || !Array.isArray(row.sources)
       || !row.sources.length || row.sources.some(source=>!['chat','gift'].includes(source)) || !Number.isFinite(row.enteredAt) || !integer(row.giftCount,0,Number.MAX_SAFE_INTEGER))
       || new Set(round.entrants.map(row=>row.userId)).size!==round.entrants.length
@@ -103,7 +105,7 @@ export function giveawayAnnouncement(round) {
   return names.length ? `【抽奖结果】${round.config.prize}，恭喜：${names.join('、')}。共 ${round.entrants.length} 人参与。` : `【抽奖结果】${round.config.prize}：本轮无人参与，未产生中奖者。`;
 }
 
-const csvCell = value => '"'+String(value ?? '').replace(/^[=+\-@\t\r\n]/,"'$&").replaceAll('"','""')+'"';
+const csvCell = value => '"'+String(value ?? '').replace(/^(?:\s*[=+\-@]|[\t\r\n]|\d{15,}$)/,"'$&").replaceAll('"','""')+'"';
 export function giveawayCSV(state) {
   const rows=[['轮次ID','直播间','直播场次','奖品','计划中奖人数','倒计时秒数','参与弹幕','参与礼物','礼物门槛','开始时间','截止时间','开奖时间','状态','参与人数','用户ID','昵称','参与方式','入池时间','指定礼物数量','结果']];
   for(const round of state.rounds) {

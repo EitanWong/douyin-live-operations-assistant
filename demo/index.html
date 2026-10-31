@@ -152,6 +152,7 @@ function giftArtwork(gift, className='gift-art') {
 function emit(e) {
   const event = { ...e, id: `demo-${++serial}`, at: Date.now(), receivedAt: Date.now() };
   api.engine.ingest(event); api.rememberUser(event);
+  void api.tools.dispatch('event',event).catch(error=>api.panel.toast(error.message,true));
   if(e.type==='chat') addRoomMessage({name:e.user?.name||'观众',text:e.text});
   else if(e.type==='enter') addRoomMessage({type:'event',text:`欢迎 ${e.user?.name||'观众'} 来到直播间`});
   else if(e.type==='gift') addGiftMessage(e);
