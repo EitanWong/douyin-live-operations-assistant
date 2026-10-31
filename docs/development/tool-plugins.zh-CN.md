@@ -149,3 +149,7 @@ Cordis API 仅封装在 `cordis-adapter.js`；业务工具和 UI 继续依赖项
 `dispatch` 可靠分发弹幕／礼物事件并等待工具保存，区别于可合并的 `notify` 状态提示。保存失败时核心仍接收事件，抽奖保留待处理日志并进入失败状态；重建工具先恢复截止前的日志，再开奖。后台通过 `giveaway-read/write` 按来源房间限制记录，并在 IndexedDB 事务提交后返回，错误不会清空旧数据。工具关闭先撤销未来任务、等待当前写入，再释放租约。
 
 使用 `tests/unit/giveaway*.test.mjs`、`tests/integration/giveaway.test.mjs` 和构建后的扩展后台测试验证规则、跨页接管、恢复与存储边界。
+
+抽奖状态现为 `version:2`：`config.prizes[{name,count}]` 是奖品和名额的唯一来源，`awards[{userId,prizeIndex}]` 保存中奖者与奖品索引，`weights[{userId,weight}]` 配置指定观众权重（其他默认为 1），`anchorGuaranteed` 与开轮时快照 `round.anchorId` 控制主播参与必中。旧 `version:1` 在读取边界将单奖品和 `winnerIds` 转换，保留原结果；下一次写入统一保存新版。抽取使用整数权重和加密随机拒绝采样，无放回分配。主播参与必中仅对已入池 UID 生效，占用首项奖品一个名额。
+
+`gift.catalog` 是抽奖唯一声明的平台操作能力，不需房间写入锁，走 MAIN 固定 `gift-catalog` 桥和原生礼物目录读取；不读取钱包和送礼待核对记录，不授予 `gift.prepare`／`gift.commit`。目录、搜索和草稿仅属于当前视图，参与与开奖记录仍由房间单写者持久化。
