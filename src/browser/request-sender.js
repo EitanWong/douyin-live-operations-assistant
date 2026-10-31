@@ -9,6 +9,7 @@ import { GiftRequests } from './gift-requests.js';
 export class PageRequestSender {
   constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); this.gifts = new GiftRequests(this); }
   giftSnapshot(options) { return this.gifts.snapshot(options); }
+  giftCatalog(options) { return this.gifts.catalog(options); }
   prepareGift(config,options) { return this.gifts.prepare(config,options); }
   commitGift(token,count,sequence,options) { return this.gifts.commit(token,count,sequence,options); }
   stopGift(token) { return this.gifts.stop(token); }
@@ -154,7 +155,7 @@ export class PageRequestSender {
 export class RequestBridgeClient {
   constructor(page,send=payload=>page.chrome.runtime.sendMessage(payload)) { this.page=page;this.send=send;this.context=new RoomContext(page);this.room=this.context.room; }
   async call(operation,payload,timeout,{signal}={}) {
-    const read=operation==='gift-snapshot' || operation==='acknowledge-gift';
+    const read=['gift-snapshot','gift-catalog','acknowledge-gift'].includes(operation);
     const unavailable=()=>operation.startsWith('prepare') || read ? {available:false,reason:'页面请求未完成，请刷新数据后重试'}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
     if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const id=this.page.crypto.randomUUID();
@@ -180,6 +181,7 @@ export class RequestBridgeClient {
   }
   prepareModeration(action,target) {return this.call('prepare-moderation',{action,target},800);}
   giftSnapshot(options) {return this.call('gift-snapshot',{},20000,options);}
+  giftCatalog(options) {return this.call('gift-catalog',{},20000,options);}
   prepareGift(config,options) {return this.call('prepare-gift',{config},20000,options);}
   commitGift(token,count,sequence,options) {return this.call('commit-gift',{token,count,sequence},30000,options);}
   stopGift(token) {return this.call('stop-gift',{token},800);}

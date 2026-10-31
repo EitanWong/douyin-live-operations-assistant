@@ -891,13 +891,13 @@ test('抽奖结果持久保存在后台数据库，重启可恢复，拒绝越�
   const w=await worker(),key='live-assistant:giveaway:1';
   let round=createGiveaway({prize:'礼盒',winners:1,durationSec:2,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false},{id:'round-1',room:'1',now:1000});
   round=enterGiveaway(round,{type:'chat',text:'参与抽奖',at:1500,user:{id:'9999999999999999999',name:'小雨'}},1500);
-  const state={version:1,rounds:[drawGiveaway(round,3000,()=>0)]};
+  const state={version:2,rounds:[drawGiveaway(round,3000,()=>0)]};
   assert.equal((await w.send({type:'giveaway-write',key,value:state})).ok,true);
   const restored=await worker(w.values,w.indexedDB);
   assert.deepEqual((await restored.send({type:'giveaway-read',key})).value,state);
   assert.equal((await restored.send({type:'giveaway-read',key:'live-assistant:giveaway:2'})).ok,false);
-  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:1,rounds:[{...round,room:'2'}]}})).ok,false);
-  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:1,rounds:[{...round,winnerIds:['stranger']}]}})).ok,false);
+  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:2,rounds:[{...round,room:'2'}]}})).ok,false);
+  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:2,rounds:[{...round,awards:[{userId:'stranger',prizeIndex:0}]}]}})).ok,false);
   assert.deepEqual((await restored.send({type:'giveaway-read',key})).value,state);
   assert.equal(w.values[key],undefined,'完整记录不落在 chrome.storage.local 配额内');
 });

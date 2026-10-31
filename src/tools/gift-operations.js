@@ -2,6 +2,7 @@ import {validateAutoGift} from '../core/auto-gift.js';
 
 export function giftOperations(transport,selfId) {
   return {
+    'gift.catalog':{lock:false,run:(_,ctx)=>transport.giftCatalog({signal:ctx.signal})},
     'gift.read':{lock:false,run:(_,ctx)=>transport.giftSnapshot({signal:ctx.signal})},
     'gift.acknowledge':{lock:false,run:id=>{
       if(typeof id!=='string' || id.length>64)throw new Error('待核对记录标识无效');

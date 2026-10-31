@@ -66,6 +66,15 @@ export class GiftRequests {
       return {available:true,...await this.read(context,api,signal)};
     } catch (error) {return {available:false,balanceUnits:null,gifts:[],reason:error.message};}
   }
+  async catalog({signal}={}) {
+    try {
+      const context=this.context(false),api=this.sender.nativeGiftApi();
+      if(!api)throw new Error('网页礼物模块尚未加载，请先打开网页礼物面板再刷新');
+      const response=await api.Xq({room_id:context.roomId,gift_scene:context.scene});
+      if(signal?.aborted || !same(context,this.context(false)))throw new Error('账号或直播间已变化，请重新读取目录');
+      return {available:true,gifts:parseGiftCatalog(responseData(response),context.scene),at:Date.now()};
+    } catch(error) {return {available:false,gifts:[],reason:error.message};}
+  }
   async prepare(value,{signal}={}) {
     if (this.preparing || this.pending || this.session) return {available:false,reason:'本页已有送礼任务，请先停止'};
     this.preparing=true;const generation=++this.generation;let lease;

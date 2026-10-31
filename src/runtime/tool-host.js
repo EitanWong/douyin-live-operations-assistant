@@ -12,7 +12,7 @@ export function createPageTools({page,room,engine,adapter,demo,current,unavailab
     : !demo && (!adapter.healthy() || liveStatus() && liveStatus()!=='live') ? '直播已结束或连接中断，已停止工具任务'
     : id==='rewards' && !engine.config.selfId ? '请先登录抖音并识别当前账号' : '';
   return new ToolRuntime({registry:bundledTools,room,guard,createLock:key=>new RoomLock({room:key}),
-    getConfig:id=>engine.config[id],services:{page,log,selfId:()=>engine.config.selfId,rewardStorage,giveawayStorage,giveawayPendingEvents,
+    getConfig:id=>engine.config[id],services:{page,log,selfId:()=>engine.config.selfId,anchorId:()=>engine.config.anchorId,rewardStorage,giveawayStorage,giveawayPendingEvents,
       rewardEvents:()=>engine.roomData.activities,roomId:getRoomId || (()=>engine.liveMode?.roomId || '')},
     operations:toolOperations({selfId:()=>engine.config.selfId,saveConfig,getRewardsConfig:()=>engine.config.rewards,
       transport:demo ? {...demoGiftTransport(),prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,

@@ -9,7 +9,7 @@ const gift = (id,count,groupId='combo-1',extra={}) => ({...chat(id),type:'gift',
 
 test('抽奖规则校验与快照固定，至少开放一种参与方式',()=>{
   const input=config();const r=createGiveaway(input,{id:'r',room:'123',now:1000});input.prize='已改';
-  assert.equal(r.config.prize,'直播周边');assert.equal(r.endsAt,61000);
+  assert.equal(r.config.prizes[0].name,'直播周边');assert.equal(r.endsAt,61000);
   for(const invalid of [{prize:''},{winners:0},{winners:1.5},{durationSec:0},{chatEnabled:false,giftEnabled:false},{keyword:' '},{gifts:''},{giftMin:0}]) {
     assert.throws(()=>validateGiveawayConfig(config(invalid)));
   }
@@ -41,27 +41,32 @@ test('倒计时结束才开奖、无放回抽取，人数不足或无人参与�
   let r=round();for(const id of ['1','2','3'])r=enterGiveaway(r,chat(id),2000);
   assert.equal(drawGiveaway(r,60000,()=>0),r);
   const drawn=drawGiveaway(r,61000,()=>0);
-  assert.equal(drawn.status,'drawn');assert.equal(drawn.winnerIds.length,2);assert.equal(new Set(drawn.winnerIds).size,2);
+  assert.equal(drawn.status,'drawn');assert.equal(drawn.awards.length,2);assert.equal(new Set(drawn.awards.map(row=>row.userId)).size,2);
   assert.equal(drawGiveaway(drawn,62000,()=>{throw Error('不可重抽');}),drawn);
-  assert.equal(drawGiveaway(enterGiveaway(round(),chat('1'),2000),61000,()=>0).winnerIds.length,1);
-  assert.deepEqual(drawGiveaway(round(),61000,()=>0).winnerIds,[]);
+  assert.equal(drawGiveaway(enterGiveaway(round(),chat('1'),2000),61000,()=>0).awards.length,1);
+  assert.deepEqual(drawGiveaway(round(),61000,()=>0).awards,[]);
 });
 test('CSV 包含每轮规则、参与方式、用户标识与中奖记录，防止公式注入',()=>{
   const r=drawGiveaway(enterGiveaway(round({prize:'礼盒,"特别版"'}),{...chat('1'),user:{id:'1',name:'=SUM(1,2)'}},2000),61000,()=>0);
-  const csv=giveawayCSV({version:1,rounds:[r,drawGiveaway(round(),61000,()=>0)]});
+  const csv=giveawayCSV({version:2,rounds:[r,drawGiveaway(round(),61000,()=>0)]});
   assert.ok(csv.startsWith('\ufeff'));assert.match(csv,/用户ID/);assert.match(csv,/'=SUM/);assert.match(csv,/礼盒,""特别版""/);assert.match(csv,/中奖/);assert.match(csv,/无人参与/);
 });
 
 test('拒绝冲突或损坏的持久轮次，历史结果不能包含陌生中奖者',()=>{
-  const r=round();assert.deepEqual(parseGiveawayState(null,'123'),{version:1,rounds:[]});
-  assert.deepEqual(parseGiveawayState({version:1,rounds:[r]},'123').rounds[0],r);
-  for(const bad of [{version:2,rounds:[]},{version:1,rounds:[r,r]},{version:1,rounds:[{...r,room:'other'}]},{version:1,rounds:[{...r,winnerIds:['stranger']}]},{version:1,rounds:[{...r,entrants:[{userName:'匿名'}]}]}])assert.throws(()=>parseGiveawayState(bad,'123'));
+  const r=round();assert.deepEqual(parseGiveawayState(null,'123'),{version:2,rounds:[]});
+  assert.deepEqual(parseGiveawayState({version:2,rounds:[r]},'123').rounds[0],r);
+  for(const bad of [{version:3,rounds:[]},{version:2,rounds:[r,r]},{version:2,rounds:[{...r,room:'other'}]},{version:2,rounds:[{...r,awards:[{userId:'stranger',prizeIndex:0}]}]},{version:2,rounds:[{...r,entrants:[{userName:'匿名'}]}]}])assert.throws(()=>parseGiveawayState(bad,'123'));
   const entered=enterGiveaway(r,chat('1'),2000);
-  assert.throws(()=>parseGiveawayState({version:1,rounds:[{...entered,winnerIds:['1']}]},'123'));
-  assert.throws(()=>parseGiveawayState({version:1,rounds:[{...entered,status:'drawn',closedAt:2000,winnerIds:['1']}]},'123'));
+  assert.throws(()=>parseGiveawayState({version:2,rounds:[{...entered,awards:[{userId:'1',prizeIndex:0}]}]},'123'));
+  assert.throws(()=>parseGiveawayState({version:2,rounds:[{...entered,status:'drawn',closedAt:2000,awards:[{userId:'1',prizeIndex:0}]}]},'123'));
 });
 
 test('安全随机抽取通过拒绝采样去掉取模偏差',t=>{
   const samples=[0xffffffff,8];const mock=t.mock.method(crypto,'getRandomValues',buffer=>{buffer[0]=samples.shift();return buffer;});
   assert.equal(secureRandomInt(3),2);assert.equal(mock.mock.callCount(),2);
+});
+test('加权抽取支持超过 32 位的整数总权重，非法范围直接拒绝',t=>{
+  const values=[[0x1fffff,0xffffffff],[1,5]];t.mock.method(crypto,'getRandomValues',buffer=>{buffer.set(values.shift());return buffer;});
+  assert.equal(secureRandomInt(0x100000001),4);
+  for(const max of [0,-1,NaN,1.5,Number.MAX_SAFE_INTEGER+1])assert.throws(()=>secureRandomInt(max));
 });

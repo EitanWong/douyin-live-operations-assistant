@@ -1,10 +1,10 @@
-import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState,validateGiveawayConfig} from '../../core/giveaway.js';
+import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState,validateGiveawayConfig,GIVEAWAY_VERSION} from '../../core/giveaway.js';
 
 // All commands, ticks and event writes use one queue under one room lease.
 export class GiveawayRunner {
-  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',now=Date.now,randomInt,pendingEvents}) {
-    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,now,randomInt,pendingEvents});
-    this.key=`live-assistant:giveaway:${room}`;this.data={version:1,rounds:[]};this.tail=Promise.resolve();this.owned=false;this.closed=false;this.reason='尚未开始抽奖';
+  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',anchorId=()=>'',now=Date.now,randomInt,pendingEvents}) {
+    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,anchorId,now,randomInt,pendingEvents});
+    this.key=`live-assistant:giveaway:${room}`;this.data={version:GIVEAWAY_VERSION,rounds:[]};this.tail=Promise.resolve();this.owned=false;this.closed=false;this.reason='尚未开始抽奖';
   }
   current() { return this.data.rounds.find(round=>round.status==='running'); }
   assertOpen() { if(this.closed)throw new Error('抽奖工具已停用'); }
@@ -14,7 +14,7 @@ export class GiveawayRunner {
   }
   state() {
     const current=this.current();
-    return {phase:current ? this.owned ? 'running' : 'readonly' : 'idle',receiving:Boolean(current),reason:this.reason,now:this.now(),rounds:structuredClone(this.data.rounds)};
+    return {phase:current ? this.owned ? 'running' : 'readonly' : 'idle',receiving:Boolean(current),reason:this.reason,anchorId:this.anchorId(),now:this.now(),rounds:structuredClone(this.data.rounds)};
   }
   publish(reason=this.reason) { this.reason=reason;if(!this.closed)this.changed(this.state()); }
   async load() {
@@ -43,7 +43,7 @@ export class GiveawayRunner {
   async save(round) {
     this.assertOpen();
     const rounds=this.data.rounds.some(row=>row.id===round.id) ? this.data.rounds.map(row=>row.id===round.id ? round : row) : [...this.data.rounds,round];
-    const next={version:1,rounds};await this.storage.set(this.key,next);this.data=next;
+    const next={version:GIVEAWAY_VERSION,rounds};await this.storage.set(this.key,next);this.data=next;
     this.publish(round.reason || '正在接收本轮参与弹幕和礼物');
   }
   ready() {
@@ -62,7 +62,7 @@ export class GiveawayRunner {
       if(!await this.claim())throw new Error('其他页面正在运行本直播间抽奖，请在该页面操作');
       try {
         if(this.current())throw new Error('本轮抽奖尚未结束');
-        await this.save(createGiveaway(config,{id:crypto.randomUUID(),room:this.room,broadcastId:this.broadcastId(),now:this.now()}));
+        await this.save(createGiveaway(config,{id:crypto.randomUUID(),room:this.room,broadcastId:this.broadcastId(),anchorId:this.anchorId(),now:this.now()}));
       } finally {if(!this.current())this.release();}
     });
   }

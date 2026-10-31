@@ -3,6 +3,7 @@ export function demoGiftTransport() {
   const gifts=[['463','小心心',1,'推荐'],['791','玫瑰',1,'推荐'],['3773','热气球',520,'特效'],['789','嘉年华',30000,'特效'],['685','粉丝团灯牌',1,'粉丝团'],['5924','荣誉流星',7999,'等级']]
     .map(([id,name,price,category])=>({id,name,priceUnits:price*10,categories:[category],available:id!=='685',reason:id==='685'?'请先点亮粉丝团':''}));
   return {
+    giftCatalog:async()=>({available:true,gifts,at:Date.now()}),
     giftSnapshot:async()=>({available:true,gifts,balanceUnits,at:Date.now(),pending:null}),
     prepareGift:async config=>{session={token:crypto.randomUUID(),config};return {available:true,token:session.token,balanceUnits};},
     commitGift:async(token,count)=>{

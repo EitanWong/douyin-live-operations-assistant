@@ -18,6 +18,17 @@ function fixture(locks=webLocks()) {
   const sender={page,context:()=>context,nativeGiftApi:()=>api};
   return {dom,page,api,gift,calls,requests:new GiftRequests(sender),setContext:value=>{context=value;}};
 }
+test('抽奖只读礼物目录，不依赖钱包或待核对送礼记录，账号变更时拒绝迟到目录',async()=>{
+  const f=fixture();try {
+    f.api.sb=()=>assert.fail('选择抽奖礼物不读取钱包');
+    Object.defineProperty(f.page,'localStorage',{get(){throw Error('无关的送礼存储不可用');}});
+    f.page.__STORE__.roomStore.roomInfo.room.room_auth.Gift=false;
+    const result=await f.requests.catalog();assert.equal(result.available,true);assert.equal(result.gifts[0].id,'463');
+    assert.equal(result.balanceUnits,undefined);assert.equal(f.calls.length,0);
+    f.api.Xq=async()=>{f.setContext({roomId:'7702839019851270938',userId:'111',path:'123'});return {data:{status_code:0,data:{gifts:[f.gift]}}};};
+    assert.equal((await f.requests.catalog()).available,false);
+  }finally{f.dom.window.close();}
+});
 test('读取礼物及余额，准备绑定礼物/价格/预算，每批和重复桥投递只提交一次',async()=>{
   const f=fixture();try {
     const snapshot=await f.requests.snapshot();assert.equal(snapshot.balanceUnits,500);assert.equal(snapshot.gifts[0].id,'463');
