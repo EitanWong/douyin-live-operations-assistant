@@ -3,6 +3,8 @@ import { accessPage } from './page-access.js';
 import { ProtocolCache } from './protocol-cache.js';
 import { fanclubFrameContext, cleanFanclubSnapshot } from '../src/data/fanclub.js';
 import { validateEndpoint } from '../src/services/ai.js';
+import { validateSearchEndpoint, validateSearchBody } from '../src/services/search.js';
+import {validateMediaRequest,MEDIA_REQUEST_LIMIT} from '../src/services/media.js';
 import { GiftStore } from '../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
 import { installCollectionKeeper } from './collection-keeper.js';
@@ -40,7 +42,7 @@ const roomFromUrl = value => {
   } catch { return null; }
 };
 const isRoom = sender => sender.frameId === 0 && Boolean(roomFromUrl(sender.tab?.url)) && (!sender.url || roomFromUrl(sender.url) === roomFromUrl(sender.tab.url));
-const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|income-calibration:\d+|event:\d+:[a-z\d-]+|api-key:https?:\/\/[^\s/]+)$/.test(key);
+const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|income-calibration:\d+|event:\d+:[a-z\d-]+|(?:api-key|search-key|media-key):https?:\/\/[^\s/]+)$/.test(key);
 const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
@@ -142,7 +144,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       await storageReady;
       let value;
       if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
-      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
+      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
       else if (['rewards-read','rewards-write'].includes(message.type) && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
         if (typeof message.key !== 'string' || !new RegExp(`^live-assistant:rewards:${room}:[1-9]\\d{0,24}$`).test(message.key)) throw new Error('活动记录范围无效');
@@ -229,14 +231,18 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         if (config?.incomeEnabled === false) value = false;
         else value = await giftStore.record({ room, event, userKey: message.userKey, rate: message.rate, capturedAt:message.capturedAt });
       }
-      else if (message.type === 'ai' && isRoom(sender)) {
-        const url = validateEndpoint(message.url);
-        if (!await chrome.permissions.contains({origins:[`${new URL(url).protocol}//${new URL(url).hostname}/*`]})) throw new Error('请点击扩展图标，授权当前 AI 服务域名后重试');
-        if (typeof message.data !== 'string' || message.data.length > 100000) throw new Error('AI请求过大');
-        const body = JSON.parse(message.data); if (!Array.isArray(body.messages) || typeof body.model !== 'string') throw new Error('AI请求无效');
-        const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),25000);
+      else if (['ai','search','media'].includes(message.type) && isRoom(sender)) {
+        const searching=message.type==='search';
+        const provider=message.provider || (String(message.url).endsWith('/web-search') ? 'bocha' : 'tavily');
+        const url = searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
+        if (!await chrome.permissions.contains({origins:[`${new URL(url).protocol}//${new URL(url).hostname}/*`]})) throw new Error(`请点击扩展图标，授权当前${searching ? '搜索' : ' AI '}服务域名后重试`);
+        if (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : 100000)) throw new Error('AI请求过大');
+        const form=searching && provider==='searxng';
+        const body = form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
+        if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!Array.isArray(body.messages) || typeof body.model !== 'string') throw new Error('AI请求无效');
+        const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 8000 : 25000);
         try {
-          const response = await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:message.data});
+          const response = await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:message.data});
           const text = await response.text();
           value={status:response.status,responseText:text.slice(0,200000),finalUrl:response.url};
         } finally { clearTimeout(timeout); }

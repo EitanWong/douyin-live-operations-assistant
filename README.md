@@ -63,3 +63,6 @@ npm run dev
 [MIT](LICENSE)
 
 自动点赞入口：**扩展工具 → 自动点赞**，支持批量、间隔、目标及手动停止；拒绝或结果未知时停止且不重试。协议依据与验证边界见 [自动点赞研究](docs/research/auto-like-2026-10-24.zh-CN.md)。
+
+
+AI 新增规则来源、背景记忆和近实时音视频识别，配置与限制见 [AI 使用说明](docs/guides/ai-context.zh-CN.md)。

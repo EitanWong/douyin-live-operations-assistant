@@ -1,4 +1,5 @@
 import { installTheme } from './theme.js';
+import { validateSearchEndpoint } from './search.js';
 let tab;
 const status=document.querySelector('#status'),open=document.querySelector('#open'),endpoint=document.querySelector('#endpoint');
 installTheme({ target:document.documentElement, select:document.querySelector('[data-theme-choice]'), onError:message=>{ status.textContent=message; status.classList.add('error'); } });
@@ -12,7 +13,7 @@ void(async()=>{
   try {
     const result=await chrome.tabs.sendMessage(tab.id,{type:'room-info'});
     if (!result?.ready) throw new Error();
-    endpoint.value=result.endpoint; status.textContent='直播间已就绪，点击下方打开面板。'; open.disabled=false;
+    endpoint.value=result.endpoint;if(result.searchEndpoint)document.querySelector('#search-endpoint').value=result.searchEndpoint; status.textContent='直播间已就绪，点击下方打开面板。'; open.disabled=false;
   } catch {status.textContent='扩展已安装，请刷新直播页再打开面板。';}
 })();
 open.addEventListener('click',async()=>{try{await chrome.tabs.sendMessage(tab.id,{type:'open-panel'});window.close();}catch{status.textContent='请刷新直播页后重试。';status.classList.add('error');}});
@@ -24,4 +25,11 @@ document.querySelector('#allow').addEventListener('click',async()=>{
     const allowed = await chrome.permissions.request({origins:[`${url.protocol}//${url.hostname}/*`]});
     status.textContent=allowed?'已授权，返回直播间测试 AI 连接。':'未授权，AI 服务暂不可访问。';
   } catch { status.textContent='授权失败，请检查接口地址。'; }
+});
+document.querySelector('#allow-search').addEventListener('click',async()=>{
+  try {
+    const url=new URL(validateSearchEndpoint(document.querySelector('#search-endpoint').value));
+    const allowed=await chrome.permissions.request({origins:[`${url.protocol}//${url.hostname}/*`]});
+    status.textContent=allowed ? '搜索域名已授权，返回面板填写搜索密钥并测试。' : '未授权，联网搜索暂不可用。';
+  } catch(error){status.textContent=error.message;}
 });

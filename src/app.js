@@ -2,6 +2,9 @@ import { RoomContext } from './browser/room-context.js';
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
 import { DouyinAdapter, RoomLock, pickElement, watchAudienceContributions } from './browser/adapter.js';
 import { createAIClient, validateEndpoint, generatePhrases } from './services/ai.js';
+import { createSearchClient, validateSearchEndpoint } from './services/search.js';
+import {createMediaClient,MediaEvidence,validateMediaConfig} from './services/media.js';
+import {LiveMediaAnalyzer} from './browser/live-media.js';
 import { Panel } from './ui/panel.js';
 import { IdentityReader, roomAdminStatus } from './browser/identity.js';
 import { GiftLedger, GiftStore, giftDate, contributionSnapshot } from './data/gifts.js';
@@ -225,14 +228,30 @@ export function boot(options = {}) {
   };
   const request = options.request || (details => GM_xmlhttpRequest(details));
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
-  const client = createAIClient({ request, getKey: endpoint => sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '') });
+  const mediaSecretKey=endpoint=>`live-assistant:media-key:${new URL(validateEndpoint(endpoint)).origin}`;
+  let activeMediaConfig=config.ai.media,mediaAnchor=config.anchorId;
+  const mediaEvidence=new MediaEvidence();
+  const mediaKey=endpoint=>(sessionKeys.get(mediaSecretKey(endpoint)) ?? get(mediaSecretKey(endpoint),'')) || (sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''));
+  const recognizeMedia=createMediaClient({request,getKey:mediaKey});
+  const clearMedia=()=>{mediaEvidence.clear();panel?.aiSettings.observations([]);};
+  const media=new LiveMediaAnalyzer({capture:options.mediaCapture,recognize:recognizeMedia,
+    onObservation:row=>{mediaEvidence.add(row);panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);},
+    onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
+    onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
+  });
+  const searchSecretKey = endpoint => `live-assistant:search-key:${new URL(validateSearchEndpoint(endpoint)).origin}`;
+  const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
+  const client = createAIClient({ request, getKey: endpoint => sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,
+    onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
+    onSearch:record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `联网搜索：${record.query} · ${record.results.length} 条来源`);}
+  });
   const lock = options.lock || new RoomLock({ room });
   const makeAdapter = options.adapterFactory || (settings => new DouyinAdapter(settings));
   let stoppedBroadcast = '';
   const stopEndedTools = () => {
     const state = engine.liveMode;
     const key = state.endedAt ? JSON.stringify([state.roomId,state.endedAt]) : '';
-    if (key && key !== stoppedBroadcast) tools?.notify('stop', '直播已结束，已停止工具任务');
+    if (key && key !== stoppedBroadcast) {media.stop();tools?.notify('stop', '直播已结束，已停止工具任务');}
     stoppedBroadcast = key;
   };
   const adapter = makeAdapter({
@@ -316,6 +335,7 @@ export function boot(options = {}) {
   });
   engine = new Engine({
     config, log, ai: client,
+    mediaContext:()=>media.state==='running' && mediaAnchor===engine.config.anchorId && (demo || roomContext.current()) ? mediaEvidence.context(activeMediaConfig.contextAgeSec) : null,
     liveData: () => {
       const local=giftLedger.currentSession();
       const saved=engine.config.incomeEnabled && incomeContext?.anchorId===engine.config.anchorId ? incomeContext : null;
@@ -326,7 +346,7 @@ export function boot(options = {}) {
     },
     manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
-    onStop: () => { lock.release(); autoStartArmed = false; },
+    onStop: () => { media.stop(); lock.release(); autoStartArmed = false; },
     send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : (text, isCurrent, hooks) => adapter.send(text, () => isCurrent() && lock.held && roomContext.current(),hooks)
   });
   tools = createPageTools({page:window,room,engine,adapter,demo,log,
@@ -350,6 +370,7 @@ export function boot(options = {}) {
     identity = { ...next, admin: roomAdminStatus(next.self, next.adminUserIds) }; const c = engine.config;
     engine.setIdentity(identity);
     if (next.anchor && c.identity.autoAnchor) {
+      if(media.state!=='idle' && mediaAnchor!==next.anchor.id)media.stop();
       if (c.anchorId && c.anchorId !== next.anchor.id && engine.running) log('error', '识别到主播资料变化；场控保持运行，请检查当前房间配置');
       c.anchorId = next.anchor.id;
     }
@@ -373,11 +394,28 @@ export function boot(options = {}) {
     const name = secretKey(c.ai.endpoint); sessionKeys.set(name, key);
     if (remember) await set(name, key); else await del(name);
   }
+  async function keepSearchKey(c, credentials = {}) {
+    if(!credentials.key)return;
+    const name=searchSecretKey(c.ai.search.endpoint);sessionKeys.set(name,credentials.key);
+    if(credentials.remember)await set(name,credentials.key);else await del(name);
+  }
+  function prepareMediaKeys(c,credentials={}) {
+    const keys=new Map();
+    for(const kind of ['vision','audio']){
+      const value=credentials[kind];if(!value?.key)continue;
+      const name=mediaSecretKey(c.ai.media[`${kind}Endpoint`]);
+      if(keys.has(name) && (keys.get(name).key!==value.key || keys.get(name).remember!==value.remember))throw new Error('同域音视频服务请使用相同密钥和记住选项，或仅在一处填写');
+      keys.set(name,value);
+    }
+    for(const [name,value] of keys)sessionKeys.set(name,value.key);
+    return async()=>{for(const [name,value] of keys)if(value.remember)await set(name,value.key);else await del(name);};
+  }
   function download(name, content) {
     const url = URL.createObjectURL(new Blob([content], { type: 'application/json;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   const pause = (reason, { manual = false } = {}) => {
+    media.stop();
     tools.notify('stop', reason);
     if (manual) manualPause = true;
     autoStartArmed = false;
@@ -456,14 +494,27 @@ export function boot(options = {}) {
         wakeSender();
       },
       identify: async () => { if (demo) { applyIdentity({ anchor:{ id:'1234567890', name:'模拟主播' }, self:{ id:'9876543210', name:'我的场控账号（模拟）' } }); panel.toast('已识别模拟主播和账号'); } else { await identityReader.refresh(); panel.toast('识别完成；未识别的项目可手动补充'); } },
-      save: async (c, key, remember) => {
+      save: async (c, key, remember, searchCredentials,mediaCredentials) => {
         await keepKey(c, key, remember);
+        await keepSearchKey(c,searchCredentials);
+        await prepareMediaKeys(c,mediaCredentials)();
         if (c.identity.autoAnchor && identity.anchor) c.anchorId = identity.anchor.id;
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
+        if(c.anchorId!==mediaAnchor || JSON.stringify(c.ai.media)!==JSON.stringify(activeMediaConfig))media.stop();
         await set(configKey, c); engine.update(c); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
       },
+      startMedia:async(c,credentials)=>{
+        if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
+        validateMediaConfig(c.ai.media,true);const persistKeys=prepareMediaKeys(c,credentials);
+        for(const kind of ['vision','audio'])if(c.ai.media[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(c.ai.media[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(c.ai.media[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
+        activeMediaConfig=copy(c.ai.media);mediaAnchor=engine.config.anchorId;clearMedia();
+        const started=media.start(activeMediaConfig);
+        try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
+      },
+      stopMedia:()=>media.stop(),clearMedia,
+      forgetMediaKey:async(kind,endpoint)=>{const name=mediaSecretKey(endpoint);media.stop();await del(name);sessionKeys.delete(name);for(const input of panel.root.querySelectorAll('[data-media-key]'))input.value='';panel.toast('此服务的音视频密钥已清除；同域普通AI密钥需在服务连接中清除');},
       hasAIKey: endpoint => Boolean(sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
       generatePhrases: async (c, key, remember, options) => {
         await keepKey(c, key, remember);
@@ -474,6 +525,12 @@ export function boot(options = {}) {
         const output = await client({ persona: c.ai.persona, knowledge: c.ai.knowledge, ...engine.aiContext(c),target: { name: '连接测试', text: '你好，请用一句话打招呼。' }, maxLength: c.sending.maxLength }, c.ai);
         log('ai', `连接测试通过：${output.slice(0, 300)}`); panel.toast('AI 连接测试通过。测试内容不会发送到公屏。');
       },
+      testSearch: async (c,credentials) => {
+        await keepSearchKey(c,credentials);
+        const result=await searchClient('抖音直播', {...c.ai.search,enabled:true});
+        panel.recordSearch({...result,question:'搜索连接测试'});panel.toast(`搜索连接通过，返回 ${result.results.length} 条来源。`);
+      },
+      forgetSearchKey:async endpoint=>{const name=searchSecretKey(endpoint);await del(name);sessionKeys.delete(name);panel.node('[data-search-key]').value='';panel.toast('搜索服务密钥已清除');},
       diagnose: () => ({...adapter.diagnose(),roomData:engine.roomData}),
       acknowledgeRuntimeAlert: async () => {
         acknowledgedRuntimeAlert = runtimeAlertState(network);
@@ -581,7 +638,7 @@ export function boot(options = {}) {
       }
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
-      if (!roomContext.current()) { void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (!roomContext.current()) { media.stop(); void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
       if ((engine.pk.current()?.phase === 'active' || panel.activeTab === 'pk') && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
@@ -597,6 +654,7 @@ export function boot(options = {}) {
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, engine.config.gift.yuanPerDiamond);
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
     window.addEventListener('pagehide', event => {
+      media.stop();
       void (event.persisted ? tools.suspend() : tools.close());
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
       const wasRunning = engine.running || engine.resumeRequested;
@@ -623,7 +681,7 @@ export function boot(options = {}) {
       refresh(); refreshGifts(); void loadIncome({profiles:true});
     });
     void drainIncome();
-    options.onReady?.({ engine, panel, adapter, tools, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
+    options.onReady?.({ engine, panel, adapter, tools,media, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });
   return engine;

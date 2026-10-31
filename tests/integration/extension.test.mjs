@@ -10,6 +10,7 @@ import { JSDOM } from 'jsdom';
 import { build } from 'esbuild';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { validateEndpoint } from '../../src/services/ai.js';
+import {validateSearchEndpoint,validateSearchBody} from '../../src/services/search.js';
 import { GiftStore } from '../../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from '../../extension/durable-storage.js';
 import { EventInbox, failureCode } from '../../src/runtime/inbox.js';
@@ -72,7 +73,7 @@ async function worker(values = {}, indexedDB = new IDBFactory()) {
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
   const code=(await readFile(file('background.js'),'utf8'));
-  vm.runInNewContext(code,{fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
+  vm.runInNewContext(code,{fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
@@ -383,6 +384,43 @@ test('AI网络需指定域名权限且不携带Cookies、不跟随跳转', async
   const w=await worker(); const m={type:'ai',url:'https://ai.example/v1/chat/completions',data:JSON.stringify({model:'model',messages:[]}),headers:{Authorization:'Bearer dummy',Cookie:'not-forwarded'}};
   assert.equal((await w.send(m)).ok,true); assert.equal(w.requests[0].opts.credentials,'omit'); assert.equal(w.requests[0].opts.redirect,'error'); assert.equal(w.requests[0].opts.headers.Cookie,undefined);
   w.deny(); assert.equal((await w.send(m)).ok,false); assert.equal(w.requests.length,1);
+});
+test('音视频后台接收有界媒体包，拒绝网页伪造、远程图片与权限缺失，并持久保存独立密钥',async()=>{
+  const w=await worker(),body={model:'vision-test',stream:false,temperature:0,max_tokens:500,messages:[{role:'system',content:'描述画面'},{role:'user',content:[{type:'text',text:'这一帧'},{type:'image_url',image_url:{url:`data:image/jpeg;base64,${'A'.repeat(120000)}`}}]}]};
+  const message={type:'media',url:'https://vision.test/v1/chat/completions',data:JSON.stringify(body),headers:{Authorization:'Bearer media-test',Cookie:'secret'}};
+  assert.equal((await w.send(message)).ok,true);assert.equal(w.requests.length,1);
+  assert.equal(w.requests[0].opts.credentials,'omit');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.headers.Cookie,undefined);
+  assert.equal((await w.send(message,{frameId:1,tab:{url:'https://live.douyin.com/1'}})).ok,false);
+  const remote=structuredClone(body);remote.messages[1].content[1].image_url.url='https://private.test/img.jpg';
+  assert.equal((await w.send({...message,data:JSON.stringify(remote)})).ok,false);
+  assert.equal((await w.send({...message,type:'ai'})).ok,false,'普通文字AI仍保留原请求大小上限');
+  const key='live-assistant:media-key:https://vision.test';
+  assert.equal((await w.send({type:'set',key,value:'media-key'})).ok,true);
+  const restarted=await worker(w.values,w.indexedDB);assert.equal((await restarted.send({type:'init'})).value[key],'media-key');
+  w.deny();assert.equal((await w.send(message)).ok,false);assert.equal(w.requests.length,1);
+});
+
+test('博查与Tavily搜索经过后台协议校验和域名授权，搜索密钥独立持久化',async()=>{
+  const w=await worker();
+  const messages=[{type:'search',url:'https://api.bochaai.com/v1/web-search',headers:{Authorization:'Bearer bocha-test',Cookie:'omit'},data:JSON.stringify({query:'上海天气',count:3,summary:true,freshness:'noLimit'})},
+    {type:'search',url:'https://api.tavily.com/search',headers:{Authorization:'Bearer tavily-test'},data:JSON.stringify({query:'上海天气',max_results:3,search_depth:'basic',include_answer:false,include_raw_content:false})}];
+  for(const message of messages)assert.equal((await w.send(message)).ok,true);
+  assert.equal(w.requests.length,2);assert.equal(w.requests[0].opts.credentials,'omit');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.headers.Cookie,undefined);
+  assert.equal((await w.send({...messages[0],data:JSON.stringify({query:'q',url:'https://x.test'})})).ok,false);
+  assert.equal((await w.send({...messages[0],url:'https://x.test/fetch'})).ok,false);
+  const key='live-assistant:search-key:https://api.bochaai.com';
+  assert.equal((await w.send({type:'set',key,value:'search-only-test'})).ok,true);
+  assert.equal((await w.send({type:'init'})).value[key],'search-only-test');
+  assert.equal((await w.send({type:'init'})).value['live-assistant:api-key:https://api.bochaai.com'],undefined);
+  w.deny();assert.equal((await w.send(messages[0])).ok,false);assert.equal(w.requests.length,2);
+});
+
+test('自建SearXNG由后台以表单发送，仅允许有界JSON搜索参数',async()=>{
+  const w=await worker(),data=new URLSearchParams({q:'开源搜索',format:'json',pageno:'1'}).toString();
+  const request={type:'search',provider:'searxng',url:'http://localhost:8080/search',data,headers:{}};
+  assert.equal((await w.send(request)).ok,true);assert.equal(w.requests[0].opts.headers['Content-Type'],'application/x-www-form-urlencoded');assert.equal(w.requests[0].opts.body,data);
+  assert.equal((await w.send({...request,data:data+'&url=https://x.test'})).ok,false);
+  assert.equal((await w.send({...request,provider:'unknown'})).ok,false);assert.equal(w.requests.length,1);
 });
 
 test('日志追加幂等、80%用量停止新日志并保留确认和恢复空间',async()=>{

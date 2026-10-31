@@ -1,7 +1,7 @@
 const DB_NAME = 'douyin-live-assistant';
 const DB_VERSION = 1;
 const STORE_NAME = 'records';
-export const isDurableKey = key => /^(live-assistant:(config|runtime|income|income-calibration|profile|event|rewards|api-key):|douyin-live-assistant:theme$)/.test(key);
+export const isDurableKey = key => /^(live-assistant:(config|runtime|income|income-calibration|profile|event|rewards|api-key|search-key|media-key):|douyin-live-assistant:theme$)/.test(key);
 const categoryOf = key => /^live-assistant:(income|income-calibration|profile):/.test(key) ? 'income' : key.startsWith('live-assistant:event:') ? 'pending' : key.startsWith('live-assistant:runtime:') ? 'runtime' : 'settings';
 const encodedSize = (key,value) => new TextEncoder().encode(key + JSON.stringify(value)).byteLength;
 
