@@ -237,9 +237,10 @@ function cloneRuntime(value) {
 const keyFor = u => u.id || u.secUid || `name:${u.name}`;
 
 export class Engine {
-  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null } = {}) {
+  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
     this.config = validateConfig(mergeConfig(config)); this.now = now; this.send = send; this.ai = ai; this.log = log; this.changed = changed; this.checkpoint = checkpoint; this.onStop = onStop;
     this.queue = []; this.giftJobs = new Map(); this.history = []; this.seen = new Map(); this.cooldowns = new Map(); this.gifts = new Map(); this.duplicates = new Map();
+    this.claimGiveaway=claimGiveaway;this.giveawayInstance=crypto.randomUUID();this.giveawayCurrent=giveawayCurrent;this.giveawayReceipts=new Map();this.lastGiveawaySend=-Infinity;
     this.calls = []; this.running = false; this.epoch = 0; this.serial = 0;
     this.chatAIQueue = []; this.chatAIBackground = null; this.replyEvents = [];
     this.contextChat = []; this.liveData = liveData;this.mediaContext=mediaContext;
@@ -280,6 +281,7 @@ export class Engine {
     const bot = this.bot.session ? { ...this.bot.session, used: this.bot.session.used ? [...this.bot.session.used] : undefined } : null;
     return cloneRuntime({
       version: 1, savedAt: this.now(), running: this.running || Boolean(this.resumeRequested),
+      giveawayReceipts:[...this.giveawayReceipts],lastGiveawaySend:Number.isFinite(this.lastGiveawaySend) ? this.lastGiveawaySend : null,
       queue: this.queue, gifts: [...this.gifts.entries()], bot, botIdiomResult:this.bot.lastIdiomResult, botQuestions:this.bot.questionHistory,
       seen: entries(this.seen), cooldowns: entries(this.cooldowns), duplicates: entries(this.duplicates),
       timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen), milestoneSession:this.milestoneSession,
@@ -295,6 +297,7 @@ export class Engine {
     this.moderation.restore(snapshot.moderation);
     const map = value => new Map(Array.isArray(value) ? value.filter(pair => Array.isArray(pair) && pair.length === 2) : []);
     this.queue = Array.isArray(snapshot.queue) ? snapshot.queue.filter(job => job && typeof job.text === 'string' && Number.isFinite(job.created)) : [];
+    this.giveawayReceipts=map(snapshot.giveawayReceipts);this.lastGiveawaySend=Number.isFinite(snapshot.lastGiveawaySend) ? snapshot.lastGiveawaySend : -Infinity;
     this.gifts = map(snapshot.gifts);
     this.bot.reset();
     this.bot.lastIdiomResult = snapshot.botIdiomResult || null;
@@ -421,7 +424,7 @@ export class Engine {
       const job = cloneRuntime(source); delete job.deliveryUncertain;
       job.attempts = Math.max(job.attempts || 0, record.attempts || 0) + 1;
       job.created = this.now();
-      if (!job.pkNotice) job.expires = Infinity;
+      if (!job.pkNotice && job.kind!=='giveaway') job.expires = Infinity;
       job.retryAt = this.now() + delay;
       this.queue.push(job); this.indexGiftJob(job); queued.add(job.id);
     }
@@ -454,7 +457,7 @@ export class Engine {
     this.chatAIQueue = []; this.chatAIBackground = null;
     // 人工暂停、切房间和配置变更继续清空现场任务；发送异常则由调用方保留 outbox，
     // 让管理员修复控件后可以继续发送，避免“已入队但未确认”变成静默丢失。
-    if (!preserveWork) { this.queue = []; this.giftJobs.clear(); this.gifts.clear(); this.bot.reset(); this.timerDue.clear(); this.history = []; }
+    if (!preserveWork) { this.queue = this.queue.filter(job=>job.kind==='giveaway'); this.giftJobs.clear(); this.gifts.clear(); this.bot.reset(); this.timerDue.clear(); this.history = []; }
     else if (this.inFlight?.jobs?.length && !this.inFlight.deliveryId) {
       const known = new Set(this.queue.map(job => job.id));
       for (const job of this.inFlight.jobs) if (!known.has(job.id)) this.queue.unshift({ ...job, deliveryUncertain:true });
@@ -504,6 +507,26 @@ export class Engine {
     this.giftJobs.clear();
     for (const job of this.queue) this.indexGiftJob(job);
   }
+  senderEnabled() { return this.running || this.queue.some(job=>job.kind==='giveaway'); }
+  validGiveawayJob(job) { return job.kind!=='giveaway' || this.giveawayCurrent(job.giveaway); }
+  async enqueueGiveaway(message) {
+    const now=this.now();
+    if(message.expiresAt<=now)return true;
+    for(const [key,expires] of this.giveawayReceipts)if(expires<=now)this.giveawayReceipts.delete(key);
+    if(message.queued && !message.attemptedBy && !this.queue.some(job=>job.giveaway?.key===message.key) && !this.inFlight?.jobs.some(job=>job.giveaway?.key===message.key))this.giveawayReceipts.delete(message.key);
+    if(!this.giveawayReceipts.has(message.key)) {
+      const checked=cleanMessage(message.text,this.config);
+      if(!checked.ok)throw new Error(`抽奖弹幕未入队：${checked.reason}`);
+      if(this.queue.length>=this.backlogLimit)throw new Error('发送队列积压，抽奖弹幕保留待重试');
+      this.giveawayReceipts.set(message.key,message.expiresAt);
+      this.queue.push({id:++this.serial,kind:'giveaway',text:checked.text,created:now,expires:message.expiresAt,
+        priority:({countdown:130,result:120,start:115,cancelled:115,entry:95})[message.kind],
+        giveaway:{key:message.key,roundId:message.roundId,kind:message.kind,endsAt:message.endsAt}});
+      this.log('queue',`抽奖：${checked.text}`);this.changed();
+    }
+    // Persist the receipt and job together before acknowledging the round outbox.
+    await this.checkpoint();return true;
+  }
   enqueue(kind, text, extra = {}) {
     const checked = cleanMessage(text, this.config);
     if (!checked.ok) { this.filtered(`${kind}：${checked.reason}`); return false; }
@@ -519,7 +542,7 @@ export class Engine {
       let lowest = null, lowestIndex = -1;
       for (let index = 0; index < this.queue.length; index++) {
         const q = this.queue[index];
-        if (q.giftReply || q.kind === 'bot') continue;
+        if (q.giftReply || q.kind === 'bot' || q.kind==='giveaway') continue;
         if (!lowest || q.priority < lowest.priority || q.priority === lowest.priority && q.created < lowest.created) { lowest = q; lowestIndex = index; }
       }
       if (!lowest || lowest.priority >= item.priority) { if (!extra.quietOverflow) { this.stats.overflow++; this.filtered('队列已满，本次互动未入队'); } return false; }
@@ -955,6 +978,7 @@ export class Engine {
     });
   }
   giftReady(q, now) {
+    if(q.kind==='giveaway' ? this.validGiveawayJob(q)!==true || now<(this.lastGiveawaySend+2000) : !this.running)return false;
     return (!q.botGroup || !this.queue.some(job => job.botGroup === q.botGroup && job.botPart < q.botPart)) && (!q.afterBot || !this.queue.some(job => job.id === q.afterBot)) && (q.retryAt || 0) <= now && now >= (q.readyAt || 0) && (!q.giftReply || now >= Math.max(q.readyAt || 0, (this.giftSentAt.get(q.giftReply.userKey) ?? -Infinity) + this.config.gift.cooldownSec * 1000));
   }
   giftBatch(first, now) {
@@ -988,9 +1012,10 @@ export class Engine {
       if (!this.giftReady(item, now)) continue;
       if (higherPriority(item, best)) best = item;
       if (item.kind === 'gift' && earlier(item, oldestGift)) oldestGift = item;
-      if (item.kind === 'bot' && earlier(item, waitingBot)) waitingBot = item;
+      if ((item.kind === 'bot' || item.kind==='giveaway') && earlier(item, waitingBot)) waitingBot = item;
     }
     if (!best) return null;
+    if(best.kind==='giveaway' && best.priority>=115)return best;
     if (!oldestGift) return waitingBot || best;
 
     // 礼物感谢是事实型事件，等待过久后必须占用下一个发送槽。
@@ -1090,16 +1115,8 @@ export class Engine {
       }});
   }
 
-  async tick(canSend = true) {
-    const expiredDeliveries = this.deliveries.expire();
-    if (expiredDeliveries.length) {
-      for (const record of expiredDeliveries) this.log('system',`未收到公屏回显，不自动重发：${record.text}`);
-      this.changed();
-    }
-    if (!this.running || this.busy) return;
-    const now = this.now(); let stateChanged = false;
-    const currentReplies=this.queue.filter(job=>this.validChatReply(job));
-    if (currentReplies.length!==this.queue.length) {this.queue=currentReplies;stateChanged=true;}
+  produceJobs(canSend,now) {
+    let stateChanged=false;
     this.pkOperations.tick(canSend);
     this.drainChatAI();
     for (const job of this.queue) if (job.aiPending && now >= job.readyAt) { job.aiPending=false; job.needsGiftAI=false; stateChanged=true; }
@@ -1149,6 +1166,20 @@ export class Engine {
     if (this.config.ai.enabled && this.config.ai.chatEnabled && this.config.ai.idleEnabled && now - this.lastChat >= this.config.ai.idleSec * 1000 && now - this.lastInteraction >= this.config.ai.idleSec * 1000) {
       this.lastInteraction = now; stateChanged = true; void this.requestAI(null, { kind: 'ai', instruction: '直播间暂时没有新弹幕，这不表示主播需要救场。没有明确需要补充的已核实信息时输出 [SKIP]；不为了冷场主动征集话题、点歌、提问或劝观众留下，不声称帮忙转达。' });
     }
+    return stateChanged;
+  }
+
+  async tick(canSend = true) {
+    const expiredDeliveries = this.deliveries.expire();
+    if (expiredDeliveries.length) {
+      for (const record of expiredDeliveries) this.log('system',`未收到公屏回显，不自动重发：${record.text}`);
+      this.changed();
+    }
+    if (!this.senderEnabled() || this.busy) return;
+    const now = this.now(); let stateChanged = false;
+    const currentReplies=this.queue.filter(job=>this.validChatReply(job) && this.validGiveawayJob(job)!==false);
+    if (currentReplies.length!==this.queue.length) {this.queue=currentReplies;stateChanged=true;}
+    if(this.running)stateChanged=this.produceJobs(canSend,now) || stateChanged;
     // 礼物感谢已经完成了连击结算，发送失败/断线时必须保留；普通互动仍按短时效清理。
     // 否则高峰期遇到长连接重连，120 秒后会静默丢掉已统计的感谢任务。
     let expiredCount = 0;
@@ -1164,6 +1195,7 @@ export class Engine {
     }
     const q = canSend ? this.selectNextJob(this.queue, now) : null;
     if (!q) { if (stateChanged) this.changed(); return; }
+    if(q.giveaway?.kind==='countdown')q.text=`抽奖剩余${Math.max(1,Math.ceil((q.giveaway.endsAt-now)/1000))}秒`;
     const batch = q.kind === 'gift' ? this.giftBatch(q, now) : {jobs:[q],text:q.text};
     const checked = cleanMessage(batch.text, this.config);
     const selectedJobs = new Set(batch.jobs); let write = 0;
@@ -1188,6 +1220,7 @@ export class Engine {
     const submitted = () => {
       const sentAt = this.now();
       this.stats.maxQueueWaitMs = Math.max(this.stats.maxQueueWaitMs || 0, sentAt - Math.min(...batch.jobs.map(job => job.created)));
+      if (q.kind === 'giveaway') this.lastGiveawaySend=sentAt;
       if (q.kind === 'bot') this.lastBotSend = sentAt;
       if (q.kind === 'gift') this.lastGiftSend = sentAt;
       if (!['gift','like','bot'].includes(q.kind)) this.duplicates.set(q.text, sentAt);
@@ -1218,15 +1251,21 @@ export class Engine {
       } finally { clearTimeout(timer); }
     };
     try {
-      if (this.config.mode === 'preview') { submitted(); this.stats.previews++; this.log('preview', batch.text); }
+      if (this.config.mode === 'preview') {
+        if(q.giveaway && !await this.claimGiveaway(q.giveaway,this.giveawayInstance))return;
+        submitted(); this.stats.previews++; this.log('preview', batch.text);
+      }
       else {
         void checkpointForSend();
         if (this.epoch !== epoch) return;
         this.selfTexts.set(batch.text, now + 120000);
         const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.channel || 'chat';
-        const result = await this.send(batch.text, () => this.running && this.epoch === epoch && this.validChatReply(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
+        const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
           this.deliveries.clicked(delivery);
-          try { await checkpointForSend(true); }
+          try {
+            await checkpointForSend(true);
+            if(q.giveaway && !await this.claimGiveaway(q.giveaway,this.giveawayInstance))throw Object.assign(new Error('此抽奖弹幕已由其他页面提交，跳过重复发送'),{giveawayClaimed:true});
+          }
           catch (error) { this.deliveries.finish(delivery,'prepared','点击意图未保存，尚未点击'); delete delivery.clickedAt; throw error; }
         }});
         if (this.epoch !== epoch) return;
@@ -1247,14 +1286,15 @@ export class Engine {
       }
     } catch (error) {
       if (this.epoch === epoch) {
-        if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
+        if(error.giveawayClaimed) {this.deliveries.finish(delivery,'cancelled',error.message);delivery.jobs=[];this.log('system',error.message);}
+        else if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
           this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知；不自动重发');
         } else {
           if (delivery) { this.deliveries.finish(delivery,'cancelled',error.message); delivery.jobs = []; }
           retry(error.message || '发送异常');
         }
         if (error.retryable) this.log('system', `发送暂不可用：${error.message}；消息保留，稍后继续发送`);
-        else this.log('error', `发送失败，场控保持运行：${error.message}`);
+        else if(!error.giveawayClaimed)this.log('error', `发送失败，场控保持运行：${error.message}`);
       }
     }
     finally {

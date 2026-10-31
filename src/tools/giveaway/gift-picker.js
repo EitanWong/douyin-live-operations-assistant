@@ -4,7 +4,7 @@ import {formatDiamonds} from '../../core/auto-gift.js';
 const views=new WeakMap();
 const active=panel=>panel.toolStates.get('giveaway')?.rounds?.at(-1)?.status==='running';
 function stateFor(panel) {
-  if(!views.has(panel))views.set(panel,{gifts:[],loading:false,message:'先打开网页礼物面板，再读取当前直播间目录；也可直接手动填写。'});
+  if(!views.has(panel))views.set(panel,{gifts:[],loading:false,message:'读取当前直播间礼物目录，无需先打开网页礼物面板；也可手动填写。'});
   return views.get(panel);
 }
 function setRules(panel,rules) {
@@ -52,9 +52,9 @@ export async function refreshGiftPicker(panel,invoke) {
   state.loading=true;updateGiftPicker(panel);
   try {
     const result=await invoke('gifts');
-    if(!result?.available)throw new Error(result?.reason || '礼物目录读取失败，请打开网页礼物面板后重试，或手动填写。');
+    if(!result?.available)throw new Error(result?.reason || '礼物目录读取失败，请确认直播页已加载并登录后重试，或手动填写。');
     state.gifts=result.gifts;
-    state.message=result.gifts.length ? '勾选可多选；选中后使用礼物 ID 匹配。各类礼物能否赠送以观众账号和平台为准。' : '当前目录为空，请打开网页礼物面板后重试，或手动填写。';
+    state.message=result.gifts.length ? '勾选可多选；选中后使用礼物 ID 匹配。各类礼物能否赠送以观众账号和平台为准。' : '当前目录为空，请稍后刷新目录，或手动填写。';
   } catch(error) {state.message=`读取失败：${error.message} 已填写的礼物仍保留，可手动继续配置。`;}
   finally {state.loading=false;updateGiftPicker(panel);}
 }

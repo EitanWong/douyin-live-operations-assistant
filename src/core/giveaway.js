@@ -1,5 +1,5 @@
 export const GIVEAWAY_VERSION = 2;
-export const GIVEAWAY_DEFAULTS = Object.freeze({prizes:Object.freeze([Object.freeze({name:'直播周边',count:1})]),weights:Object.freeze([]),anchorGuaranteed:false,durationSec:300,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false,gifts:'小心心',giftMin:1});
+export const GIVEAWAY_DEFAULTS = Object.freeze({prizes:Object.freeze([Object.freeze({name:'直播周边',count:1})]),weights:Object.freeze([]),anchorGuaranteed:false,feedbackEnabled:true,durationSec:300,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false,gifts:'小心心',giftMin:1});
 
 const boundedText = (value, limit) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= limit;
 const integer = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max;
@@ -34,12 +34,13 @@ function validatePrizes(value) {
 export function validateGiveawayConfig(value) {
   const prizes=validatePrizes(value),weights=validateWeights(value.weights);
   if(value.anchorGuaranteed!==undefined && typeof value.anchorGuaranteed!=='boolean')throw new Error('主播必中设置无效');
+  if(value.feedbackEnabled!==undefined && typeof value.feedbackEnabled!=='boolean')throw new Error('抽奖弹幕反馈设置无效');
   if (!integer(value.durationSec,1,86400)) throw new Error('倒计时须为 1～86400 秒的整数');
   if (typeof value.chatEnabled !== 'boolean' || typeof value.giftEnabled !== 'boolean' || !value.chatEnabled && !value.giftEnabled) throw new Error('请至少开启一种参与方式');
   if (value.chatEnabled && !boundedText(value.keyword,100)) throw new Error('请填写参与弹幕，最多 100 字');
   if (value.giftEnabled && (!boundedText(value.gifts,1000) || !giftRules(value).length)) throw new Error('请填写可参与的礼物名称或 ID');
   if (value.giftEnabled && !integer(value.giftMin,1,100000)) throw new Error('礼物数量须为 1～100000 的整数');
-  return {prizes,weights,anchorGuaranteed:value.anchorGuaranteed ?? false,durationSec:value.durationSec,chatEnabled:value.chatEnabled,
+  return {prizes,weights,anchorGuaranteed:value.anchorGuaranteed ?? false,feedbackEnabled:value.feedbackEnabled ?? false,durationSec:value.durationSec,chatEnabled:value.chatEnabled,
     keyword:String(value.keyword || '').trim(),giftEnabled:value.giftEnabled,gifts:String(value.gifts || '').trim(),giftMin:value.giftEnabled ? value.giftMin : 1};
 }
 
@@ -48,7 +49,7 @@ export function createGiveaway(config,{id,room,broadcastId='',anchorId='',now}) 
   config=validateGiveawayConfig(config);
   if(config.anchorGuaranteed && !/^[1-9]\d{0,24}$/.test(anchorId))throw new Error('请先识别当前主播 UID，再开启主播参与必中');
   return {id,room,broadcastId,anchorId,status:'running',startedAt:now,endsAt:now+config.durationSec*1000,closedAt:null,
-    config,entrants:[],giftProgress:[],awards:[],reason:''};
+    config,entrants:[],giftProgress:[],awards:[],feedback:[],reason:''};
 }
 
 function eligibleEvent(round,event,now) {
@@ -141,6 +142,18 @@ function validateAwards(round) {
     && !awards.some(award=>award.userId===round.anchorId && award.prizeIndex===0))throw new Error('主播必中结果无效');
 }
 
+function validateFeedback(round) {
+  round.feedback ??= [];
+  const kinds=['start','entry','countdown','result','cancelled'];
+  if(!Array.isArray(round.feedback) || round.feedback.some(row=>!row || !boundedText(row.id,100) || !kinds.includes(row.kind)
+    || typeof row.text!=='string' || !row.text.trim() || [...row.text].length>50 || typeof row.queued!=='boolean'
+    || !Number.isFinite(row.createdAt) || !Number.isFinite(row.expiresAt) || row.expiresAt<=row.createdAt
+    || row.attemptedBy!==undefined && !boundedText(row.attemptedBy,100)
+    || row.kind==='countdown' && ![300,60,30,10].includes(row.seconds)
+    || row.kind==='entry' && (!Array.isArray(row.userIds) || !row.userIds.length || row.userIds.some(id=>!round.entrants.some(entrant=>entrant.userId===id))))
+    || new Set(round.feedback.map(row=>row.id)).size!==round.feedback.length)throw new Error('抽奖反馈记录无效');
+}
+
 // Read storage once at the boundary. Corruption must never silently discard history.
 export function parseGiveawayState(value,room) {
   if (value == null) return {version:GIVEAWAY_VERSION,rounds:[]};
@@ -158,6 +171,7 @@ export function parseGiveawayState(value,room) {
       || new Set(round.entrants.map(row=>row.userId)).size!==round.entrants.length
       || round.giftProgress.some(row=>!row || typeof row.key!=='string' || typeof row.userId!=='string' || !integer(row.count,1,1000000000))) throw new Error('抽奖参与记录无效');
     validateAwards(round);
+    validateFeedback(round);
   }
   if (rounds.filter(round=>round.status==='running').length>1 || new Set(rounds.map(round=>round.id)).size!==rounds.length) throw new Error('抽奖轮次状态冲突');
   return structuredClone({version:GIVEAWAY_VERSION,rounds});

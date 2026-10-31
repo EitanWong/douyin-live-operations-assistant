@@ -49,6 +49,17 @@ test('正式 MAIN 桥仅读取抽奖礼物目录，不调用钱包或付费接�
     assert.equal(result.gifts.length,4);assert.equal(result.balanceUnits,undefined);assert.equal(f.calls.length,0);
   }finally{f.close();}
 });
+test('正式 MAIN 桥在礼物模块未加载时可经原生请求客户端读取目录',async()=>{
+  const f=fixture(),reads=[];try {
+    delete f.api.hF;
+    const client={defaults:{baseURL:f.page.location.origin,withCredentials:true},request:async options=>{reads.push(options);return {data:{status_code:0,data:{gifts:f.raw}}};}};
+    const require=id=>({ZP:client});
+    require.m={client:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
+    f.page.webpackChunkdouyin_live_v2=[];f.page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
+    const result=await f.bridge.giftCatalog();assert.equal(result.available,true,result.reason);assert.equal(result.gifts.length,4);
+    assert.equal(reads.length,1);assert.equal(reads[0].url,'/webcast/gift/list/');assert.equal(reads[0].method,'get');assert.equal(f.calls.length,0);
+  }finally{f.close();}
+});
 test('原生模块尚未加载时解释加载步骤，取消迟到准备会回收账号锁且不触发付费',async()=>{
   const f=fixture();let release;try {
     const original=f.api.Xq;f.api.Xq=()=>new Promise(resolve=>{release=()=>resolve(original());});

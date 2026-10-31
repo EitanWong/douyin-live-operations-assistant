@@ -13,8 +13,9 @@ export function createPageTools({page,room,engine,adapter,demo,current,unavailab
     : id==='rewards' && !engine.config.selfId ? '请先登录抖音并识别当前账号' : '';
   return new ToolRuntime({registry:bundledTools,room,guard,createLock:key=>new RoomLock({room:key}),
     getConfig:id=>engine.config[id],services:{page,log,selfId:()=>engine.config.selfId,anchorId:()=>engine.config.anchorId,rewardStorage,giveawayStorage,giveawayPendingEvents,
+      messageLength:()=>engine.config.sending.maxLength,feedbackMode:()=>demo ? 'demo' : engine.config.mode,
       rewardEvents:()=>engine.roomData.activities,roomId:getRoomId || (()=>engine.liveMode?.roomId || '')},
-    operations:toolOperations({selfId:()=>engine.config.selfId,saveConfig,getRewardsConfig:()=>engine.config.rewards,
+    operations:toolOperations({selfId:()=>engine.config.selfId,saveConfig,getRewardsConfig:()=>engine.config.rewards,announceGiveaway:value=>engine.enqueueGiveaway(value),
       transport:demo ? {...demoGiftTransport(),prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,
       click:node=>{
         const style=node?.ownerDocument===page.document && page.getComputedStyle(node);

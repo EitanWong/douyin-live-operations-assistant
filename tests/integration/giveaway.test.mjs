@@ -103,3 +103,23 @@ test('观众权重和主播必中通过工具入口锁定，主播使用当前�
     await api.tools.restart('giveaway');assert.deepEqual(api.tools.state('giveaway').rounds[0].awards,round.awards);
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });
+
+test('场控暂停时真实工具入口仍会发送开轮、报名、关键倒计时与开奖结果，回显不重复报名',async()=>{
+  const dom=page(),values=new Map(),sent=[];let api,onEvent;
+  boot({page:dom.window,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),
+    adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true,
+      send:async(text,current,hooks)=>{assert.equal(current(),true);await hooks.beforeClick();sent.push(text);api.engine.observeEcho({type:'chat',source:'socket',text,user:{id:'9'},receivedAt:Date.now()});return {submitted:true,clicked:true};}};},onReady:value=>{api=value;}});
+  try {
+    await api.tools.ready;api.engine.config.selfId='9';assert.equal(api.engine.running,false);
+    const p=api.panel;assert.ok(p.node('[data-giveaway=feedbackEnabled]').checked);
+    await api.tools.invoke('giveaway','start',{prizes:[{name:'礼盒',count:2}],durationSec:12,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false});
+    await until(()=>sent.some(text=>text.includes('抽奖开始')));
+    const at=Date.now();for(const id of ['1','2','1'])await onEvent({type:'chat',id:crypto.randomUUID(),source:'socket',text:'参与抽奖',at,user:{id,name:`观众${id}`}});
+    for(let i=0;i<1500 && !sent.some(text=>text.includes('开奖·'));i++)await new Promise(resolve=>setTimeout(resolve,10));
+    assert.ok(sent.some(text=>/报名成功.*观众1、观众2/.test(text)),JSON.stringify(sent));
+    assert.ok(sent.some(text=>/抽奖剩余\d+秒/.test(text)));assert.ok(sent.some(text=>/开奖·礼盒.*观众1.*观众2/.test(text)));
+    const report=await api.tools.invoke('giveaway','export');assert.equal(report.rounds[0].entrants.length,2);assert.equal(api.engine.running,false);
+    const before=sent.length;await api.tools.restart('giveaway');await new Promise(resolve=>setTimeout(resolve,500));assert.equal(sent.length,before);
+    assert.match(p.node('[data-giveaway-feedback]').textContent,/发送|队列/);
+  }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
+});

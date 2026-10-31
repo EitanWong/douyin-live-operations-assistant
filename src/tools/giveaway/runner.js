@@ -1,10 +1,12 @@
 import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState,validateGiveawayConfig,GIVEAWAY_VERSION} from '../../core/giveaway.js';
+import {prepareGiveawayFeedback} from '../../core/giveaway-feedback.js';
 
 // All commands, ticks and event writes use one queue under one room lease.
 export class GiveawayRunner {
-  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',anchorId=()=>'',now=Date.now,randomInt,pendingEvents}) {
-    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,anchorId,now,randomInt,pendingEvents});
+  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',anchorId=()=>'',now=Date.now,randomInt,pendingEvents,feedback,maxLength=()=>50,feedbackMode=()=> 'auto'}) {
+    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,anchorId,now,randomInt,pendingEvents,feedback,maxLength,feedbackMode});
     this.key=`live-assistant:giveaway:${room}`;this.data={version:GIVEAWAY_VERSION,rounds:[]};this.tail=Promise.resolve();this.owned=false;this.closed=false;this.reason='尚未开始抽奖';
+    this.handedOff=new Set();
   }
   current() { return this.data.rounds.find(round=>round.status==='running'); }
   assertOpen() { if(this.closed)throw new Error('抽奖工具已停用'); }
@@ -14,7 +16,7 @@ export class GiveawayRunner {
   }
   state() {
     const current=this.current();
-    return {phase:current ? this.owned ? 'running' : 'readonly' : 'idle',receiving:Boolean(current),reason:this.reason,anchorId:this.anchorId(),now:this.now(),rounds:structuredClone(this.data.rounds)};
+    return {phase:current ? this.owned ? 'running' : 'readonly' : 'idle',receiving:Boolean(current),reason:this.reason,feedbackError:this.feedbackError || '',feedbackMode:this.feedbackMode(),anchorId:this.anchorId(),now:this.now(),rounds:structuredClone(this.data.rounds)};
   }
   publish(reason=this.reason) { this.reason=reason;if(!this.closed)this.changed(this.state()); }
   async load() {
@@ -46,6 +48,49 @@ export class GiveawayRunner {
     const next={version:GIVEAWAY_VERSION,rounds};await this.storage.set(this.key,next);this.data=next;
     this.publish(round.reason || '正在接收本轮参与弹幕和礼物');
   }
+  pendingFeedback(round) {
+    const broadcast=this.broadcastId();
+    if(round.broadcastId && broadcast && round.broadcastId!==broadcast)return [];
+    return (round.feedback || []).filter(row=>!row.attemptedBy && (!row.queued || !this.handedOff.has(`${round.id}:${row.id}`)) && row.expiresAt>this.now() &&
+      (['result','cancelled'].includes(row.kind) || round.status==='running'));
+  }
+  async flushFeedback() {
+    if(!this.feedback || !this.owned || this.guard())return;
+    try {
+      for(const round of this.data.rounds) {
+        const accepted=new Set();
+        try {
+          for(const message of this.pendingFeedback(round)) {
+            this.assertOpen();
+            await this.feedback({...message,key:`${round.id}:${message.id}`,roundId:round.id,endsAt:round.endsAt});
+            this.handedOff.add(`${round.id}:${message.id}`);
+            accepted.add(message.id);
+          }
+        } finally {
+          if(accepted.size)await this.save({...round,feedback:round.feedback.map(row=>accepted.has(row.id) ? {...row,queued:true} : row)});
+        }
+      }
+      this.feedbackError='';
+    } catch(error) {this.feedbackError=error.message;}
+    this.publish();
+  }
+  claimFeedback({key,owner}) {
+    return this.run(async()=>{
+      if(typeof key!=='string' || typeof owner!=='string' || !owner || owner.length>100)throw new Error('抽奖弹幕认领参数无效');
+      if(this.guard())throw new Error(this.guard());
+      if(!await this.claim())throw Object.assign(new Error('等待抽奖运行页提交弹幕'),{retryable:true});
+      try {
+        const round=this.data.rounds.find(row=>row.feedback?.some(message=>`${row.id}:${message.id}`===key));
+        const message=round?.feedback.find(row=>`${round.id}:${row.id}`===key);
+        if(!message || message.expiresAt<=this.now() || message.attemptedBy && message.attemptedBy!==owner)return false;
+        if(['start','entry','countdown'].includes(message.kind) && round.status!=='running')return false;
+        if(round.broadcastId && this.broadcastId() && round.broadcastId!==this.broadcastId())return false;
+        if(message.attemptedBy===owner)return true;
+        await this.save({...round,feedback:round.feedback.map(row=>row.id===message.id ? {...row,attemptedBy:owner} : row)});
+        return true;
+      } finally {if(!this.current())this.release();}
+    });
+  }
   ready() {
     return this.run(async()=>{
       if(!this.storage){this.publish('抽奖存储尚未就绪');return;}
@@ -56,33 +101,41 @@ export class GiveawayRunner {
   }
   start(value) {
     return this.run(async()=>{
-      const config=validateGiveawayConfig(value),reason=this.guard();
+      const config=validateGiveawayConfig({feedbackEnabled:true,...value}),reason=this.guard();
       if(reason)throw new Error(reason);
       if(!this.storage)throw new Error('抽奖存储不可用，请重新加载扩展');
       if(!await this.claim())throw new Error('其他页面正在运行本直播间抽奖，请在该页面操作');
       try {
         if(this.current())throw new Error('本轮抽奖尚未结束');
-        await this.save(createGiveaway(config,{id:crypto.randomUUID(),room:this.room,broadcastId:this.broadcastId(),anchorId:this.anchorId(),now:this.now()}));
+        const round=createGiveaway(config,{id:crypto.randomUUID(),room:this.room,broadcastId:this.broadcastId(),anchorId:this.anchorId(),now:this.now()});
+        await this.save(prepareGiveawayFeedback(round,this.now(),this.maxLength(),{start:true}));
+        await this.flushFeedback();
       } finally {if(!this.current())this.release();}
     });
   }
   async finish(round) {
-    await this.save(round);this.release();this.publish(round.reason);
+    await this.save(prepareGiveawayFeedback(round,this.now(),this.maxLength()));
+    await this.flushFeedback();this.release();this.publish(round.reason);
   }
   async check() {
     let round=this.current();
-    if(!round){this.publish();return;}
+    if(!round && !this.data.rounds.some(row=>this.pendingFeedback(row).length)){this.publish();return;}
     if(!this.owned) {
       if(this.guard() || !await this.claim()){this.publish('本轮由其他页面运行，等待同步');return;}
-      round=this.current();if(!round){this.release();this.publish();return;}
+      round=this.current();
     }
+    if(!round){await this.flushFeedback();this.release();this.publish();return;}
     const broadcast=this.broadcastId();
     if(round.broadcastId && broadcast && round.broadcastId!==broadcast) {
       await this.finish({...round,status:'cancelled',closedAt:this.now(),reason:'直播场次已切换，本轮已取消'});return;
     }
     const result=drawGiveaway(round,this.now(),this.randomInt);
     if(result!==round)await this.finish(result);
-    else this.publish(this.guard() || '正在接收本轮参与弹幕和礼物');
+    else {
+      const next=prepareGiveawayFeedback(round,this.now(),this.maxLength());
+      if(next!==round)await this.save(next);
+      await this.flushFeedback();this.publish(this.guard() || '正在接收本轮参与弹幕和礼物');
+    }
   }
   tick() {
     return this.run(async()=>{
