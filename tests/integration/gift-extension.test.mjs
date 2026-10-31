@@ -42,6 +42,13 @@ test('正式 MAIN 构建发现原生礼物模块，多种礼物共用受限流�
     assert.equal(invalid.value.submitted,false);assert.equal(f.calls.length,4);
   }finally{f.close();}
 });
+test('正式 MAIN 桥仅读取抽奖礼物目录，不调用钱包或付费接口',async()=>{
+  const f=fixture();try {
+    f.api.sb=()=>assert.fail('抽奖目录不读钱包');
+    const result=await f.bridge.giftCatalog();assert.equal(result.available,true,result.reason);
+    assert.equal(result.gifts.length,4);assert.equal(result.balanceUnits,undefined);assert.equal(f.calls.length,0);
+  }finally{f.close();}
+});
 test('原生模块尚未加载时解释加载步骤，取消迟到准备会回收账号锁且不触发付费',async()=>{
   const f=fixture();let release;try {
     const original=f.api.Xq;f.api.Xq=()=>new Promise(resolve=>{release=()=>resolve(original());});

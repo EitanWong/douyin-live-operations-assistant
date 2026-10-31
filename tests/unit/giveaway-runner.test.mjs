@@ -15,9 +15,9 @@ const event=id=>({type:'chat',id:`c-${id}`,source:'socket',roomId:'room',at:1500
 test('并发收到的弹幕全部持久保存，到期只开奖一次，重建后结果相同',async()=>{
   const f=fixture(),runner=f.create();await runner.ready();await runner.start(config);f.time(2000);
   await Promise.all(['1','2','3'].map(id=>runner.event(event(id))));assert.equal(f.saved().rounds[0].entrants.length,3);
-  f.time(3000);await runner.tick();const winner=f.saved().rounds[0].winnerIds[0];await runner.dispose();
+  f.time(3000);await runner.tick();const winner=f.saved().rounds[0].awards[0];await runner.dispose();
   const restored=f.create();await restored.ready();await restored.tick();
-  assert.equal(restored.state().rounds[0].status,'drawn');assert.deepEqual(restored.state().rounds[0].winnerIds,[winner]);await restored.dispose();
+  assert.equal(restored.state().rounds[0].status,'drawn');assert.deepEqual(restored.state().rounds[0].awards,[winner]);await restored.dispose();
 });
 test('刷新后接续进行中轮次，多标签页只允许一个写入者，旧页退出后接管',async()=>{
   const f=fixture(),first=f.create(),second=f.create();await first.ready();await first.start(config);await second.ready();
@@ -46,5 +46,20 @@ test('恢复时先补入截止前已写入日志的事件，再对过期轮次�
   const f=fixture(),first=f.create();await first.ready();await first.start(config);await first.dispose();f.time(5000);
   const records=[{key:'pending',savedAt:1500,event:event('1')},{key:'late',savedAt:4000,event:event('2')}];
   const second=f.create({pendingEvents:async()=>records});await second.ready();
-  const result=f.saved().rounds[0];assert.equal(result.status,'drawn');assert.deepEqual(result.winnerIds,['1']);await second.dispose();
+  const result=f.saved().rounds[0];assert.equal(result.status,'drawn');assert.deepEqual(result.awards,[{userId:'1',prizeIndex:0}]);await second.dispose();
+});
+test('多奖品与权重、主播身份固定；开奖保存失败不公布，恢复后导出映射保持',async()=>{
+  const f=fixture();let anchor='9';const runner=f.create({anchorId:()=>anchor});await runner.ready();
+  await runner.start({...config,prizes:[{name:'礼盒',count:1},{name:'纪念杯',count:1}],weights:[{userId:'1',weight:3}],anchorGuaranteed:true});
+  anchor='8';f.time(2000);await runner.event(event('1'));await runner.event(event('9'));f.time(3000);f.failure(true);
+  await assert.rejects(runner.tick(),/磁盘已满/);assert.equal(runner.state().rounds[0].status,'running');assert.deepEqual(runner.state().rounds[0].awards,[]);
+  f.failure(false);await runner.tick();const saved=await runner.export();assert.equal(saved.version,2);
+  assert.equal(saved.rounds[0].anchorId,'9');assert.deepEqual(saved.rounds[0].awards,[{userId:'9',prizeIndex:0},{userId:'1',prizeIndex:1}]);await runner.dispose();
+  const restored=f.create({randomInt:()=>assert.fail('保存后不能重抽')});await restored.ready();assert.deepEqual((await restored.export()).rounds[0],saved.rounds[0]);await restored.dispose();
+});
+test('旧版已开奖记录升级后可直接导出，追加新轮次时以新版保存且旧结果不变',async()=>{
+  const f=fixture();await f.storage.set('',{version:1,rounds:[{id:'old',room:'123',broadcastId:'room',status:'drawn',startedAt:0,endsAt:500,closedAt:500,
+    config,entrants:[{userId:'2',userName:'旧观众',sources:['chat'],enteredAt:100,giftCount:0}],giftProgress:[],winnerIds:['2'],reason:'旧结果'}]});
+  const runner=f.create();await runner.ready();assert.deepEqual((await runner.export()).rounds[0].awards,[{userId:'2',prizeIndex:0}]);
+  await runner.start(config);assert.equal(f.saved().version,2);assert.equal(f.saved().rounds.length,2);assert.equal(f.saved().rounds[0].config.prizes[0].name,'礼盒');await runner.dispose();
 });
