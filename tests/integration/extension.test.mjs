@@ -12,7 +12,7 @@ import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { validateEndpoint } from '../../src/services/ai.js';
 import { GiftStore } from '../../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from '../../extension/durable-storage.js';
-import { EventInbox } from '../../src/runtime/inbox.js';
+import { EventInbox, failureCode } from '../../src/runtime/inbox.js';
 import { installCollectionKeeper } from '../../extension/collection-keeper.js';
 import { RequestBridgeClient } from '../../src/browser/request-sender.js';
 import { webLocks } from '../helpers/web-locks.mjs';
@@ -35,7 +35,7 @@ function connectNative(page) {
 function nativeEvent(page,event) {nativeQueues.get(page).events.push(event);}
 async function rawEntry(entry) {
   let source=(await readFile(new URL(`../../extension/${entry}.js`,import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
-  if(entry==='content')source=source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
+  if(entry==='content')source=`const failureCode = ${failureCode.toString()};\n`+source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
   return source;
 }
 async function evalPage(page) {page.RoomContext=RoomContext;page.eval(await rawEntry('page'));}
@@ -713,7 +713,7 @@ test('扩展后台把在线榜单观测隔离到来源房间并允许同UID重�
 });
 
 test('场次后台接口绑定来源房间，支持零礼物场次和后台重启', async () => {
-  const w=await worker(),at=Date.now()-60000;
+  const w=await worker(),at=Date.parse('2026-10-15T12:00:00+08:00');
   const start=await w.send({type:'income-session',boundaryType:'start',room:'2',roomId:'broadcast-A',at,source:'platform'});
   assert.equal(start.ok,true);
   const restarted=await worker(w.values,w.indexedDB);
@@ -889,4 +889,43 @@ test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不�
     assert.equal((await keeper.refresh()).awake,true);
     assert.equal(saved['live-assistant:collection-leases']['1'],tab.url);
   }finally{dom.window.close();}
+});
+
+
+test('事件桥短暂失联时暂停发送资格，后台恢复后继续接收，无需刷新',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
+  let adapter,drains=0;const timers=[],handled=[];
+  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+    DouyinAdapter:class {
+      constructor(options){Object.assign(this,options);}
+      emitStatus(){}
+      healthy(){return Boolean(this.status.connected || this.status.lastPoll);}
+    },
+    setTimeout:callback=>{timers.push(callback);return timers.length;},clearTimeout(){},
+    chrome:{runtime:{sendMessage:async message=>{
+      if(message.type==='init')return {ok:true,value:{}};
+      if(message.type==='page-command' && message.command.type==='drain'){
+        if(++drains===2)throw new Error('Could not establish connection. Receiving end does not exist.');
+        return {ok:true,value:{events:drains===3?[{type:'gift',id:'after-reconnect'}]:[],captures:[],status:{hook:true,connected:true,lastPoll:Date.now(),frames:drains}}};
+      }
+      return {ok:true,value:{}};
+    },onMessage:{addListener(){}}}},
+    boot:options=>{adapter=options.adapterFactory({onEvent:async event=>handled.push(event.id)});adapter.hook();}
+  });
+  try {
+    await dom.window.eval(`(async()=>{${await rawEntry('content')}})()`);
+    await new Promise(setImmediate);
+    assert.equal(adapter.healthy(),true);
+    await timers.shift()();await new Promise(setImmediate);
+    assert.equal(adapter.persistenceUnavailable(),false);
+    assert.equal(adapter.healthy(),false);
+    assert.match(adapter.status.bridgeError,/Receiving end/);
+    assert.equal(timers.length,1);
+    await timers.shift()();await new Promise(setImmediate);await adapter.inbox.whenIdle();
+    assert.equal(adapter.healthy(),true);
+    assert.equal(adapter.status.contextInvalidated,false);
+    assert.equal(adapter.status.bridgeError,undefined);
+    assert.equal(drains,3);
+    assert.deepEqual(handled,['after-reconnect']);
+  }finally{adapter?.closeEvents();dom.window.close();}
 });

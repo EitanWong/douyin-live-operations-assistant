@@ -2,7 +2,7 @@ import { boot } from '../src/app.js';
 import { DouyinAdapter } from '../src/browser/adapter.js';
 import { RequestBridgeClient } from '../src/browser/request-sender.js';
 import { IdentityReader } from '../src/browser/identity.js';
-import { EventInbox } from '../src/runtime/inbox.js';
+import { EventInbox, failureCode } from '../src/runtime/inbox.js';
 import { roomFromURL } from '../src/browser/room-context.js';
 
 async function startContent() {
@@ -51,7 +51,7 @@ if (room) {
   };
   let liveStatus = { hook:false, sockets:0, frames:0, events:0, errors:0, connected:false, lastFrame:0 };
   let contextInvalidated = false;
-  const isContextError = error => error?.code === 'CONTEXT_INVALID' || /context invalidated|扩展上下文|receiving end does not exist/i.test(String(error?.message || error));
+  const isContextError = error => failureCode(error) === 'CONTEXT_INVALID';
   const contextFailure = () => Object.assign(new Error('扩展上下文已失效，请先导出恢复数据，再刷新直播页'), {code:'CONTEXT_INVALID'});
   const invalidateContext = () => {
     contextInvalidated = true;
@@ -145,7 +145,10 @@ if (room) {
       for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
       for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
       receivePacket({type:'status',status:batch.status});activeAdapter?.sync();more=batch.more===true;
-    } catch(error) {if(!contextInvalidated)liveStatus={...liveStatus,connected:false,bridgeError:error.message};}
+    } catch(error) {
+      if(!contextInvalidated)liveStatus={...liveStatus,connected:false,bridgeError:error.message};
+      activeAdapter?.sync();
+    }
     finally {bridgePending=false;if(!bridgeStopped && !contextInvalidated)bridgeTimer=window.setTimeout(drainBridge,more?0:200);}
   };
   const startBridge=()=>{bridgeStopped=false;window.clearTimeout(bridgeTimer);void drainBridge();};
@@ -233,6 +236,7 @@ if (room) {
       const storage = await message({type:'storage-clear-cache'});
       this.storage = storage; this.sync(); return storage;
     }
+    healthy() { return !contextInvalidated && !this.status.bridgeError && super.healthy(); }
     persistenceUnavailable() { return contextInvalidated; }
     closeEvents() { this.inbox.close(); void updateCollectionLease(false); }
     hook() {

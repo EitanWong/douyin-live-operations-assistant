@@ -2,7 +2,8 @@ export function failureCode(error) {
   if (error?.code) return error.code;
   const text = String(error?.message || error);
   if (/quota|配额|QUOTA_BYTES/i.test(text)) return 'STORAGE_QUOTA';
-  if (/context invalidated|扩展上下文|receiving end does not exist/i.test(text)) return 'CONTEXT_INVALID';
+  // A missing receiver can recover when the worker starts; an invalidated context cannot.
+  if (/context invalidated|扩展上下文/i.test(text)) return 'CONTEXT_INVALID';
   return 'TRANSIENT';
 }
 

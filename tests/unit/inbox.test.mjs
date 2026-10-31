@@ -94,3 +94,22 @@ test('处理器拒绝 null 等非 Error 值时仍按有限重试隔离，不悬�
     }finally{inbox.close();await task;}
   }
 });
+
+
+test('后台接收端短暂缺失后自动重试同一事件，不永久阻塞采集',async()=>{
+  const handled=[];let calls=0;
+  const inbox=new EventInbox({wait:async()=>{},handle:async event=>{
+    if(++calls===1)throw new Error('Could not establish connection. Receiving end does not exist.');
+    handled.push(event.id);
+  }});
+  const result=inbox.admit({type:'gift',id:'reconnected'});
+  try {
+    await inbox.whenIdle();
+    assert.equal(inbox.status().blocked,false);
+    assert.equal(await result,true);
+    assert.deepEqual(handled,['reconnected']);
+    assert.equal(calls,2);
+    assert.equal(inbox.status().quarantined,0);
+    assert.equal(inbox.status().state,'healthy');
+  } finally {inbox.close();}
+});
