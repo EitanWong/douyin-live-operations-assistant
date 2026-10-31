@@ -14,6 +14,8 @@ src/tools/
   gateway.js              能力检查、房间锁、操作校验与在途请求跟踪
   auto-like/index.js       自动点赞生命周期，复用 core/auto-like.js
   auto-like/view.js        自动点赞界面、状态渲染及按钮操作
+  auto-gift/index.js       自动送礼生命周期，复用 core/auto-gift.js
+  auto-gift/view.js        礼物搜索、余额、消费上限及手动控制
   rewards/index.js         福袋红包生命周期，复用 browser/rewards.js
   rewards/view.js          福袋红包界面、状态渲染及按钮操作
 ```
@@ -32,7 +34,7 @@ Cordis `effect()` 登记工具作用域的关闭。停用时，适配层先同�
 
 ## 最小工具定义
 
-下面的接口示意不包含新的产品功能；真实工具应分别维护入口与视图，参考已有两个工具。
+下面的接口示意不包含新的产品功能；真实工具应分别维护入口与视图，参考已有工具。
 
 ```js
 const exampleTool = {
@@ -101,6 +103,11 @@ const exampleTool = {
 | `like.prepare` | 本次目标数量，1～1,000,000；准备后核对账号和环境，过期 token 自动注销 |
 | `like.commit` | `{token, count, sequence}`；单批 1～100，序号连续，不超过本次剩余额度，账号不能变化 |
 | `like.stop` | 当前实例的 token；撤销作用域后仍允许完成注销 |
+| `gift.read` | 无载荷；只读原生礼物目录、余额及待核对记录，不取得运行锁 |
+| `gift.prepare` | `{giftId, priceUnits, batch, intervalSec, target, budget}`；金额用十分之一钻整数计算，绑定账号、房间、目标、价格及预算 |
+| `gift.commit` | `{token, count, sequence}`；序号和额度先预留，MAIN 再检查实时目录、余额、权限及账号锁 |
+| `gift.stop` | 当前实例的 token；撤销后续操作，账号锁等在途请求结算才释放 |
+| `gift.acknowledge` | 用户已核对的未知批次记录 ID；锁内刷新余额后解除匹配记录，不重发旧请求 |
 | `rewards.click` | 已识别的页面活动节点；应用再次核对房间、开关、节点所属页面、连接及禁用状态 |
 | `rewards.prepare` | `{lotteryId, allowPassword, signal?}`；绑定当前账号及开关，只查询精确轮次的资格，迟到或取消的准备自动注销 |
 | `rewards.commit` | `{token, signal?}`；当前实例的单次票据，重新核对账号、开关和房间；先提交条件 6，再按资格发送必要口令 |
@@ -115,7 +122,7 @@ const exampleTool = {
 
 每个工具页面的“工具管理”可单独停用、重新启用当前工具。停用不改写主场控配置、账本或主发送队列；工具自身明确要求保存配置的操作除外，例如“立即停止参与”会保存 `rewards.enabled=false`。
 
-直播结束或人工暂停会向两个工具发出任务停止通知。页面进入 BFCache 时撤销实例并回收资源，返回后只重新挂载原先启用的工具；手动停用的工具保持停用。刷新、关闭及切房会关闭宿主，旧回调不能继续提交操作。
+直播结束或人工暂停会向全部工具发出任务停止通知。页面进入 BFCache 时撤销实例并回收资源，返回后只重新挂载原先启用的工具；手动停用的工具保持停用。刷新、关闭及切房会关闭宿主，旧回调不能继续提交操作。
 
 `onReady` 调试接口中的 `tools` 提供 `ready`、`status()`、`state(id)`、`diagnostics()`、`enable(id)`、`disable(id)`、`restart(id)`、`invoke(id, action, value)`、`suspend()`、`resume()` 和 `close()`。`diagnostics()` 返回 `{backend:'cordis', plugins, scopes}`，可检查启停后 Fiber 和作用域是否归零。这些接口属于应用内维护与测试接口，不是页面主世界的外部控制入口。
 
