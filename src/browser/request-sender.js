@@ -2,11 +2,17 @@ import { RoomContext, roomMatchesStore, roomFromURL } from './room-context.js';
 import { ModerationRequests } from './moderation-requests.js';
 import { LikeRequests } from './like-requests.js';
 import { LotteryRequests } from './lottery-requests.js';
+import { GiftRequests } from './gift-requests.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
-// remain in charge. No cookies, signatures, remote code, or paid endpoints cross
-// the extension bridge.
+// remain in charge. Cookies, signatures and remote code never cross the bridge;
+// paid gifts use fixed, budget-bound preparation and commit operations.
 export class PageRequestSender {
-  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); }
+  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); this.gifts = new GiftRequests(this); }
+  giftSnapshot(options) { return this.gifts.snapshot(options); }
+  prepareGift(config,options) { return this.gifts.prepare(config,options); }
+  commitGift(token,count,sequence,options) { return this.gifts.commit(token,count,sequence,options); }
+  stopGift(token) { return this.gifts.stop(token); }
+  acknowledgeGift(id) { return this.gifts.acknowledge(id); }
   prepareLottery(lotteryId,options) { return this.lotteries.prepare(lotteryId,options); }
   commitLottery(token,options) { return this.lotteries.commit(token,options); }
   stopLottery(token) { return this.lotteries.stop(token); }
@@ -36,8 +42,19 @@ export class PageRequestSender {
     if (!clients.includes(client)) return null;
     try { if (new URL(client.defaults.baseURL, this.page.location.href).origin !== this.page.location.origin) return null; }
     catch { return null; }
-    this.loadedChunks = chunks; this.loadedClient = client;
+    this.loadedChunks = chunks; this.loadedClient = client; this.loadedRequire = require;
     return client;
+  }
+  nativeGiftApi() {
+    if (!this.client()) return null;
+    const require=this.loadedRequire;
+    const candidates=Object.entries(require.m).filter(([,factory])=>{
+      const source=Function.prototype.toString.call(factory);
+      return ['/webcast/gift/list/','/webcast/gift/send/','/webcast/wallet/info/'].every(path=>source.includes(path));
+    });
+    if (candidates.length!==1) return null;
+    const api=require(candidates[0][0]);
+    return ['Xq','hF','sb'].every(key=>typeof api?.[key]==='function') ? api : null;
   }
   context() {
     const info = this.page.__STORE__?.roomStore?.roomInfo;
@@ -137,7 +154,8 @@ export class PageRequestSender {
 export class RequestBridgeClient {
   constructor(page,send=payload=>page.chrome.runtime.sendMessage(payload)) { this.page=page;this.send=send;this.context=new RoomContext(page);this.room=this.context.room; }
   async call(operation,payload,timeout,{signal}={}) {
-    const unavailable=()=>operation.startsWith('prepare')?{available:false}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
+    const read=operation==='gift-snapshot' || operation==='acknowledge-gift';
+    const unavailable=()=>operation.startsWith('prepare') || read ? {available:false,reason:'页面请求未完成，请刷新数据后重试'}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
     if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const id=this.page.crypto.randomUUID();
     let canceled=false;
@@ -153,6 +171,7 @@ export class RequestBridgeClient {
         // Revoke that session before allowing another attempt.
         if(operation==='prepare-like' && result?.ok && typeof result.value?.token==='string')await this.stopLike(result.value.token);
         if(operation==='prepare-lottery' && result?.ok && typeof result.value?.token==='string')await this.stopLottery(result.value.token);
+        if(operation==='prepare-gift' && result?.ok && typeof result.value?.token==='string')await this.stopGift(result.value.token);
         return unavailable();
       }
       return result?.ok && this.context.current() ? result.value : unavailable();
@@ -160,6 +179,11 @@ export class RequestBridgeClient {
     finally {this.page.clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
   }
   prepareModeration(action,target) {return this.call('prepare-moderation',{action,target},800);}
+  giftSnapshot(options) {return this.call('gift-snapshot',{},20000,options);}
+  prepareGift(config,options) {return this.call('prepare-gift',{config},20000,options);}
+  commitGift(token,count,sequence,options) {return this.call('commit-gift',{token,count,sequence},30000,options);}
+  stopGift(token) {return this.call('stop-gift',{token},800);}
+  acknowledgeGift(recordId) {return this.call('acknowledge-gift',{recordId},20000);}
   prepareLike(options) {return this.call('prepare-like',{},10000,options);}
   prepareLottery(lotteryId,{allowPassword=false,signal}={}) {return this.call('prepare-lottery',{lotteryId,allowPassword},10000,{signal});}
   commitLottery(token,options) {return this.call('commit-lottery',{token},20000,options);}

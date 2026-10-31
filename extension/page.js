@@ -27,16 +27,21 @@ if(room && !Object.hasOwn(window,'__douyinAssistantPageV2')) {
     onCapture:record=>enqueue(captures,record,true),onPK:event=>enqueue(priority,event),
     onEvent:event=>{if(!event.type.startsWith('pk-'))enqueue(events,event);}});
   const send=async command=>{
-    const {operation,channel,token,text,action,target,count,sequence,id,lotteryId,allowPassword}=command,sender=adapter.requestSender;
+    const {operation,channel,token,text,action,target,count,sequence,id,lotteryId,allowPassword,config,recordId}=command,sender=adapter.requestSender;
     if(typeof id!=='string' || id.length>64 || jobs.has(id) || jobs.size>=128)throw new Error('请求标识无效');
     if(canceled.delete(id))return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const controller=new AbortController();jobs.set(id,controller);
     try {
+      if(operation==='gift-snapshot')return await sender.giftSnapshot({signal:controller.signal});
+      if(operation==='prepare-gift')return await sender.prepareGift(config,{signal:controller.signal});
+      if(operation==='acknowledge-gift' && typeof recordId==='string' && recordId.length<=64)return await sender.acknowledgeGift(recordId);
       if(operation==='prepare-like')return await sender.prepareLike({signal:controller.signal});
       if(operation==='prepare-lottery')return await sender.prepareLottery(lotteryId,{allowPassword,signal:controller.signal});
       if(operation==='prepare-moderation')return await sender.prepareModeration(action,target);
       if(operation==='prepare')return await sender.prepare(channel);
       if(typeof token!=='string' || token.length>64)return {submitted:false};
+      if(operation==='commit-gift')return await sender.commitGift(token,count,sequence,{signal:controller.signal});
+      if(operation==='stop-gift')return await sender.stopGift(token);
       if(operation==='commit-like')return await sender.commitLike(token,count,sequence,{signal:controller.signal});
       if(operation==='stop-like')return await sender.stopLike(token);
       if(operation==='commit-lottery')return await sender.commitLottery(token,{signal:controller.signal});

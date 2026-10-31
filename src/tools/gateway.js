@@ -1,3 +1,4 @@
+import {giftOperations} from './gift-operations.js';
 // This is a capability boundary for maintained plugins, not a sandbox for hostile code.
 export class ToolGateway {
   constructor({definition, scope, room, guard, operations, createLock, timeout = 15000}) {
@@ -68,6 +69,7 @@ export function toolOperations({transport, click, saveConfig, selfId = () => '',
   };
   const lotterySignal = (value,ctx) => value.signal ? AbortSignal.any([ctx.signal,value.signal]) : ctx.signal;
   return {
+    ...giftOperations(transport,selfId),
     'like.prepare': {run:async (budget, ctx) => {
       if (!Number.isInteger(budget) || budget < 1 || budget > 1000000) throw new Error('点赞目标无效');
       if (ctx.session.token) throw new Error('已有点赞会话');

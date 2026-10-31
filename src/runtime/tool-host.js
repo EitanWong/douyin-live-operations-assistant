@@ -2,6 +2,7 @@ import {ToolRuntime} from '../tools/runtime.js';
 import {bundledTools} from '../tools/bundled.js';
 import {toolOperations} from '../tools/gateway.js';
 import {RoomLock} from '../browser/adapter.js';
+import {demoGiftTransport} from '../tools/auto-gift/demo.js';
 
 // Page policy and transport adapters live here; plugins receive the scoped API.
 export function createPageTools({page,room,engine,adapter,demo,current,unavailable,liveStatus,log,rewardStorage,saveConfig,changed,getRoomId}) {
@@ -14,7 +15,7 @@ export function createPageTools({page,room,engine,adapter,demo,current,unavailab
     getConfig:id=>engine.config[id],services:{page,log,selfId:()=>engine.config.selfId,rewardStorage,
       rewardEvents:()=>engine.roomData.activities,roomId:getRoomId || (()=>engine.liveMode?.roomId || '')},
     operations:toolOperations({selfId:()=>engine.config.selfId,saveConfig,getRewardsConfig:()=>engine.config.rewards,
-      transport:demo ? {prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,
+      transport:demo ? {...demoGiftTransport(),prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,
       click:node=>{
         const style=node?.ownerDocument===page.document && page.getComputedStyle(node);
         if(!engine.config.rewards.enabled || !node?.isConnected || !style || style.display==='none' || style.visibility==='hidden' || !node.getClientRects().length ||
