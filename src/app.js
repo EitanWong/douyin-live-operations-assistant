@@ -82,14 +82,14 @@ export function boot(options = {}) {
   const refresh = () => { if (panel && !closed && !suspended && !renderTimer) renderTimer = setTimeout(() => { renderTimer = null; panel.refresh(engine, network); }, 100); };
   let sendingScheduled = false, senderActive = false;
   const wakeSender = () => {
-    if (persistenceDisabled || sendingScheduled || senderActive || !engine?.running || engine.busy || closed || suspended || !roomContext.current()) return;
+    if (persistenceDisabled || sendingScheduled || senderActive || !engine?.senderEnabled() || engine.busy || closed || suspended || !roomContext.current()) return;
     const now = Date.now();
     if (!engine.queue.some(job => engine.giftReady(job, now)) && ![...engine.gifts.values()].some(gift => gift.due <= now && gift.count > gift.credited)) return;
     if (!demo && engine.config.mode !== 'preview' && !adapter.healthy()) return;
     sendingScheduled = true;
     queueMicrotask(async () => {
       sendingScheduled = false;
-      if (persistenceDisabled || !engine.running || engine.busy || closed || suspended || !roomContext.current()) return;
+      if (persistenceDisabled || !engine.senderEnabled() || engine.busy || closed || suspended || !roomContext.current()) return;
       const beforeJob = engine.selectNextJob(engine.queue, Date.now())?.id;
       const beforeSent = engine.stats.submitted + engine.stats.previews;
       senderActive = true;
@@ -340,6 +340,16 @@ export function boot(options = {}) {
   });
   engine = new Engine({
     config, log, ai: client,
+    claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
+    giveawayCurrent:message=>{
+      if(!tools || tools.closed || tools.suspended)return null;
+      if(tools.guard('giveaway') || tools.status().find(row=>row.id==='giveaway')?.phase!=='active')return null;
+      const round=tools.state('giveaway')?.rounds?.find(row=>row.id===message.roundId);
+      if(!round)return null;
+      const broadcast=identity.live?.roomId || engine.liveMode?.roomId || '';
+      if(round.broadcastId && broadcast && round.broadcastId!==broadcast)return false;
+      return message.kind==='result' ? round.status==='drawn' : message.kind==='cancelled' ? round.status==='cancelled' : round.status==='running';
+    },
     mediaContext:()=>media.state==='running' && mediaAnchor===engine.config.anchorId && (demo || roomContext.current()) ? mediaEvidence.context(activeMediaConfig.contextAgeSec) : null,
     liveData: () => {
       const local=giftLedger.currentSession();
@@ -352,7 +362,12 @@ export function boot(options = {}) {
     manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
     onStop: () => { media.stop(); lock.release(); autoStartArmed = false; },
-    send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : (text, isCurrent, hooks) => adapter.send(text, () => isCurrent() && lock.held && roomContext.current(),hooks)
+    send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : async (text, isCurrent, hooks) => {
+      const independent=!engine.running;
+      if(independent && (!isCurrent() || !await lock.acquire()))return {submitted:false,reason:'等待当前直播间发送锁'};
+      try {return await adapter.send(text,()=>isCurrent() && lock.held && roomContext.current(),hooks);}
+      finally {if(independent && !engine.running && !starting)lock.release();}
+    }
   });
   tools = createPageTools({page:window,room,engine,adapter,demo,log,
     getRoomId:()=>identity.live?.roomId || engine.liveMode?.roomId || '',

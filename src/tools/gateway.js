@@ -62,7 +62,7 @@ export class ToolGateway {
   }
 }
 
-export function toolOperations({transport, click, saveConfig, selfId = () => '', getRewardsConfig = () => ({enabled:false})}) {
+export function toolOperations({transport, click, saveConfig, selfId = () => '', getRewardsConfig = () => ({enabled:false}),announceGiveaway}) {
   const lotteryAllowed = (session,ctx) => {
     const config=getRewardsConfig();
     return ctx.isCurrent() && !ctx.signal?.aborted && session.account===selfId() && config.enabled && config.luckyBag && config.nativePassword===session.allowPassword;
@@ -70,6 +70,11 @@ export function toolOperations({transport, click, saveConfig, selfId = () => '',
   const lotterySignal = (value,ctx) => value.signal ? AbortSignal.any([ctx.signal,value.signal]) : ctx.signal;
   return {
     ...giftOperations(transport,selfId),
+    'giveaway.announce': {validate:value=>{
+      if(typeof value?.key!=='string' || typeof value.roundId!=='string' || !['start','entry','countdown','result','cancelled'].includes(value.kind)
+        || typeof value.text!=='string' || !value.text.trim() || [...value.text].length>50 || !Number.isFinite(value.expiresAt)
+        || !Number.isFinite(value.endsAt))throw new Error('抽奖弹幕参数无效');
+    },run:value=>announceGiveaway(value)},
     'like.prepare': {run:async (budget, ctx) => {
       if (!Number.isInteger(budget) || budget < 1 || budget > 1000000) throw new Error('点赞目标无效');
       if (ctx.session.token) throw new Error('已有点赞会话');

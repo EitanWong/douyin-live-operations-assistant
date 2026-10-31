@@ -144,7 +144,7 @@ Cordis API 仅封装在 `cordis-adapter.js`；业务工具和 UI 继续依赖项
 
 ## 互动抽奖的数据边界
 
-`giveaway` 通过包内注册加入导航。纯规则位于 `src/core/giveaway.js`；运行器在房间租约下串行保存，持久状态为 `{version:1, rounds}`。直播间、轮次、参与者、礼物连击进度与中奖 ID 各有明确字段，规则创建后固定。
+`giveaway` 通过包内注册加入导航。纯规则位于 `src/core/giveaway.js`；运行器在房间租约下串行保存，持久状态为 `{version:2, rounds}`。直播间、轮次、参与者、礼物连击进度与中奖 ID 各有明确字段，规则创建后固定。
 
 `dispatch` 可靠分发弹幕／礼物事件并等待工具保存，区别于可合并的 `notify` 状态提示。保存失败时核心仍接收事件，抽奖保留待处理日志并进入失败状态；重建工具先恢复截止前的日志，再开奖。后台通过 `giveaway-read/write` 按来源房间限制记录，并在 IndexedDB 事务提交后返回，错误不会清空旧数据。工具关闭先撤销未来任务、等待当前写入，再释放租约。
 
@@ -152,4 +152,9 @@ Cordis API 仅封装在 `cordis-adapter.js`；业务工具和 UI 继续依赖项
 
 抽奖状态现为 `version:2`：`config.prizes[{name,count}]` 是奖品和名额的唯一来源，`awards[{userId,prizeIndex}]` 保存中奖者与奖品索引，`weights[{userId,weight}]` 配置指定观众权重（其他默认为 1），`anchorGuaranteed` 与开轮时快照 `round.anchorId` 控制主播参与必中。旧 `version:1` 在读取边界将单奖品和 `winnerIds` 转换，保留原结果；下一次写入统一保存新版。抽取使用整数权重和加密随机拒绝采样，无放回分配。主播参与必中仅对已入池 UID 生效，占用首项奖品一个名额。
 
-`gift.catalog` 是抽奖唯一声明的平台操作能力，不需房间写入锁，走 MAIN 固定 `gift-catalog` 桥和原生礼物目录读取；不读取钱包和送礼待核对记录，不授予 `gift.prepare`／`gift.commit`。目录、搜索和草稿仅属于当前视图，参与与开奖记录仍由房间单写者持久化。
+`gift.catalog` 是抽奖声明的礼物目录读取能力，不需房间写入锁，走 MAIN 固定 `gift-catalog` 桥；原生礼物模块未加载时，复用网页已加载的同源请求客户端，只 GET `/webcast/gift/list/` 读取目录；不读取钱包和送礼待核对记录，不授予 `gift.prepare`／`gift.commit`。目录、搜索和草稿仅属于当前视图，参与与开奖记录仍由房间单写者持久化。
+
+
+抽奖另声明 `giveaway.announce`，须持有房间工具租约，且受宿主页面／直播场次门控。`config.feedbackEnabled` 固定本轮是否发弹幕；旧记录缺少该字段时归一为 false。纯函数 `prepareGiveawayFeedback` 生成 `round.feedback[]`：`id/kind/text/createdAt/expiresAt/queued`，报名确认另存 `userIds`，倒计时另存 `seconds`。开始、报名与结果先与轮次一起保存，再交给发送队列；截止前确认合并，关键节点不补发过期提醒。
+
+Engine 的 `enqueueGiveaway` 将带稳定 key 的任务和收据一起 checkpoint，抽奖通道可独立于场控 running 工作，沿用发送串行、点击前检查点与回显核对。抽奖消息独立间隔 2 秒，其他模块原有调度保持原样；出队时更新倒计时文本。`claimFeedback` 在点击前以房间单写者持久记录 `attemptedBy`（当前 Engine 实例），接管页不能重复点击已认领消息。未认领的 queued 消息由新运行器重新交付，收据与队列去重；未知发送结果保持不自动重发。JSON 保留反馈记录，queued 仅表示交付队列，不表示平台回显。

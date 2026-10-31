@@ -98,7 +98,7 @@ export const giveawayView = {
       <label class="field"><span>参与弹幕</span><input type="text" data-giveaway="keyword" value="参与抽奖" maxlength="100"><small>去除首尾空格后须完全一致；重复发送不增加名额。</small></label>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="giftEnabled">赠送指定礼物直接参与</label>
       <div class="actions"><button type="button" data-action="giveaway-refresh-gifts">读取 / 刷新礼物目录</button></div>
-      <p class="hint" data-giveaway-gift-message role="status" aria-live="polite">先打开网页礼物面板，再读取当前直播间目录；也可直接手动填写。</p>
+      <p class="hint" data-giveaway-gift-message role="status" aria-live="polite">读取当前直播间礼物目录，无需先打开网页礼物面板；也可手动填写。</p>
       <label class="field"><span>搜索礼物名称或 ID</span><input type="search" data-giveaway-gift-search placeholder="例如：小心心、玫瑰或 463"></label>
       <div class="giveaway-gift-list" data-giveaway-gift-list role="group" aria-label="可选礼物"></div>
       <p class="hint" data-giveaway-gift-count></p>
@@ -106,12 +106,18 @@ export const giveawayView = {
       <div class="grid"><label class="field"><span>已选礼物名称或 ID · 可手动补充</span><input type="text" data-giveaway="gifts" value="小心心" maxlength="1000"><small>勾选目录会填入 ID；手动填写多项时用逗号分隔。指定礼物合并累计。</small></label>
       <label class="field"><span>累计礼物数量</span><input type="number" data-giveaway="giftMin" value="1" min="1" max="100000" step="1"><small>仅累计本轮指定礼物；达到门槛自动入池，无需再发弹幕。</small></label></div>
     </fieldset>
+    <fieldset class="giveaway-config"><legend>弹幕反馈</legend>
+      <label class="giveaway-option"><input type="checkbox" data-giveaway="feedbackEnabled" checked>自动发送抽奖反馈到公屏</label>
+      <p class="hint">播报开轮、报名成功和开奖结果；剩余 5 分钟、1 分钟、30 秒、10 秒时提醒。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p>
+    </fieldset>
     <div class="actions"><button type="button" class="primary" data-action="giveaway-start">开始抽奖</button><button type="button" class="danger" data-action="giveaway-cancel" disabled>取消本轮</button></div>
     <p class="hint" data-giveaway-status role="status" aria-live="polite">正在读取抽奖记录</p>
+    <p class="hint" data-giveaway-feedback role="status" aria-live="polite">开轮后显示弹幕反馈状态</p>
+    <p class="hint" data-giveaway-entry-feedback role="status" aria-live="polite"></p>
     <section class="giveaway-live" aria-label="当前抽奖"><h3 data-giveaway-round-title>尚未开始</h3><p class="giveaway-clock" data-giveaway-countdown role="timer" aria-live="off">设置奖品和参与方式，然后开始第一轮抽奖。</p><p class="giveaway-result" data-giveaway-result role="status" aria-live="polite"></p><div class="actions"><button type="button" data-action="giveaway-copy" disabled>复制开奖公告</button></div></section>
     <div class="giveaway-history-head"><h3>抽奖记录</h3><div class="actions"><button type="button" data-action="giveaway-csv" disabled>导出 CSV</button><button type="button" data-action="giveaway-json" disabled>导出 JSON</button></div></div>
     <div data-giveaway-history></div>
-    <p class="hint">结果在本工具公布，可复制公告到公屏。记录保存在本机；CSV 可用于表格统计，JSON 保留完整规则和明细。请保持直播页打开；刷新后会恢复本轮，关闭期间的互动无法采集。参与人数不足时按奖品列表顺序分配；无人参加时保留空结果。</p>
+    <p class="hint">结果保存在本工具，开启弹幕反馈后也会自动公布到公屏。记录保存在本机；CSV 可用于表格统计，JSON 保留完整规则、明细与弹幕反馈记录。发送状态和公屏回显可在运行日志查看。请保持直播页打开；刷新后会恢复本轮，关闭期间的互动无法采集。参与人数不足时按奖品列表顺序分配；无人参加时保留空结果。</p>
   </section>`,
   update(panel,state) {
     const rounds=state.rounds || [],round=rounds.at(-1),active=round?.status==='running';
@@ -123,6 +129,10 @@ export const giveawayView = {
     panel.disabled('[data-action=giveaway-csv]',!rounds.length);panel.disabled('[data-action=giveaway-json]',!rounds.length);
     panel.disabled('[data-action=giveaway-copy]',round?.status!=='drawn');
     panel.text('[data-giveaway-status]',`${panel.demo ? '模拟抽奖 · ' : ''}${state.reason || '尚未开始抽奖'}`);
+    const messages=round?.feedback || [],pending=messages.filter(row=>!row.queued && row.expiresAt>(state.now || Date.now())).length;
+    const mode=state.feedbackMode==='preview' ? '仅预览 · 不发公屏' : state.feedbackMode==='demo' ? '模拟发送' : '自动发送';
+    panel.text('[data-giveaway-feedback]',state.feedbackError ? `弹幕待重试：${state.feedbackError}` : round ? round.config.feedbackEnabled ? `${mode} · 已交给发送队列 ${messages.filter(row=>row.queued).length} 条${pending ? ` · 待入队 ${pending} 条` : ''}。实际发送及回显请查看运行日志。` : '本轮已关闭公屏反馈；报名和开奖结果仍在工具内显示。' : `${mode} · 开轮后显示弹幕反馈状态`);
+    panel.text('[data-giveaway-entry-feedback]',round?.entrants.length ? `已报名 ${round.entrants.length} 人 · 最近：${round.entrants.slice(-5).map(row=>row.userName).join('、')}` : '');
     panel.text('[data-giveaway-round-title]',round ? `${giveawayPrizes(round.config)} · ${status[round.status]}` : '尚未开始');
     const seconds=active ? Math.max(0,Math.ceil((round.endsAt-(state.now || Date.now()))/1000)) : 0;
     const clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;

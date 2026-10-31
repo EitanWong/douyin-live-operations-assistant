@@ -16,8 +16,32 @@ function fixture(locks=webLocks()) {
     sb:async()=>({data:{status_code:0,data:{diamond_x10:500,user_id:'789'}}}),
     hF:async payload=>{calls.push(payload);return {data:{status_code:0,data:{gift_id:463,gift_struct:{diamond_count:1}}}};}};
   const sender={page,context:()=>context,nativeGiftApi:()=>api};
-  return {dom,page,api,gift,calls,requests:new GiftRequests(sender),setContext:value=>{context=value;}};
+  return {dom,page,api,gift,calls,sender,requests:new GiftRequests(sender),setContext:value=>{context=value;}};
 }
+test('未打开礼物面板仍能通过网页已加载客户端读取目录，沿用签名和会话且仅请求目录',async()=>{
+  const f=fixture(),reads=[];
+  try {
+    f.sender.nativeGiftApi=()=>null;
+    f.sender.client=()=>({request:async options=>{reads.push(options);return {data:{status_code:0,data:{gifts:[f.gift]}}};}});
+    f.api.sb=()=>assert.fail('目录不读钱包');f.api.hF=()=>assert.fail('目录不送礼');
+    Object.defineProperty(f.page,'localStorage',{get(){throw Error('无关送礼存储不可用');}});
+    const result=await f.requests.catalog();assert.equal(result.available,true,result.reason);assert.equal(result.gifts[0].id,'463');
+    assert.equal(reads.length,1);assert.equal(reads[0].url,'/webcast/gift/list/');assert.equal(reads[0].method,'get');
+    assert.deepEqual(reads[0].params,{room_id:'7702839019851270938',gift_scene:1});assert.equal(f.calls.length,0);
+  }finally{f.dom.window.close();}
+});
+test('目录回退受取消和账号／房间变化约束，客户端未加载时给出可操作原因',async()=>{
+  const f=fixture();
+  try {
+    f.sender.nativeGiftApi=()=>null;
+    f.sender.client=()=>null;assert.match((await f.requests.catalog()).reason,/加载|就绪/);
+    f.sender.client=()=>({request:async()=>{f.setContext({roomId:'999',userId:'789',path:'123'});return {data:{status_code:0,data:{gifts:[f.gift]}}};}});
+    assert.match((await f.requests.catalog()).reason,/账号或直播间已变化/);
+    const controller=new AbortController();controller.abort();let reads=0;
+    f.sender.client=()=>({request:async()=>{reads++;return {data:{status_code:0,data:{gifts:[f.gift]}}};}});
+    assert.equal((await f.requests.catalog({signal:controller.signal})).available,false);assert.equal(reads,0);
+  }finally{f.dom.window.close();}
+});
 test('抽奖只读礼物目录，不依赖钱包或待核对送礼记录，账号变更时拒绝迟到目录',async()=>{
   const f=fixture();try {
     f.api.sb=()=>assert.fail('选择抽奖礼物不读取钱包');

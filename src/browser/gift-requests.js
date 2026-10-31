@@ -68,9 +68,14 @@ export class GiftRequests {
   }
   async catalog({signal}={}) {
     try {
+      if(signal?.aborted)throw new Error('礼物目录读取已取消');
       const context=this.context(false),api=this.sender.nativeGiftApi();
-      if(!api)throw new Error('网页礼物模块尚未加载，请先打开网页礼物面板再刷新');
-      const response=await api.Xq({room_id:context.roomId,gift_scene:context.scene});
+      const params={room_id:context.roomId,gift_scene:context.scene};
+      // The catalog is a read operation. It can use the page's signed HTTP
+      // client before the lazy gift panel (and its wallet/send APIs) is loaded.
+      const client=api ? null : this.sender.client?.();
+      if(!api && !client)throw new Error('网页请求模块尚未就绪，请等待直播页加载完成后重试');
+      const response=await (api ? api.Xq(params) : client.request({url:'/webcast/gift/list/',method:'get',params,timeout:8000,signal}));
       if(signal?.aborted || !same(context,this.context(false)))throw new Error('账号或直播间已变化，请重新读取目录');
       return {available:true,gifts:parseGiftCatalog(responseData(response),context.scene),at:Date.now()};
     } catch(error) {return {available:false,gifts:[],reason:error.message};}
