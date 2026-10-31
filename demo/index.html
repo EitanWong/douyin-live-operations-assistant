@@ -49,7 +49,7 @@ body{background:#f3f3f5;color:#1d1d1f}main{width:min(1420px,calc(100% - 48px));m
   <div class="event-group"><h3>主播与 PK 数据演示</h3><div class="buttons"><button data-pk-demo="start">模拟 PK 追分局</button><button data-pk-demo="end">模拟终局</button><button data-anchor-demo>模拟主播统计</button></div><small>仅生成本地模拟数据，不连接真实直播间。</small></div>
 </div></section>
 <footer>模拟器不会登录直播间，也不会发送真实弹幕或礼物。礼物图标从抖音公开 CDN 加载；名称和钻石价格取自一次公开直播间，仅作本地样例，真实目录、价格和房间布局可能变化。主播收入按约 0.05 元/钻估算，不代表平台结算。AI 请求仅在配置后发往你填写的服务。</footer>
-</main><script type="importmap">{"imports":{"/src/ui/live-charts.js":"/dist/live-charts.js","/src/tools/cordis-adapter.js":"/dist/tool-runtime.js"}}</script><script type="module">
+</main><script type="importmap">{"imports":{"/src/ui/live-charts.js":"/dist/live-charts.js","/src/tools/cordis-adapter.js":"/dist/tool-runtime.js","/src/services/intent.js":"/dist/ai-intent.js"}}</script><script type="module">
 import { boot } from '../src/app.js';
 import { DEFAULTS, copy } from '../src/core/engine.js';
 const prefix = 'douyin-live-demo:';

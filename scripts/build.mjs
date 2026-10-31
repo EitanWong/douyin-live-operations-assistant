@@ -37,14 +37,17 @@ const header = `// ==UserScript==
 // @license      MIT
 // ==/UserScript==
 `;
+const intentLicense=await readFile(`${root}node_modules/jsonrepair/LICENSE.md`,'utf8');
 const cordisLicense=await readFile(`${root}vendor/cordis/LICENSE`,'utf8');
 const cosmokitLicense=await readFile(`${root}node_modules/cosmokit/LICENSE`,'utf8');
-const toolNotice=`/*! Cordis · MIT\n${cordisLicense}\nCosmokit · MIT\n${cosmokitLicense}\n*/`;
 const iconLicense=await readFile(`${root}vendor/lucide/LICENSE`,'utf8');
-const bundleNotice=`${toolNotice}\n/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
+const toolNotice=`/*! Cordis · MIT\n${cordisLicense}\nCosmokit · MIT\n${cosmokitLicense}\n*/`;
+const bundleNotice=`${toolNotice}\n/*! jsonrepair · ISC\n${intentLicense}\n*/\n/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
+const toolBuild={entryPoints:[`${root}src/tools/cordis-adapter.js`],bundle:true,platform:'browser',minify:true,legalComments:'inline',target:'chrome111',banner:{js:toolNotice}};
 await mkdir(dist, { recursive: true });
-await build({entryPoints:[`${root}src/tools/cordis-adapter.js`],bundle:true,platform:'browser',format:'esm',minify:true,legalComments:'inline',target:'chrome111',banner:{js:toolNotice},outfile:`${dist}/tool-runtime.js`});
 await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/live-charts.js`});
+await build({entryPoints:[`${root}src/services/intent.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',banner:{js:`/*! jsonrepair · ISC\n${intentLicense}\n*/`},target:'chrome111',outfile:`${dist}/ai-intent.js`});
+await build({...toolBuild,format:'esm',outfile:`${dist}/tool-runtime.js`});
 await writeFile(`${dist}/douyin-live-assistant.user.js`,await bundleStandalone({entry:`${root}src/userscript.js`,banner:header+'\n'+bundleNotice,target:'chrome111'}));
 console.log('Built dist/douyin-live-assistant.user.js (standalone; no runtime dependencies)');
 const destination = `${dist}/chrome-extension`;
@@ -55,7 +58,8 @@ const glassLicense = await readFile(`${root}vendor/solid-glass/LICENSE`, 'utf8')
 await writeFile(`${ext}/solid-glass.css`, `/* Solid Glass · https://github.com/deeplethe/solid-glass\n${glassLicense}\n*/\n${SOLID_GLASS_CSS}`);
 await writeFile(`${ext}/theme.js`, await readFile(`${root}src/ui/theme.js`));
 // AI 模块的源码相对依赖不属于扩展目录，必须一起打包供后台加载。
-await build({entryPoints:[`${root}src/services/ai.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/ai.js`});
+await build({entryPoints:[`${root}src/services/ai.js`],bundle:true,format:'esm',target:'chrome120',banner:{js:`/*! jsonrepair · ISC\n${intentLicense}\n*/`},outfile:`${ext}/ai.js`});
+await build({entryPoints:[`${root}src/services/search.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/search.js`});
 await writeFile(`${ext}/gifts.js`,await readFile(`${root}src/data/gifts.js`));
 await build({entryPoints:[`${root}extension/collection-keeper.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/collection-keeper.js`});
 await build({entryPoints:[`${root}extension/background.js`],bundle:true,format:'esm',target:'chrome120',banner:{js:bundleNotice},outfile:`${ext}/background.js`});
@@ -71,6 +75,7 @@ for(const name of ['echarts/LICENSE','echarts/NOTICE','echarts/licenses/LICENSE-
 chartLicenses += `chinese-dictionary (vendor/chinese-dictionary)\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n`;
 chartLicenses += `chinese-xinhua (vendor/chinese-xinhua)\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\n`;
 chartLicenses += `Lucide icon subset (vendor/lucide)\n${iconLicense}\n`;
+chartLicenses += `jsonrepair · ISC\n${intentLicense}\n`;
 chartLicenses += `Cordis 4.0.0-rc.12 (vendor/cordis)\n${cordisLicense}\nCosmokit\n${cosmokitLicense}\n`;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
@@ -84,7 +89,7 @@ if (development) {
   await writeFile(`${ext}/manifest.json`, JSON.stringify(manifest, null, 2));
   for (const name of ['development-reload.js', 'development-content.js']) await writeFile(`${ext}/${name}`, await readFile(`${root}extension/${name}`));
   const hash = createHash('sha256');
-  for (const name of ['manifest.json','content.js','page.js','indicator-frame.js','fanclub-frame.js','fanclub-data.js','background.js','popup.js','popup.html','popup.css','solid-glass.css','theme.js','ai.js','gifts.js','durable-storage.js','protocol-cache.js','development-reload.js','development-content.js']) hash.update(await readFile(`${ext}/${name}`));
+  for (const name of ['manifest.json','content.js','page.js','indicator-frame.js','fanclub-frame.js','fanclub-data.js','background.js','popup.js','popup.html','popup.css','solid-glass.css','theme.js','ai.js','search.js','gifts.js','durable-storage.js','protocol-cache.js','development-reload.js','development-content.js']) hash.update(await readFile(`${ext}/${name}`));
   const revision = hash.digest('hex');
   await writeFile(`${ext}/background.js`, `${await readFile(`${ext}/background.js`, 'utf8')}\nimport { installDevelopmentReload } from './development-reload.js';\ninstallDevelopmentReload({ chrome, revision:'${revision}', endpoint:'http://127.0.0.1:${developmentPort}/build', beforeReload:async()=>{ await storageReady; await giftStore.tail; } });\n`);
   // 最后发布构建标识；构建中或失败时，Chrome 不会读到半成品更新通知。

@@ -133,7 +133,7 @@ if (room) {
     if (request.type === 'storage') { for (const [key,change] of Object.entries(request.changes)) { if (change.newValue === undefined) values.delete(key); else values.set(key,change.newValue); } }
     if (request.type === 'income-updated') incomeChanged?.();
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
-    if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', ready:Boolean(panel) });
+    if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
   });
   let bridgeTimer,bridgePending=false,bridgeStopped=false;
   const drainBridge=async()=>{
@@ -256,7 +256,7 @@ if (room) {
     void (async()=>{
       try {
         await writes;
-        const response = await message({type:'ai',url:details.url,headers:details.headers,data:details.data});
+        const response = await message({type:details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
         details.onload(response);
       } catch (e) { details.onload({status:0,responseText:'',error:e.message}); }
     })();
