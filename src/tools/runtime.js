@@ -114,6 +114,17 @@ export class ToolRuntime {
       } catch (error) { entry.notifying.delete(name); this.fail(entry, error); }
     }
   }
+  async dispatch(name,value) {
+    if(this.suspended || this.closed)return;
+    const results=await Promise.allSettled([...this.entries.values()].filter(entry=>entry.phase==='failed' && entry.state.receiving || entry.phase==='active' && entry.scope.active && entry.instance?.[name]).map(async entry=>{
+      if(entry.phase==='failed')throw new Error(entry.error || '工具事件接收失败，请重新启用工具');
+      const scope=entry.scope;
+      try {await this.bounded(scope.run(()=>entry.instance[name](value)),entry.timeout);}
+      catch(error){if(entry.scope===scope && scope.active)this.fail(entry,error);throw error;}
+    }));
+    const errors=results.filter(result=>result.status==='rejected').map(result=>result.reason);
+    if(errors.length)throw new AggregateError(errors,'抽奖事件保存失败，事件日志保留待重试');
+  }
   suspend() {
     this.suspended = true;
     return Promise.allSettled(this.registry.list().map(definition => this.disable(definition.id, {preserveEnabled:true})));

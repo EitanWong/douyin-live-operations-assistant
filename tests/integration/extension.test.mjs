@@ -17,6 +17,7 @@ import { EventInbox, failureCode } from '../../src/runtime/inbox.js';
 import { installCollectionKeeper } from '../../extension/collection-keeper.js';
 import { RequestBridgeClient } from '../../src/browser/request-sender.js';
 import { webLocks } from '../helpers/web-locks.mjs';
+import {createGiveaway,enterGiveaway,drawGiveaway} from '../../src/core/giveaway.js';
 import { buildFixture } from '../helpers/build.mjs';
 const {dist:testDist, cleanup} = await buildFixture();
 after(cleanup);
@@ -73,7 +74,7 @@ async function worker(values = {}, indexedDB = new IDBFactory()) {
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
   const code=(await readFile(file('background.js'),'utf8'));
-  vm.runInNewContext(code,{fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
+  vm.runInNewContext(code,{structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
@@ -884,6 +885,21 @@ test('福袋记录按来源房间和账号持久化，后台重启后接管者�
   assert.deepEqual((await restored.send({type:'rewards-read',key})).value,records);
   assert.deepEqual((await restored.send({type:'rewards-read',key:'live-assistant:rewards:1:456'})).value,[]);
   assert.equal((await restored.send({type:'rewards-write',key:'live-assistant:rewards:2:789',records})).ok,false);
+});
+
+test('抽奖结果持久保存在后台数据库，重启可恢复，拒绝越房和非法记录',async()=>{
+  const w=await worker(),key='live-assistant:giveaway:1';
+  let round=createGiveaway({prize:'礼盒',winners:1,durationSec:2,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false},{id:'round-1',room:'1',now:1000});
+  round=enterGiveaway(round,{type:'chat',text:'参与抽奖',at:1500,user:{id:'9999999999999999999',name:'小雨'}},1500);
+  const state={version:1,rounds:[drawGiveaway(round,3000,()=>0)]};
+  assert.equal((await w.send({type:'giveaway-write',key,value:state})).ok,true);
+  const restored=await worker(w.values,w.indexedDB);
+  assert.deepEqual((await restored.send({type:'giveaway-read',key})).value,state);
+  assert.equal((await restored.send({type:'giveaway-read',key:'live-assistant:giveaway:2'})).ok,false);
+  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:1,rounds:[{...round,room:'2'}]}})).ok,false);
+  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:1,rounds:[{...round,winnerIds:['stranger']}]}})).ok,false);
+  assert.deepEqual((await restored.send({type:'giveaway-read',key})).value,state);
+  assert.equal(w.values[key],undefined,'完整记录不落在 chrome.storage.local 配额内');
 });
 
 test('上下文同步失效时更新诊断并停止重试，取消保活失败不覆盖恢复提示',async()=>{

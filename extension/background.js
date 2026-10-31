@@ -8,6 +8,7 @@ import {validateMediaRequest,MEDIA_REQUEST_LIMIT} from '../src/services/media.js
 import { GiftStore } from '../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
 import { installCollectionKeeper } from './collection-keeper.js';
+import {parseGiveawayState} from '../src/core/giveaway.js';
 
 const collectionKeeper = installCollectionKeeper(chrome);
 
@@ -152,6 +153,15 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         else {
           if (!Array.isArray(message.records) || message.records.length > 100 || jsonLength(message.records) > 50000) throw new Error('活动记录无效');
           await durableStorage.set(message.key,message.records);value=true;
+        }
+      }
+      else if (['giveaway-read','giveaway-write'].includes(message.type) && isRoom(sender)) {
+        const room=roomFromUrl(sender.tab.url),key=`live-assistant:giveaway:${room}`;
+        if(message.key!==key)throw new Error('抽奖记录范围无效');
+        if(message.type==='giveaway-read')value=await durableStorage.get(key) ?? null;
+        else {
+          const size=jsonLength(message.value);if(size==null || size>16*1024*1024)throw new Error('抽奖记录过大，请先导出历史记录');
+          const state=parseGiveawayState(message.value,room);await durableStorage.set(key,state);value=true;
         }
       }
       else if (message.type === 'collection-state' && isRoom(sender)) value = await collectionKeeper.update(sender,message.active);

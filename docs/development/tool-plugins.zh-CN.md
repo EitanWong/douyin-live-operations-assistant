@@ -141,3 +141,11 @@ Cordis API 仅封装在 `cordis-adapter.js`；业务工具和 UI 继续依赖项
 `tests/unit/lottery-requests.test.mjs` 与 `lottery-automation-request.test.mjs` 验证资格边界、单次提交、取消及持久去重；`tests/integration/lottery-extension.test.mjs` 执行构建后的 MAIN 桥，检查真实语义操作的请求顺序、重复票据、迟到资格和两阶段取消。平台 HTTP 客户端由本地夹具替代，不产生真实报名，也不把测试成功计作本人服务器参与确认。
 
 浏览器本地模拟器已验证：工具注册导航、模拟点赞完成、独立停用与重新启用、重新启用后等待用户开始。未向真实直播间发送弹幕、点赞或参与活动；真实平台长时运行仍需按实测指南验收。
+
+## 互动抽奖的数据边界
+
+`giveaway` 通过包内注册加入导航。纯规则位于 `src/core/giveaway.js`；运行器在房间租约下串行保存，持久状态为 `{version:1, rounds}`。直播间、轮次、参与者、礼物连击进度与中奖 ID 各有明确字段，规则创建后固定。
+
+`dispatch` 可靠分发弹幕／礼物事件并等待工具保存，区别于可合并的 `notify` 状态提示。保存失败时核心仍接收事件，抽奖保留待处理日志并进入失败状态；重建工具先恢复截止前的日志，再开奖。后台通过 `giveaway-read/write` 按来源房间限制记录，并在 IndexedDB 事务提交后返回，错误不会清空旧数据。工具关闭先撤销未来任务、等待当前写入，再释放租约。
+
+使用 `tests/unit/giveaway*.test.mjs`、`tests/integration/giveaway.test.mjs` 和构建后的扩展后台测试验证规则、跨页接管、恢复与存储边界。
