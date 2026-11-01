@@ -101,7 +101,7 @@ export class GiveawayRunner {
   }
   start(value) {
     return this.run(async()=>{
-      const config=validateGiveawayConfig({feedbackEnabled:true,...value}),reason=this.guard();
+      const config=validateGiveawayConfig({...value,feedbackEnabled:true}),reason=this.guard();
       if(reason)throw new Error(reason);
       if(!this.storage)throw new Error('抽奖存储不可用，请重新加载扩展');
       if(!await this.claim())throw new Error('其他页面正在运行本直播间抽奖，请在该页面操作');

@@ -107,7 +107,7 @@ export const giveawayView = {
       <label class="field"><span>累计礼物数量</span><input type="number" data-giveaway="giftMin" value="1" min="1" max="100000" step="1"><small>仅累计本轮指定礼物；达到门槛自动入池，无需再发弹幕。</small></label></div>
     </fieldset>
     <fieldset class="giveaway-config"><legend>弹幕反馈</legend>
-      <label class="giveaway-option"><input type="checkbox" data-giveaway="feedbackEnabled" checked>自动发送抽奖反馈到公屏</label>
+      <p class="hint">抽奖反馈自动发送到公屏。</p>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="announcePrizeNames" checked>弹幕播报奖品名称</label>
       <p class="hint">播报开轮、报名成功和开奖结果；剩余 5 分钟、1 分钟、30 秒、10 秒时提醒。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p>
     </fieldset>
@@ -118,7 +118,7 @@ export const giveawayView = {
     <section class="giveaway-live" aria-label="当前抽奖"><h3 data-giveaway-round-title>尚未开始</h3><p class="giveaway-clock" data-giveaway-countdown role="timer" aria-live="off">设置奖品和参与方式，然后开始第一轮抽奖。</p><p class="giveaway-result" data-giveaway-result role="status" aria-live="polite"></p><div class="actions"><button type="button" data-action="giveaway-copy" disabled>复制开奖公告</button></div></section>
     <div class="giveaway-history-head"><h3>抽奖记录</h3><div class="actions"><button type="button" data-action="giveaway-csv" disabled>导出 CSV</button><button type="button" data-action="giveaway-json" disabled>导出 JSON</button></div></div>
     <div data-giveaway-history></div>
-    <p class="hint">结果保存在本工具，开启弹幕反馈后也会自动公布到公屏。记录保存在本机；CSV 可用于表格统计，JSON 保留完整规则、明细与弹幕反馈记录。发送状态和公屏回显可在运行日志查看。请保持直播页打开；刷新后会恢复本轮，关闭期间的互动无法采集。参与人数不足时按奖品列表顺序分配；无人参加时保留空结果。</p>
+    <p class="hint">结果保存在本工具，并自动公布到公屏。记录保存在本机；CSV 可用于表格统计，JSON 保留完整规则、明细与弹幕反馈记录。发送状态和公屏回显可在运行日志查看。请保持直播页打开；刷新后会恢复本轮，关闭期间的互动无法采集。参与人数不足时按奖品列表顺序分配；无人参加时保留空结果。</p>
   </section>`,
   update(panel,state) {
     const rounds=state.rounds || [],round=rounds.at(-1),active=round?.status==='running';

@@ -12,6 +12,13 @@ function fixture() {
 }
 const event=id=>({type:'chat',id:`c-${id}`,source:'socket',roomId:'room',at:1500,text:'参与抽奖',user:{id,name:`观众${id}`}});
 
+test('新轮次即使传入关闭反馈也会生成并交付开轮公告',async()=>{
+  const f=fixture(),messages=[],runner=f.create({feedback:async message=>messages.push(message)});
+  await runner.ready();await runner.start({...config,feedbackEnabled:false});
+  assert.equal(f.saved().rounds[0].config.feedbackEnabled,true);
+  assert.ok(messages.some(message=>message.kind==='start'));await runner.dispose();
+});
+
 test('并发收到的弹幕全部持久保存，到期只开奖一次，重建后结果相同',async()=>{
   const f=fixture(),runner=f.create();await runner.ready();await runner.start(config);f.time(2000);
   await Promise.all(['1','2','3'].map(id=>runner.event(event(id))));assert.equal(f.saved().rounds[0].entrants.length,3);

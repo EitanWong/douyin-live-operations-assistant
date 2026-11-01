@@ -47,7 +47,7 @@ export function validateGiveawayConfig(value) {
 
 // A round fixes its rules at creation; entrants always represent people, not tickets.
 export function createGiveaway(config,{id,room,broadcastId='',anchorId='',now}) {
-  config=validateGiveawayConfig(config);
+  config=validateGiveawayConfig({...config,feedbackEnabled:true});
   if(config.anchorGuaranteed && !/^[1-9]\d{0,24}$/.test(anchorId))throw new Error('请先识别当前主播 UID，再开启主播参与必中');
   return {id,room,broadcastId,anchorId,status:'running',startedAt:now,endsAt:now+config.durationSec*1000,closedAt:null,
     config,entrants:[],giftProgress:[],awards:[],feedback:[],reason:''};

@@ -111,7 +111,7 @@ test('场控暂停时真实工具入口仍会发送开轮、报名、关键倒�
       send:async(text,current,hooks)=>{assert.equal(current(),true);await hooks.beforeClick();sent.push(text);api.engine.observeEcho({type:'chat',source:'socket',text,user:{id:'9'},receivedAt:Date.now()});return {submitted:true,clicked:true};}};},onReady:value=>{api=value;}});
   try {
     await api.tools.ready;api.engine.config.selfId='9';assert.equal(api.engine.running,false);
-    const p=api.panel;assert.ok(p.node('[data-giveaway=feedbackEnabled]').checked);
+    const p=api.panel;assert.equal(p.root.querySelector('[data-giveaway=feedbackEnabled]'),null);
     await api.tools.invoke('giveaway','start',{prizes:[{name:'礼盒',count:2}],durationSec:12,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false});
     await until(()=>sent.some(text=>text.includes('抽奖开始')));
     const at=Date.now();for(const id of ['1','2','1'])await onEvent({type:'chat',id:crypto.randomUUID(),source:'socket',text:'参与抽奖',at,user:{id,name:`观众${id}`}});
