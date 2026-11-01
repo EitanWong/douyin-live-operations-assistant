@@ -1,4 +1,5 @@
-import {ModelPickers,modelPicker} from './model-picker.js';
+import {AI_SETTINGS_CSS} from './ai-settings-styles.js';
+import {ModelPickers} from './model-picker.js';
 import {AI_SERVICE_PRESETS as presets,replyModelOptions} from './ai-model-options.js';
 import {resolveReplyConfig} from '../services/ai-pipeline.js';
 import { pkSettingsTemplate } from './pk-settings-template.js';
@@ -28,7 +29,8 @@ import { SEARCH_PROVIDERS, validateSearchEndpoint } from '../services/search.js'
 import { giftDate } from '../data/gifts.js';
 import { BOT_COMMANDS, RoomBot } from '../core/bot.js';
 import { hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
-import { AISettings, aiPipelineTemplate, aiEnhancementsTemplate } from './ai-settings.js';
+import {AISettings} from './ai-settings.js';
+import {aiSettingsTemplate} from './ai-settings-template.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
@@ -121,7 +123,7 @@ export class Panel {
     this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
+    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
     this.root.append(this.build()); decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),
@@ -320,28 +322,9 @@ export class Panel {
             <p class="hint">按列表顺序匹配；可用“上移 / 下移”调整优先级。每条规则支持包含关键词或完全一致。</p>
           </section>
           <section class="page" role="tabpanel" id="page-ai" aria-labelledby="tab-ai" data-page="ai" hidden>
-            <h2>AI 服务与问答</h2><p class="intro">连接模型服务，并配置 AI 如何回应直播间弹幕。</p>
+            <h2>AI 设置</h2><p class="intro">先连接模型，再按需开启直播感知、知识检索和联网搜索。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="ai"></p></div>
-            <div class="settings-workspace ai-workspace">${aiPipelineTemplate(this)}<div class="actions workspace-wide"><button type="button" data-action="test-ai">测试 AI 连接</button></div>
-            <div class="settings-column"><section class="settings-group settings-column" data-text-service><h3>回复模型服务</h3>
-              <label class="field"><span>服务预设</span><select data-preset><option value="custom">自定义兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问 / DashScope</option><option value="doubao">豆包 / 火山方舟</option><option value="local">本地 Ollama</option></select></label>
-            ${modelPicker('ai.model','回复模型',replyModelOptions('custom'))}<p class="hint">优先选择推荐模型；接入点 ID 或列表外模型请选择“自定义模型”。本地模型需已安装，云端模型需已开通。</p><details data-ai-connection><summary>接口地址</summary>${this.input('ai.endpoint', 'API 接口地址')}</details>
-            <label class="field"><span>API Key</span><input type="password" data-api-key autocomplete="new-password" placeholder="留空保留此服务已有密钥"><small data-key-status>密钥按服务域名隔离，不随配置导出。</small></label>
-            <label class="toggle"><input type="checkbox" data-remember-key>记住新密钥（仅此设备）</label>
-            <div class="actions"><button type="button" class="danger" data-action="forget-key">清除此服务密钥</button></div></section>            <section class="settings-group settings-column"><h3>所有 AI 功能共用直播上下文</h3><p>问答、答谢、机器人、定时消息、PK 播报、内容检测和话术生成共用已采集的直播信息。</p><p class="hint">开启相应 AI 功能后，近期弹幕与回复、观众样本、活动趋势、钻石与收入估算、当前与历史 PK 比分、任务、展馆和段位会发送至你配置的 AI 服务。历史明细有界采样并保留汇总；未知和过期数据明确标记。音视频默认不接入；手动开启识别后，共用近期画面描述和语音转写。</p></section></div>
-            <section class="settings-group settings-column"><h3>联网搜索</h3><label class="toggle"><input type="checkbox" data-field="ai.search.enabled">允许 AI 按需联网查询</label><p class="hint">需要外部资料时先搜索再回答，直播数据仍从本机记录读取。支持博查、Tavily、兼容服务和自建 SearXNG；搜索词会发送给该服务，来源链接保留在下方。</p>
-            ${this.select('ai.search.provider','搜索服务',Object.entries(SEARCH_PROVIDERS).map(([key,value])=>[key,value.label]))}${this.input('ai.search.endpoint','搜索接口地址')}
-            <label class="field"><span>搜索 API Key</span><input type="password" data-search-key autocomplete="new-password" placeholder="留空保留已保存的搜索密钥"><small>博查与 Tavily 必填，自建 SearXNG 通常不需要。密钥独立保存，不随配置导出。</small></label><label class="toggle"><input type="checkbox" data-remember-search-key>记住搜索密钥（仅此设备）</label><p class="hint">SearXNG 实例需在 search.formats 中允许 json；默认地址为本机 8080 端口，需先部署实例。</p>
-            <details><summary>搜索额度</summary><div class="grid">${this.input('ai.search.maxResults','每次最多来源数','number')}${this.input('ai.search.maxPerHour','每小时最多搜索 / 次','number')}</div></details>
-            <div class="actions"><button type="button" data-action="test-search">测试联网搜索</button><button type="button" class="danger" data-action="forget-search-key">清除搜索密钥</button></div><p class="hint">扩展版请在扩展图标中授权搜索服务域名。每次联网问答最多搜索一次，生成答案还会使用一次 AI 调用额度。</p>
-            <details><summary>最近联网问答来源</summary><div data-search-history><p class="empty">联网查询后在这里核对来源。</p></div></details></section>
-            ${aiEnhancementsTemplate(this)}
-            <section class="settings-group workspace-wide ai-conversation"><h3>问答与场控资料</h3><p class="hint">AI 根据聊天语境判断是查询直播数据、查找外部资料、普通聊天还是需要先问清楚。无需设置触发词，@当前账号可直接提问。</p><div class="settings-workspace"><div class="settings-column"><div data-chat-controls><p class="hint">AI 结合最近聊天、直播数据和已回复内容判断是否需要接话；不必回复时保持安静。@当前账号可直接对话，菜单与游戏指令优先。</p><p class="hint">观众可问“现在多少人在线”“本场收到多少礼物”“最高单价礼物是什么”“今天 PK 赢了几场”。支持本场、昨日、今日、周、月、季、年和累计的已采集统计；缺失或过期时会说明，收入仅为估算。</p><details><summary>AI 额度与弹幕窗口</summary><div class="grid">${this.input('ai.maxPerHour', '每小时最多调用 / 次', 'number')}${this.input('ai.contextSize', '最近弹幕条数', 'number')}${this.input('ai.contextAgeSec', '弹幕保留时长 / 秒', 'number')}</div></details>
-            </div></div><div class="settings-column"><div data-ai-profile>${this.area('ai.persona', '场控风格', 'text')}${this.area('ai.knowledge', '主播与本场直播资料', 'text', '填写已核实的直播主题、开播时间和资料。')}</div>
-            <details data-idle-controls><summary>冷场互动</summary>${this.input('ai.idleSec', '没有新互动多久算冷场 / 秒', 'number')}</details></div></div></section>
-
-            <div class="notice workspace-wide">启用 AI 的模块才会显示 AI 生成选项。近期弹幕、昵称、直播统计、互动与 PK 摘要和你填写的资料会发往所配置的服务，不发送 Cookies 或观众 UID。预览模式仍会调用 AI。</div>
-            </div>
+            ${aiSettingsTemplate(this)}
           </section>
           <section class="page" role="tabpanel" id="page-bot" aria-labelledby="tab-bot" data-page="bot" hidden>
             <h2>@机器人</h2><p class="intro">开启房间游戏，让主播与观众一起接龙、猜数字、答题或挑战。启用 AI 服务后，@账号也能直接聊天；菜单和游戏指令优先。</p>
@@ -580,7 +563,7 @@ export class Panel {
     this.applyFeatureVisibility();
   }
   setBusy(action, value) { if (value) this.busyActions.add(action); else this.busyActions.delete(action); this.syncControls(); }
-  revealError(el, page = el.closest('[data-page]')?.dataset.page) { el.setAttribute('aria-invalid','true'); if (page) this.tab(page); for (let parent=el.parentElement;parent;parent=parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; el.focus(); }
+  revealError(el, page = el.closest('[data-page]')?.dataset.page) { el.setAttribute('aria-invalid','true'); if (page) this.tab(page); this.aiSettings.reveal(el); for (let parent=el.parentElement;parent;parent=parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; el.focus(); }
   read() {
     for (const el of this.root.querySelectorAll('[aria-invalid]')) el.removeAttribute('aria-invalid');
     const result = copy(this.config);

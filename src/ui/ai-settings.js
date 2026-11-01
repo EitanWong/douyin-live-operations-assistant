@@ -1,37 +1,18 @@
-import {modelPicker} from './model-picker.js';
-import {AI_MODEL_OPTIONS} from './ai-model-options.js';
-import {AI_PIPELINE_MODES,aliEndpoints} from '../services/ai-pipeline.js';
-import {DOUYIN_RULES} from '../data/douyin-rules.js';
+import {aliEndpoints} from '../services/ai-pipeline.js';
 import {MEMORY_LIMITS,validateMemory,retrieveMemories} from '../services/knowledge.js';
-import {RETRIEVAL_LIMITS} from '../services/retrieval.js';
-
-export function aiPipelineTemplate(panel){return `<section class="settings-group workspace-wide"><h3>AI 组合</h3>${panel.select('ai.pipeline.mode','识别与回复组合',AI_PIPELINE_MODES)}<p class="hint" data-pipeline-description></p>
-<div data-pipeline-ali hidden><div class="grid">${panel.select('ai.pipeline.region','百炼地域',[['cn-beijing','北京'],['ap-southeast-1','新加坡']])}${panel.input('ai.pipeline.workspaceId','百炼业务空间 ID','text','从百炼控制台复制业务空间 ID，密钥和模型须属于同一地域。')}</div>
-<label class="field"><span>百炼 API Key</span><input type="password" data-media-key="pipeline" autocomplete="new-password" placeholder="感知共用此密钥；纯 Omni 组合的回复也使用它"></label><label class="toggle"><input type="checkbox" data-media-remember="pipeline">记住百炼密钥（仅此设备）</label><button type="button" data-media-forget="pipeline">清除百炼密钥</button><p class="hint">扩展图标 → AI 服务访问权限 → 授权音视频服务域名。然后返回此处选择直播标签页。无需安装本地网关。</p>
-<p class="hint">默认已选推荐模型，可下拉切换或选择“自定义模型”。列表是常用预设，实际可用性以账号和地域为准。</p><details open><summary>模型与会话额度</summary><div class="grid">${modelPicker('ai.pipeline.realtimeModel','Omni 实时模型',AI_MODEL_OPTIONS.realtime)}${modelPicker('ai.pipeline.replyModel','纯 Omni 组合的回复模型',AI_MODEL_OPTIONS.omni)}${modelPicker('ai.pipeline.visionModel','独立视觉模型',AI_MODEL_OPTIONS.vision)}${modelPicker('ai.pipeline.audioModel','独立语音模型',AI_MODEL_OPTIONS.audio)}${panel.input('ai.pipeline.sessionMinutes','单次实时会话最长 / 分钟','number')}${panel.input('ai.pipeline.sessionTokens','单次实时会话 token 上限','number')}</div></details></div>
-<details><summary>上下文预算</summary>${panel.input('ai.pipeline.contextBudgetChars','每次请求的上下文字符预算','number')}<p class="hint">按字符限制，不等同于模型 token。优先保留当前问题、任务和汇总事实；裁减的明细会注明。</p></details></section>`;}
-
-export function aiEnhancementsTemplate(panel) {
-  const mediaField=(kind,title)=>`<details><summary>${title}服务</summary>${panel.input(`ai.media.${kind}Endpoint`,`${title}接口地址`)}${modelPicker(`ai.media.${kind}Model`,`${title}模型`,kind==='vision' ? [...AI_MODEL_OPTIONS.vision,...AI_MODEL_OPTIONS.omni] : AI_MODEL_OPTIONS.audio)}<label class="field"><span>${title} API Key</span><input type="password" data-media-key="${kind}" autocomplete="new-password" placeholder="留空使用已保存密钥或同域AI密钥"><small>同一服务域名共用密钥，不随配置导出。</small></label><label class="toggle"><input type="checkbox" data-media-remember="${kind}">记住新密钥（仅此设备）</label><button type="button" data-media-forget="${kind}">清除音视频服务密钥</button></details>`;
-  return `<section class="settings-group workspace-wide"><h3>直播音视频识别</h3><p class="group-note">手动选择共享的直播标签页，持续识别画面与语音，为问答提供近期现场线索。每次刷新后需要重新开启。</p>
-    <div data-custom-media><div class="grid">${panel.toggle('ai.media.videoEnabled','识别直播画面')}${panel.toggle('ai.media.audioEnabled','识别直播语音')}${panel.toggle('ai.media.omniEnabled','Omni 音画联合识别')}</div>
-    <div class="grid"><div>${mediaField('vision','视觉')}</div><div>${mediaField('audio','音频')}</div></div>
-    <p class="hint">模型菜单不会更改接口地址，请确保所选模型由该接口提供。Omni 联合识别使用视觉服务的接口、模型和密钥，需同时开启画面与语音；支持百炼 Qwen3.5 Omni / Qwen3.8 Omni。其他模式分别配置视觉与音频服务。扩展版需授权接口域名。</p>
-    </div><details><summary>采集频率与上下文有效期</summary><div class="grid">${panel.input('ai.media.videoIntervalSec','画面采样间隔 / 秒','number')}${panel.input('ai.media.audioIntervalSec','音频分段时长 / 秒','number')}${panel.input('ai.media.maxPerHour','音视频每小时最多调用 / 次','number')}${panel.input('ai.media.contextAgeSec','识别结果有效期 / 秒','number')}</div><p class="hint">采样间隔仅用于分段模式。实时会话每小时响应上限和分段调用使用相同的额度设置，分别计数；静音画面需要定期描述时可选独立视觉与语音组合。</p></details>
-    <div class="actions"><button type="button" data-media-start>选择直播标签页并开始识别</button><button type="button" data-media-stop disabled>停止识别</button><button type="button" data-media-clear>清空识别上下文</button></div>
-    <p class="hint" role="status" aria-live="polite" data-media-status>尚未开始识别</p><p class="hint" data-media-error hidden></p>
-    <details><summary>近期识别结果</summary><div data-media-results><p class="empty">开启后显示带时间的画面描述和语音转写。</p></div></details>
-    <p class="hint">选屏时选择直播标签页，并勾选“同时分享标签页音频”。实时组合由语音活动触发结果，持续说话或静音画面不保证定时更新。共享区域的画面与音频会发往你配置的服务；原始媒体只在本机内存短暂处理，不写入配置、日志或账本。识别可能延迟和出错，不用于自动处罚。忙时跳过采样；连续失败或额度用完会停止。</p>
-  </section>
-  <section class="settings-group workspace-wide"><h3>本地知识库 / 背景记忆</h3>${panel.toggle('ai.memory.enabled','允许 AI 使用已保存的背景记忆')}<p class="group-note">在当前主播直播间保存长期背景，例如主播介绍、固定排期、商品口径。只由你添加、编辑或删除；弹幕和模型不能自动改写记忆。按问题检索原文片段，保留来源与核对时间；没有匹配资料时不凑数。</p><div data-memory-list></div><p class="empty" data-memory-empty>还没有背景记忆。添加已核实的资料，让回答有据可查。</p><button type="button" data-memory-add>添加背景记忆</button><p class="hint">保存设置后持久记住，刷新后仍在；随该直播间配置导出和导入。到期或停用的条目不再进入 AI 上下文。每条正文最多2000字，共40条，正文总计最多20000字。每次最多${RETRIEVAL_LIMITS.chunks}个片段、原文合计${RETRIEVAL_LIMITS.chars}字。</p>
-    <details><summary>测试本地知识检索</summary><label class="field"><span>输入一个具体问题</span><input type="text" data-memory-query maxlength="300" placeholder="例如：陶瓷茶具怎么清洗"></label><button type="button" data-memory-search>查看命中资料</button><p class="hint">使用当前编辑的资料，在本机预览，不调用模型或联网。实际问答还会结合近期弹幕和媒体线索。</p><div data-memory-matches aria-live="polite"></div></details></section>
-  <section class="settings-group workspace-wide"><h3>抖音直播与 PK 规则依据</h3><p class="group-note">核对日期：2026-11-01。内置公开条款摘要和采集边界，所有 AI 功能共用。规则会更新，具体活动、加成和段位任务以平台当期说明为准。</p><details><summary>查看规则摘要与来源</summary>${DOUYIN_RULES.map(row=>`<div class="editor-row"><strong>${row.id} · ${row.authority==='official' ? '官方条款摘要' : '助手事实边界'}</strong><p>${row.text}</p>${row.source.url ? `<a href="${row.source.url}" target="_blank" rel="noopener noreferrer">${row.source.title} · ${row.source.publishedOn}</a>` : '<small>本助手的使用限制，不是平台官方条款。</small>'}</div>`).join('')}</details><p class="hint">最新政策或不明活动条件需要联网核对官方来源。未找到、资料冲突或采集不足时，AI 应说明无法确认，不补造价格、承诺或计分公式。</p></section>`;
-}
+import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
 
 const fields=[['title','资料标题','text'],['content','背景正文','textarea'],['source','资料来源 / 确认人','text'],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 export class AISettings {
   constructor(root,{dirty,start,stop,clear,forget,error}) {
     this.root=root;this.dirty=dirty;this.error=error;
+    const navigation=root.querySelector('.ai-section-tabs');
+    navigation.addEventListener('click',event=>{const tab=event.target.closest('[data-ai-section-tab]');if(tab)this.showSection(tab.dataset.aiSectionTab);});
+    navigation.addEventListener('keydown',event=>this.navigate(event));
+    root.addEventListener('change',event=>{
+      if(event.target.matches('[data-field^="ai.media."]'))this.syncMedia();
+      if(event.target.matches('[data-field^="ai.search."]'))this.syncSearch();
+    });
     root.querySelector('[data-field="ai.pipeline.mode"]').addEventListener('change',()=>this.syncPipeline());
     for(const key of ['workspaceId','region'])root.querySelector(`[data-field="ai.pipeline.${key}"]`).addEventListener('input',()=>{root.querySelector('[data-media-key="pipeline"]').value='';});
     const edited=event=>{if(event.target.matches('[data-memory-field],[data-media-key],[data-media-remember]'))dirty();};
@@ -60,13 +41,49 @@ export class AISettings {
     for(const button of root.querySelectorAll('[data-media-forget]'))button.addEventListener('click',()=>{void Promise.resolve(forget(button.dataset.mediaForget)).catch(error);});
     for(const kind of ['vision','audio'])root.querySelector(`[data-field="ai.media.${kind}Endpoint"]`).addEventListener('input',()=>{root.querySelector(`[data-media-key="${kind}"]`).value='';});
   }
+  showSection(key){
+    for(const tab of this.root.querySelectorAll('[data-ai-section-tab]')){
+      const active=tab.dataset.aiSectionTab===key;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active ? 0 : -1;
+    }
+    for(const section of this.root.querySelectorAll('[data-ai-section]'))section.hidden=section.dataset.aiSection!==key;
+    this.root.querySelector('.ai-section-tabs').scrollIntoView?.({block:'start',behavior:'instant'});
+  }
+  navigate(event){
+    const tab=event.target.closest('[data-ai-section-tab]');
+    if(!tab || event.altKey || event.ctrlKey || event.metaKey || event.isComposing)return;
+    const keys=AI_SETTINGS_SECTIONS.map(([key])=>key),index=keys.indexOf(tab.dataset.aiSectionTab);
+    const next=({ArrowRight:(index+1)%keys.length,ArrowLeft:(index+keys.length-1)%keys.length,Home:0,End:keys.length-1})[event.key];
+    if(next===undefined)return;event.preventDefault();this.showSection(keys[next]);this.root.querySelector(`[data-ai-section-tab="${keys[next]}"]`).focus();
+  }
+  reveal(element){const section=element.closest('[data-ai-section]');if(section)this.showSection(section.dataset.aiSection);}
   syncPipeline(){
     const mode=this.root.querySelector('[data-field="ai.pipeline.mode"]').value;
     this.root.querySelector('[data-pipeline-ali]').hidden=['custom','text'].includes(mode);
     this.root.querySelector('[data-custom-media]').hidden=mode!=='custom';
     this.root.querySelector('[data-text-service]').hidden=mode==='omni-only';
     this.root.querySelector('[data-media-start]').hidden=mode==='text';
-    this.root.querySelector('[data-pipeline-description]').textContent=({custom:'保留现有接口，可单独启用视觉、语音或 Omni 分段识别。',text:'使用已采集直播数据、近期弹幕、本地知识检索与联网搜索生成回复。','omni-llm':'Omni 持续接收所选直播标签页的音视频，完成识别后供现有文字模型使用。','omni-only':'Omni 实时模型负责感知，Omni 文本模型结合共享直播上下文生成回复，共用百炼配置。','ali-split':'独立视觉模型定时识别画面，ASR 分段转写语音，由现有文字模型回复。此组合属于分段识别。'})[mode];
+    this.root.querySelector('[data-perception-off]').hidden=mode!=='text';
+    this.root.querySelector('[data-perception-active]').hidden=mode==='text';
+    for(const node of this.root.querySelectorAll('[data-ai-modes]'))node.hidden=!node.dataset.aiModes.split(' ').includes(mode);
+    this.root.querySelector('[data-pipeline-role]').textContent=mode==='omni-only' ? '感知 + 回复共用' : '仅感知';
+    this.root.querySelector('[data-pipeline-description]').textContent=({custom:'回复服务独立配置；可按需开启自定义视觉、语音或 Omni 分段识别。',text:'只用直播数据、弹幕、知识与搜索生成回复，无需配置感知服务。','omni-llm':'Omni 持续理解直播音画，回复由独立配置的文字模型生成。','omni-only':'同一套百炼配置，Omni 负责直播感知和弹幕回复。','ali-split':'视觉与语音分别按间隔识别直播内容，回复使用文字模型。'})[mode];
+    this.root.querySelector('[data-perception-description]').textContent=({custom:'在“连接与模型”启用并配置感知服务，再选择共享的直播标签页。',text:'','omni-llm':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','omni-only':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','ali-split':'使用“连接与模型”中的视觉模型与语音模型分段识别。'})[mode];
+    this.syncMedia();
+  }
+  syncMedia(){
+    const enabled=key=>this.root.querySelector(`[data-field="ai.media.${key}Enabled"]`).checked;
+    this.root.querySelector('[data-custom-service="vision"]').hidden=!enabled('video');
+    this.root.querySelector('[data-custom-service="audio"]').hidden=!enabled('audio') || enabled('omni');
+    this.root.querySelector('[data-custom-title="vision"]').textContent=enabled('omni') ? 'Omni 音画服务' : '视觉服务';
+  }
+  syncSearch(){
+    const enabled=this.root.querySelector('[data-field="ai.search.enabled"]').checked;
+    const local=this.root.querySelector('[data-field="ai.search.provider"]').value==='searxng';
+    this.root.querySelector('[data-search-config]').hidden=!enabled;
+    this.root.querySelector('[data-search-auth]').open=!local;
+    this.root.querySelector('[data-search-auth-title]').hidden=!local;
+    this.root.querySelector('[data-searxng-help]').hidden=!local;
+    this.root.querySelector('[data-search-endpoint]').open=local;
   }
   pipelineEndpoint(){
     const ai={pipeline:{mode:this.root.querySelector('[data-field="ai.pipeline.mode"]').value,region:this.root.querySelector('[data-field="ai.pipeline.region"]').value,workspaceId:this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim()}};
@@ -87,7 +104,7 @@ export class AISettings {
     row.querySelector('[data-memory-remove]').addEventListener('click',()=>{row.remove();this.empty();this.dirty();});
     this.list.append(row);
   }
-  populate(memory){this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();}
+  populate(memory){this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
   read(){
     const memory={enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>{
       const result={...row.record};for(const input of row.querySelectorAll('[data-memory-field]'))result[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();
