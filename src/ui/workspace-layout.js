@@ -1,3 +1,5 @@
+import {element,organizePage} from './workspace-pages.js';
+import {WorkspaceGrid} from './workspace-grid.js';
 // Present existing controls in named groups without cloning fields or changing
 // their owners. The same nodes survive navigation and responsive layout changes.
 const field=path=>`[data-field="${path}"]`;
@@ -33,6 +35,7 @@ function organize(page){
     if(section && !section.querySelector('h3')){const h=page.ownerDocument.createElement('h3');h.textContent='参与设置';section.prepend(h);}
   }
   for(const input of page.querySelectorAll('.toggle input[type=checkbox],.giveaway-option input[type=checkbox]'))input.setAttribute('role','switch');
+  organizePage(page);
 }
 function isVisible(node,page){for(let current=node;current && current!==page;current=current.parentElement)if(current.hidden)return false;return true;}
 
@@ -47,6 +50,17 @@ export class WorkspaceLayout {
     this.toolbar.innerHTML='<div class="workspace-heading"><span data-workspace-category></span><h2 data-workspace-title></h2></div><label class="workspace-jump"><span>本页分区</span><select data-page-sections aria-label="跳转到本页分区"></select></label>';
     this.toolbar.append(root.querySelector('.foot'));root.querySelector('.workspace-content').prepend(this.toolbar);
     this.select=this.toolbar.querySelector('select');
+    this.views=element(this.toolbar,'div','workspace-views','data-workspace-views');this.toolbar.after(this.views);
+    this.subviews=new Map();for(const [key,selector] of [['anchor','.anchor-views'],['ai','.ai-section-tabs']]){const node=root.querySelector(selector);if(node){this.views.append(node);this.subviews.set(key,node);}}
+    this.status=element(this.toolbar,'footer','workspace-status','data-workspace-status');this.status.setAttribute('aria-label','运行状态与消息');
+    this.status.append(root.querySelector('.shell-status'));root.querySelector('.workspace-content').append(this.status);
+    this.messages=element(this.status,'details','workspace-messages','data-workspace-messages');this.messageTitle=element(this.messages,'summary');this.messageTitle.textContent='消息';this.messages.append(this.messageTitle);
+    this.messageBody=element(this.messages,'div','workspace-message-list');this.messageBody.setAttribute('aria-label','消息与提醒');
+    for(const node of root.querySelectorAll('.toast,.panel>.banner'))this.messageBody.append(node);
+    this.messages.append(this.messageBody);this.status.append(this.messages);
+    this.messageSignature='';this.syncMessages=()=>{const visible=[...this.messageBody.children].filter(node=>!node.hidden),signature=visible.filter(node=>node.matches('.toast,[data-runtime-alert],[data-ai-alert]')).map(node=>node.textContent).join('\n');this.messageTitle.textContent=visible.length ? `消息 · ${visible.length}` : '暂无新消息';if(signature && signature!==this.messageSignature)this.messages.open=true;if(!signature)this.messages.open=false;this.messageSignature=signature;};
+    this.messageObserver=new this.document.defaultView.MutationObserver(this.syncMessages);this.messageObserver.observe(this.messageBody,{subtree:true,attributes:true,attributeFilter:['hidden'],childList:true,characterData:true});this.syncMessages();
+    this.grid=new WorkspaceGrid(root);
     this.onJump=()=>{
       const target=this.targets.get(this.select.value);if(!target)return;
       for(let parent=target.parentElement;parent && parent!==this.page;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
@@ -59,17 +73,18 @@ export class WorkspaceLayout {
   }
   show(key){
     const data=this.pages.get(key);if(!data)return;this.key=key;this.page=data.page;
+    for(const [page,node] of this.subviews)node.hidden=page!==key;this.views.hidden=!this.subviews.has(key);
     this.toolbar.querySelector('[data-workspace-title]').textContent=data.title;
     const tab=this.root.querySelector(`[data-tab="${key}"]`),group=tab?.closest('[data-nav-group]');
     this.toolbar.querySelector('[data-workspace-category]').textContent=group?.querySelector('.nav-group-title')?.textContent || '直播运营';
     this.targets=new Map();this.select.replaceChildren(new this.document.defaultView.Option('跳转到…',''));
     let serial=0;
     for(const heading of this.page.querySelectorAll('h3,legend,details>summary')){
-      if(!isVisible(heading,this.page) || heading.closest('[data-list],[data-memory-list]'))continue;
+      if(!isVisible(heading,this.page) || heading.closest('[data-list],[data-memory-list],[data-workspace-help]'))continue;
       const value=String(++serial),label=(heading.querySelector('.pk-broadcast-title')?.textContent || heading.textContent).trim();if(!label)continue;
       this.targets.set(value,heading);this.select.add(new this.document.defaultView.Option(label,value));
     }
     this.select.closest('label').hidden=this.targets.size<2;
   }
-  destroy(){this.destroyed=true;this.root.removeEventListener('change',this.onSection);this.select.removeEventListener('change',this.onJump);this.root.removeEventListener('click',this.onSection);}
+  destroy(){this.destroyed=true;this.grid.destroy();this.messageObserver.disconnect();this.root.removeEventListener('change',this.onSection);this.select.removeEventListener('change',this.onJump);this.root.removeEventListener('click',this.onSection);}
 }

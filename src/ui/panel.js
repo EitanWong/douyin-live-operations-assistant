@@ -842,7 +842,7 @@ export class Panel {
     this.node('[data-pk-rates]').innerHTML = [rate('3 倍加成', data.multiplierStats), rate('卡片 / 宝箱命中', data.cardStats)].join('');
   }
   setAnchorView(view) {
-    if (!['overview','income'].includes(view)) return;
+    if (!['overview','income','broadcast'].includes(view)) return;
     this.anchorView = view;
     for (const button of this.root.querySelectorAll('[data-anchor-view]')) button.setAttribute('aria-pressed', String(button.dataset.anchorView === view));
     for (const content of this.root.querySelectorAll('[data-anchor-content]')) content.hidden = content.dataset.anchorContent !== view;
