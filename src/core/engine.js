@@ -1259,7 +1259,7 @@ export class Engine {
         void checkpointForSend();
         if (this.epoch !== epoch) return;
         this.selfTexts.set(batch.text, now + 120000);
-        const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.channel || 'chat';
+        const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.kind === 'giveaway' ? 'admin' : q.channel || 'chat';
         const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
           this.deliveries.clicked(delivery);
           try {

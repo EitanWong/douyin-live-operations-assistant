@@ -23,6 +23,21 @@ test('开始、合并报名与多奖品结果生成有界公屏消息，重复�
   assert.deepEqual(prepareGiveawayFeedback(round,362000,50).feedback,round.feedback);
   assert.deepEqual(parseGiveawayState({version:2,rounds:[round]},'123').rounds[0].feedback,round.feedback);
 });
+test('可隐藏开轮及开奖结果的奖品名称，同时公布中奖者',()=>{
+  let round=createGiveaway({...config,announcePrizeNames:false},{id:'hidden',room:'123',now:1000});
+  round=prepareGiveawayFeedback(round,1000,50,{start:true});
+  round=enter(round,'1');round=prepareGiveawayFeedback(drawGiveaway(round,361000,()=>0),361000,50);
+  const messages=round.feedback.map(row=>row.text).join('');
+  assert.match(messages,/抽奖开始/);assert.match(messages,/观众1/);
+  assert.doesNotMatch(messages,/签名礼盒|纪念杯/);
+  assert.equal(parseGiveawayState({version:2,rounds:[round]},'123').rounds[0].config.announcePrizeNames,false);
+});
+test('抽奖反馈优先请求管理员弹幕',async()=>{
+  const f=sender();let channel;
+  f.engine.send=async(text,current,hooks)=>{channel=hooks.channel;await hooks.beforeClick();return {submitted:true};};
+  await f.engine.enqueueGiveaway(f.message('start','抽奖开始',{kind:'start'}));await f.engine.tick();
+  assert.equal(channel,'admin');
+});
 test('关键节点只提醒一次，短轮次和后台恢复不补发过时节点',()=>{
   let round=make();
   for(const remaining of [300,60,30,10]){

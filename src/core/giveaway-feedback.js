@@ -25,6 +25,10 @@ function resultLines(round,limit) {
   const result=[];
   if(round.config.weights.length)result.push(...lines('抽取规则：','按观众权重抽取',limit).map(text=>({text})));
   if(round.config.anchorGuaranteed)result.push(...lines('抽取规则：','主播参与必中',limit).map(text=>({text})));
+  if(!round.config.announcePrizeNames) {
+    const ids=new Set(round.awards.map(row=>row.userId));
+    return result.concat(groups(round.entrants.filter(row=>ids.has(row.userId)),'中奖：',limit));
+  }
   for(const [index,prize] of round.config.prizes.entries()) {
     const ids=new Set(round.awards.filter(row=>row.prizeIndex===index).map(row=>row.userId));
     const label=`开奖·${clip(prize.name,Math.min(12,Math.floor((limit-4)/2)))}：`;
@@ -44,7 +48,8 @@ export function prepareGiveawayFeedback(round,now,limit=50,{start=false}={}) {
   };
   const liveExpiry=Math.min(round.endsAt,now+30000);
   if(start && round.status==='running' && !has('start')) {
-    const messages=[...lines('抽奖开始：',`${round.config.durationSec}秒后开奖，${giveawaySlots(round.config)}个名额`,limit),...lines('奖品：',giveawayPrizes(round.config),limit)];
+    const messages=lines('抽奖开始：',`${round.config.durationSec}秒后开奖，${giveawaySlots(round.config)}个名额`,limit);
+    if(round.config.announcePrizeNames)messages.push(...lines('奖品：',giveawayPrizes(round.config),limit));
     if(round.config.chatEnabled)messages.push(...lines('参与弹幕：',round.config.keyword,limit));
     if(round.config.giftEnabled)messages.push(...lines('参与礼物：',`${round.config.gifts}，累计${round.config.giftMin}个`,limit));
     append('start',messages.map(text=>({text})),liveExpiry);
