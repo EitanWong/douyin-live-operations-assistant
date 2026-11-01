@@ -59,7 +59,7 @@ test('扩展工具自动点赞独立于回复模式：输入不会污染配置�
     assert.equal(panel.node('[data-action=auto-like-start]').disabled,true);
     assert.equal(panel.node('[data-auto-like=batch]').disabled,true);
     assert.match(panel.node('[data-auto-like-progress]').textContent,/30 次 · 1 批/);
-    panel.node('[data-action=auto-like-stop]').click();assert.equal(calls.at(-1),'stop');
+    panel.node('[data-action=auto-like-stop]').click();await new Promise(setImmediate);assert.equal(calls.at(-1),'stop');
     panel.updateToolState('auto-like',{phase:'stopped',accepted:30,batches:1,reason:'已停止'});
     assert.equal(panel.node('[data-action=auto-like-start]').disabled,false);
     assert.equal(panel.node('[data-action=auto-like-stop]').disabled,true);
@@ -129,7 +129,7 @@ test('旧配置升级后只展示四种房间游戏，开关同步菜单并只�
   try {
     panel.tab('bot');
     const page=panel.node('[data-page="bot"]');
-    assert.deepEqual([...page.querySelectorAll('[role="switch"]')].map(node=>node.getAttribute('aria-label')),['成语接龙','猜数字','真心话','大冒险']);
+    assert.deepEqual([...page.querySelectorAll('.feature-row [role="switch"]')].map(node=>node.getAttribute('aria-label')),['成语接龙','猜数字','真心话','大冒险']);
     assert.match(page.textContent,/开始接龙.*开始猜数字.*开始真心话.*开始大冒险/su);
     assert.doesNotMatch(page.textContent,/骰子|硬币|猜拳|帮我选择/u);
     assert.match(panel.node('[data-bot-menu]').textContent,/接龙.*猜数字.*真心话.*大冒险/u);

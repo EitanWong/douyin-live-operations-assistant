@@ -19,6 +19,7 @@ export const NAVIGATION_GROUPS = [
 export function navigationTemplate(activeTab = 'pk', tools = bundledTools) {
   const groups = NAVIGATION_GROUPS.map(group => group.key === 'tools' ? {...group,items:[...group.items,...tools.list().map(tool => [tool.id,tool.label,tool.icon])]} : group);
   return `<nav class="nav" aria-label="功能导航">
+    <div class="compact-navigation"><label><span>功能分类</span><select data-nav-category aria-label="功能分类"></select></label><label><span>功能页面</span><select data-nav-page aria-label="功能页面"></select></label></div>
     <div class="sidebar-heading"><span class="nav-label">功能导航</span><button type="button" data-sidebar-toggle aria-expanded="true" aria-controls="assistant-navigation-items" aria-label="折叠侧边栏" title="折叠侧边栏">${icon('panel-right')}</button></div>
     <div class="primary-nav" role="group" aria-label="功能分类">${groups.map(group=>`<button type="button" data-category="${group.key}" aria-pressed="${group.key==='interaction'}">${group.label}</button>`).join('')}</div>
     <div id="assistant-navigation-items">${groups.map(group=>`<section class="nav-group" data-nav-group="${group.key}"><h2 class="nav-group-title">${group.label}</h2><div class="subnav" data-subnav="${group.key}" role="tablist" aria-label="${group.label}功能" aria-orientation="horizontal" ${group.key!=='interaction'?'hidden':''}>${group.items.map(([key,label,glyph])=>`<button type="button" role="tab" id="tab-${key}" aria-controls="page-${key}" data-tab="${key}" title="${label}" aria-label="${label}" aria-selected="${key===activeTab}" tabindex="${key===activeTab?0:-1}">${icon(glyph)}<span class="nav-label">${label}</span></button>`).join('')}</div></section>`).join('')}</div>
@@ -28,7 +29,7 @@ export function navigationTemplate(activeTab = 'pk', tools = bundledTools) {
 // Presentation and navigation preferences are independent of room automation.
 // Reuse the same tab nodes in both layouts so draft state and focus survive.
 export class Navigation {
-  constructor(root, {onError = () => {}} = {}) {
+  constructor(root, {onError = () => {},onNavigate=()=>{}} = {}) {
     this.root = root;
     this.view = root.host.ownerDocument.defaultView;
     this.workspace = root.querySelector('.workspace');
@@ -37,7 +38,11 @@ export class Navigation {
     this.nav = root.querySelector('.nav');
     this.collapsed = false;
     this.side = 'left'; this.layout = 'top'; this.category = 'interaction';
-    this.onError = onError;
+    this.onError = onError;this.onNavigate=onNavigate;
+    this.categorySelect=root.querySelector('[data-nav-category]');this.pageSelect=root.querySelector('[data-nav-page]');
+    this.onCategory=()=>{const group=root.querySelector(`[data-subnav="${this.categorySelect.value}"]`);const tab=[...group.querySelectorAll('[data-tab]')].find(tab=>!tab.hidden);if(tab)this.onNavigate(tab.dataset.tab);};
+    this.onPage=()=>this.onNavigate(this.pageSelect.value);
+    this.categorySelect.addEventListener('change',this.onCategory);this.pageSelect.addEventListener('change',this.onPage);
     this.storageKey = 'douyin-live-assistant:sidebar-side';
     try { this.side = this.normalize(this.view.localStorage.getItem(this.storageKey)); } catch {}
     this.collapseKey = 'douyin-live-assistant:sidebar-collapsed';
@@ -112,16 +117,15 @@ export class Navigation {
   }
   update(width) {
     if (!width) return;
-    const next = width >= 1000 ? 'sidebar' : 'top';
+    const next = width >= 820 ? 'sidebar' : 'top';
     if (next === this.layout && this.workspace.dataset.navLayout) return;
     this.layout = next;
     this.finishMotion();
     this.workspace.dataset.navLayout = this.layout;
     this.sync();
     const focused = this.root.activeElement;
-    if ((next === 'top' && focused === this.toggle) || (next === 'sidebar' && focused?.closest('.primary-nav'))) {
-      this.nav.querySelector('[data-tab][aria-selected="true"]')?.focus();
-    }
+    if(next==='top' && (focused===this.toggle || focused?.closest('[data-subnav]')))this.pageSelect.focus();
+    if(next==='sidebar' && (focused===this.pageSelect || focused===this.categorySelect || focused?.closest('.primary-nav')))this.nav.querySelector('[data-tab][aria-selected="true"]')?.focus();
   }
   sync(category = this.category) {
     this.category = category;
@@ -135,11 +139,25 @@ export class Navigation {
       for (const [index,tab] of available.entries()) tab.tabIndex = tab.getAttribute('aria-selected') === 'true' || (!selected && index === 0) ? 0 : -1;
       group.closest('.nav-group').hidden = !available.length;
     }
+    this.syncCompact();
     if (this.root.activeElement?.closest('[data-subnav]')?.hidden) {
       this.nav.querySelector('[data-tab][aria-selected="true"]')?.focus();
     }
   }
+  syncCompact(){
+    const option=(label,value)=>new this.view.Option(label,value);
+    this.categorySelect.replaceChildren();this.pageSelect.replaceChildren();
+    for(const group of this.root.querySelectorAll('.nav [data-subnav]')){
+      const tabs=[...group.querySelectorAll('[data-tab]')].filter(tab=>!tab.hidden);if(!tabs.length)continue;
+      this.categorySelect.add(option(group.closest('.nav-group').querySelector('h2').textContent,group.dataset.subnav));
+      if(group.dataset.subnav!==this.category)continue;
+      for(const tab of tabs)this.pageSelect.add(option(tab.getAttribute('aria-label'),tab.dataset.tab));
+      this.pageSelect.value=tabs.find(tab=>tab.getAttribute('aria-selected')==='true')?.dataset.tab || tabs[0].dataset.tab;
+    }
+    this.categorySelect.value=this.category;
+  }
   destroy() {
+    this.categorySelect.removeEventListener('change',this.onCategory);this.pageSelect.removeEventListener('change',this.onPage);
     this.observer?.disconnect();
     this.select.removeEventListener('change', this.onChange);
     this.toggle.removeEventListener('click', this.onToggle);
