@@ -21,6 +21,8 @@
 
 ## 调研资料
 
+- [AI 基础层与阿里 Omni](research/ai-foundation-and-omni-2026-11-01.zh-CN.md)：实时接口官方依据、持续观察与问答分离、统一证据上下文、本地 RAG、联网与分阶段验收。
+
 - [PK 播报与共享直播上下文](research/shared-live-context-2026-10-25.zh-CN.md)：PK 页内设置、固定格式兜底、所有 AI 共用数据与验证边界。
 - [实时直播音视频理解](research/realtime-av-understanding-2026-10-24.zh-CN.md)：采集路径、中文流式识别、视觉与全模态开源方案、成本、延迟目标和扩展接入设计。
 - [侧边栏与界面组件](research/sidebar-and-ui-components-2026-10-23.zh-CN.md)：左右布局、折叠交互、Lucide 许可与组件边界。
