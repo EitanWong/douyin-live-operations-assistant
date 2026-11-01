@@ -1,4 +1,4 @@
-import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState,validateGiveawayConfig,GIVEAWAY_VERSION} from '../../core/giveaway.js';
+import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState,validateGiveawayConfig,GIVEAWAY_VERSION,matchesGiveawayChat,giveawayUserId} from '../../core/giveaway.js';
 import {prepareGiveawayFeedback} from '../../core/giveaway-feedback.js';
 
 // All commands, ticks and event writes use one queue under one room lease.
@@ -16,7 +16,7 @@ export class GiveawayRunner {
   }
   state() {
     const current=this.current();
-    return {phase:current ? this.owned ? 'running' : 'readonly' : 'idle',receiving:Boolean(current),reason:this.reason,feedbackError:this.feedbackError || '',feedbackMode:this.feedbackMode(),anchorId:this.anchorId(),now:this.now(),rounds:structuredClone(this.data.rounds)};
+    return {phase:current ? this.owned ? 'running' : 'readonly' : 'idle',receiving:Boolean(current),reason:this.reason,entryError:this.entryError || '',feedbackError:this.feedbackError || '',feedbackMode:this.feedbackMode(),anchorId:this.anchorId(),now:this.now(),rounds:structuredClone(this.data.rounds)};
   }
   publish(reason=this.reason) { this.reason=reason;if(!this.closed)this.changed(this.state()); }
   async load() {
@@ -109,6 +109,7 @@ export class GiveawayRunner {
         if(this.current())throw new Error('本轮抽奖尚未结束');
         const round=createGiveaway(config,{id:crypto.randomUUID(),room:this.room,broadcastId:this.broadcastId(),anchorId:this.anchorId(),now:this.now()});
         await this.save(prepareGiveawayFeedback(round,this.now(),this.maxLength(),{start:true}));
+        this.entryError='';
         await this.flushFeedback();
       } finally {if(!this.current())this.release();}
     });
@@ -149,8 +150,16 @@ export class GiveawayRunner {
       const round=this.current();if(!this.owned || !round)return;
       if(this.now()>=round.endsAt){await this.check();return;}
       if(this.guard())return;
+      if(matchesGiveawayChat(round,event,this.now()) && !giveawayUserId(event.user)) {
+        this.entryError=`${String(event.user?.name || '观众').slice(0,100)} 的参与弹幕未报名：未采集到稳定用户 ID，请检查直播连接后重发口令`;
+        this.publish();return;
+      }
       const next=enterGiveaway(round,event,this.now());
-      if(next!==round)await this.save(next);
+      if(next!==round) {
+        await this.save(prepareGiveawayFeedback(next,this.now(),this.maxLength()));
+        this.entryError='';
+        await this.flushFeedback();
+      }
     });
   }
   cancel(reason='已取消本轮抽奖') {

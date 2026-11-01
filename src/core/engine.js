@@ -551,8 +551,8 @@ export class Engine {
     this.queue.push(item); this.indexGiftJob(item);
     this.log('queue', `${kind}：${checked.text}`); this.changed(); return true;
   }
-  ingest(event) {
-    try { this.ingestEvent(event); } finally { this.changed(); }
+  ingest(event, {giveawayChat=false} = {}) {
+    try { this.ingestEvent(event, {giveawayChat}); } finally { this.changed(); }
   }
   ingestPK(event) {
     if (isLiveModeEvent(event)) {
@@ -585,7 +585,7 @@ export class Engine {
     this.pkOperations.lifecycle(normalized, state);
     return true;
   }
-  ingestEvent(event) {
+  ingestEvent(event, {giveawayChat=false} = {}) {
     this.assertCapacity(event);
     const now = this.now(); this.stats.events++;
     // PK 事件是只读分析数据，允许在场控暂停时继续进入统计；发送规则仍只处理运行中的互动事件。
@@ -674,8 +674,8 @@ export class Engine {
     if ((!u.name && event.type !== 'gift') || matchesUser(u, this.config.ignored)) return;
     if (event.type === 'chat') {
       if (!event.text || (this.selfTexts.get(event.text) || 0) > now) return;
-      if (this.config.moderation.enabled && !isSelf) this.moderation.inspect(event, () => this.handleChat(event, now));
-      else this.handleChat(event, now);
+      if (this.config.moderation.enabled && !isSelf) this.moderation.inspect(event, () => this.handleChat(event, now, giveawayChat));
+      else this.handleChat(event, now, giveawayChat);
     } else if (event.type === 'enter' && this.config.welcome.enabled) {
       const decision = welcomeDecision(u, this.config);
       if (!decision.pass) this.filtered(`${u.name}：${decision.reason}`);
@@ -748,7 +748,7 @@ export class Engine {
     this.queue=this.queue.filter(job=>!job.idiomHintToken || job.idiomHintToken===token);
     return this.queue.length!==before;
   }
-  handleChat(event, now) {
+  handleChat(event, now, giveawayChat=false) {
     const u = event.user || {}, isSelf = this.isSelfUser(u);
       const milestone = recognizeMilestone(event.text);
       if (milestone) {
@@ -759,6 +759,7 @@ export class Engine {
       this.history.push({ name: u.name.slice(0, 40), text: String(event.text).slice(0, 300), at: now });
       const contextAge = this.config.ai.contextAgeSec * 1000;
       while (this.history.length && (now - this.history[0].at > contextAge || this.history.length > this.config.ai.contextSize)) this.history.shift();
+      if (giveawayChat) return;
       const a = this.config.ai;
       const command = addressedToSelf(event, this.selfIdentity, this.config.selfId);
       if (command !== null) {

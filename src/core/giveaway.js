@@ -56,8 +56,23 @@ export function createGiveaway(config,{id,room,broadcastId='',anchorId='',now}) 
 function eligibleEvent(round,event,now) {
   if (round.status !== 'running' || now >= round.endsAt || !['chat','gift'].includes(event?.type)) return false;
   if (round.broadcastId && event.roomId && event.roomId !== round.broadcastId) return false;
-  const at=event.at ?? event.receivedAt ?? now;
+  // Round boundaries and frame capture use the same local clock. Platform time
+  // may be absent (0), rounded to seconds, or ahead of this computer.
+  const hasReceipt=event.receivedAt!==undefined;
+  if(hasReceipt && (!Number.isFinite(event.receivedAt) || event.receivedAt<=0 || event.receivedAt>now))return false;
+  if(hasReceipt && Number.isFinite(event.at) && event.at>0 && event.receivedAt-event.at>30000)return false;
+  const at=hasReceipt ? event.receivedAt : event.at>0 ? event.at : now;
   return Number.isFinite(at) && at >= round.startedAt && at < round.endsAt && at <= now;
+}
+
+export function giveawayUserId(user) {
+  const id=String(user?.id || '').trim();
+  return id && id!=='0' ? id : user?.secUid ? `sec:${user.secUid}` : '';
+}
+
+export function matchesGiveawayChat(round,event,now) {
+  return Boolean(round && eligibleEvent(round,event,now) && event.type==='chat' && round.config.chatEnabled
+    && typeof event.text==='string' && event.text.trim()===round.config.keyword);
 }
 
 function accumulateGift(round,event,userId) {
@@ -74,10 +89,10 @@ function accumulateGift(round,event,userId) {
 
 export function enterGiveaway(round,event,now) {
   if (!eligibleEvent(round,event,now)) return round;
-  const userId=String(event.user?.id || (event.user?.secUid ? `sec:${event.user.secUid}` : ''));
-  if (!userId || userId==='0') return round;
+  const userId=giveawayUserId(event.user);
+  if (!userId) return round;
   let updated=round,source,giftCount=0;
-  if (event.type==='chat' && round.config.chatEnabled && typeof event.text==='string' && event.text.trim()===round.config.keyword) source='chat';
+  if (matchesGiveawayChat(round,event,now)) source='chat';
   if (event.type==='gift') {
     const gift=accumulateGift(round,event,userId);
     if (!gift) return round;

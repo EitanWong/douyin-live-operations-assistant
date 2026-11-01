@@ -15,7 +15,7 @@ test('开始、合并报名与多奖品结果生成有界公屏消息，重复�
   for(const id of ['1','2','3'])round=enter(round,id);
   round=prepareGiveawayFeedback(round,2000,50);
   const entries=round.feedback.filter(row=>row.kind==='entry');assert.equal(entries.length,1);
-  assert.deepEqual(entries.flatMap(row=>row.userIds),['1','2','3']);assert.match(entries[0].text,/报名成功/);
+  assert.deepEqual(entries.flatMap(row=>row.userIds),['1','2','3']);assert.match(entries[0].text,/报名成功.*@观众1.*@观众2.*@观众3/);
   const repeated=prepareGiveawayFeedback(enter(round,'1'),2100,50);assert.deepEqual(repeated.feedback,round.feedback);
   round=prepareGiveawayFeedback(drawGiveaway(round,361000,()=>0),361000,50);
   const results=round.feedback.filter(row=>row.kind==='result').map(row=>row.text).join('');

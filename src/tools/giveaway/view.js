@@ -133,7 +133,7 @@ export const giveawayView = {
     const messages=round?.feedback || [],pending=messages.filter(row=>!row.queued && row.expiresAt>(state.now || Date.now())).length;
     const mode=state.feedbackMode==='preview' ? '仅预览 · 不发公屏' : state.feedbackMode==='demo' ? '模拟发送' : '自动发送';
     panel.text('[data-giveaway-feedback]',state.feedbackError ? `弹幕待重试：${state.feedbackError}` : round ? round.config.feedbackEnabled ? `${mode} · 已交给发送队列 ${messages.filter(row=>row.queued).length} 条${pending ? ` · 待入队 ${pending} 条` : ''}。实际发送及回显请查看运行日志。` : '本轮已关闭公屏反馈；报名和开奖结果仍在工具内显示。' : `${mode} · 开轮后显示弹幕反馈状态`);
-    panel.text('[data-giveaway-entry-feedback]',round?.entrants.length ? `已报名 ${round.entrants.length} 人 · 最近：${round.entrants.slice(-5).map(row=>row.userName).join('、')}` : '');
+    panel.text('[data-giveaway-entry-feedback]',state.entryError || (round?.entrants.length ? `已报名 ${round.entrants.length} 人 · 最近：${round.entrants.slice(-5).map(row=>row.userName).join('、')}` : ''));
     panel.text('[data-giveaway-round-title]',round ? `${giveawayPrizes(round.config)} · ${status[round.status]}` : '尚未开始');
     const seconds=active ? Math.max(0,Math.ceil((round.endsAt-(state.now || Date.now()))/1000)) : 0;
     const clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;

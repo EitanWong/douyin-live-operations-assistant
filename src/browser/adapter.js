@@ -7,6 +7,29 @@ import { CollectionGuard } from './collection-guard.js';
 import { readRoomLikes } from './room-likes.js';
 
 const MAX_CAPTURE_FRAME_BYTES = 512 * 1024;
+function chatRowIdentity(row,nickname) {
+  const ids=new Set(),secUids=new Set();
+  // Only the sender's label and row attributes identify this message. Never
+  // borrow an ID from another chat row, a mentioned user, or the message body.
+  const elements=new Set([row,nickname,...nickname.querySelectorAll('[data-user-id],[data-uid],[data-sec-uid],a[href]')]);
+  const link=nickname.closest('a[href]');if(link && row.contains(link))elements.add(link);
+  for(const element of elements) {
+    for(const attr of ['data-user-id','data-uid']) {
+      const id=element.getAttribute(attr);if(/^[1-9]\d{0,24}$/.test(id || ''))ids.add(id);
+    }
+    const secUid=element.getAttribute('data-sec-uid');if(/^[\w-]{1,196}$/.test(secUid || ''))secUids.add(secUid);
+    const href=element.getAttribute('href');
+    if(href)try {
+      const url=new URL(href,row.ownerDocument.location.href);
+      if(['www.douyin.com','live.douyin.com','douyin.com'].includes(url.hostname)) {
+        const id=url.pathname.match(/^\/user\/([\w-]+)\/?$/)?.[1];
+        if(/^[1-9]\d{0,24}$/.test(id || ''))ids.add(id);
+        else if(/^MS4[\w-]{1,193}$/.test(id || ''))secUids.add(id);
+      }
+    } catch {}
+  }
+  return ids.size>1 || secUids.size>1 ? {id:''} : {id:[...ids][0] || '',...(secUids.size ? {secUid:[...secUids][0]} : {})};
+}
 function base64(bytes, page) {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -763,7 +786,7 @@ export class DouyinAdapter {
       if (allowMilestone && milestone && this.shouldReadMilestones()) pending.push({ type:'milestone', milestone, text, source:'dom', receivedAt });
       if (!nameEl || !contentEl) return;
       const name = nameEl.textContent.trim().replace(/[:：]$/, '');
-      if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
+      if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,...chatRowIdentity(row,nameEl),fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
     };
     const report = error => { if (Date.now() - lastError > 10000) { lastError = Date.now(); this.onLog('error', `页面弹幕采集异常：${error.message}`); } };
     const detectLiveBoundary = () => {

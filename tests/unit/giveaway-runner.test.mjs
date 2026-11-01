@@ -12,6 +12,27 @@ function fixture() {
 }
 const event=id=>({type:'chat',id:`c-${id}`,source:'socket',roomId:'room',at:1500,text:'参与抽奖',user:{id,name:`观众${id}`}});
 
+test('采集到平台时间为零和安全 UID 的口令时立即保存报名和 @ 确认',async()=>{
+  const f=fixture(),messages=[],runner=f.create({feedback:async message=>messages.push(message)});
+  try {
+    await runner.ready();await runner.start(config);f.time(2000);
+    await runner.event({...event('0'),at:0,receivedAt:2000,user:{id:'0',secUid:'viewer',name:'小雨'}});
+    assert.equal(f.saved().rounds[0].entrants[0]?.userId,'sec:viewer');
+    assert.ok(messages.some(row=>row.kind==='entry' && row.text.includes('@小雨')));
+  } finally {await runner.dispose();}
+});
+
+test('匹配口令缺少稳定身份时提示原因，后续有效报名清除提醒',async()=>{
+  const f=fixture(),runner=f.create();
+  try {
+    await runner.ready();await runner.start(config);f.time(2000);
+    await runner.event({...event(''),user:{name:'小雨'}});
+    assert.equal(f.saved().rounds[0].entrants.length,0);assert.match(runner.state().entryError,/小雨.*用户.*ID/);
+    await runner.tick();assert.match(runner.state().entryError,/用户.*ID/);
+    await runner.event(event('1'));assert.equal(runner.state().entryError,'');
+  } finally {await runner.dispose();}
+});
+
 test('新轮次即使传入关闭反馈也会生成并交付开轮公告',async()=>{
   const f=fixture(),messages=[],runner=f.create({feedback:async message=>messages.push(message)});
   await runner.ready();await runner.start({...config,feedbackEnabled:false});
@@ -71,13 +92,13 @@ test('旧版已开奖记录升级后可直接导出，追加新轮次时以新�
   await runner.start(config);assert.equal(f.saved().version,2);assert.equal(f.saved().rounds.length,2);assert.equal(f.saved().rounds[0].config.prizes[0].name,'礼盒');await runner.dispose();
 });
 
-test('报名先保存再合并确认；关键倒计时和开奖结果只入队一次，重建不重发',async()=>{
+test('报名先保存再立即确认；关键倒计时和开奖结果只入队一次，重建不重发',async()=>{
   const f=fixture(),messages=[];
   const feedback=async message=>{assert.ok(f.saved().rounds[0].feedback.some(row=>row.id===message.id));messages.push(message);};
   const runner=f.create({feedback});await runner.ready();await runner.start({...config,durationSec:61});
   assert.ok(messages.some(row=>row.kind==='start'));f.time(2000);
   await runner.event(event('1'));await runner.event(event('2'));await runner.event(event('1'));await runner.tick();
-  assert.equal(messages.filter(row=>row.kind==='entry').length,1);assert.match(messages.find(row=>row.kind==='entry').text,/观众1、观众2/);
+  assert.equal(messages.filter(row=>row.kind==='entry').length,2);assert.match(messages.filter(row=>row.kind==='entry').map(row=>row.text).join(''),/@观众1.*@观众2/);
   await runner.tick();assert.equal(messages.filter(row=>row.kind==='countdown').length,1);
   f.time(62000);await runner.tick();assert.equal(messages.filter(row=>row.kind==='result').length,1);
   for(const message of messages.filter(row=>row.kind==='result'))await runner.claimFeedback({key:message.key,owner:'sender'});
@@ -89,7 +110,7 @@ test('报名或开奖保存失败不会发成功公告，发送失败保留待�
   const runner=f.create({feedback:async message=>{if(unavailable)throw Error('发送暂不可用');messages.push(message);}});
   await runner.ready();await runner.start(config);f.time(2000);f.failure(true);
   await assert.rejects(runner.event(event('1')),/磁盘/);assert.equal(messages.filter(row=>row.kind==='entry').length,0);
-  f.failure(false);await runner.event(event('1'));unavailable=true;await runner.tick();assert.equal(runner.state().rounds[0].entrants.length,1);
+  f.failure(false);unavailable=true;await runner.event(event('1'));await runner.tick();assert.equal(runner.state().rounds[0].entrants.length,1);
   assert.match(runner.state().feedbackError,/发送暂不可用/);f.time(3000);f.failure(true);
   await assert.rejects(runner.tick(),/磁盘/);assert.equal(messages.filter(row=>row.kind==='result').length,0);
   f.failure(false);await runner.tick();assert.equal(runner.state().rounds[0].status,'drawn');

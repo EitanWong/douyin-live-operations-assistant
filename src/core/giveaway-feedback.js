@@ -10,11 +10,11 @@ function lines(label,value,limit) {
   while(chars.length)result.push(label+chars.splice(0,width).join(''));
   return result;
 }
-function groups(rows,label,limit) {
+function groups(rows,label,limit,mention=false) {
   const result=[];let names=[],userIds=[];
   const flush=()=>{if(names.length)result.push({text:label+names.join('、'),userIds});names=[];userIds=[];};
   for(const row of rows) {
-    const name=clip(row.userName || row.userId,Math.min(12,limit-size(label)));
+    const name=(mention ? '@' : '')+clip(row.userName || row.userId,Math.min(12,limit-size(label)-(mention ? 1 : 0)));
     if(size(label+[...names,name].join('、'))>limit)flush();
     names.push(name);userIds.push(row.userId);
   }
@@ -56,7 +56,7 @@ export function prepareGiveawayFeedback(round,now,limit=50,{start=false}={}) {
   }
   if(round.status==='running') {
     const confirmed=new Set(next.filter(row=>row.kind==='entry').flatMap(row=>row.userIds));
-    append('entry',groups(round.entrants.filter(row=>!confirmed.has(row.userId)),'报名成功：',limit),round.endsAt);
+    append('entry',groups(round.entrants.filter(row=>!confirmed.has(row.userId)),'报名成功：',limit,true),round.endsAt);
     for(const seconds of GIVEAWAY_COUNTDOWNS) {
       const at=round.endsAt-seconds*1000;
       if(round.config.durationSec>seconds && now>=at && now<at+1500 && !next.some(row=>row.kind==='countdown' && row.seconds===seconds)) {

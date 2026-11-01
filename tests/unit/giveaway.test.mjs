@@ -1,11 +1,54 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createGiveaway, enterGiveaway, drawGiveaway, validateGiveawayConfig, giveawayCSV,parseGiveawayState,secureRandomInt} from '../../src/core/giveaway.js';
+import {createGiveaway, enterGiveaway, drawGiveaway, validateGiveawayConfig, giveawayCSV,parseGiveawayState,secureRandomInt,matchesGiveawayChat} from '../../src/core/giveaway.js';
 
 const config = overrides => ({prize:'直播周边',winners:2,durationSec:60,chatEnabled:true,keyword:'参与抽奖',giftEnabled:true,gifts:'玫瑰, 小心心',giftMin:3,...overrides});
 const round = overrides => createGiveaway(config(overrides),{id:'round-1',room:'123',broadcastId:'room-1',now:1000});
 const chat = (id,text='参与抽奖',at=2000) => ({type:'chat',id:`chat-${id}`,source:'socket',roomId:'room-1',at,text,user:{id,name:`观众${id}`}});
 const gift = (id,count,groupId='combo-1',extra={}) => ({...chat(id),type:'gift',id:`gift-${id}-${count}`,giftId:'1',giftName:'玫瑰',count,groupId,...extra});
+
+test('真实采集时间支持空平台时间、秒级开轮边界和平台时钟略快，仍拒绝旧消息与其他房间',()=>{
+  const r=round();
+  for(const at of [0,999,2500]) {
+    const event={...chat('1','参与抽奖',at),receivedAt:2000};
+    assert.equal(matchesGiveawayChat(r,event,2000),true,`平台时间 ${at}`);
+    assert.equal(enterGiveaway(r,event,2000).entrants.length,1);
+  }
+  const later=createGiveaway(config(),{id:'later',room:'123',broadcastId:'room-1',now:100000});
+  for(const event of [
+    {...chat('1','参与抽奖',1),receivedAt:101000},
+    {...chat('1','参与抽奖',101000),receivedAt:99999},
+    {...chat('1','参与抽奖',101000),receivedAt:101001},
+    {...chat('1','参与抽奖',101000),receivedAt:101000,roomId:'other'}
+  ])assert.equal(enterGiveaway(later,event,101000),later);
+});
+
+test('UID 为零时回退安全 UID，不能按昵称或零 UID 合并观众',()=>{
+  const r=round(),event={...chat('0'),user:{id:'0',secUid:'stable-viewer',name:'观众'}};
+  const entered=enterGiveaway(r,event,2000);
+  assert.equal(entered.entrants.length,1);assert.equal(entered.entrants[0].userId,'sec:stable-viewer');
+  assert.equal(enterGiveaway(entered,event,2000),entered);
+  assert.equal(enterGiveaway(r,{...event,user:{id:'0',name:'观众'}},2000),r);
+});
+
+test('抽奖口令识别与入池使用相同的轮次、房间、时间和精确匹配规则',()=>{
+  const r=round();
+  const cases=[
+    [r,chat('1',' 参与抽奖 '),2000,true],
+    [r,chat('1','我要参与抽奖'),2000,false],
+    [r,{...chat('1'),roomId:'other'},2000,false],
+    [r,chat('1','参与抽奖',999),2000,false],
+    [r,chat('1','参与抽奖',2001),2000,false],
+    [r,chat('1'),61000,false],
+    [round({chatEnabled:false}),chat('1'),2000,false],
+    [r,gift('1',3),2000,false],
+    [null,chat('1'),2000,false]
+  ];
+  for(const [current,event,now,expected] of cases) {
+    assert.equal(matchesGiveawayChat(current,event,now),expected);
+    if(current && event.type==='chat')assert.equal(enterGiveaway(current,event,now)!==current,expected);
+  }
+});
 
 test('抽奖规则校验与快照固定，至少开放一种参与方式',()=>{
   const input=config();const r=createGiveaway(input,{id:'r',room:'123',now:1000});input.prize='已改';

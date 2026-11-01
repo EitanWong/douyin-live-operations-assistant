@@ -1,5 +1,6 @@
 import { RoomContext } from './browser/room-context.js';
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
+import { matchesGiveawayChat } from './core/giveaway.js';
 import { DouyinAdapter, RoomLock, pickElement, watchAudienceContributions } from './browser/adapter.js';
 import { createAIClient, validateEndpoint, generatePhrases } from './services/ai.js';
 import { createSearchClient, validateSearchEndpoint } from './services/search.js';
@@ -307,7 +308,9 @@ export function boot(options = {}) {
           if (row.user) rememberUser({...event,type:'audience-rank',user:row.user});
         }
       } catch (error) { log('error', `互动资料更新失败：${error.message}`); }
-      engine.ingest(event);
+      const giveawayState=tools?.state('giveaway');
+      const giveawayRound=giveawayState?.phase==='running' ? giveawayState.rounds.find(round=>round.status==='running') : null;
+      engine.ingest(event, {giveawayChat:matchesGiveawayChat(giveawayRound,event,Date.now())});
       stopEndedTools();
       if(['chat','gift'].includes(liveEvent.type)) {
         await tools?.ready;
