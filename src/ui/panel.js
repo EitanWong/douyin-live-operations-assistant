@@ -1,3 +1,5 @@
+import {ModelPickers,modelPicker} from './model-picker.js';
+import {AI_SERVICE_PRESETS as presets,replyModelOptions} from './ai-model-options.js';
 import {resolveReplyConfig} from '../services/ai-pipeline.js';
 import { pkSettingsTemplate } from './pk-settings-template.js';
 import { PK_SETTINGS_CSS } from './pk-settings-styles.js';
@@ -35,12 +37,7 @@ const categories = { system: '运行', filter: '过滤', moderation: '内容提�
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const interactionPages = ['anchor','pk','gift','welcome','likes','keywords','bot','timers'];
 const money = value => new Intl.NumberFormat('zh-CN', {style:'currency',currency:'CNY',maximumFractionDigits:2}).format(value);
-const presets = {
-  deepseek: ['https://api.deepseek.com/chat/completions', 'deepseek-flash'],
-  qwen: ['https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', 'qwen-plus'],
-  doubao: ['https://ark.cn-beijing.volces.com/api/v3/chat/completions', '请填写你的接入点ID'],
-  local: ['http://localhost:11434/v1/chat/completions', 'qwen2.5:7b']
-};
+
 const CSS_TEXT = `
 :host{all:initial;color-scheme:var(--sg-scheme);font:14px/1.55 var(--sg-font);color:var(--sg-foreground);--ink:var(--sg-foreground);--muted:var(--sg-muted);--line:var(--sg-border);--accent:var(--sg-brand);--accent-strong:var(--sg-brand);--paper:var(--sg-background);--surface:var(--sg-solid);--wash:var(--sg-control);--signal:var(--sg-brand);--amber:var(--sg-warning);--danger:var(--sg-danger);-webkit-font-smoothing:antialiased}
 [hidden]{display:none!important}
@@ -129,6 +126,7 @@ export class Panel {
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),
       forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
+    this.modelPickers=new ModelPickers(this.root);
     this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});
   }
   input(path, label, type = 'text', hint = '') {
@@ -327,7 +325,7 @@ export class Panel {
             <div class="settings-workspace ai-workspace">${aiPipelineTemplate(this)}<div class="actions workspace-wide"><button type="button" data-action="test-ai">测试 AI 连接</button></div>
             <div class="settings-column"><section class="settings-group settings-column" data-text-service><h3>回复模型服务</h3>
               <label class="field"><span>服务预设</span><select data-preset><option value="custom">自定义兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问 / DashScope</option><option value="doubao">豆包 / 火山方舟</option><option value="local">本地 Ollama</option></select></label>
-            <details data-ai-connection><summary>接口与模型</summary>${this.input('ai.endpoint', 'API 接口地址')}${this.input('ai.model', '模型名称 / 接入点 ID')}</details>
+            ${modelPicker('ai.model','回复模型',replyModelOptions('custom'))}<p class="hint">优先选择推荐模型；接入点 ID 或列表外模型请选择“自定义模型”。本地模型需已安装，云端模型需已开通。</p><details data-ai-connection><summary>接口地址</summary>${this.input('ai.endpoint', 'API 接口地址')}</details>
             <label class="field"><span>API Key</span><input type="password" data-api-key autocomplete="new-password" placeholder="留空保留此服务已有密钥"><small data-key-status>密钥按服务域名隔离，不随配置导出。</small></label>
             <label class="toggle"><input type="checkbox" data-remember-key>记住新密钥（仅此设备）</label>
             <div class="actions"><button type="button" class="danger" data-action="forget-key">清除此服务密钥</button></div></section>            <section class="settings-group settings-column"><h3>所有 AI 功能共用直播上下文</h3><p>问答、答谢、机器人、定时消息、PK 播报、内容检测和话术生成共用已采集的直播信息。</p><p class="hint">开启相应 AI 功能后，近期弹幕与回复、观众样本、活动趋势、钻石与收入估算、当前与历史 PK 比分、任务、展馆和段位会发送至你配置的 AI 服务。历史明细有界采样并保留汇总；未知和过期数据明确标记。音视频默认不接入；手动开启识别后，共用近期画面描述和语音转写。</p></section></div>
@@ -481,6 +479,7 @@ export class Panel {
     this.node('[data-search-key]').value = '';
     const preset = Object.entries(presets).find(([,values])=>values[0] === config.ai.endpoint)?.[0] || 'custom';
     this.node('[data-preset]').value = preset; this.node('[data-ai-connection]').open = ['custom','doubao','local'].includes(preset);
+    this.modelPickers.setChoices('ai.model',replyModelOptions(preset));this.modelPickers.populate();
     this.syncControls(); this.markDirty(false);
   }
   syncPKSettings(aiReady) {
@@ -1020,8 +1019,9 @@ export class Panel {
     });
     this.root.querySelector('[data-preset]').addEventListener('change', e => {
       this.node('[data-ai-connection]').open = ['custom','doubao','local'].includes(e.target.value);
-      const preset = presets[e.target.value]; if (!preset) return;
-      this.root.querySelector('[data-field="ai.endpoint"]').value = preset[0]; this.root.querySelector('[data-field="ai.model"]').value = preset[1]; clearKey();
+      const preset = presets[e.target.value];
+      if (!preset) {this.modelPickers.setChoices('ai.model',replyModelOptions(e.target.value));return;}
+      this.root.querySelector('[data-field="ai.endpoint"]').value = preset[0]; this.root.querySelector('[data-field="ai.model"]').value = preset[1];this.modelPickers.setChoices('ai.model',replyModelOptions(e.target.value)); clearKey();
     });
   }
   searchCredentials() {return {key:this.node('[data-search-key]').value.trim(),remember:this.node('[data-remember-search-key]').checked};}
