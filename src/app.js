@@ -1,3 +1,5 @@
+import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
+import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
 import { RoomContext } from './browser/room-context.js';
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
 import { matchesGiveawayChat } from './core/giveaway.js';
@@ -230,19 +232,21 @@ export function boot(options = {}) {
   const request = options.request || (details => GM_xmlhttpRequest(details));
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
   const mediaSecretKey=endpoint=>`live-assistant:media-key:${new URL(validateEndpoint(endpoint)).origin}`;
-  let activeMediaConfig=config.ai.media,mediaAnchor=config.anchorId;
+  let activeMediaConfig=resolveMediaConfig(config.ai),mediaAnchor=config.anchorId;
   const mediaEvidence=new MediaEvidence();
   const mediaKey=endpoint=>(sessionKeys.get(mediaSecretKey(endpoint)) ?? get(mediaSecretKey(endpoint),'')) || (sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''));
   const recognizeMedia=createMediaClient({request,getKey:mediaKey});
   const clearMedia=()=>{mediaEvidence.clear();panel?.aiSettings.observations([]);};
-  const media=new LiveMediaAnalyzer({capture:options.mediaCapture,recognize:recognizeMedia,
+  const media=new LiveMediaAnalyzer({capture:options.mediaCapture,realtimeCapture:options.realtimeCapture || createRealtimeCapture({exchange:createSDPExchange({request,getKey:mediaKey})}),recognize:recognizeMedia,
     onObservation:row=>{mediaEvidence.add(row);panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
   });
   const searchSecretKey = endpoint => `live-assistant:search-key:${new URL(validateSearchEndpoint(endpoint)).origin}`;
   const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
-  const client = createAIClient({ request, getKey: endpoint => sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,
+  let aiStatusSequence=0;
+  const client = createAIClient({ request, getKey: (endpoint,ai) => pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,
+    onStatus:status=>{if (engine && resolveReplyConfig(engine.config.ai).endpoint===status.endpoint && resolveReplyConfig(engine.config.ai).model===status.model && status.sequence>aiStatusSequence) {aiStatusSequence=status.sequence;panel?.setAIServiceStatus(status.error);}},
     onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `联网搜索：${record.query} · ${record.results.length} 条来源`);}
   });
@@ -426,9 +430,10 @@ export function boot(options = {}) {
   }
   function prepareMediaKeys(c,credentials={}) {
     const keys=new Map();
-    for(const kind of ['vision','audio']){
+    const preset=!['custom','text'].includes(pipelineConfig(c.ai).mode);
+    for(const kind of preset ? ['pipeline'] : ['vision','audio']){
       const value=credentials[kind];if(!value?.key)continue;
-      const name=mediaSecretKey(c.ai.media[`${kind}Endpoint`]);
+      const name=mediaSecretKey(preset ? aliEndpoints(c.ai).chat : c.ai.media[`${kind}Endpoint`]);
       if(keys.has(name) && (keys.get(name).key!==value.key || keys.get(name).remember!==value.remember))throw new Error('同域音视频服务请使用相同密钥和记住选项，或仅在一处填写');
       keys.set(name,value);
     }
@@ -525,28 +530,28 @@ export function boot(options = {}) {
         await prepareMediaKeys(c,mediaCredentials)();
         if (c.identity.autoAnchor && identity.anchor) c.anchorId = identity.anchor.id;
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
-        if(c.anchorId!==mediaAnchor || JSON.stringify(c.ai.media)!==JSON.stringify(activeMediaConfig))media.stop();
-        await set(configKey, c); engine.update(c); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
+        if(c.anchorId!==mediaAnchor || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(activeMediaConfig))media.stop();
+        await set(configKey, c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
       },
       startMedia:async(c,credentials)=>{
         if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
-        validateMediaConfig(c.ai.media,true);const persistKeys=prepareMediaKeys(c,credentials);
-        for(const kind of ['vision','audio'])if(c.ai.media[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(c.ai.media[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(c.ai.media[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
-        activeMediaConfig=copy(c.ai.media);mediaAnchor=engine.config.anchorId;clearMedia();
+        const effective=resolveMediaConfig(c.ai);validateMediaConfig(effective,true);const persistKeys=prepareMediaKeys(c,credentials);
+        for(const kind of ['vision','audio'])if(!(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
+        activeMediaConfig=copy(effective);mediaAnchor=engine.config.anchorId;clearMedia();
         const started=media.start(activeMediaConfig);
         try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
       },
       stopMedia:()=>media.stop(),clearMedia,
       forgetMediaKey:async(kind,endpoint)=>{const name=mediaSecretKey(endpoint);media.stop();await del(name);sessionKeys.delete(name);for(const input of panel.root.querySelectorAll('[data-media-key]'))input.value='';panel.toast('此服务的音视频密钥已清除；同域普通AI密钥需在服务连接中清除');},
-      hasAIKey: endpoint => Boolean(sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
-      generatePhrases: async (c, key, remember, options) => {
-        await keepKey(c, key, remember);
+      hasAIKey: (endpoint,omni=false) => Boolean(omni ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
+      generatePhrases: async (c, key, remember, options,mediaCredentials) => {
+        await keepKey(c, key, remember);await prepareMediaKeys(c,mediaCredentials)();
         return generatePhrases(client, c, {...options,sharedContext:engine.aiContext(c)});
       },
-      testAI: async (c, key, remember) => {
-        await keepKey(c, key, remember);
+      testAI: async (c, key, remember,_searchCredentials,mediaCredentials) => {
+        await keepKey(c, key, remember);await prepareMediaKeys(c,mediaCredentials)();
         const output = await client({ persona: c.ai.persona, knowledge: c.ai.knowledge, ...engine.aiContext(c),target: { name: '连接测试', text: '你好，请用一句话打招呼。' }, maxLength: c.sending.maxLength }, c.ai);
         log('ai', `连接测试通过：${output.slice(0, 300)}`); panel.toast('AI 连接测试通过。测试内容不会发送到公屏。');
       },

@@ -61,3 +61,16 @@ test('联网搜索配置切换服务、保存独立密钥，来源链接可核�
     assert.equal(panel.searchRecords.length,8);
   } finally {panel.destroy();dom.window.close();}
 });
+
+test('组合设置只需选择模式、地域、业务空间和一把百炼密钥，切换不覆盖文字模型',()=>{
+  const dom=setup();let captured;
+  const panel=new Panel({room:'1',config:copy(DEFAULTS),callbacks:{startMedia:(config,credentials)=>captured={config,credentials}}});
+  try{
+    const mode=panel.node('[data-field="ai.pipeline.mode"]');assert.ok(mode);mode.value='omni-only';mode.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+    assert.equal(panel.node('[data-pipeline-ali]').hidden,false);assert.equal(panel.node('[data-custom-media]').hidden,true);assert.equal(panel.node('[data-text-service]').hidden,true);
+    panel.node('[data-field="ai.pipeline.workspaceId"]').value='ws-example';panel.node('[data-media-key="pipeline"]').value='ali-secret';
+    panel.node('[data-media-start]').click();assert.equal(captured.config.ai.pipeline.mode,'omni-only');assert.equal(captured.credentials.pipeline.key,'ali-secret');assert.equal(captured.config.ai.model,DEFAULTS.ai.model);assert.ok(!JSON.stringify(captured.config).includes('ali-secret'));
+    mode.value='omni-llm';mode.dispatchEvent(new dom.window.Event('change',{bubbles:true}));assert.equal(panel.node('[data-text-service]').hidden,false);
+    mode.value='text';mode.dispatchEvent(new dom.window.Event('change',{bubbles:true}));assert.equal(panel.node('[data-media-start]').hidden,true);
+  }finally{panel.destroy();dom.window.close();}
+});

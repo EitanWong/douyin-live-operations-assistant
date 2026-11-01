@@ -1,3 +1,4 @@
+import {liveFactFingerprint} from '../services/ai-context.js';
 import { IDIOM_GAME_DEFAULTS } from './idiom-game.js';
 import { Moderation, MODERATION_DEFAULTS } from './moderation.js';
 import { addressedToSelf, RoomBot } from './bot.js';
@@ -16,6 +17,7 @@ import { milestoneThankYou, recognizeMilestone } from './milestones.js';
 import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplate, validAudienceAI } from './audience.js';
 import { AnchorStats } from './anchor-stats.js';
 import { audienceReplyContext, giftReplyContext, isIntrusiveReply, liveReplyContext, observedReplyEvent } from './reply-context.js';
+import {AI_PIPELINE_DEFAULTS,validatePipeline} from '../services/ai-pipeline.js';
 
 export { recognizeMilestone };
 
@@ -53,7 +55,7 @@ export const DEFAULTS = {
     intervalSec: 0, userCooldownSec: 0,
     contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180,
     persona: '你在直播间帮忙做简单招呼。说话简短、平常，欢迎或谢谢一句就够。把注意力留给主播，不主动找话题，不自称主持，不说帮忙转达或安排，没有必要就不插话。',
-    knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS
+    knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS
   },
   timers: [{ id: 'welcome', enabled: false, responseMode: 'rules', intervalSec: 300, start: '', end: '', quietSec: 15, messages: DEFAULT_TIMER_PHRASES }],
   adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', startSelector: '', endSelector: '' }
@@ -156,6 +158,7 @@ export function validateConfig(c) {
   range(c.ai.temperature, 0, 2, 'AI 温度');
   validateMemory(c.ai.memory);
   validateMediaConfig(c.ai.media);
+  validatePipeline(c.ai);
   if(typeof c.ai.knowledge!=='string' || c.ai.knowledge.length>12000)throw new Error('主播与本场资料最多12000字');
   if (typeof c.ai.search.enabled!=='boolean') throw new Error('联网搜索开关无效');
   choice(c.ai.search.provider,['bocha','tavily','searxng'],'搜索服务');
@@ -796,7 +799,7 @@ export class Engine {
   }
   validChatReply(job) {
     const reply=job.aiChat, ai=this.config.ai;
-    return !reply || reply.contextKey===this.chatContextKey() && this.now()-reply.observedAt<45000 && ai.enabled
+    return !reply || (!reply.facts || reply.facts===liveFactFingerprint(this.aiContext().liveContext)) && reply.contextKey===this.chatContextKey() && this.now()-reply.observedAt<45000 && ai.enabled
       && (reply.replyMode==='direct' ? ai.chatEnabled || this.config.bot.enabled : ai.chatEnabled);
   }
   requestChatAI(event, addressed) {
@@ -1057,6 +1060,7 @@ export class Engine {
       target: event ? { type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
+    let replyFacts=null;prompt.onLiveFacts=value=>{replyFacts=value;};
     prompt.reserveFollowup=()=>{
       if(!this.running || epoch!==this.epoch || chatContext!==null && chatContext!==this.chatContextKey())return false;
       this.calls=this.calls.filter(at=>this.now()-at<3600000);
@@ -1080,7 +1084,7 @@ export class Engine {
       if (task.kind !== 'bot' && isIntrusiveReply(wording)) { fallback('AI 回复主动代主持或劝留'); return; }
       if (['gift','like','welcome'].includes(task.kind) && !validAudienceAI(output,event?.user,now)) { fallback('AI 称呼与公开资料不符'); return; }
       if (this.running && epoch === this.epoch && this.now() - now < 45000) {
-        if (chatContext!==null && chatContext!==this.chatContextKey()) return;
+        if (chatContext!==null && (chatContext!==this.chatContextKey() || replyFacts && replyFacts!==liveFactFingerprint(this.aiContext().liveContext))) return;
         if (task.kind === 'ai' && task.data?.replyMode && (!this.config.ai.enabled || (task.data.replyMode === 'direct' ? !(this.config.ai.chatEnabled || this.config.bot.enabled) : !this.config.ai.chatEnabled))) return;
         if (task.targetJob) {
           if (currentJob() && this.now() <= task.deadline) {
@@ -1094,7 +1098,7 @@ export class Engine {
           return;
         }
         if (output.trim() === '[SKIP]') { this.log('ai', 'AI 判断无需回复'); if (task.kind !== 'timer') fallback('AI 未生成回复'); }
-        else if (!this.enqueue(task.kind, output, {...task.extra,...(chatContext!==null ? {aiChat:{contextKey:chatContext,observedAt:now,replyMode:task.data.replyMode}} : {})})) fallback('AI 回复未通过检查');
+        else if (!this.enqueue(task.kind, output, {...task.extra,...(chatContext!==null ? {aiChat:{contextKey:chatContext,observedAt:now,replyMode:task.data.replyMode,facts:replyFacts}} : {})})) fallback('AI 回复未通过检查');
       }
     } catch (error) { this.log('error', `AI 调用失败：${error.message}`); fallback('AI 调用失败'); }
     finally { clearTimeout(aiTimer); this.aiBusy = false; this.changed(); this.drainChatAI(); }

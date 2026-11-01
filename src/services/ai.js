@@ -1,7 +1,8 @@
 import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
 import { parseAIIntent } from './intent.js';
-import { assembleAIContext,currentAIPrompt } from './ai-context.js';
+import { assembleAIContext,currentAIPrompt,applyContextBudget,liveFactFingerprint } from './ai-context.js';
+import {resolveReplyConfig,pipelineConfig} from './ai-pipeline.js';
 import { GROUNDING_INSTRUCTION } from '../data/douyin-rules.js';
 
 export function validateEndpoint(value) {
@@ -12,11 +13,18 @@ export function validateEndpoint(value) {
   return url.href;
 }
 export function makeAIRequest(prompt, config) {
+  config=resolveReplyConfig(config);
   prompt=currentAIPrompt(prompt);
   const request=makeBaseAIRequest(prompt,config);
   request.messages[0].content=`${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
   const data={...JSON.parse(request.messages[1].content),...assembleAIContext(prompt,config)};
-  request.messages[1].content=JSON.stringify(data);
+  request.messages[0].content='context_meta.budget.omissions 列出按预算省略的资料；缺少明细不等于没有发生，不能将截取明细求和冒充完整汇总。\n'+request.messages[0].content;
+  request.messages[1].content='';
+  const wireBudget=Math.floor((98000-JSON.stringify(request).length)/2);
+  if(wireBudget<1000)throw new Error('固定任务指令超过请求预算，请缩短场控风格和任务');
+  request.messages[1].content=JSON.stringify(applyContextBudget(data,Math.min(pipelineConfig(config).contextBudgetChars,wireBudget)));
+  if(JSON.stringify(request).length>100000)throw new Error('AI 请求超过整包预算');
+  if(/qwen.*omni/iu.test(config.model)){request.stream=true;request.modalities=['text'];if(/^qwen3\.8-omni-/iu.test(config.model))request.reasoning_effort='none';}
   return request;
 }
 function makeBaseAIRequest(prompt, config) {
@@ -108,8 +116,9 @@ const PHRASE_SCENES = {
 export async function generatePhrases(client, config, {kind, reference = '', keywords = [], sharedContext = {}}) {
   const scene = PHRASE_SCENES[kind];
   if (!scene) throw new Error('不支持的话术场景');
-  validateEndpoint(config.ai.endpoint);
-  if (!config.ai.model.trim()) throw new Error('请先填写 AI 模型');
+  const replyConfig=resolveReplyConfig(config.ai);
+  validateEndpoint(replyConfig.endpoint);
+  if (!replyConfig.model.trim()) throw new Error('请先填写 AI 模型');
   if (kind === 'keyword' && !keywords.length) throw new Error('先填写这条规则的触发词，再生成回复');
   const count = kind === 'keyword' ? 1 : 20;
   const maxLength = config.sending.maxLength;
@@ -133,16 +142,20 @@ export async function generatePhrases(client, config, {kind, reference = '', key
   return result;
 }
 
-export function createAIClient({ request, getKey, search, onIntent = () => {}, onSearch = () => {} }) {
-  return async (prompt, config) => {
-    const endpoint = validateEndpoint(config.endpoint), key = getKey(endpoint);
+export function createAIClient({ request, getKey, search, onIntent = () => {}, onSearch = () => {}, onStatus = () => {} }) {
+  let serial=0;
+  const run = async (prompt, config) => {
+    const endpoint = validateEndpoint(config.endpoint), key = getKey(endpoint,config);
     if (!key && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(endpoint).hostname)) throw new Error('请先填写此服务的 API Key');
+    let factVersion=null;
     const deadline=Date.now()+42000, current=()=>!prompt.isCurrent || prompt.isCurrent();
     const notify=(callback,value)=>{try{callback(value);}catch{/* UI diagnostics cannot block a reply. */}};
     const complete=async value=>{
       if(!current())return '[SKIP]';
       const remaining=deadline-Date.now();if(remaining<=0)throw new Error('AI 问答等待超时');
-      const data=await requestJSON(request,{url:endpoint,key,body:makeAIRequest(value,config),timeout:Math.min(25000,remaining)});
+      const refreshed=currentAIPrompt(value);factVersion=liveFactFingerprint(refreshed.liveContext);
+      const body=makeAIRequest(refreshed,config);
+      const data=await requestJSON(request,{url:endpoint,key,body,stream:body.stream,timeout:Math.min(25000,remaining)});
       const output=data.choices?.[0]?.message?.content;
       if(typeof output!=='string' || !output.trim())throw new Error('模型未返回文本，请使用 Chat Completions 兼容接口');
       return output.trim();
@@ -153,6 +166,7 @@ export function createAIClient({ request, getKey, search, onIntent = () => {}, o
     const plan=parseAIIntent(raw,prompt.maxLength);
     notify(onIntent,{intent:plan.intent,question:prompt.target.text});
     if(plan.intent==='skip')return '[SKIP]';
+    if(plan.intent==='live-data')prompt.onLiveFacts?.(factVersion);
     if(plan.intent!=='web-search'){
       if(!plan.reply.trim() || [...plan.reply].length>prompt.maxLength)throw new Error('AI 回复为空或超过字数限制');
       return plan.reply.trim();
@@ -173,5 +187,18 @@ export function createAIClient({ request, getKey, search, onIntent = () => {}, o
     const answer=output==='[SKIP]' || citations.length && citations.every(index=>found.results.some(row=>row.index===index)) ? output : '搜索资料不足，暂时无法确认。';
     notify(onSearch,{...found,question:prompt.target.text,answer});
     return answer;
+  };
+  return async (prompt, config) => {
+    config=resolveReplyConfig(config);
+    const sequence=++serial;
+    try {
+      const result=await run(prompt,config);
+      if (!prompt.isCurrent || prompt.isCurrent()) try {onStatus({endpoint:config.endpoint,model:config.model,sequence,error:''});} catch {}
+      return result;
+    } catch (error) {
+      const message=error.aiStatusMessage || (error.message === '请先填写此服务的 API Key' ? error.message : 'AI 服务暂不可用，请检查连接、接口和模型设置。');
+      if (!prompt.isCurrent || prompt.isCurrent()) try {onStatus({endpoint:config.endpoint,model:config.model,sequence,error:message});} catch {}
+      throw error;
+    }
   };
 }

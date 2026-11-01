@@ -1,3 +1,4 @@
+import {validateRealtimeEndpoint,validateSDP} from '../src/services/ai-pipeline.js';
 import { roomFromURL } from '../src/browser/room-context.js';
 import { accessPage } from './page-access.js';
 import { ProtocolCache } from './protocol-cache.js';
@@ -240,6 +241,17 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const config = await readRecord(`live-assistant:config:${room}`);
         if (config?.incomeEnabled === false) value = false;
         else value = await giftStore.record({ room, event, userKey: message.userKey, rate: message.rate, capturedAt:message.capturedAt });
+      }
+      else if(message.type==='media-sdp' && isRoom(sender)){
+        const url=validateRealtimeEndpoint(message.url);validateSDP(message.data);
+        if(typeof message.headers?.Authorization!=='string' || !/^Bearer [^\s]{1,1000}$/u.test(message.headers.Authorization))throw new Error('百炼实时认证无效');
+        if(!await chrome.permissions.contains({origins:[`${new URL(url).origin}/*`]}))throw new Error('请点击扩展图标，授权音视频服务域名后重试');
+        const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),25000);
+        try{
+          const response=await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':'application/sdp',Authorization:message.headers.Authorization},body:message.data});
+          const text=await response.text();if(response.status>=200 && response.status<300)validateSDP(text);
+          value={status:response.status,responseText:response.status>=200 && response.status<300 ? text : '',finalUrl:response.url};
+        }finally{clearTimeout(timeout);}
       }
       else if (['ai','search','media'].includes(message.type) && isRoom(sender)) {
         const searching=message.type==='search';

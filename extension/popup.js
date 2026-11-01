@@ -13,7 +13,7 @@ void(async()=>{
   try {
     const result=await chrome.tabs.sendMessage(tab.id,{type:'room-info'});
     if (!result?.ready) throw new Error();
-    endpoint.value=result.endpoint;if(result.searchEndpoint)document.querySelector('#search-endpoint').value=result.searchEndpoint; status.textContent='直播间已就绪，点击下方打开面板。'; open.disabled=false;
+    endpoint.value=result.endpoint;if(result.mediaEndpoint)document.querySelector('#media-endpoint').value=result.mediaEndpoint;if(result.searchEndpoint)document.querySelector('#search-endpoint').value=result.searchEndpoint; status.textContent='直播间已就绪，点击下方打开面板。'; open.disabled=false;
   } catch {status.textContent='扩展已安装，请刷新直播页再打开面板。';}
 })();
 open.addEventListener('click',async()=>{try{await chrome.tabs.sendMessage(tab.id,{type:'open-panel'});window.close();}catch{status.textContent='请刷新直播页后重试。';status.classList.add('error');}});
@@ -32,4 +32,13 @@ document.querySelector('#allow-search').addEventListener('click',async()=>{
     const allowed=await chrome.permissions.request({origins:[`${url.protocol}//${url.hostname}/*`]});
     status.textContent=allowed ? '搜索域名已授权，返回面板填写搜索密钥并测试。' : '未授权，联网搜索暂不可用。';
   } catch(error){status.textContent=error.message;}
+});
+
+document.querySelector('#allow-media').addEventListener('click',async()=>{
+  try{
+    const url=new URL(document.querySelector('#media-endpoint').value);
+    if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash || !url.pathname.endsWith('/chat/completions'))throw new Error('请先在直播间配置百炼地域和业务空间，再重新打开扩展图标');
+    const allowed=await chrome.permissions.request({origins:[`${url.origin}/*`]});
+    status.textContent=allowed ? '音视频域名已授权，返回直播间选择共享标签页。' : '音视频域名尚未授权。';
+  }catch(error){status.textContent=error.message;}
 });

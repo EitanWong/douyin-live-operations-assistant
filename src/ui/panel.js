@@ -1,3 +1,4 @@
+import {resolveReplyConfig} from '../services/ai-pipeline.js';
 import { pkSettingsTemplate } from './pk-settings-template.js';
 import { PK_SETTINGS_CSS } from './pk-settings-styles.js';
 import { moderationTemplate } from './moderation-template.js';
@@ -25,7 +26,7 @@ import { SEARCH_PROVIDERS, validateSearchEndpoint } from '../services/search.js'
 import { giftDate } from '../data/gifts.js';
 import { BOT_COMMANDS, RoomBot } from '../core/bot.js';
 import { hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
-import { AISettings, aiEnhancementsTemplate } from './ai-settings.js';
+import { AISettings, aiPipelineTemplate, aiEnhancementsTemplate } from './ai-settings.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
@@ -127,7 +128,7 @@ export class Panel {
     this.root.append(this.build()); decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),
-      forget:kind=>this.callbacks.forgetMediaKey?.(kind,this.read().ai.media[`${kind}Endpoint`])});
+      forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
     this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});
   }
   input(path, label, type = 'text', hint = '') {
@@ -139,10 +140,11 @@ export class Panel {
   phraseGenerator(kind) {
     return `<div class="actions" data-phrase-generator hidden><button type="button" data-generate-phrases="${kind}">AI 生成话术</button><small>替换当前话术，保存后生效。</small></div>`;
   }
+  readPipeline(){return Object.fromEntries([...this.root.querySelectorAll('[data-field^="ai.pipeline."]')].map(el=>[el.dataset.field.split('.').at(-1),el.type==='number' ? Number(el.value) : el.value.trim()]));}
   phraseServiceReady() {
     try {
-      const endpoint=validateEndpoint(this.node('[data-field="ai.endpoint"]').value.trim());
-      return Boolean(this.node('[data-field="ai.model"]').value.trim() && (['localhost','127.0.0.1','[::1]'].includes(new URL(endpoint).hostname) || this.node('[data-api-key]').value.trim() || this.callbacks.hasAIKey?.(endpoint)));
+      const pipeline=this.readPipeline(),reply=resolveReplyConfig({pipeline,endpoint:this.node('[data-field="ai.endpoint"]').value.trim(),model:this.node('[data-field="ai.model"]').value.trim()}),endpoint=validateEndpoint(reply.endpoint),omni=pipeline.mode==='omni-only';
+      return Boolean(reply.model && (['localhost','127.0.0.1','[::1]'].includes(new URL(endpoint).hostname) || this.node(omni ? '[data-media-key="pipeline"]' : '[data-api-key]').value.trim() || this.callbacks.hasAIKey?.(endpoint,omni)));
     } catch { return false; }
   }
   async fillPhrases(button) {
@@ -154,10 +156,10 @@ export class Panel {
     const before=field.value, version=this.config;
     const config=copy(this.config);
     for (const key of ['endpoint','model','persona','knowledge']) config.ai[key]=this.node(`[data-field="ai.${key}"]`).value.trim();
-    config.ai.memory=this.aiSettings.read();
+    config.ai.memory=this.aiSettings.read();config.ai.pipeline=this.readPipeline();
     try {
       this.setBusy('generate-phrases',true); button.textContent='正在生成…'; button.setAttribute('aria-busy','true');
-      const lines=await this.callbacks.generatePhrases(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,{kind,reference:before,keywords});
+      const lines=await this.callbacks.generatePhrases(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,{kind,reference:before,keywords},this.aiSettings.credentials());
       if (!field.isConnected || this.config!==version) return;
       if (field.value!==before || kind==='keyword' && row.querySelector('[data-item="keywords"]').value.split('\n').map(text=>text.trim()).filter(Boolean).join('\n')!==keywords.join('\n')) { this.toast('生成期间内容已修改，已保留你的编辑，请重新生成',true); return; }
       field.value=lines.join('\n'); field.removeAttribute('aria-invalid');
@@ -180,6 +182,7 @@ export class Panel {
         <div class="shell-status" aria-label="场控状态"><strong data-shell-state>已暂停</strong><span data-shell-network>等待直播数据</span></div>
         ${this.demo ? '<p class="banner">本地演示：弹幕和礼物均为模拟数据，消息不会发到抖音。</p>' : ''}
         <div class="banner" data-runtime-alert role="status" hidden><strong data-runtime-alert-text></strong> <button type="button" data-go="diagnostics" data-ack-runtime-alert>查看并处理</button></div>
+        <div class="banner" data-ai-alert role="status" hidden><strong data-ai-alert-text></strong> <button type="button" data-go="ai">检查 AI 设置</button></div>
         <div class="workspace">
         ${navigationTemplate(this.activeTab, this.tools)}
         <main class="workspace-content" aria-label="功能页面">
@@ -321,13 +324,13 @@ export class Panel {
           <section class="page" role="tabpanel" id="page-ai" aria-labelledby="tab-ai" data-page="ai" hidden>
             <h2>AI 服务与问答</h2><p class="intro">连接模型服务，并配置 AI 如何回应直播间弹幕。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="ai"></p></div>
-            <div class="settings-workspace ai-workspace">
-            <div class="settings-column"><section class="settings-group settings-column"><h3>服务连接</h3>
+            <div class="settings-workspace ai-workspace">${aiPipelineTemplate(this)}<div class="actions workspace-wide"><button type="button" data-action="test-ai">测试 AI 连接</button></div>
+            <div class="settings-column"><section class="settings-group settings-column" data-text-service><h3>回复模型服务</h3>
               <label class="field"><span>服务预设</span><select data-preset><option value="custom">自定义兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问 / DashScope</option><option value="doubao">豆包 / 火山方舟</option><option value="local">本地 Ollama</option></select></label>
             <details data-ai-connection><summary>接口与模型</summary>${this.input('ai.endpoint', 'API 接口地址')}${this.input('ai.model', '模型名称 / 接入点 ID')}</details>
             <label class="field"><span>API Key</span><input type="password" data-api-key autocomplete="new-password" placeholder="留空保留此服务已有密钥"><small data-key-status>密钥按服务域名隔离，不随配置导出。</small></label>
             <label class="toggle"><input type="checkbox" data-remember-key>记住新密钥（仅此设备）</label>
-            <div class="actions"><button type="button" data-action="test-ai">测试 AI 连接</button><button type="button" class="danger" data-action="forget-key">清除此服务密钥</button></div></section>            <section class="settings-group settings-column"><h3>所有 AI 功能共用直播上下文</h3><p>问答、答谢、机器人、定时消息、PK 播报、内容检测和话术生成共用已采集的直播信息。</p><p class="hint">开启相应 AI 功能后，近期弹幕与回复、观众样本、活动趋势、钻石与收入估算、当前与历史 PK 比分、任务、展馆和段位会发送至你配置的 AI 服务。历史明细有界采样并保留汇总；未知和过期数据明确标记。音视频默认不接入；手动开启识别后，共用近期画面描述和语音转写。</p></section></div>
+            <div class="actions"><button type="button" class="danger" data-action="forget-key">清除此服务密钥</button></div></section>            <section class="settings-group settings-column"><h3>所有 AI 功能共用直播上下文</h3><p>问答、答谢、机器人、定时消息、PK 播报、内容检测和话术生成共用已采集的直播信息。</p><p class="hint">开启相应 AI 功能后，近期弹幕与回复、观众样本、活动趋势、钻石与收入估算、当前与历史 PK 比分、任务、展馆和段位会发送至你配置的 AI 服务。历史明细有界采样并保留汇总；未知和过期数据明确标记。音视频默认不接入；手动开启识别后，共用近期画面描述和语音转写。</p></section></div>
             <section class="settings-group settings-column"><h3>联网搜索</h3><label class="toggle"><input type="checkbox" data-field="ai.search.enabled">允许 AI 按需联网查询</label><p class="hint">需要外部资料时先搜索再回答，直播数据仍从本机记录读取。支持博查、Tavily、兼容服务和自建 SearXNG；搜索词会发送给该服务，来源链接保留在下方。</p>
             ${this.select('ai.search.provider','搜索服务',Object.entries(SEARCH_PROVIDERS).map(([key,value])=>[key,value.label]))}${this.input('ai.search.endpoint','搜索接口地址')}
             <label class="field"><span>搜索 API Key</span><input type="password" data-search-key autocomplete="new-password" placeholder="留空保留已保存的搜索密钥"><small>博查与 Tavily 必填，自建 SearXNG 通常不需要。密钥独立保存，不随配置导出。</small></label><label class="toggle"><input type="checkbox" data-remember-search-key>记住搜索密钥（仅此设备）</label><p class="hint">SearXNG 实例需在 search.formats 中允许 json；默认地址为本机 8080 端口，需先部署实例。</p>
@@ -602,7 +605,7 @@ export class Panel {
         }
       }
     }
-    const validated = validateConfig(mergeConfig(result)); if (validated.ai.enabled || this.node('[data-api-key]').value.trim()) validateEndpoint(validated.ai.endpoint);
+    const validated = validateConfig(mergeConfig(result)); if (validated.ai.enabled || this.node('[data-api-key]').value.trim()) validateEndpoint(resolveReplyConfig(validated.ai).endpoint);
     if(validated.ai.search.enabled || this.node('[data-search-key]').value.trim())validateSearchEndpoint(validated.ai.search.endpoint,validated.ai.search.provider);
     for (const [key, selector] of Object.entries(validated.adapter)) if (selector) { try { document.querySelector(selector); } catch { throw new Error(`${key} 选择器无效`); } }
     return validated;
@@ -719,8 +722,8 @@ export class Panel {
   syncLauncher() {
     const launcher = this.node('.launcher'), running = Boolean(this.latest?.[0].running);
     const status = running ? (this.latest[0].config.mode === 'preview' ? '仅预览' : '自动发送') : '已暂停';
-    launcher.classList.toggle('running', running); this.text('.launcher span', status);
-    const attributes = { 'aria-expanded':String(this.open), 'aria-label':`${this.open ? '收起' : '展开'}场控面板，当前${status}`, title:`点击${this.open ? '收起' : '展开'} · 拖动调整位置` };
+    launcher.classList.toggle('running', running); this.text('.launcher span', this.aiServiceError ? 'AI 异常' : status);
+    const attributes = { 'aria-expanded':String(this.open), 'aria-label':`${this.open ? '收起' : '展开'}场控面板，当前${status}${this.aiServiceError ? '，AI 服务异常' : ''}`, title:`点击${this.open ? '收起' : '展开'} · 拖动调整位置` };
     for (const [key, value] of Object.entries(attributes)) if (launcher.getAttribute(key) !== value) launcher.setAttribute(key, value);
   }
   toggleOpen() { this.open = !this.open; this.floating.setOpen(this.open); this.syncLauncher(); if (this.open) { if (this.latest) this.refresh(...this.latest); this.renderLogs(); this.charts.resize(); } }
@@ -1032,6 +1035,12 @@ export class Panel {
       }).join('');
       return `<section class="section"><p>${esc(String(row.question || row.query || '').slice(0,160))}</p><p class="hint">${esc(row.error || row.answer || '搜索连接通过')}${row.searchedAt ? ` · ${esc(timeFormat.format(row.searchedAt))}` : ''}</p>${sources ? `<ol>${sources}</ol>` : ''}</section>`;
     }).join('');
+  }
+  setAIServiceStatus(message) {
+    this.aiServiceError = message;
+    this.text('[data-ai-alert-text]', message);
+    this.hidden('[data-ai-alert]', !message);
+    this.syncLauncher();
   }
   log(category, message) {
     this.entries.push({ at: new Date().toISOString(), category, message, time: timeFormat.format(new Date()) });

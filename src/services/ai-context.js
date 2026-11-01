@@ -23,3 +23,41 @@ export function assembleAIContext(prompt,config) {
       knowledgeMethod:retrieval.method,mediaCoverage:media?.coverage || null}
   };
 }
+
+// Trim whole optional records, retaining valid JSON and the task's fixed facts.
+export function applyContextBudget(input,limit){
+  const data=structuredClone(input),omissions=[];
+  data.context_meta ??={};data.context_meta.budget={unit:'characters',limit,omissions};
+  const size=()=>JSON.stringify(data).length;
+  const candidates=(value,path=[],out=[])=>{
+    if(!value || typeof value!=='object')return out;
+    for(const [key,child] of Object.entries(value)){
+      const next=[...path,key];if(next[0]==='target' || next[0]==='data' || next.join('.')==='context_meta.budget')continue;
+      if(Array.isArray(child) && child.length)out.push({parent:value,key,path:next.join('.'),chars:JSON.stringify(child).length});
+      else if(child && typeof child==='object')candidates(child,next,out);
+    }return out;
+  };
+  for(let iteration=0;size()>limit && iteration<200;iteration++){
+    const row=candidates(data).sort((a,b)=>b.chars-a.chars)[0];
+    if(row){
+      const before=row.parent[row.key],count=Math.max(1,Math.ceil(before.length/2));
+      row.parent[row.key]=['recent_chat','recent_replies','recentChat'].includes(row.key) ? before.slice(count) : before.slice(0,before.length-count);
+      const existing=omissions.find(value=>value.path===row.path);if(existing)existing.removedRecords+=count;else omissions.push({path:row.path,removedRecords:count});
+    }else if(data.evidence_context?.sessionKnowledge){const text=data.evidence_context.sessionKnowledge;data.evidence_context.sessionKnowledge='';omissions.push({path:'evidence_context.sessionKnowledge',removedChars:text.length});}
+    else throw new Error('固定任务与汇总事实超过上下文预算，请缩短任务资料或提高上下文预算');
+  }
+  if(size()>limit)throw new Error('上下文超过字符预算');
+  return data;
+}
+
+// Stable aggregate facts only: new chat, elapsed clocks and sampled histories do not invalidate a reply.
+export function liveFactFingerprint(context){
+  const roots=['roomStats','audience','income','giftHistory','pk','pkHistory','tasks','exhibition','rank'];
+  const ignored=/^(?:at|.*At|.*AgeMs|duration.*|remainingMs|selfSpeed|opponentSpeed|selfVelocity60|opponentVelocity60|estimates|dataQuality|chatSignals|contributorActivity|effectHistory|activity|basis|sampleBasis|.*Coverage)$/u;
+  const stable=value=>{
+    if(Array.isArray(value))return undefined;
+    if(!value || typeof value!=='object')return value;
+    return Object.fromEntries(Object.keys(value).sort().filter(key=>!ignored.test(key) && !Array.isArray(value[key])).map(key=>[key,stable(value[key])]));
+  };
+  return JSON.stringify(Object.fromEntries(roots.map(key=>[key,stable(context?.[key] ?? null)])));
+}

@@ -14,7 +14,7 @@ const base64=buffer=>{
   return btoa(text);
 };
 
-async function audioWav(blob,env,maxSeconds) {
+async function audioWav(blob,env,maxSeconds,includeSilence=false) {
   const context=new env.AudioContext();
   try {
     const decoded=await context.decodeAudioData(await blob.arrayBuffer());
@@ -22,7 +22,7 @@ async function audioWav(blob,env,maxSeconds) {
     const offline=new env.OfflineAudioContext(1,length,16000),source=offline.createBufferSource();source.buffer=decoded;source.connect(offline.destination);source.start();
     const samples=(await offline.startRendering()).getChannelData(0);
     const rms=Math.sqrt(samples.reduce((sum,value)=>sum+value*value,0)/samples.length);
-    return rms<0.003 ? null : base64(encodeWav(samples));
+    return rms<0.003 && !includeSilence ? null : base64(encodeWav(samples));
   } finally {await context.close();}
 }
 
@@ -39,7 +39,7 @@ function frame(video,canvas) {
 export async function createDisplayCapture({config,onSample,onEnded,onError,onSkip=()=>{},isCurrent=()=>true,signal},env=globalThis) {
   if(!env.navigator?.mediaDevices?.getDisplayMedia)throw new Error('当前浏览器不支持屏幕共享，请使用支持共享标签页音频的Chrome桌面版');
   const stream=await env.navigator.mediaDevices.getDisplayMedia({video:true,audio:config.audioEnabled,preferCurrentTab:true,systemAudio:'exclude'});
-  let closed=false,video,recorder,recordTimer,frameTimer,decoding=false,releasePreparation;
+  let closed=false,video,canvas,recorder,recordTimer,frameTimer,decoding=false,releasePreparation;
   const cancelled=new Promise(resolve=>{releasePreparation=resolve;});
   const stop=()=>{
     if(closed)return;closed=true;clearTimeout(recordTimer);clearInterval(frameTimer);
@@ -56,9 +56,9 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
     if(config.videoEnabled){
       video=env.document.createElement('video');video.muted=true;video.playsInline=true;video.srcObject=stream;await Promise.race([video.play(),cancelled]);
       if(closed || !isCurrent()){stop();return {stop};}
-      const canvas=env.document.createElement('canvas');
+      canvas=env.document.createElement('canvas');
       const sample=()=>{try {const data=frame(video,canvas);if(data && !closed)void onSample({kind:'video',data,at:Date.now()});}catch(error){onError(error);}};
-      frameTimer=setInterval(sample,config.videoIntervalSec*1000);sample();
+      if(!config.omniEnabled){frameTimer=setInterval(sample,config.videoIntervalSec*1000);sample();}
     }
     if(config.audioEnabled){
       if(!env.MediaRecorder || !env.AudioContext || !env.OfflineAudioContext)throw new Error('当前浏览器缺少音频分段识别支持');
@@ -70,9 +70,12 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
         recorder.onerror=()=>{stop();onError(new Error('共享音频录制失败，请停止后重试'));onEnded();};
         recorder.onstop=()=>{
           if(closed)return;
-          const endedAt=Date.now(),blob=new Blob(parts,{type:recorder.mimeType});record();
+          const endedAt=Date.now(),blob=new Blob(parts,{type:recorder.mimeType});let image;
+          try {if(config.omniEnabled)image=frame(video,canvas);}catch(error){onError(error);}
+          record();
+          if(config.omniEnabled && !image){onSkip();return;}
           if(decoding){onSkip();return;}decoding=true;
-          void (async()=>{try {const data=await audioWav(blob,env,config.audioIntervalSec);if(data && !closed)await onSample({kind:'audio',data,at,endedAt});}catch(error){if(!closed)onError(error);}finally{decoding=false;}})();
+          void (async()=>{try {const data=await audioWav(blob,env,config.audioIntervalSec,config.omniEnabled);if(data && !closed)await onSample(config.omniEnabled ? {kind:'omni',image,data,at,endedAt} : {kind:'audio',data,at,endedAt});}catch(error){if(!closed)onError(error);}finally{decoding=false;}})();
         };
         recorder.start();recordTimer=setTimeout(()=>{if(recorder.state==='recording')recorder.stop();},config.audioIntervalSec*1000);
       };
@@ -83,15 +86,17 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
 }
 
 export class LiveMediaAnalyzer {
-  constructor({capture=createDisplayCapture,recognize,onObservation=()=>{},onState=()=>{},onError=()=>{}}){
-    Object.assign(this,{capture,recognize,onObservation,onState,onError});this.state='idle';this.epoch=0;this.skipped=0;this.errors=0;this.busy=new Map();this.failures=new Map();
+  constructor({capture=createDisplayCapture,realtimeCapture,recognize,onObservation=()=>{},onState=()=>{},onError=()=>{}}){
+    Object.assign(this,{capture,realtimeCapture,recognize,onObservation,onState,onError});this.state='idle';this.epoch=0;this.skipped=0;this.errors=0;this.busy=new Map();this.failures=new Map();
   }
   notify(){this.onState({state:this.state,skipped:this.skipped,errors:this.errors});}
   async start(config){
     if(this.state!=='idle')return;
     validateMediaConfig(config,true);const epoch=++this.epoch;this.controller=new AbortController();this.state='starting';this.errors=0;this.skipped=0;this.failures.clear();this.notify();
     try {
-      const capture=await this.capture({config,signal:this.controller.signal,isCurrent:()=>epoch===this.epoch,onSample:sample=>this.sample(sample,config,epoch),onEnded:()=>{if(epoch===this.epoch)this.stop();},onError:error=>this.error(error,'capture',epoch),onSkip:()=>{if(epoch===this.epoch){this.skipped++;this.notify();}}});
+      const factory=config.transport==='webrtc' ? this.realtimeCapture : this.capture;
+      if(!factory)throw new Error('实时识别服务未初始化');
+      const capture=await factory({config,onObservation:row=>{if(epoch===this.epoch)this.onObservation(row);},onProgress:value=>{if(epoch===this.epoch)this.onState({state:this.state,skipped:this.skipped,errors:this.errors,...value});},signal:this.controller.signal,isCurrent:()=>epoch===this.epoch,onSample:sample=>this.sample(sample,config,epoch),onEnded:()=>{if(epoch===this.epoch)this.stop();},onError:error=>this.error(error,'capture',epoch),onSkip:()=>{if(epoch===this.epoch){this.skipped++;this.notify();}}});
       if(epoch!==this.epoch){capture.stop();return;}
       this.source=capture;this.state='running';this.notify();
     }catch(error){if(epoch===this.epoch){this.stop();this.onError(error);throw error;}}

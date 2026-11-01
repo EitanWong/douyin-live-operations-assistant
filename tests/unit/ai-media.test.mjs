@@ -8,6 +8,81 @@ const image={kind:'video',data:'data:image/jpeg;base64,/9j/2Q==',at:1000};
 const audio={kind:'audio',data:'UklGRiQAAABXQVZF',at:1000};
 const defer=()=>{let resolve;const promise=new Promise(done=>{resolve=done;});return {resolve,promise};};
 
+test('Omni 将同一片段的画面和音频一起发送并保存流式文字结果',async()=>{
+  let sent;const client=createMediaClient({getKey:()=> 'key',now:()=>3000,request:d=>{sent=JSON.parse(d.data);d.onload({status:200,responseText:'data: {"choices":[{"delta":{"content":"主播展示"}}]}\n\ndata: {"choices":[{"delta":{"content":"杯子"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'});}});
+  const config={...settings,omniEnabled:true,visionModel:'qwen3.5-omni-flash'};
+  const result=await client({kind:'omni',image:image.data,data:audio.data,at:1000,endedAt:2000},config);
+  assert.equal(sent.stream,true);assert.deepEqual(sent.modalities,['text']);
+  assert.equal(sent.messages[1].content[1].image_url.url,image.data);
+  assert.equal(sent.messages[1].content[2].input_audio.data,`data:audio/wav;base64,${audio.data}`);
+  assert.equal(result.text,'主播展示杯子');assert.equal(result.kind,'omni');
+  const evidence=new MediaEvidence({now:()=>3000});evidence.add(result);
+  assert.equal(evidence.context(60).observations[0].text,'主播展示杯子');
+  const invalid=structuredClone(sent);invalid.messages[1].content[1].image_url.url='https://example.com/image.jpg';
+  assert.throws(()=>validateMediaRequest(invalid));
+});
+
+test('Omni 拒绝不完整的流式结果与不完整的采集配置',async()=>{
+  const config={...settings,omniEnabled:true};
+  assert.throws(()=>validateMediaConfig({...config,audioEnabled:false},true),/同时开启/);
+  const client=createMediaClient({getKey:()=> 'key',request:d=>d.onload({status:200,responseText:'data: {"choices":[{"delta":{"content":"不完整"}}]}\n\n'})});
+  await assert.rejects(client({kind:'omni',image:image.data,data:audio.data,at:1000},config),/未完整/);
+});
+
+test('Omni 不把被截断或过滤的流式回答当作有效观察',async()=>{
+  const config={...settings,omniEnabled:true};
+  for(const reason of ['length','content_filter']){
+    const response=`data: {"choices":[{"delta":{"content":"部分内容"},"finish_reason":null}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"${reason}"}]}\n\ndata: [DONE]\n\n`;
+    const client=createMediaClient({getKey:()=> 'key',request:d=>d.onload({status:200,responseText:response})});
+    await assert.rejects(client({kind:'omni',image:image.data,data:audio.data,at:1000},config),/未完整|截断|过滤/);
+  }
+});
+
+test('Omni 拒绝过短的带前缀音频数据',async()=>{
+  let body;const client=createMediaClient({getKey:()=> 'key',request:d=>{body=JSON.parse(d.data);d.onload({status:200,responseText:'data: [DONE]\n\n'});}});
+  await assert.rejects(client({kind:'omni',image:image.data,data:'A',at:1000},{...settings,omniEnabled:true}),/无效|音频/);
+  assert.equal(body,undefined);
+});
+
+test('Omni 处理百炼的思考、空选项和多段文字，不暴露思考内容',async()=>{
+  const response=[{choices:[{delta:{reasoning_content:'私有推理',content:''},finish_reason:null}]},{choices:[{delta:{content:'画面中'},finish_reason:null}]},{choices:[]},{choices:[{delta:{content:'有杯子'},finish_reason:null}]},{choices:[{delta:{},finish_reason:'stop'}]}].map(chunk=>`data: ${JSON.stringify(chunk)}\r\n\r\n`).join('')+'data: [DONE]\r\n\r\n';
+  const client=createMediaClient({getKey:()=> 'key',request:d=>d.onload({status:200,responseText:response})});
+  const result=await client({kind:'omni',image:image.data,data:audio.data,at:1000},{...settings,omniEnabled:true});
+  assert.equal(result.text,'画面中有杯子');
+});
+
+test('Omni 遇到服务错误、损坏数据或缺少结束标记时不产生观察',async()=>{
+  const cases=[
+    {status:401,responseText:'{}',error:/401/},
+    {status:200,responseText:'data: {bad json}\n\ndata: [DONE]\n\n',error:/无效/},
+    {status:200,responseText:'data: {"error":{"message":"failed"}}\n\ndata: [DONE]\n\n',error:/无效/},
+    {status:200,responseText:'data: {"choices":[{"delta":{"content":"片段"},"finish_reason":"stop"}]}\n\n',error:/未完整/},
+    {status:200,responseText:'data: {"choices":[{"delta":{"content":"片段"}}]}\n\ndata: [DONE]\n\n',error:/未完整/},
+    {status:200,responseText:'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',error:/未返回文本/},
+  ];
+  for(const {status,responseText,error} of cases){
+    const client=createMediaClient({getKey:()=> 'key',request:d=>d.onload({status,responseText})});
+    await assert.rejects(client({kind:'omni',image:image.data,data:audio.data,at:1000},{...settings,omniEnabled:true}),error);
+  }
+});
+
+test('Omni 使用视觉服务及密钥，失败计入额度，过期后可重试',async()=>{
+  let now=1000;const sent=[],client=createMediaClient({now:()=>now,getKey:url=>url.includes('vision.test') ? 'vision-key' : 'wrong-key',request:d=>{sent.push(d);d.onload({status:429,responseText:'{}'});}});
+  const config={...settings,omniEnabled:true,visionEndpoint:'https://vision.test/v1/chat/completions',audioEndpoint:'https://audio.test/v1/chat/completions',audioModel:'',maxPerHour:1};
+  const sample={kind:'omni',image:image.data,data:audio.data,at:1000};
+  await assert.rejects(client(sample,config),/429/);await assert.rejects(client(sample,config),/额度/);
+  assert.equal(sent.length,1);assert.equal(sent[0].headers.Authorization,'Bearer vision-key');assert.equal(sent[0].url,config.visionEndpoint);
+  now+=3600000;await assert.rejects(client(sample,config),/429/);assert.equal(sent.length,2);
+});
+
+test('Qwen3.8 Omni 使用非思考模式，Qwen3.5 请求不附带其专用参数',async()=>{
+  const bodies=[],client=createMediaClient({getKey:()=> 'key',request:d=>{bodies.push(JSON.parse(d.data));d.onload({status:200,responseText:'data: {"choices":[{"delta":{"content":"画面"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'});}});
+  const sample={kind:'omni',image:image.data,data:audio.data,at:1000};
+  await client(sample,{...settings,omniEnabled:true,visionModel:'qwen3.8-omni-flash'});
+  await client(sample,{...settings,omniEnabled:true,visionModel:'qwen3.5-omni-flash'});
+  assert.equal(bodies[0].reasoning_effort,'none');assert.equal(bodies[1].reasoning_effort,undefined);
+});
+
 test('媒体模型与端点显式配置，默认不启动，采样与额度有界',()=>{
   assert.doesNotThrow(()=>validateMediaConfig(MEDIA_DEFAULTS));
   assert.throws(()=>validateMediaConfig(MEDIA_DEFAULTS,true),/选择|开启/);
@@ -87,6 +162,22 @@ test('画面尚未就绪时停止立即释放共享轨道，启动等待也会�
   const starting=analyzer.start({...settings,audioEnabled:false});await ready.promise;
   analyzer.stop();assert.equal(closed,1);assert.equal(paused,1);assert.equal(video.srcObject,null);
   await starting;assert.equal(analyzer.state,'idle');
+});
+
+test('Omni 在音频分段结束时采集画面，静音也保留画面上下文',async()=>{
+  let recorder,resolveSample;const sample=new Promise(resolve=>{resolveSample=resolve;});
+  const track={stop(){},addEventListener(){}};
+  const stream={getTracks:()=>[track],getAudioTracks:()=>[track]};
+  const video={readyState:2,videoWidth:100,videoHeight:100,play:async()=>{},pause(){}};
+  const canvas={getContext:()=>({drawImage(){}}),toDataURL:()=>image.data};
+  const env={navigator:{mediaDevices:{getDisplayMedia:async()=>stream}},document:{createElement:name=>name==='video' ? video : canvas},
+    MediaStream:class {},MediaRecorder:class {constructor(){recorder=this;this.state='inactive';this.mimeType='audio/webm';}start(){this.state='recording';}stop(){this.state='inactive';this.onstop();}},
+    AudioContext:class {async decodeAudioData(){return {duration:1};}async close(){}},
+    OfflineAudioContext:class {createBufferSource(){return {connect(){},start(){}};}async startRendering(){return {getChannelData:()=>new Float32Array(16000)};}},
+  };
+  const capture=await createDisplayCapture({config:{...settings,omniEnabled:true},onSample:resolveSample,onEnded(){},onError:error=>assert.fail(error)},env);
+  recorder.stop();const result=await sample;capture.stop();
+  assert.equal(result.kind,'omni');assert.equal(result.image,image.data);assert.ok(result.data.startsWith('UklGR'));
 });
 
 test('PCM编码为16kHz单声道16位WAV，裁剪范围，生成正确长度',()=>{

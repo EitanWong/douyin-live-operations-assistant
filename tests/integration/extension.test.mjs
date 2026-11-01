@@ -67,14 +67,14 @@ test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，�
     assert.equal(requests.length,3);
   }finally{page.close();}
 });
-async function worker(values = {}, indexedDB = new IDBFactory()) {
+async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{"choices":[]}') {
   let usedBytes = 0, listener,changed; const sent=[], requests=[]; let allowed=true;
   const WorkerDurableStorage = class extends DurableStorage {
     constructor(options = {}) { super({...options, indexedDB: options.indexedDB || indexedDB, IDBKeyRange}); }
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
   const code=(await readFile(file('background.js'),'utf8'));
-  vm.runInNewContext(code,{structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
+  vm.runInNewContext(code,{structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};}});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
@@ -982,4 +982,14 @@ test('事件桥短暂失联时暂停发送资格，后台恢复后继续接收�
     assert.equal(drains,3);
     assert.deepEqual(handled,['after-reconnect']);
   }finally{adapter?.closeEvents();dom.window.close();}
+});
+
+
+test('构建后台独立交换百炼 WebRTC SDP，要求直播页、服务授权和有效数据',async()=>{
+  const sdp='v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n',w=await worker({},new IDBFactory(),sdp);
+  const message={type:'media-sdp',url:'https://ws.cn-beijing.maas.aliyuncs.com/api/v1/webrtc/realtime?model=qwen3.8-omni-flash-realtime',headers:{Authorization:'Bearer private'},data:sdp};
+  assert.equal((await w.send(message)).ok,true);assert.equal(w.requests[0].opts.headers['Content-Type'],'application/sdp');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.credentials,'omit');
+  for(const invalid of [{...message,url:'https://evil.com/api/v1/webrtc/realtime?model=x'},{...message,data:'{}'},{...message,headers:{}}])assert.equal((await w.send(invalid)).ok,false);
+  assert.equal((await w.send(message,{frameId:1,tab:{url:'https://live.douyin.com/1'}})).ok,false);assert.equal(w.requests.length,1);
+  w.deny();assert.match((await w.send(message)).error,/授权/u);
 });
