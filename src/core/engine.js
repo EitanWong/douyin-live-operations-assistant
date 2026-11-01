@@ -1025,9 +1025,11 @@ export class Engine {
     return oldestGift;
   }
   aiContext(config=this.config) {
-    const liveContext=liveReplyContext(this,this.now(),config);
-    return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8),
-      mediaContext:this.mediaContext(config),getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now()};
+    const read=()=>{
+      const liveContext=liveReplyContext(this,this.now(),config);
+      return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8),mediaContext:this.mediaContext(config)};
+    };
+    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now()};
   }
   async requestAI(event = null, task = { kind: 'ai', instruction: '只简短回答目标弹幕中需要回答的问题，没有必要回复时输出 [SKIP]，不主动发起话题。' }) {
     const a = this.config.ai, now = this.now(), epoch = this.epoch;

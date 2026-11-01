@@ -11,7 +11,7 @@ const entry=(id,content,extra={})=>({id,title:id,content,source:'主播确认',u
 test('背景记忆检索优先相关资料，停用和已到期记录不再作为事实',()=>{
   const memory={...MEMORY_DEFAULTS,entries:[entry('地址','工作室在杭州'),entry('排期','每周六直播唱歌'),entry('旧价','商品99元',{expiresOn:'2026-10-31'}),entry('撤回','商品1元',{enabled:false})]};
   const found=selectMemories(memory,'主播在哪里直播？杭州工作室地址',now);
-  assert.equal(found[0].id,'地址');assert.equal(found.length,2);
+  assert.equal(found[0].id,'地址');assert.equal(found.length,1);
   assert.equal(found[0].source,'主播确认');
   assert.deepEqual(selectMemories({...memory,enabled:false},'地址',now),[]);
   assert.equal(selectMemories({enabled:true,entries:[entry('今天','今日优惠',{expiresOn:'2026-11-01'})]},'优惠',now).length,1);

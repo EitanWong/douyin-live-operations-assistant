@@ -1,8 +1,8 @@
 import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
 import { parseAIIntent } from './intent.js';
-import { selectMemories } from './knowledge.js';
-import { DOUYIN_RULES, GROUNDING_INSTRUCTION } from '../data/douyin-rules.js';
+import { assembleAIContext,currentAIPrompt } from './ai-context.js';
+import { GROUNDING_INSTRUCTION } from '../data/douyin-rules.js';
 
 export function validateEndpoint(value) {
   let url; try { url = new URL(value); } catch { throw new Error('AI 接口地址无效'); }
@@ -12,12 +12,10 @@ export function validateEndpoint(value) {
   return url.href;
 }
 export function makeAIRequest(prompt, config) {
+  prompt=currentAIPrompt(prompt);
   const request=makeBaseAIRequest(prompt,config);
   request.messages[0].content=`${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
-  const data=JSON.parse(request.messages[1].content),now=prompt.getNow?.() ?? prompt.now ?? Date.now();
-  data.evidence_context={at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',
-    memories:selectMemories(config.memory,`${prompt.target?.text || ''} ${prompt.task?.kind || ''}`,now)};
-  data.media_context=prompt.task?.kind==='moderation' ? null : typeof prompt.getMediaContext==='function' ? prompt.getMediaContext() : prompt.mediaContext || null;
+  const data={...JSON.parse(request.messages[1].content),...assembleAIContext(prompt,config)};
   request.messages[1].content=JSON.stringify(data);
   return request;
 }

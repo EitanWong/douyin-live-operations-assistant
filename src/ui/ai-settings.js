@@ -1,5 +1,6 @@
 import {DOUYIN_RULES} from '../data/douyin-rules.js';
-import {MEMORY_LIMITS,validateMemory} from '../services/knowledge.js';
+import {MEMORY_LIMITS,validateMemory,retrieveMemories} from '../services/knowledge.js';
+import {RETRIEVAL_LIMITS} from '../services/retrieval.js';
 
 export function aiEnhancementsTemplate(panel) {
   const mediaField=(kind,title)=>`<details><summary>${title}服务</summary>${panel.input(`ai.media.${kind}Endpoint`,`${title}接口地址`)}${panel.input(`ai.media.${kind}Model`,`${title}模型名称`)}<label class="field"><span>${title} API Key</span><input type="password" data-media-key="${kind}" autocomplete="new-password" placeholder="留空使用已保存密钥或同域AI密钥"><small>同一服务域名共用密钥，不随配置导出。</small></label><label class="toggle"><input type="checkbox" data-media-remember="${kind}">记住新密钥（仅此设备）</label><button type="button" data-media-forget="${kind}">清除音视频服务密钥</button></details>`;
@@ -12,7 +13,8 @@ export function aiEnhancementsTemplate(panel) {
     <details><summary>近期识别结果</summary><div data-media-results><p class="empty">开启后显示带时间的画面描述和语音转写。</p></div></details>
     <p class="hint">选屏时选择直播标签页，并勾选“同时分享标签页音频”。共享区域的截图与音频片段会发往你配置的服务；原始媒体只在本机内存短暂处理，不写入配置、日志或账本。识别可能延迟和出错，不用于自动处罚。忙时跳过采样；连续失败或额度用完会停止。</p>
   </section>
-  <section class="settings-group workspace-wide"><h3>背景记忆</h3>${panel.toggle('ai.memory.enabled','允许 AI 使用已保存的背景记忆')}<p class="group-note">在当前主播直播间保存长期背景，例如主播介绍、固定排期、商品口径。只由你添加、编辑或删除；弹幕和模型不能自动改写记忆。每次问答最多检索8条相关资料。</p><div data-memory-list></div><p class="empty" data-memory-empty>还没有背景记忆。添加已核实的资料，让回答有据可查。</p><button type="button" data-memory-add>添加背景记忆</button><p class="hint">保存设置后持久记住，刷新后仍在；随该直播间配置导出和导入。到期或停用的条目不再进入 AI 上下文。每条正文最多2000字，共40条，正文总计最多20000字。</p></section>
+  <section class="settings-group workspace-wide"><h3>本地知识库 / 背景记忆</h3>${panel.toggle('ai.memory.enabled','允许 AI 使用已保存的背景记忆')}<p class="group-note">在当前主播直播间保存长期背景，例如主播介绍、固定排期、商品口径。只由你添加、编辑或删除；弹幕和模型不能自动改写记忆。按问题检索原文片段，保留来源与核对时间；没有匹配资料时不凑数。</p><div data-memory-list></div><p class="empty" data-memory-empty>还没有背景记忆。添加已核实的资料，让回答有据可查。</p><button type="button" data-memory-add>添加背景记忆</button><p class="hint">保存设置后持久记住，刷新后仍在；随该直播间配置导出和导入。到期或停用的条目不再进入 AI 上下文。每条正文最多2000字，共40条，正文总计最多20000字。每次最多${RETRIEVAL_LIMITS.chunks}个片段、原文合计${RETRIEVAL_LIMITS.chars}字。</p>
+    <details><summary>测试本地知识检索</summary><label class="field"><span>输入一个具体问题</span><input type="text" data-memory-query maxlength="300" placeholder="例如：陶瓷茶具怎么清洗"></label><button type="button" data-memory-search>查看命中资料</button><p class="hint">使用当前编辑的资料，在本机预览，不调用模型或联网。实际问答还会结合近期弹幕和媒体线索。</p><div data-memory-matches aria-live="polite"></div></details></section>
   <section class="settings-group workspace-wide"><h3>抖音直播与 PK 规则依据</h3><p class="group-note">核对日期：2026-11-01。内置公开条款摘要和采集边界，所有 AI 功能共用。规则会更新，具体活动、加成和段位任务以平台当期说明为准。</p><details><summary>查看规则摘要与来源</summary>${DOUYIN_RULES.map(row=>`<div class="editor-row"><strong>${row.id} · ${row.authority==='official' ? '官方条款摘要' : '助手事实边界'}</strong><p>${row.text}</p>${row.source.url ? `<a href="${row.source.url}" target="_blank" rel="noopener noreferrer">${row.source.title} · ${row.source.publishedOn}</a>` : '<small>本助手的使用限制，不是平台官方条款。</small>'}</div>`).join('')}</details><p class="hint">最新政策或不明活动条件需要联网核对官方来源。未找到、资料冲突或采集不足时，AI 应说明无法确认，不补造价格、承诺或计分公式。</p></section>`;
 }
 
@@ -25,6 +27,18 @@ export class AISettings {
     root.querySelector('[data-memory-add]').addEventListener('click',()=>{
       if(this.list.children.length>=MEMORY_LIMITS.entries){error(new Error('背景记忆最多40条'));return;}
       this.add({id:crypto.randomUUID(),title:'',content:'',source:'用户填写',updatedAt:Date.now(),expiresOn:'',enabled:true});this.empty();dirty();this.list.lastElementChild.querySelector('input').focus();
+    });
+    root.querySelector('[data-memory-search]').addEventListener('click',()=>{
+      try {
+        const query=root.querySelector('[data-memory-query]').value.trim();
+        if(!query)throw new Error('请先输入要检索的问题');
+        const result=retrieveMemories(this.read(),query),target=root.querySelector('[data-memory-matches]');
+        target.replaceChildren();
+        const summary=document.createElement('p');summary.textContent=`命中 ${result.chunks.length} 个片段，原文 ${result.usedChars} 字${result.truncated ? '（已按预算与去重规则筛选）' : ''}。`;target.append(summary);
+        for(const chunk of result.chunks){
+          const item=document.createElement('p');item.textContent=`${chunk.title} · ${chunk.source || '未填写来源'} · 核对时间 ${new Date(chunk.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})} · 原文位置 ${chunk.range.start}–${chunk.range.end}：${chunk.content}`;target.append(item);
+        }
+      } catch(reason){error(reason);}
     });
     root.querySelector('[data-media-start]').addEventListener('click',()=>{
       try {Promise.resolve(start()).catch(error);}catch(reason){error(reason);}

@@ -1,3 +1,5 @@
+import {retrieveKnowledge} from './retrieval.js';
+
 export const MEMORY_DEFAULTS = {enabled:true,entries:[]};
 export const MEMORY_LIMITS = {entries:40,content:2000,total:20000,selected:8};
 export const beijingDate = at => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(at);
@@ -18,16 +20,13 @@ export function validateMemory(memory,now=Date.now()) {
   return memory;
 }
 
-function terms(value) {
-  const words=String(value || '').toLowerCase().match(/[a-z0-9]+|[\p{Script=Han}]/gu) || [];
-  return new Set([...words,...words.slice(1).map((word,index)=>words[index]+word)]);
+export function retrieveMemories(memory,query,now=Date.now(),options={}) {
+  const today=beijingDate(now);
+  const entries=memory?.enabled ? memory.entries.filter(row=>row.enabled && (!row.expiresOn || row.expiresOn>=today)) : [];
+  return retrieveKnowledge(entries,query,options);
 }
 
 export function selectMemories(memory,query,now=Date.now()) {
-  if(!memory?.enabled)return [];
-  const today=beijingDate(now),keys=terms(query);
-  return memory.entries.filter(row=>row.enabled && (!row.expiresOn || row.expiresOn>=today))
-    .map((row,index)=>({row,index,score:[...terms(`${row.title} ${row.content}`)].filter(word=>keys.has(word)).length}))
-    .sort((a,b)=>b.score-a.score || b.row.updatedAt-a.row.updatedAt || a.index-b.index)
-    .slice(0,MEMORY_LIMITS.selected).map(({row})=>({...row}));
+  const result=retrieveMemories(memory,query,now);
+  return [...new Set(result.chunks.map(chunk=>chunk.entryId))].map(id=>({...memory.entries.find(row=>row.id===id)}));
 }

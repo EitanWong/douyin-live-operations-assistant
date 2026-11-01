@@ -62,7 +62,8 @@ export function createMediaClient({request,getKey,now=Date.now}) {
     const text=response?.choices?.[0]?.message?.content;
     if(typeof text!=='string' || !text.trim())throw new Error('媒体模型未返回文本，请检查模型是否支持输入格式');
     if(['[SILENCE]','[UNKNOWN]'].includes(text.trim()))return null;
-    return {kind:sample.kind,at:sample.at,endedAt:sample.endedAt || sample.at,receivedAt:now(),text:text.trim().slice(0,1800),source:'model-recognition'};
+    return {kind:sample.kind,at:sample.at,endedAt:sample.endedAt || sample.at,receivedAt:now(),text:text.trim().slice(0,1800),source:'model-recognition',
+      model:body.model,transport:'chat-completions',isFinal:true};
   };
 }
 
@@ -70,9 +71,15 @@ export class MediaEvidence {
   constructor({now=Date.now}={}){this.now=now;this.rows=[];this.clearedAt=0;}
   clear(){this.rows=[];this.clearedAt=this.now();}
   add(row){
-    if(!row || !['audio','video'].includes(row.kind) || typeof row.text!=='string' || !row.text.trim() || !Number.isFinite(row.at) || row.at<=0 || row.at<this.clearedAt || row.at>this.now()+5000)return;
-    this.rows.push({kind:row.kind,at:row.at,endedAt:row.endedAt || row.at,receivedAt:row.receivedAt || this.now(),text:row.text.slice(0,1800),source:'model-recognition'});
-    this.rows=this.rows.slice(-12);
+    if(!row || row.isFinal===false || !['audio','video','omni'].includes(row.kind) || typeof row.text!=='string' || !row.text.trim() || !Number.isFinite(row.at) || row.at<=0 || row.at<this.clearedAt || row.at>this.now()+5000)return;
+    const endedAt=row.endedAt ?? row.at,receivedAt=row.receivedAt ?? this.now();
+    if(!Number.isFinite(endedAt) || endedAt<row.at || endedAt>this.now()+5000 || !Number.isFinite(receivedAt) || receivedAt<endedAt || receivedAt>this.now()+5000)return;
+    const id=`${row.kind}:${row.at}:${endedAt}`,previous=this.rows.find(value=>value.id===id);
+    if(previous && previous.receivedAt>=receivedAt)return;
+    this.rows=this.rows.filter(value=>value.id!==id);
+    this.rows.push({id,kind:row.kind,at:row.at,endedAt,receivedAt,text:row.text.slice(0,1800),source:'model-recognition',isFinal:true,
+      model:typeof row.model==='string' ? row.model.slice(0,200) : null,transport:row.transport==='chat-completions' ? row.transport : null});
+    this.rows=this.rows.sort((a,b)=>a.at-b.at || a.endedAt-b.endedAt || a.id.localeCompare(b.id)).slice(-12);
   }
   context(ageSec){return {coverage:'sampled-shared-media',at:this.now(),observations:this.rows.filter(row=>this.now()-row.at<=ageSec*1000).map(row=>({...row}))};}
 }
