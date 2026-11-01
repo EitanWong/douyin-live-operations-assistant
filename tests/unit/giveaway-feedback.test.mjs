@@ -11,6 +11,7 @@ const enter=(r,id)=>enterGiveaway(r,{type:'chat',text:'参与抽奖',at:2000,use
 test('开始、合并报名与多奖品结果生成有界公屏消息，重复参与和重放不重复确认',()=>{
   let round=prepareGiveawayFeedback(make(),1000,50,{start:true});
   assert.match(round.feedback.map(row=>row.text).join(''),/抽奖开始.*参与抽奖/);
+  assert.ok(round.feedback.some(row=>row.text==='发送弹幕：参与抽奖 即可参抽奖'));
   for(const id of ['1','2','3'])round=enter(round,id);
   round=prepareGiveawayFeedback(round,2000,50);
   const entries=round.feedback.filter(row=>row.kind==='entry');assert.equal(entries.length,1);

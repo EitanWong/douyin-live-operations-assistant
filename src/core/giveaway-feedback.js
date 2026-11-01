@@ -50,7 +50,7 @@ export function prepareGiveawayFeedback(round,now,limit=50,{start=false}={}) {
   if(start && round.status==='running' && !has('start')) {
     const messages=lines('抽奖开始：',`${round.config.durationSec}秒后开奖，${giveawaySlots(round.config)}个名额`,limit);
     if(round.config.announcePrizeNames)messages.push(...lines('奖品：',giveawayPrizes(round.config),limit));
-    if(round.config.chatEnabled)messages.push(...lines('参与弹幕：',round.config.keyword,limit));
+    if(round.config.chatEnabled)messages.push(...lines('发送弹幕：',`${round.config.keyword} 即可参抽奖`,limit));
     if(round.config.giftEnabled)messages.push(...lines('参与礼物：',`${round.config.gifts}，累计${round.config.giftMin}个`,limit));
     append('start',messages.map(text=>({text})),liveExpiry);
   }
