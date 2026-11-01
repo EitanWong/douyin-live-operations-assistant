@@ -24,14 +24,16 @@ function sessionSettings(){return {modalities:['text'],instructions,input_audio_
 function outputText(response){return (response.output || []).filter(item=>item.type==='message').flatMap(item=>item.content || []).filter(part=>['text','output_text'].includes(part.type)).map(part=>part.text || '').join('').slice(0,1800);}
 
 // One factory owns the hourly counter across restarts; each capture owns its media and protocol state.
-export function createRealtimeCapture({exchange,env=globalThis,now=Date.now}){
+export function createRealtimeCapture({exchange,env=globalThis,now=Date.now,sourceFactory}){
   let calls=[];
   return async({config,signal,onObservation,onEnded,onError,onProgress=()=>{},isCurrent=()=>true})=>{
-    if(!env.RTCPeerConnection || !env.navigator?.mediaDevices?.getDisplayMedia)throw new Error('实时识别需要支持 WebRTC 和标签页音频共享的 Chrome 桌面版');
+    const inputFactory=config.inputSource==='display' ? undefined : sourceFactory;
+    if(!env.RTCPeerConnection || !inputFactory && !env.navigator?.mediaDevices?.getDisplayMedia)throw new Error('实时识别需要支持 WebRTC 和标签页音频共享的 Chrome 桌面版');
     validateRealtimeEndpoint(config.realtimeEndpoint);
     calls=calls.filter(at=>now()-at<3600000);if(calls.length>=config.maxPerHour)throw new Error('实时识别每小时额度已用完');
     // Invoke synchronously within the start button's activation.
-    const sharing=env.navigator.mediaDevices.getDisplayMedia({video:true,audio:true,preferCurrentTab:true,systemAudio:'exclude'});
+    let source;
+    const sharing=inputFactory ? Promise.resolve(inputFactory({config,signal,isCurrent,onEnded,onError})).then(value=>{source=value;return value.stream;}) : env.navigator.mediaDevices.getDisplayMedia({video:true,audio:true,preferCurrentTab:true,systemAudio:'exclude'});
     let stream,pc,video,scaled,frameTimer,durationTimer,setupTimer,closed=false,ack=false,updating=false,requested=false,started=0,totalTokens=0,sessionId=null,speechAt=null;
     const channels=new Set(),senders=[],responses=new Map(),turns=new Map(),seen=new Set();
     let acceptReady,rejectReady;
@@ -41,7 +43,7 @@ export function createRealtimeCapture({exchange,env=globalThis,now=Date.now}){
     const stop=()=>{
       if(closed)return;closed=true;clearInterval(frameTimer);clearTimeout(durationTimer);clearTimeout(setupTimer);
       signal?.removeEventListener('abort',abort);for(const ch of channels)ch.close();pc?.close();
-      for(const source of [stream,scaled])for(const track of source?.getTracks() || [])track.stop();
+      source?.stop();for(const media of [source ? null : stream,scaled])for(const track of media?.getTracks() || [])track.stop();
       if(video){video.pause();video.srcObject=null;}responses.clear();turns.clear();seen.clear();rejectReady(new Error('实时识别已停止'));
     };
     const fail=error=>{if(closed)return;stop();onError(error);onEnded();};
@@ -50,7 +52,7 @@ export function createRealtimeCapture({exchange,env=globalThis,now=Date.now}){
     const remember=id=>{if(seen.has(id))return false;seen.add(id);if(seen.size>256)seen.delete(seen.values().next().value);return true;};
     const emit=(kind,id,text,at)=>{
       if(!active() || !ack || typeof text!=='string' || !text.trim() || !remember(`${kind}:${id}`))return;
-      onObservation({kind,id:`${sessionId || 'realtime'}:${kind}:${id}`,at:Math.max(started,at || now()),endedAt:now(),receivedAt:now(),text:text.trim().slice(0,1800),isFinal:true,model:config.realtimeModel,transport:'webrtc',sessionId});
+      onObservation({kind,id:`${sessionId || 'realtime'}:${kind}:${id}`,at:Math.max(started,at || now()),endedAt:now(),receivedAt:now(),text:text.trim().slice(0,1800),isFinal:true,model:config.realtimeModel,transport:'webrtc',inputSource:source?.source || 'display',sessionId});
     };
     const handle=async(event,channel)=>{
       if(!active() || typeof event.data!=='string' || event.data.length>100000)return;
@@ -88,10 +90,10 @@ export function createRealtimeCapture({exchange,env=globalThis,now=Date.now}){
     };
     const attach=channel=>{channels.add(channel);channel.onmessage=event=>{void handle(event,channel).catch(()=>fail(new Error('实时会话处理失败，请重新连接')));};channel.onclose=()=>{if(active())fail(new Error('实时识别数据连接已断开'));};channel.onerror=()=>fail(new Error('实时识别数据连接失败'));};
     try{
-      void sharing.then(late=>{if(closed)for(const track of late.getTracks())track.stop();},()=>{});
+      void sharing.then(late=>{if(closed){if(source)source.stop();else for(const track of late.getTracks())track.stop();}},()=>{});
       if(signal?.aborted)stop();
       stream=await Promise.race([sharing,ready]);if(!active()){stop();for(const track of stream.getTracks())track.stop();throw new Error('实时识别已停止');}
-      if(!stream.getAudioTracks().length)throw new Error('没有共享到直播音频，请选择直播标签页并勾选“同时分享标签页音频”');
+      if(!stream.getAudioTracks().length)throw new Error(inputFactory ? '原始流没有可用的音频轨道' : '没有共享到直播音频，请选择直播标签页并勾选“同时分享标签页音频”');
       setupTimer=setTimeout(()=>fail(new Error('实时会话配置确认超时')),30000);
       for(const track of stream.getTracks())track.addEventListener('ended',()=>{if(active()){stop();onEnded();}},{once:true});
       pc=new env.RTCPeerConnection({iceServers:[]});pc.onconnectionstatechange=()=>{if(['failed','disconnected','closed'].includes(pc.connectionState) && active())fail(new Error('实时识别连接已断开，请重新开启'));};pc.ondatachannel=event=>attach(event.channel);

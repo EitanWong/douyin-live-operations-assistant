@@ -36,28 +36,31 @@ function frame(video,canvas) {
 }
 
 // getDisplayMedia 必须在点击调用栈内调用；不用麦克风替代直播音频。
-export async function createDisplayCapture({config,onSample,onEnded,onError,onSkip=()=>{},isCurrent=()=>true,signal},env=globalThis) {
-  if(!env.navigator?.mediaDevices?.getDisplayMedia)throw new Error('当前浏览器不支持屏幕共享，请使用支持共享标签页音频的Chrome桌面版');
-  const stream=await env.navigator.mediaDevices.getDisplayMedia({video:true,audio:config.audioEnabled,preferCurrentTab:true,systemAudio:'exclude'});
+export async function createDisplayCapture({config,onSample,onEnded,onError,onSkip=()=>{},isCurrent=()=>true,signal,sourceFactory},env=globalThis) {
+  if(!sourceFactory && !env.navigator?.mediaDevices?.getDisplayMedia)throw new Error('当前浏览器不支持屏幕共享，请使用支持共享标签页音频的Chrome桌面版');
+  const source=sourceFactory ? await sourceFactory({config,onEnded,onError,isCurrent,signal}) : null;
+  if(sourceFactory && !source?.stream){source?.stop();throw new Error('未取得原始流媒体轨道');}
+  const stream=sourceFactory ? source.stream : await env.navigator.mediaDevices.getDisplayMedia({video:true,audio:config.audioEnabled,preferCurrentTab:true,systemAudio:'exclude'});
+  const inputSource=source?.source || 'display';
   let closed=false,video,canvas,recorder,recordTimer,frameTimer,decoding=false,releasePreparation;
   const cancelled=new Promise(resolve=>{releasePreparation=resolve;});
   const stop=()=>{
     if(closed)return;closed=true;clearTimeout(recordTimer);clearInterval(frameTimer);
     signal?.removeEventListener('abort',stop);releasePreparation();
     if(recorder?.state==='recording')recorder.stop();
-    for(const track of stream.getTracks())track.stop();
+    if(source)source.stop();else for(const track of stream.getTracks())track.stop();
     if(video){video.pause();video.srcObject=null;}
   };
   signal?.addEventListener('abort',stop,{once:true});
   try {
     if(signal?.aborted || !isCurrent()){stop();return {stop};}
-    if(config.audioEnabled && !stream.getAudioTracks().length)throw new Error('没有共享到直播音频，请重新选择直播标签页并勾选“同时分享标签页音频”，或关闭音频识别');
+    if(config.audioEnabled && !stream.getAudioTracks().length)throw new Error(sourceFactory ? '原始流没有可用的音频轨道' : '没有共享到直播音频，请重新选择直播标签页并勾选“同时分享标签页音频”，或关闭音频识别');
     for(const track of stream.getTracks())track.addEventListener('ended',()=>{if(!closed){stop();onEnded();}},{once:true});
     if(config.videoEnabled){
       video=env.document.createElement('video');video.muted=true;video.playsInline=true;video.srcObject=stream;await Promise.race([video.play(),cancelled]);
       if(closed || !isCurrent()){stop();return {stop};}
       canvas=env.document.createElement('canvas');
-      const sample=()=>{try {const data=frame(video,canvas);if(data && !closed)void onSample({kind:'video',data,at:Date.now()});}catch(error){onError(error);}};
+      const sample=()=>{try {const data=frame(video,canvas);if(data && !closed)void onSample({kind:'video',data,at:Date.now(),inputSource});}catch(error){onError(error);}};
       if(!config.omniEnabled){frameTimer=setInterval(sample,config.videoIntervalSec*1000);sample();}
     }
     if(config.audioEnabled){
@@ -75,7 +78,7 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
           record();
           if(config.omniEnabled && !image){onSkip();return;}
           if(decoding){onSkip();return;}decoding=true;
-          void (async()=>{try {const data=await audioWav(blob,env,config.audioIntervalSec,config.omniEnabled);if(data && !closed)await onSample(config.omniEnabled ? {kind:'omni',image,data,at,endedAt} : {kind:'audio',data,at,endedAt});}catch(error){if(!closed)onError(error);}finally{decoding=false;}})();
+          void (async()=>{try {const data=await audioWav(blob,env,config.audioIntervalSec,config.omniEnabled);if(data && !closed)await onSample(config.omniEnabled ? {kind:'omni',image,data,at,endedAt,inputSource} : {kind:'audio',data,at,endedAt,inputSource});}catch(error){if(!closed)onError(error);}finally{decoding=false;}})();
         };
         recorder.start();recordTimer=setTimeout(()=>{if(recorder.state==='recording')recorder.stop();},config.audioIntervalSec*1000);
       };

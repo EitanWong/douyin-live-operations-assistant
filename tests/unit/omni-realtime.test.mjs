@@ -53,3 +53,12 @@ test('重复响应事件不重复计费，text.done 可补齐完成文本，错�
   assert.equal(b.observations.length,1);b.event({type:'response.created',response:{id:'same'}});b.event({type:'response.done',response:{id:'same',status:'completed',usage:{total_tokens:600}}});assert.ok(!f.peer.closed);b.controller.abort();
   const g=fixture(),c=await begin(g);c.event({type:'session.created',session:{id:'bad'}});c.event({type:'session.updated',session:{modalities:['audio'],turn_detection:{type:'server_vad'}}});await assert.rejects(c.pending);assert.equal(g.tracks[0].enabled,false);assert.ok(g.peer.closed);
 });
+
+test('Omni 可直接使用原始直播流，既有确认门控保留且不调用浏览器选屏',async()=>{
+  const f=fixture();let shared=0,released=0;f.env.navigator.mediaDevices.getDisplayMedia=()=>{shared++;assert.fail('直接拉流不应选屏');};
+  const factory=createRealtimeCapture({env:f.env,exchange:async()=>sdp,sourceFactory:async()=>({stream:f.stream,source:'direct',stop:()=>released++})});
+  const pending=factory({config,onObservation(){},onError:assert.fail,onEnded(){}});await tick();
+  assert.ok(f.channel);await f.channel.onmessage({data:JSON.stringify({type:'session.created',session:{id:'direct'}})});await tick();
+  const session=f.channel.sent[0].session;await f.channel.onmessage({data:JSON.stringify({type:'session.updated',session})});
+  const capture=await pending;assert.equal(shared,0);assert.equal(f.peer.senders.length,2);capture.stop();assert.equal(released,1);
+});

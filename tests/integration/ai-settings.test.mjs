@@ -74,3 +74,17 @@ test('组合设置只需选择模式、地域、业务空间和一把百炼密�
     mode.value='text';mode.dispatchEvent(new dom.window.Event('change',{bubbles:true}));assert.equal(panel.node('[data-media-start]').hidden,true);
   }finally{panel.destroy();dom.window.close();}
 });
+
+test('直播感知默认直接拉流，显式切换标签页共享后更新操作说明并保存来源',()=>{
+  const dom=setup();let captured;
+  const panel=new Panel({room:'1',config:copy(DEFAULTS),callbacks:{startMedia:config=>captured=config}});
+  try{
+    const source=panel.node('[data-field="ai.media.inputSource"]');assert.ok(source);assert.equal(source.value,'direct');
+    assert.match(panel.node('[data-media-start]').textContent,/直接拉流/);
+    panel.aiSettings.state({state:'starting'});assert.match(panel.node('[data-media-status]').textContent,/原始流/);panel.aiSettings.state({state:'idle'});
+    source.value='display';source.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+    assert.match(panel.node('[data-media-start]').textContent,/选择直播标签页/);
+    panel.node('[data-media-start]').click();assert.equal(captured.ai.media.inputSource,'display');
+    assert.match(panel.node('[data-source-help]').textContent,/分享标签页音频/);
+  }finally{panel.destroy();dom.window.close();}
+});

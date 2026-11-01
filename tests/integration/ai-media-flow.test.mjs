@@ -33,3 +33,27 @@ test('应用端到端共享媒体观测与持久记忆，暂停后清空且原�
     assert.equal(api.media.state,'idle');assert.equal(closed,2,'自动识别主播归属变化后释放采集');
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 });
+
+test('默认原始流输入从应用采样进入文字回复上下文并在暂停时释放',async()=>{
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1234567890',pretendToBeVisual:true});
+  for(const name of ['document','window','location','MutationObserver','HTMLElement'])globalThis[name]=dom.window[name];
+  globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};
+  const track={stop(){},addEventListener(){}},stream={getTracks:()=>[track],getVideoTracks:()=>[track],getAudioTracks:()=>[]};
+  dom.window.HTMLMediaElement.prototype.play=async()=>{};dom.window.HTMLMediaElement.prototype.pause=()=>{};
+  for(const [key,value] of Object.entries({readyState:2,videoWidth:640,videoHeight:360}))Object.defineProperty(dom.window.HTMLVideoElement.prototype,key,{get:()=>value,configurable:true});
+  dom.window.HTMLCanvasElement.prototype.getContext=()=>({drawImage(){}});dom.window.HTMLCanvasElement.prototype.toDataURL=()=>'data:image/jpeg;base64,/9j/2Q==';
+  let api,sourceConfig,stopped=0;const requests=[];
+  const wait=async fn=>{for(let i=0;i<300 && !fn();i++)await new Promise(r=>setTimeout(r,10));assert.ok(fn());};
+  try{
+    boot({demo:true,get:(_key,fallback)=>fallback,set:async()=>{},del:()=>{},all:()=>({}),directStreamSource:async({config})=>{sourceConfig=config;return {stream,source:'direct',stop:()=>stopped++};},
+      request:d=>{requests.push(d);d.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:d.operation==='media'?'主播展示茶杯。':'你好。'}}]})});},
+      adapterFactory:()=>({status:{},sync(){},observeDOM(){},stopDOM(){},healthy:()=>false}),onReady:value=>api=value});
+    await wait(()=>api);const c=structuredClone(api.engine.config);c.ai.endpoint='http://localhost:11434/v1/chat/completions';c.ai.model='text';
+    Object.assign(c.ai.media,{videoEnabled:true,visionModel:'vision',visionEndpoint:'http://localhost:1234/v1/chat/completions'});
+    await api.panel.callbacks.save(c,'',false,{},{});await api.panel.callbacks.startMedia(c,{});
+    await wait(()=>requests.some(d=>d.operation==='media'));await new Promise(setImmediate);
+    assert.equal(sourceConfig.inputSource,'direct');await api.panel.callbacks.testAI(c,'',false);
+    const input=JSON.parse(JSON.parse(requests.at(-1).data).messages[1].content);assert.equal(input.media_context.coverage,'sampled-direct-stream');assert.equal(input.media_context.observations[0].inputSource,'direct');assert.equal(input.media_context.observations[0].text,'主播展示茶杯。');
+    api.stop('测试暂停');assert.equal(stopped,1);assert.equal(api.engine.aiContext().mediaContext,null);
+  }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});

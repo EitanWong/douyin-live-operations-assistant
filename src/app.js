@@ -1,3 +1,4 @@
+import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
 import { RoomContext } from './browser/room-context.js';
@@ -7,7 +8,7 @@ import { DouyinAdapter, RoomLock, pickElement, watchAudienceContributions } from
 import { createAIClient, validateEndpoint, generatePhrases } from './services/ai.js';
 import { createSearchClient, validateSearchEndpoint } from './services/search.js';
 import {createMediaClient,MediaEvidence,validateMediaConfig} from './services/media.js';
-import {LiveMediaAnalyzer} from './browser/live-media.js';
+import {LiveMediaAnalyzer,createDisplayCapture} from './browser/live-media.js';
 import { Panel } from './ui/panel.js';
 import { IdentityReader, roomAdminStatus } from './browser/identity.js';
 import { GiftLedger, GiftStore, giftDate, contributionSnapshot } from './data/gifts.js';
@@ -237,7 +238,12 @@ export function boot(options = {}) {
   const mediaKey=endpoint=>(sessionKeys.get(mediaSecretKey(endpoint)) ?? get(mediaSecretKey(endpoint),'')) || (sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''));
   const recognizeMedia=createMediaClient({request,getKey:mediaKey});
   const clearMedia=()=>{mediaEvidence.clear();panel?.aiSettings.observations([]);};
-  const media=new LiveMediaAnalyzer({capture:options.mediaCapture,realtimeCapture:options.realtimeCapture || createRealtimeCapture({exchange:createSDPExchange({request,getKey:mediaKey})}),recognize:recognizeMedia,
+  const directSource=options.directStreamSource || createDirectStreamSource({page,env:window});
+  const sourceFor=config=>config.inputSource==='display' ? undefined : directSource;
+  const exchange=createSDPExchange({request,getKey:mediaKey});
+  const realtimeCapture=createRealtimeCapture({exchange,env:window,sourceFactory:directSource});
+  const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config)},window)),
+    realtimeCapture:options.realtimeCapture || realtimeCapture,recognize:recognizeMedia,
     onObservation:row=>{mediaEvidence.add(row);panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}

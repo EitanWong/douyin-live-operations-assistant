@@ -186,3 +186,18 @@ test('PCM编码为16kHz单声道16位WAV，裁剪范围，生成正确长度',()
   assert.equal(view.getUint32(24,true),16000);assert.equal(view.getUint16(22,true),1);assert.equal(bytes.byteLength,52);
   assert.equal(view.getInt16(46,true),32767);assert.equal(view.getInt16(48,true),-32768);assert.equal(view.getInt16(50,true),32767);
 });
+
+test('注入原始流采集时沿用分段识别并释放原始解码器，不调用选屏',async()=>{
+  let shared=0,released=0,seen;
+  const track={stop(){},addEventListener(){}};const stream={getTracks:()=>[track],getAudioTracks:()=>[]};
+  const video={readyState:2,videoWidth:100,videoHeight:100,play:async()=>{},pause(){}};
+  const env={navigator:{mediaDevices:{getDisplayMedia:()=>{shared++;throw new Error('不应选屏');}}},document:{createElement:name=>name==='video' ? video : {getContext:()=>({drawImage(){}}),toDataURL:()=>image.data}}};
+  const capture=await createDisplayCapture({config:{...settings,audioEnabled:false},sourceFactory:async()=>({stream,source:'direct',stop:()=>released++}),onSample:s=>seen=s,onEnded(){},onError:assert.fail},env);
+  assert.equal(shared,0);assert.equal(seen.kind,'video');assert.equal(seen.inputSource,'direct');capture.stop();capture.stop();assert.equal(released,1);
+});
+
+test('原始流来源返回空结果时直接报错，绝不隐式启动选屏',async()=>{
+  let shared=0;
+  await assert.rejects(()=>createDisplayCapture({config:{videoEnabled:true},sourceFactory:async()=>null}, {navigator:{mediaDevices:{getDisplayMedia:async()=>{shared++;throw new Error('unexpected display');}}}}),/原始流/);
+  assert.equal(shared,0);
+});

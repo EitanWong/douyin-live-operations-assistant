@@ -3,7 +3,7 @@ import {validateEndpoint} from './ai.js';
 import {requestJSON} from './search.js';
 
 export const MEDIA_DEFAULTS = {
-  videoEnabled:false,audioEnabled:false,omniEnabled:false,transport:'sampled',
+  videoEnabled:false,audioEnabled:false,omniEnabled:false,transport:'sampled',inputSource:'direct',
   visionEndpoint:'https://api.openai.com/v1/chat/completions',visionModel:'',
   audioEndpoint:'https://api.openai.com/v1/chat/completions',audioModel:'',
   videoIntervalSec:12,audioIntervalSec:8,maxPerHour:120,contextAgeSec:60
@@ -11,6 +11,7 @@ export const MEDIA_DEFAULTS = {
 export const MEDIA_REQUEST_LIMIT=1500000;
 
 export function validateMediaConfig(config,ready=false) {
+  if(config.inputSource!==undefined && !['direct','display'].includes(config.inputSource))throw new Error('直播感知输入来源无效');
   if(config?.transport!==undefined && !['sampled','webrtc'].includes(config.transport))throw new Error('音视频传输方式无效');
   if(config?.transport==='webrtc'){
     validateRealtimeEndpoint(config.realtimeEndpoint);
@@ -86,7 +87,7 @@ export function createMediaClient({request,getKey,now=Date.now}) {
     if(typeof text!=='string' || !text.trim())throw new Error('媒体模型未返回文本，请检查模型是否支持输入格式');
     if(['[SILENCE]','[UNKNOWN]'].includes(text.trim()))return null;
     return {kind:sample.kind,at:sample.at,endedAt:sample.endedAt || sample.at,receivedAt:now(),text:text.trim().slice(0,1800),source:'model-recognition',
-      model:body.model,transport:'chat-completions',isFinal:true};
+      model:body.model,transport:'chat-completions',inputSource:sample.inputSource || 'display',isFinal:true};
   };
 }
 
@@ -101,8 +102,8 @@ export class MediaEvidence {
     if(previous && previous.receivedAt>=receivedAt)return;
     this.rows=this.rows.filter(value=>value.id!==id);
     this.rows.push({id,kind:row.kind,at:row.at,endedAt,receivedAt,text:row.text.slice(0,1800),source:'model-recognition',isFinal:true,
-      model:typeof row.model==='string' ? row.model.slice(0,200) : null,transport:['chat-completions','webrtc'].includes(row.transport) ? row.transport : null});
+      model:typeof row.model==='string' ? row.model.slice(0,200) : null,transport:['chat-completions','webrtc'].includes(row.transport) ? row.transport : null,inputSource:row.inputSource==='direct' ? 'direct' : 'display'});
     this.rows=this.rows.sort((a,b)=>a.at-b.at || a.endedAt-b.endedAt || a.id.localeCompare(b.id)).slice(-12);
   }
-  context(ageSec){return {coverage:this.rows.some(row=>row.transport==='webrtc') ? 'realtime-vad-shared-media' : 'sampled-shared-media',at:this.now(),observations:this.rows.filter(row=>this.now()-row.at<=ageSec*1000).map(row=>({...row}))};}
+  context(ageSec){return {coverage:this.rows.some(row=>row.inputSource==='direct') ? (this.rows.some(row=>row.transport==='webrtc') ? 'realtime-vad-direct-stream' : 'sampled-direct-stream') : (this.rows.some(row=>row.transport==='webrtc') ? 'realtime-vad-shared-media' : 'sampled-shared-media'),at:this.now(),observations:this.rows.filter(row=>this.now()-row.at<=ageSec*1000).map(row=>({...row}))};}
 }

@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dist = resolve(process.env.DOUYIN_DIST_DIR || `${root}dist`);
-for (const file of ['douyin-live-assistant.user.js','ai-intent.js','tool-runtime.js', 'chrome-extension/background.js', 'chrome-extension/popup.js', 'chrome-extension/ai.js','chrome-extension/search.js','chrome-extension/content.js', 'chrome-extension/page.js', 'chrome-extension/indicator-frame.js']) {
+for (const file of ['douyin-live-assistant.user.js','ai-intent.js','tool-runtime.js','live-stream-codecs.js', 'chrome-extension/background.js', 'chrome-extension/popup.js', 'chrome-extension/ai.js','chrome-extension/search.js','chrome-extension/content.js', 'chrome-extension/page.js', 'chrome-extension/indicator-frame.js']) {
   execFileSync(process.execPath, ['--check', resolve(dist, file)], {stdio:'inherit'});
 }
 async function checkDirectory(directory) {

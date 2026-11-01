@@ -67,10 +67,16 @@ export class AISettings {
     for(const node of this.root.querySelectorAll('[data-ai-modes]'))node.hidden=!node.dataset.aiModes.split(' ').includes(mode);
     this.root.querySelector('[data-pipeline-role]').textContent=mode==='omni-only' ? '感知 + 回复共用' : '仅感知';
     this.root.querySelector('[data-pipeline-description]').textContent=({custom:'回复服务独立配置；可按需开启自定义视觉、语音或 Omni 分段识别。',text:'只用直播数据、弹幕、知识与搜索生成回复，无需配置感知服务。','omni-llm':'Omni 持续理解直播音画，回复由独立配置的文字模型生成。','omni-only':'同一套百炼配置，Omni 负责直播感知和弹幕回复。','ali-split':'视觉与语音分别按间隔识别直播内容，回复使用文字模型。'})[mode];
-    this.root.querySelector('[data-perception-description]').textContent=({custom:'在“连接与模型”启用并配置感知服务，再选择共享的直播标签页。',text:'','omni-llm':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','omni-only':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','ali-split':'使用“连接与模型”中的视觉模型与语音模型分段识别。'})[mode];
+    this.root.querySelector('[data-perception-description]').textContent=({custom:'在“连接与模型”启用并配置感知服务，再启动直播音视频识别。',text:'','omni-llm':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','omni-only':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','ali-split':'使用“连接与模型”中的视觉模型与语音模型分段识别。'})[mode];
     this.syncMedia();
   }
+  syncSource(){
+    const direct=this.root.querySelector('[data-field="ai.media.inputSource"]').value!=='display';
+    this.root.querySelector('[data-media-start]').textContent=direct ? '直接拉流并开始识别' : '选择直播标签页并开始识别';
+    this.root.querySelector('[data-source-help]').textContent=direct ? '自动读取当前直播间原始 FLV / HLS 流并在本机解码，无需选择共享窗口。需流支持 H264/AAC 和跨域读取；失败会提示，不自动改用屏幕共享。' : '请选择直播标签页并勾选“同时分享标签页音频”。仅在你选择此方式后才会请求共享。';
+  }
   syncMedia(){
+    this.syncSource();
     const enabled=key=>this.root.querySelector(`[data-field="ai.media.${key}Enabled"]`).checked;
     this.root.querySelector('[data-custom-service="vision"]').hidden=!enabled('video');
     this.root.querySelector('[data-custom-service="audio"]').hidden=!enabled('audio') || enabled('omni');
@@ -115,7 +121,8 @@ export class AISettings {
   credentials(){return Object.fromEntries(['vision','audio','pipeline'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
   state({state,skipped=0,errors=0,totalTokens,lastFinalAt}){
     this.root.querySelector('[data-media-start]').disabled=state!=='idle';this.root.querySelector('[data-media-stop]').disabled=state==='idle';
-    this.root.querySelector('[data-media-status]').textContent=`${({idle:'识别已停止',starting:'正在选择直播标签页或等待服务配置确认',running:'正在持续识别所选共享内容'})[state]} · 忙时跳过 ${skipped} 次 · 失败 ${errors} 次${totalTokens!==undefined ? ` · 已用 ${totalTokens} token` : ''}${lastFinalAt ? ` · 最近完成 ${new Date(lastFinalAt).toLocaleTimeString('zh-CN')}` : ''}`;
+    const direct=this.root.querySelector('[data-field="ai.media.inputSource"]').value!=='display';
+    this.root.querySelector('[data-media-status]').textContent=`${({idle:'识别已停止',starting:direct ? '正在获取原始流或等待服务配置确认' : '正在选择直播标签页或等待服务配置确认',running:direct ? '正在识别原始直播流' : '正在持续识别所选共享内容'})[state]} · 忙时跳过 ${skipped} 次 · 失败 ${errors} 次${totalTokens!==undefined ? ` · 已用 ${totalTokens} token` : ''}${lastFinalAt ? ` · 最近完成 ${new Date(lastFinalAt).toLocaleTimeString('zh-CN')}` : ''}`;
     if(state==='starting')this.showError('');
   }
   showError(message){const target=this.root.querySelector('[data-media-error]');target.textContent=message;target.hidden=!message;}
