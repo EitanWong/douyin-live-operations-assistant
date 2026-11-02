@@ -160,7 +160,7 @@ export class Panel {
     const before=field.value, version=this.config;
     const config=copy(this.config);
     for (const key of ['endpoint','model','persona','knowledge']) config.ai[key]=this.node(`[data-field="ai.${key}"]`).value.trim();
-    config.ai.memory=this.aiSettings.read();config.ai.pipeline=this.readPipeline();
+    config.ai.memory=this.aiSettings.read();config.ai.assistant.skills=structuredClone(this.aiSettings.skills);config.ai.pipeline=this.readPipeline();
     try {
       this.setBusy('generate-phrases',true); button.textContent='正在生成…'; button.setAttribute('aria-busy','true');
       const lines=await this.callbacks.generatePhrases(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,{kind,reference:before,keywords},this.aiSettings.credentials());
@@ -461,7 +461,7 @@ export class Panel {
     for (const item of config.keyword.rules) this.addRow('keywords',item,false);
     for (const item of config.welcome.listed) this.addRow('listed',item,false);
     for (const item of config.timers) this.addRow('timers',item,false);
-    this.aiSettings.populate(config.ai.memory);
+    this.aiSettings.populate(config.ai.memory,config.ai.assistant);
     this.node('[data-api-key]').value = '';
     this.node('[data-search-key]').value = '';
     const preset = Object.entries(presets).find(([,values])=>values[0] === config.ai.endpoint)?.[0] || 'custom';
@@ -582,7 +582,7 @@ export class Panel {
     if (new Set(prices.map(p=>p.key)).size !== prices.length) throw new Error('礼物价格有重复名称或 ID，请合并');
     result.gift.prices = Object.fromEntries(prices.map(p=>[p.key,p.value]));
     result.keyword.rules = this.readList('keywords'); result.welcome.listed = [...new Set(this.readList('listed'))]; result.timers = this.readList('timers');
-    result.ai.memory=this.aiSettings.read();
+    result.ai.memory=this.aiSettings.read();result.ai.assistant.skills=structuredClone(this.aiSettings.skills);
     if (result.welcome.admin.enabled) {
       for (const [admin, basic, label] of [['minWealth','minWealth','荣誉'], ['minFanLevel','minFanLevel','灯牌']]) {
         if (result.welcome.admin[admin] < result.welcome[basic]) {

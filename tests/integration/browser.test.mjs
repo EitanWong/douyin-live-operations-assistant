@@ -370,7 +370,7 @@ test('生成的单文件油猴脚本在加载前可启动，无外部依赖且�
   const source = await readFile(join(fixture.dist, 'douyin-live-assistant.user.js'), 'utf8');
   const values = new Map();
   const dom = new JSDOM('<body></body>', { url: 'https://live.douyin.com/1234567890?anchor_id=1234567890', runScripts: 'outside-only', pretendToBeVisual: true });
-  Object.assign(dom.window, { unsafeWindow: dom.window, TextDecoder, TextEncoder, GM_getValue: (k, fallback) => values.get(k) ?? fallback, GM_setValue: (k, v) => values.set(k, v), GM_deleteValue: k => values.delete(k), GM_xmlhttpRequest: () => assert.fail('默认不应请求 AI'), GM_registerMenuCommand: () => {} });
+  Object.assign(dom.window, { unsafeWindow: dom.window, structuredClone, TextDecoder, TextEncoder, GM_getValue: (k, fallback) => values.get(k) ?? fallback, GM_setValue: (k, v) => values.set(k, v), GM_deleteValue: k => values.delete(k), GM_xmlhttpRequest: () => assert.fail('默认不应请求 AI'), GM_registerMenuCommand: () => {} });
   dom.window.eval(source); const host = dom.window.document.getElementById('douyin-live-assistant'); assert.ok(host); assert.equal(host.shadowRoot.querySelector('[data-state]').textContent, '已暂停');
   assert.equal(host.shadowRoot.querySelector('[data-field="anchorId"]').value, '1234567890'); assert.equal(source.includes('@require'), false); dom.window.close();
 });

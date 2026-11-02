@@ -1,3 +1,5 @@
+import {AudienceMemory} from './ai/audience-memory.js';
+import {AIWorkbench} from './ui/ai-workbench.js';
 import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
@@ -36,6 +38,8 @@ export function boot(options = {}) {
   try { config = validateConfig(mergeConfig(get(configKey, {}))); }
   catch (e) { config = copy(DEFAULTS); configError = `旧配置无效，已使用默认值：${e.message}`; }
   if (!config.anchorId) config.anchorId = new URLSearchParams(location.search).get('anchor_id')?.match(/^\d+$/)?.[0] || '';
+  let audienceMemory=new AudienceMemory({anchor:config.anchorId,state:runtimeSnapshot?.audienceMemory}),workbench,localAgentTasks,localAgentReady;
+  const currentMemory=()=>{if(audienceMemory.anchor!==String(engine?.config.anchorId || config.anchorId))audienceMemory=new AudienceMemory({anchor:engine?.config.anchorId || config.anchorId});return audienceMemory;};
   const sessionKeys = new Map(); let panel, engine, tools, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false, persistenceDisabled = false;
   const runtimeWriter = new RuntimeWriter(snapshot => set(runtimeKey, snapshot));
   // 自动开启只在本页首次进入时保持武装；只有用户明确点击暂停才关闭。
@@ -67,7 +71,7 @@ export function boot(options = {}) {
     if (runtimeWriter.failure || adapter.persistenceUnavailable?.()) return immediate ? Promise.reject(runtimeWriter.failure || contextFailure()) : Promise.resolve();
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
     const save = () => {
-      const snapshot = { ...engine.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),acknowledgedRuntimeAlert} };
+      const snapshot = { ...engine.snapshot(), audienceMemory:currentMemory().snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),acknowledgedRuntimeAlert} };
       const write = runtimeWriter.save(snapshot);
       const reported = write.catch(error => reportPersistenceError(error, '运行状态保存失败'));
       return immediate ? write : reported;
@@ -287,6 +291,7 @@ export function boot(options = {}) {
         if (journalKey) await options.journal.ack(journalKey);
         return;
       }
+      if(engine.config.ai.enabled && engine.config.ai.assistant.memoryEnabled && currentMemory().observe(liveEvent))persistRuntime();
       let journalWrite = null;
       const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
       if ((engine.running || tools?.state('giveaway')?.receiving || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
@@ -352,7 +357,7 @@ export function boot(options = {}) {
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
-    config, log, ai: client,
+    config, log, ai: client, viewerMemory:user=>currentMemory().context(user),
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;
@@ -698,7 +703,7 @@ export function boot(options = {}) {
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
+      if (closed) { workbench?.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();
@@ -717,6 +722,18 @@ export function boot(options = {}) {
       refresh(); refreshGifts(); void loadIncome({profiles:true});
     });
     void drainIncome();
+    const taskTransport=async()=>{
+      if(options.agentTasks)return options.agentTasks;
+      localAgentReady ||= import('./ai/local-agent.js').then(({createLocalAgentTasks})=>{
+        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:(kind,endpoint)=>kind==='search' ? sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'') : pipelineConfig(engine.config.ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''),get,set});
+        return localAgentTasks;
+      });
+      return localAgentReady;
+    };
+    workbench=new AIWorkbench(panel.root,{memory:currentMemory,saveMemory:()=>persistRuntime(true),onError:error=>panel.toast(error.message,true),tasks:{
+      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
+      list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
+    }});
     options.onReady?.({ engine, panel, adapter, tools,media, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });

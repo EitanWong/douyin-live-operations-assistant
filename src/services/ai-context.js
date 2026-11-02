@@ -19,7 +19,7 @@ export function assembleAIContext(prompt,config) {
     evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta},
     media_context:media,
     context_meta:{schemaVersion:1,assembledAt:now,liveObservedAt:prompt.liveContext?.observedAt ?? null,
-      sourcePolicy:'Current structured live observations for metrics; media recognition for sampled scene clues; local passages for background; web results for external facts. Conflicts and missing evidence stay unknown.',
+      sourcePolicy:'media_context.scene separates recent speech, visual samples and multimodal observations; inspect ages and sampling coverage before claiming current activity. Viewer memories are limited observed events or operator notes, not verified personality. Current structured live observations for metrics; media recognition for sampled scene clues; local passages for background; web results for external facts. Conflicts and missing evidence stay unknown.',
       knowledgeMethod:retrieval.method,mediaCoverage:media?.coverage || null}
   };
 }

@@ -1,3 +1,4 @@
+import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
 import { IDIOM_GAME_DEFAULTS } from './idiom-game.js';
 import { Moderation, MODERATION_DEFAULTS } from './moderation.js';
@@ -53,7 +54,7 @@ export const DEFAULTS = {
   ai: {
     enabled: false, chatEnabled: false, endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash',
     intervalSec: 0, userCooldownSec: 0,
-    contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180,
+    assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180,
     persona: '你在直播间帮忙做简单招呼。说话简短、平常，欢迎或谢谢一句就够。把注意力留给主播，不主动找话题，不自称主持，不说帮忙转达或安排，没有必要就不插话。',
     knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS
   },
@@ -156,7 +157,7 @@ export function validateConfig(c) {
   range(c.ai.contextSize, 1, 100, '上下文条数'); range(c.ai.contextAgeSec, 10, 600, '上下文有效秒数');
   range(c.ai.maxPerHour, 1, 36000, 'AI 每小时调用上限'); range(c.ai.idleSec, 60, 3600, '冷场秒数');
   range(c.ai.temperature, 0, 2, 'AI 温度');
-  validateMemory(c.ai.memory);
+  validateMemory(c.ai.memory);validateAssistant(c.ai.assistant);
   validateMediaConfig(c.ai.media);
   validatePipeline(c.ai);
   if(typeof c.ai.knowledge!=='string' || c.ai.knowledge.length>12000)throw new Error('主播与本场资料最多12000字');
@@ -240,7 +241,8 @@ function cloneRuntime(value) {
 const keyFor = u => u.id || u.secUid || `name:${u.name}`;
 
 export class Engine {
-  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
+  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
+    this.viewerMemory=viewerMemory;
     this.config = validateConfig(mergeConfig(config)); this.now = now; this.send = send; this.ai = ai; this.log = log; this.changed = changed; this.checkpoint = checkpoint; this.onStop = onStop;
     this.queue = []; this.giftJobs = new Map(); this.history = []; this.seen = new Map(); this.cooldowns = new Map(); this.gifts = new Map(); this.duplicates = new Map();
     this.claimGiveaway=claimGiveaway;this.giveawayInstance=crypto.randomUUID();this.giveawayCurrent=giveawayCurrent;this.giveawayReceipts=new Map();this.lastGiveawaySend=-Infinity;
@@ -1037,6 +1039,7 @@ export class Engine {
   }
   async requestAI(event = null, task = { kind: 'ai', instruction: '只简短回答目标弹幕中需要回答的问题，没有必要回复时输出 [SKIP]，不主动发起话题。' }) {
     const a = this.config.ai, now = this.now(), epoch = this.epoch;
+    const proactiveCurrent=()=>!task.data?.proactive || this.config.ai.idleEnabled && this.config.ai.chatEnabled && this.now()-now<=30000 && this.now()-this.lastChat>=this.config.ai.idleSec*1000;
     const chatContext=task.kind==='ai' && task.data?.replyMode ? this.chatContextKey() : null;
     const currentJob = () => task.targetJob && this.queue.includes(task.targetJob) && task.targetJob.revision === task.revision && task.targetJob.aiPending;
     const fallback = reason => {
@@ -1057,7 +1060,7 @@ export class Engine {
     this.aiBusy = true; this.lastAI = now; this.calls.push(now); this.stats.aiCalls++;
     const prompt = {
       persona: a.persona, knowledge: a.knowledge, ...this.aiContext(),
-      target: event ? { type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
+      target: event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user) : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
     let replyFacts=null;prompt.onLiveFacts=value=>{replyFacts=value;};
@@ -1067,7 +1070,7 @@ export class Engine {
       if(this.calls.length>=this.config.ai.maxPerHour)return false;
       this.lastAI=this.now();this.calls.push(this.lastAI);this.stats.aiCalls++;return true;
     };
-    prompt.isCurrent=()=>this.running && epoch===this.epoch && this.config.ai.enabled
+    prompt.isCurrent=()=>this.running && epoch===this.epoch && this.config.ai.enabled && proactiveCurrent()
       && (!a.search.enabled || this.config.ai.search.enabled)
       && (chatContext===null || chatContext===this.chatContextKey() && (task.data.replyMode==='direct' ? this.config.ai.chatEnabled || this.config.bot.enabled : this.config.ai.chatEnabled));
     prompt.canFollowup=()=>this.calls.filter(at=>this.now()-at<3600000).length<this.config.ai.maxPerHour;
@@ -1083,7 +1086,7 @@ export class Engine {
       for (const name of [audienceAddress(event?.user,now),event?.user?.name].filter(Boolean)) wording = wording.split(name).join('');
       if (task.kind !== 'bot' && isIntrusiveReply(wording)) { fallback('AI 回复主动代主持或劝留'); return; }
       if (['gift','like','welcome'].includes(task.kind) && !validAudienceAI(output,event?.user,now)) { fallback('AI 称呼与公开资料不符'); return; }
-      if (this.running && epoch === this.epoch && this.now() - now < 45000) {
+      if (this.running && epoch === this.epoch && this.now() - now < 45000 && proactiveCurrent()) {
         if (chatContext!==null && (chatContext!==this.chatContextKey() || replyFacts && replyFacts!==liveFactFingerprint(this.aiContext().liveContext))) return;
         if (task.kind === 'ai' && task.data?.replyMode && (!this.config.ai.enabled || (task.data.replyMode === 'direct' ? !(this.config.ai.chatEnabled || this.config.bot.enabled) : !this.config.ai.chatEnabled))) return;
         if (task.targetJob) {
@@ -1170,8 +1173,8 @@ export class Engine {
       if (t.responseMode === 'ai') void this.requestAI(null, { kind: 'timer', instruction: '保留本次参考话术的原意，只写一句简短提醒。默认只欢迎大家、轻轻提醒喜欢可以关注，不发起话题，不征集问题或点歌，不说替大家转达。现场正在聊天、近期已有类似招呼或没有必要插话时输出 [SKIP]。', data: { intervalSec: t.intervalSec, reference: fallback }, fallback });
       else this.enqueue('timer', fallback);
     }
-    if (this.config.ai.enabled && this.config.ai.chatEnabled && this.config.ai.idleEnabled && now - this.lastChat >= this.config.ai.idleSec * 1000 && now - this.lastInteraction >= this.config.ai.idleSec * 1000) {
-      this.lastInteraction = now; stateChanged = true; void this.requestAI(null, { kind: 'ai', instruction: '直播间暂时没有新弹幕，这不表示主播需要救场。没有明确需要补充的已核实信息时输出 [SKIP]；不为了冷场主动征集话题、点歌、提问或劝观众留下，不声称帮忙转达。' });
+    if (this.config.ai.enabled && this.config.ai.chatEnabled && this.config.ai.idleEnabled && (this.mediaContext(this.config)?.observations || []).some(row=>Number.isFinite(row.endedAt ?? row.at) && now-(row.endedAt ?? row.at)>=0 && now-(row.endedAt ?? row.at)<=30000) && now - this.lastChat >= this.config.ai.idleSec * 1000 && now - this.lastInteraction >= this.config.ai.idleSec * 1000) {
+      this.lastInteraction = now; stateChanged = true; void this.requestAI(null, { kind: 'ai', data:{proactive:true}, instruction: '这是用户已开启的冷场自然互动。仅在最近30秒内有有效音画线索或明确本场话题时，可像观众一样自然补充一句或问主播一个贴合内容的小问题；不用全场号召，不催关注消费，不声称自己是真人或有线下经历。不确定、正在争执、刚回答过类似内容、没有新线索时输出 [SKIP]。' });
     }
     return stateChanged;
   }

@@ -41,7 +41,7 @@ async function rawEntry(entry) {
   return source;
 }
 async function evalPage(page) {page.RoomContext=RoomContext;page.eval(await rawEntry('page'));}
-async function evalContent(page) {connectNative(page);page.eval(await readFile(file('content.js'),'utf8'));}
+async function evalContent(page) {page.structuredClone=structuredClone;connectNative(page);page.eval(await readFile(file('content.js'),'utf8'));}
 function pageTransport(page) {return async request=>({ok:true,value:await page.__douyinAssistantPageV2.call(request.command)});}
 test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，重复批次只发一次，停止票据立即失效',async()=>{
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,requests=[];
@@ -74,7 +74,7 @@ async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
   const code=(await readFile(file('background.js'),'utf8'));
-  vm.runInNewContext(code,{queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};}});
+  vm.runInNewContext(code,{atob,btoa,queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};}});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
@@ -168,7 +168,7 @@ test('油猴与隔离脚本产物均可执行礼物与观众回复上下文', as
     const source = await readFile(path,'utf8');
     const dom = new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
     try {
-      Object.assign(dom.window,{TextDecoder,TextEncoder});
+      Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone});
       dom.window.eval(source.replace(/(?:boot|startContent)\(\);\s*}\)\(\);\s*$/, 'globalThis.replyTest = {Engine, copy, DEFAULTS};})();'));
       const {Engine,copy,DEFAULTS} = dom.window.replyTest;
       assert.equal(DEFAULTS.pkOperations.durationSec,300,entry);
@@ -244,7 +244,7 @@ test('MAIN 观察器在隔离脚本读取前完整缓存事件，分页读取只
 test('隔离脚本把 MAIN 原始协议帧送入独立持久化通道', async () => {
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
   const saved=[];
-  Object.assign(dom.window,{TextDecoder,TextEncoder,chrome:{runtime:{
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{
     sendMessage:async request=>{
       if(request.type==='init')return {ok:true,value:{}};
       if(request.type==='protocol-append'){saved.push(request);return {ok:true,value:{key:'stored'}};}
@@ -564,7 +564,7 @@ test('同步只送当前房间配置/租约，不广播AI密钥',async()=>{
 test('实际扩展content产物通过Chrome接口启动；保存失败显示且保持未保存',async()=>{
   const listeners=[];
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/?room_id=1',runScripts:'outside-only',pretendToBeVisual:true});
-  Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>m.type==='init'?{ok:true,value:{}}:{ok:false,error:'测试存储失败'},onMessage:{addListener:f=>listeners.push(f)}}}});
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>m.type==='init'?{ok:true,value:{}}:{ok:false,error:'测试存储失败'},onMessage:{addListener:f=>listeners.push(f)}}}});
   await evalContent(dom.window); await new Promise(r=>setTimeout(r,100));
   const root=dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot; assert.ok(root);
   assert.equal(root.querySelector('.launcher').hidden,false);
@@ -578,7 +578,7 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
   const anchorId = '9007199254740993999';
   const values = {'live-assistant:config:1':{anchorId,identity:{autoAnchor:false,autoSelf:false}}};
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
-  Object.assign(dom.window, {TextDecoder,TextEncoder,chrome:{runtime:{
+  Object.assign(dom.window, {TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{
     sendMessage:async request => {
       if (request.type === 'init') return {ok:true,value:values};
       if (request.type === 'event-list' || request.type === 'income-profiles') return {ok:true,value:[]};
@@ -622,7 +622,7 @@ test('实际扩展接收点赞和礼物，本人礼物入账但不自发感谢�
   const values={'live-assistant:config:1':{mode:'preview',selfId,identity:{autoSelf:false},like:{enabled:true}}};
   const journal=new Map();let journalId=0,failAppendOnce=true;
   const giftStore = new GiftStore({get:async(key,fallback)=>values[key] ?? fallback,set:async(key,value)=>{values[key]=JSON.parse(JSON.stringify(value));},all:async()=>values});
-  Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>{
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>{
     if(m.type==='init')return {ok:true,value:values};
     if(m.type==='event-append'&&m.event?.id==='other-gift')return new Promise(()=>{});
     if(m.type==='event-append'&&failAppendOnce){failAppendOnce=false;return {ok:false,error:'模拟后台存储短暂失败'};}
@@ -704,7 +704,7 @@ test('页面刷新及扩展后台重启后自动读回礼物收入和榜单估�
   const launch=async()=>{
     const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
     Object.defineProperty(dom.window.navigator,'locks',{value:webLocks()});
-    Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:message=>backend.send(message),onMessage:{addListener(){}}}}});
+    Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:message=>backend.send(message),onMessage:{addListener(){}}}}});
     connectNative(dom.window);dom.window.eval(code);
     await waitFor(()=>dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot);
     const root=dom.window.document.querySelector('#douyin-live-assistant').shadowRoot;
@@ -784,7 +784,7 @@ test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保�
   // jsdom's postMessage omits source/origin; model the browser's same-window bridge.
   dom.window.postMessage=(data,origin)=>dom.window.setTimeout(()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{data,origin,source:dom.window})),0);
   const listeners=[];let moves=0;const leases=[];
-  Object.assign(dom.window,{TextDecoder,TextEncoder,chrome:{runtime:{sendMessage:async request=>{
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{sendMessage:async request=>{
     if(request.type==='init')return {ok:true,value:{}};
     if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
     if(request.type==='collection-state'){leases.push(request.active);return {ok:true,value:{awake:request.active}};}

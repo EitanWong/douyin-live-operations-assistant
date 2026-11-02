@@ -1,3 +1,4 @@
+import {validateSkillPack} from '../ai/skills.js';
 import {aliEndpoints} from '../services/ai-pipeline.js';
 import {MEMORY_LIMITS,validateMemory,retrieveMemories} from '../services/knowledge.js';
 import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
@@ -5,7 +6,8 @@ import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
 const fields=[['title','资料标题','text'],['content','背景正文','textarea'],['source','资料来源 / 确认人','text'],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 export class AISettings {
   constructor(root,{dirty,start,stop,clear,forget,error}) {
-    this.root=root;this.dirty=dirty;this.error=error;
+    this.root=root;this.dirty=dirty;this.error=error;this.skills=[];
+    root.querySelector('[data-skill-install]').addEventListener('click',()=>{try{const skill=validateSkillPack(JSON.parse(root.querySelector('[data-skill-json]').value));if(this.skills.length>=8 && !this.skills.some(s=>s.id===skill.id))throw new Error('自定义技能最多8个');this.skills=this.skills.filter(s=>s.id!==skill.id).concat(skill);this.showSkills();dirty();}catch(reason){error(reason);}});
     const navigation=root.querySelector('.ai-section-tabs');
     navigation.addEventListener('click',event=>{const tab=event.target.closest('[data-ai-section-tab]');if(tab)this.showSection(tab.dataset.aiSectionTab);});
     navigation.addEventListener('keydown',event=>this.navigate(event));
@@ -110,7 +112,8 @@ export class AISettings {
     row.querySelector('[data-memory-remove]').addEventListener('click',()=>{row.remove();this.empty();this.dirty();});
     this.list.append(row);
   }
-  populate(memory){this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
+  showSkills(){const target=this.root.querySelector('[data-skill-list]');target.replaceChildren();for(const skill of this.skills){const row=target.ownerDocument.createElement('p');row.textContent=skill.name+' · '+skill.scenes.join('、');const button=target.ownerDocument.createElement('button');button.type='button';button.textContent='移除技能';button.addEventListener('click',()=>{this.skills=this.skills.filter(s=>s.id!==skill.id);this.showSkills();this.dirty();});row.append(button);target.append(row);}}
+  populate(memory,assistant){this.skills=structuredClone(assistant?.skills || []);this.showSkills();this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
   read(){
     const memory={enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>{
       const result={...row.record};for(const input of row.querySelectorAll('[data-memory-field]'))result[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();

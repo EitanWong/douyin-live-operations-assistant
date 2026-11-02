@@ -119,3 +119,11 @@ AI pipeline 的 Zod schema 在配置边界解析一次并保留扩展字段，�
 Chrome 后台的 DurableStorage 使用 Dexie 事务，保持原生数据库版本 1 与 journalOrder 索引，记录与用量计数同时提交。仅后台拥有写入职责；原迁移“先校验已提交副本，再删除旧副本”规则不变。感知每个实例有独立 XState actor，active 范围持有采集资源和取消令牌；停止/结束/启动失败均退出 active，在途采样请求收到 AbortSignal。
 
 可见字段网格与设置页卡片分别使用 Mantine SimpleGrid / Stack。新界面接管时暂停旧 WorkspaceGrid 的观察和测量，失败回退时恢复。原控制器与 UI 桥仍在，不能据此认为旧模板与兼容开销已全部消失。选型、版本、许可和验证见[接入记录](../research/mature-foundation-integration-2026-11-02.zh-CN.md)。
+
+### 受限 Agent、观众记忆与缓存（2026-11-02）
+
+`ai/harness.js` 用 XState actor 执行独立任务；`extension/ai-background.js` 是 Chrome 后台宿主，`ai/task-store.js` 用独立 Dexie 数据库保存任务及调用额度。前台只提交、查询、取消；研究不持有公屏发送器，使用提交时快照、执行时已保存模型设置和独立密钥。旧在途任务重启后标为中断，不自动重复付费步骤；排队任务可由 alarm 唤醒。油猴和演示版使用依赖页面存活的本地宿主。
+
+`ai/audience-memory.js` 管理主播范围内、30天/100位观众的有界事实；同名不合并，礼物累计去重，删除水位阻止旧事件恢复。目标记忆以不含UID/secUID的形式注入回复，用户可查看、纠正和删除。`ai/skills.js` 仅解析声明式提示包，不执行代码。公开网页提取使用linkedom worker + Readability，只读取明确链接的已授权文字，不分析主页视频或进行跨平台身份匹配。
+
+`services/retrieval.js` 的lru-cache缓存MiniSearch派生索引，完整资料元数据变化会失效；实时答案不缓存。媒体上下文区分最新语音、顺序视觉采样和音画联合观察，显示覆盖与年龄。冷场任务要求新鲜现场线索，出现新弹幕或关闭开关后丢弃迟到结果。详见[实施记录](../research/agent-harness-memory-2026-11-02.zh-CN.md)。

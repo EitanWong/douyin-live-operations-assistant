@@ -100,7 +100,8 @@ test('应用入口在猜数字和 AI 聊天中优先登记抽奖，其他弹幕�
     assert.equal(prompts.length,1);
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });
-test('扩展工具抽奖独立于场控：真实入口收弹幕与礼物、开奖记录、导出与刷新恢复',async()=>{
+test('扩展工具抽奖独立于场控：真实入口收弹幕与礼物、开奖记录、导出与刷新恢复',async t=>{
+  let clock=Date.now();t.mock.method(Date,'now',()=>clock);
   const dom=page(),values=new Map();let api,onEvent;
   boot({page:dom.window,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),
     adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true};},
@@ -118,6 +119,7 @@ test('扩展工具抽奖独立于场控：真实入口收弹幕与礼物、开�
       onEvent({type:'chat',id:'chat-2',source:'socket',at,text:'参与抽奖',user:{id:'1',name:'小雨'}})
     ]);
     assert.equal(api.tools.state('giveaway').rounds[0].entrants.length,2);
+    clock+=1100;
     await until(()=>api.tools.state('giveaway').rounds[0].status==='drawn');
     assert.match(p.node('[data-giveaway-result]').textContent,/签名礼盒/);
     const report=await api.tools.invoke('giveaway','export');assert.equal(report.rounds[0].entrants.length,2);assert.equal(report.rounds[0].awards.length,1);

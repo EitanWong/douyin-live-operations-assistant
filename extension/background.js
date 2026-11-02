@@ -1,3 +1,4 @@
+import {createBackgroundAI} from './ai-background.js';
 import {APPEARANCE_PREFERENCES} from '../src/ui/appearance.js';
 import {validateRealtimeEndpoint,validateSDP} from '../src/services/ai-pipeline.js';
 import { roomFromURL } from '../src/browser/room-context.js';
@@ -103,6 +104,10 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord});
+const activeAIRequests=new Map(),cancelledAIRequests=new Set();
+chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
+chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
   if (message?.type === 'fanclub-frame') {
     void (async()=>{
@@ -166,6 +171,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           const state=parseGiveawayState(message.value,room);await durableStorage.set(key,state);value=true;
         }
       }
+      else if (['agent-submit','agent-list','agent-cancel'].includes(message.type) && isRoom(sender)) value=await getAIBackground().handle(message,roomFromUrl(sender.tab.url));
+      else if(message.type==='ai-request-cancel' && isRoom(sender) && typeof message.id==='string' && /^[a-z\d-]{16,80}$/iu.test(message.id)){const key=`${sender.tab.id}:${message.id}`;cancelledAIRequests.add(key);while(cancelledAIRequests.size>128)cancelledAIRequests.delete(cancelledAIRequests.values().next().value);activeAIRequests.get(key)?.abort();value=true;}
       else if (message.type === 'collection-state' && isRoom(sender)) value = await collectionKeeper.update(sender,message.active);
       else if (message.type === 'theme-get' && (isRoom(sender) || extensionPage)) value = await readRecord(themeKey) ?? 'system';
       else if (message.type === 'theme-set' && (isRoom(sender) || extensionPage) && themeValues.has(message.value)) {
@@ -269,11 +276,13 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const body = form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
         if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!Array.isArray(body.messages) || typeof body.model !== 'string') throw new Error('AI请求无效');
         const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 8000 : 25000);
+        const requestKey=typeof message.requestId==='string' && /^[a-z\d-]{16,80}$/iu.test(message.requestId) ? `${sender.tab.id}:${message.requestId}` : null;
+        if(requestKey){activeAIRequests.set(requestKey,controller);if(cancelledAIRequests.delete(requestKey))controller.abort();}
         try {
           const response = await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:message.data});
           const text = await response.text();
           value={status:response.status,responseText:text.slice(0,200000),finalUrl:response.url};
-        } finally { clearTimeout(timeout); }
+        } finally { clearTimeout(timeout);if(requestKey)activeAIRequests.delete(requestKey); }
       } else throw new Error('不支持的请求');
       reply({ok:true,value});
     } catch (error) { reply({ok:false,error:error.name === 'AbortError' ? 'AI请求超时' : error.message,code:error.code || (/quota|配额|QUOTA_BYTES/i.test(error.message) ? 'STORAGE_QUOTA' : 'TRANSIENT')}); }

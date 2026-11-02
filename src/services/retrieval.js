@@ -1,4 +1,5 @@
 import MiniSearch from 'minisearch';
+import {LRUCache} from 'lru-cache';
 
 // Source offsets and evidence selection belong to the domain; indexing and
 // BM25+ ranking belong to MiniSearch. No embeddings or remote service required.
@@ -27,17 +28,18 @@ function splitEntry(row) {
   }
   return chunks;
 }
-function rankChunks(chunks,query,contextQuery) {
-  if(!chunks.length)return [];
+function makeIndex(chunks){
   const index=new MiniSearch({fields:['title','content'],tokenize:tokens,processTerm:term=>term,searchOptions:{boost:{title:2},prefix:term=>/^[a-z0-9]{3,}$/u.test(term),fuzzy:term=>/^[a-z]{5,}$/u.test(term) ? .2 : false}});
-  index.addAll(chunks);
+  index.addAll(chunks);return index;
+}
+function rankChunks(chunks,index,query,contextQuery) {
   const scores=new Map();
   for(const [text,weight] of [[query,3],[contextQuery,1]])for(const hit of index.search(String(text || '')))scores.set(hit.id,(scores.get(hit.id) || 0)+hit.score*weight);
   return chunks.filter(chunk=>scores.has(chunk.id)).map(chunk=>({...chunk,score:scores.get(chunk.id)}))
     .sort((a,b)=>b.score-a.score || b.row.updatedAt-a.row.updatedAt || a.row.id.localeCompare(b.row.id) || a.range.start-b.range.start);
 }
-export function retrieveKnowledge(entries,query,{contextQuery=''}={}) {
-  const chunks=entries.flatMap(splitEntry),ranked=rankChunks(chunks,query,contextQuery),selected=[];
+function retrieve(chunks,index,query,{contextQuery=''}={}) {
+  const ranked=rankChunks(chunks,index,query,contextQuery),selected=[];
   let usedChars=0;
   for(const chunk of ranked){
     if(selected.some(row=>row.entryId===chunk.row.id && row.range.start<chunk.range.end && chunk.range.start<row.range.end))continue;
@@ -50,3 +52,16 @@ export function retrieveKnowledge(entries,query,{contextQuery=''}={}) {
     matchedEntries:new Set(ranked.map(chunk=>chunk.row.id)).size,usedChars,limits:RETRIEVAL_LIMITS,
     truncated:ranked.some(chunk=>!selected.some(row=>row.id===chunk.id)),chunks:selected};
 }
+
+// The key includes every source field: edits to evidence or metadata invalidate
+// together. The bounded cache stores indexes, never model replies or live facts.
+export function createKnowledgeRetriever(){
+  const cache=new LRUCache({max:4,maxSize:600000,ttl:300000,sizeCalculation:(_value,key)=>key.length*4+1024});
+  const search=(entries,query,options)=>{
+    const key=JSON.stringify(entries);let indexed=cache.get(key);
+    if(!indexed){const chunks=entries.flatMap(splitEntry);indexed={chunks,index:makeIndex(chunks)};cache.set(key,indexed);}
+    return retrieve(indexed.chunks,indexed.index,query,options);
+  };
+  search.clear=()=>cache.clear();return search;
+}
+export const retrieveKnowledge=createKnowledgeRetriever();

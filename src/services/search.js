@@ -76,7 +76,7 @@ export function requestJSON(request, {url,key,body,timeout=25000,operation='ai',
 
 export function createSearchClient({request,getKey,now=Date.now}) {
   let calls=[];
-  return async(query,config,{timeout=8000}={})=>{
+  return async(query,config,{timeout=8000,signal}={})=>{
     if(!config?.enabled)throw new Error('联网搜索未启用');
     const provider=config.provider || 'bocha',endpoint=validateSearchEndpoint(config.endpoint,provider),key=getKey(endpoint);
     if(!key && provider!=='searxng')throw new Error('请先填写搜索服务的 API Key');
@@ -85,7 +85,7 @@ export function createSearchClient({request,getKey,now=Date.now}) {
     calls=calls.filter(at=>now()-at<3600000);
     if(calls.length>=config.maxPerHour)throw new Error('联网搜索每小时额度已用完');
     calls.push(now());
-    const data=await requestJSON(request,{url:endpoint,key,body,timeout,operation:'search',provider,form:provider==='searxng'});
+    const data=await requestJSON(request,{url:endpoint,key,body,timeout,operation:'search',provider,form:provider==='searxng',signal});
     if(!data || typeof data!=='object' || Array.isArray(data))throw new Error('搜索服务未返回有效结果');
     if(provider==='bocha' && data.code!==undefined && data.code!==200)throw new Error(`博查搜索失败（${String(data.code).slice(0,12)}）`);
     const rows=provider==='bocha' ? data.data?.webPages?.value : data.results;

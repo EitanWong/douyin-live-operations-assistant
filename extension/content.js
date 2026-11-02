@@ -254,13 +254,16 @@ if (room) {
   }
 
   const request = details => {
+    const requestId=crypto.randomUUID();let aborted=false;
     void (async()=>{
       try {
         await writes;
-        const response = await message({type:details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
-        details.onload(response);
-      } catch (e) { details.onload({status:0,responseText:'',error:e.message}); }
+        if(aborted)return;
+        const response = await message({requestId,type:details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
+        if(!aborted)details.onload(response);
+      } catch (e) { if(!aborted)details.onload({status:0,responseText:'',error:e.message}); }
     })();
+    return {abort(){if(aborted)return;aborted=true;details.onabort?.();void message({type:'ai-request-cancel',id:requestId}).catch(()=>{});}};
   };
   const repository = {
     profile: profile => message({ type:'income-profile', profile }),
@@ -271,7 +274,7 @@ if (room) {
     recordContributionSnapshot: snapshot => message({type:'contribution-snapshot',...snapshot}),
     report: (room, month, {includeAllSessions = false} = {}) => message({ type:'income-report', room, month, includeAllSessions })
   };
-  boot({ page:window, giveawayStorage:{get:key=>message({type:'giveaway-read',key}),set:(key,value)=>message({type:'giveaway-write',key,value})}, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>{try{return resolveReplyConfig({...panel.config.ai,endpoint:panel.root.querySelector('[data-field="ai.endpoint"]').value,pipeline:panel.readPipeline()}).endpoint;}catch{return panel.root.querySelector('[data-field="ai.endpoint"]').value;}};} });
+  boot({ page:window, agentTasks:{submit:job=>message({type:'agent-submit',...job}),list:()=>message({type:'agent-list'}),cancel:id=>message({type:'agent-cancel',id})}, giveawayStorage:{get:key=>message({type:'giveaway-read',key}),set:(key,value)=>message({type:'giveaway-write',key,value})}, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>{try{return resolveReplyConfig({...panel.config.ai,endpoint:panel.root.querySelector('[data-field="ai.endpoint"]').value,pipeline:panel.readPipeline()}).endpoint;}catch{return panel.root.querySelector('[data-field="ai.endpoint"]').value;}};} });
 }
 
 }

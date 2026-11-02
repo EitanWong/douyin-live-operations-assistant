@@ -43,10 +43,10 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
   if(sourceFactory && !source?.stream){source?.stop();throw new Error('未取得原始流媒体轨道');}
   const stream=sourceFactory ? source.stream : await env.navigator.mediaDevices.getDisplayMedia({video:true,audio:config.audioEnabled,preferCurrentTab:true,systemAudio:'exclude'});
   const inputSource=source?.source || 'display';
-  let closed=false,video,canvas,recorder,recordTimer,frameTimer,decoding=false,releasePreparation;
+  let closed=false,video,canvas,recorder,recordTimer,frameTimer,visualTimer,decoding=false,releasePreparation;
   const cancelled=new Promise(resolve=>{releasePreparation=resolve;});
   const stop=()=>{
-    if(closed)return;closed=true;clearTimeout(recordTimer);clearInterval(frameTimer);
+    if(closed)return;closed=true;clearTimeout(recordTimer);clearInterval(frameTimer);clearInterval(visualTimer);
     signal?.removeEventListener('abort',stop);releasePreparation();
     if(recorder?.state==='recording')recorder.stop();
     if(source)source.stop();else for(const track of stream.getTracks())track.stop();
@@ -61,8 +61,10 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
       video=env.document.createElement('video');video.muted=true;video.playsInline=true;video.srcObject=stream;await Promise.race([video.play(),cancelled]);
       if(closed || !isCurrent()){stop();return {stop};}
       canvas=env.document.createElement('canvas');
-      const sample=()=>{try {const data=frame(video,canvas);if(data && !closed)void onSample({kind:'video',data,at:Date.now(),inputSource});}catch(error){onError(error);}};
-      if(!config.omniEnabled){frameTimer=setInterval(sample,config.videoIntervalSec*1000);sample();}
+      const frames=[];
+      const collect=()=>{try{const data=frame(video,canvas);if(data && !closed){frames.push({data,at:Date.now()});if(frames.length>3)frames.shift();}}catch(error){onError(error);}};
+      const sample=()=>{collect();if(frames.length && !closed){const selected=frames.splice(0);void onSample({kind:'video',data:selected.at(-1).data,frames:selected,at:selected[0].at,endedAt:selected.at(-1).at,inputSource});}};
+      if(!config.omniEnabled){visualTimer=setInterval(collect,Math.max(1000,config.videoIntervalSec*1000/3));frameTimer=setInterval(sample,config.videoIntervalSec*1000);sample();}
     }
     if(config.audioEnabled){
       if(!env.MediaRecorder || !env.AudioContext || !env.OfflineAudioContext)throw new Error('当前浏览器缺少音频分段识别支持');
