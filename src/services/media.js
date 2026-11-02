@@ -74,7 +74,8 @@ function mediaBody(sample,config) {
 
 export function createMediaClient({request,getKey,now=Date.now}) {
   let calls=[];
-  return async(sample,config)=>{
+  return async(sample,config,{signal}={})=>{
+    if(signal?.aborted)throw new Error('请求已取消');
     validateMediaConfig(config,true);
     if(sample.kind==='omni' ? !config.omniEnabled : sample.kind==='video' ? !config.videoEnabled : !config.audioEnabled)throw new Error('此媒体识别未开启');
     const body=mediaBody(sample,config),endpoint=validateEndpoint(config[sample.kind==='video' || sample.kind==='omni' ? 'visionEndpoint' : 'audioEndpoint']),key=getKey(endpoint);
@@ -82,7 +83,7 @@ export function createMediaClient({request,getKey,now=Date.now}) {
     calls=calls.filter(at=>now()-at<3600000);
     if(calls.length>=config.maxPerHour)throw new Error('音视频每小时调用额度已用完');
     calls.push(now());
-    const response=await requestJSON(request,{url:endpoint,key,body,operation:'media',stream:sample.kind==='omni'});
+    const response=await requestJSON(request,{url:endpoint,key,body,operation:'media',stream:sample.kind==='omni',signal});
     const text=response?.choices?.[0]?.message?.content;
     if(typeof text!=='string' || !text.trim())throw new Error('媒体模型未返回文本，请检查模型是否支持输入格式');
     if(['[SILENCE]','[UNKNOWN]'].includes(text.trim()))return null;

@@ -48,3 +48,13 @@ test('展开诊断详情沿用原 toggle 处理器，日志加载后进入可见
  const f=setup();try{const page=f.root.querySelector('[data-page="ai"]');page.innerHTML='<details><summary>运行日志</summary><p>尚未加载</p></details>';let calls=0;const detail=page.querySelector('details');detail.addEventListener('toggle',()=>{calls++;detail.querySelector('p').textContent='队列已启动';});f.bridge.refresh();const disclosure=find(f.bridge.getSnapshot().content,'details');f.bridge.toggle(disclosure.id,true);await new Promise(resolve=>setTimeout(resolve,10));assert.equal(detail.open,true);assert.equal(calls,1);assert.match(JSON.stringify(f.bridge.getSnapshot().content),/队列已启动/);
  }finally{f.close();}
 });
+
+test('成熟界面接管后暂停旧布局，渲染失败恢复兼容布局且保留草稿',async()=>{
+ const {mountProductPanel}=await import('../../src/ui/product/mount.js');const f=setup();let mounted,fail;const states=[];
+ try{
+  f.dom.window.CSS={supports:()=>true};f.panel.workspaceLayout={grid:{setSuspended:value=>states.push(value)}};f.panel.toast=()=>{};
+  const panelElement=f.dom.window.document.createElement('div');panelElement.className='panel';f.root.append(panelElement);panelElement.append(f.root.querySelector('.workspace'));
+  mounted=mountProductPanel(f.panel,{load:async()=>({mountProductWorkspace({onReady,onError}){fail=onError;onReady();return {destroy(){}};}})});
+  await mounted.ready;assert.equal(states.at(-1),true);fail();assert.equal(states.at(-1),false);assert.equal(f.root.querySelector('input').value,'qwen-plus');
+ }finally{mounted?.destroy();f.close();}
+});

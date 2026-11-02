@@ -108,3 +108,5 @@ npm 下载 API 的观测窗口为 2026-10-23 至 10-29：React 244728980、Manti
 配色选择 [Radix Colors](https://www.radix-ui.com/colors/docs/overview/usage)（MIT），采用官方 12 阶[语义用途](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale)，完整提供亮暗对应。它是静态色彩数据，3.0.0 发布于 2023-10-02；本次 npm 元数据 modified 为 2025-12-24，GitHub commits Atom 最近条目为 2025-12-17。不能将它表述为近期频繁发布的框架；选择理由是稳定的配对色板与清楚许可证，而不是追逐更新频率。31 套色板与原始配色共 32 项；偏浅文本色必要时上调至第 12 阶，普通文字/按钮前景对比度通过专项检查。Liquid Glass 作为自有可选 CSS 材质与色板正交组合，无需引入不成熟的液态玻璃运行时或外部远程脚本。
 
 实施边界：成熟库实际负责交互控件、主题、表格模型、图表和配置校验。当前 UI 用兼容桥迁移全部页面，旧控制器与模板尚在；不是已完成整仓 React 重写。数据表分页、排序、导出继续依赖原领域实现，未引入 Virtual、Dexie、XState、Orama、AI SDK 或 WXT。这样能先交付一致的控件和清楚的状态所有权，再按真实需求逐项替换底层，避免新旧框架重复承担同一职责。真实 Omni 服务、付费操作和长时间直播仍不由本轮 UI 验收证明。
+
+后续已进一步实际接入 MiniSearch、Dexie、XState 和 eventsource-parser，并复用 Mantine 布局与 Zod 分支契约。详见[成熟底层组件接入记录](mature-foundation-integration-2026-11-02.zh-CN.md)，其中包含版本兼容、未采用方案的理由、数据库回退边界与实际验证。

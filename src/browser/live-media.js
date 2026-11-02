@@ -1,3 +1,4 @@
+import {createMediaSession} from './media-session.js';
 import {validateMediaConfig} from '../services/media.js';
 
 export function encodeWav(samples,sampleRate=16000) {
@@ -90,35 +91,34 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
 
 export class LiveMediaAnalyzer {
   constructor({capture=createDisplayCapture,realtimeCapture,recognize,onObservation=()=>{},onState=()=>{},onError=()=>{}}){
-    Object.assign(this,{capture,realtimeCapture,recognize,onObservation,onState,onError});this.state='idle';this.epoch=0;this.skipped=0;this.errors=0;this.busy=new Map();this.failures=new Map();
+    Object.assign(this,{capture,realtimeCapture,recognize,onObservation,onState,onError});this.skipped=0;this.errors=0;this.busy=new Map();this.failures=new Map();
+    this.actor=createMediaSession(this);let previous=this.state;
+    this.actor.subscribe(()=>{const current=this.state;if(current!==previous){previous=current;this.notify();}});
   }
+  get state(){const snapshot=this.actor.getSnapshot();return snapshot.matches('idle') ? 'idle' : snapshot.matches({active:'starting'}) ? 'starting' : 'running';}
   notify(){this.onState({state:this.state,skipped:this.skipped,errors:this.errors});}
   async start(config){
     if(this.state!=='idle')return;
-    validateMediaConfig(config,true);const epoch=++this.epoch;this.controller=new AbortController();this.state='starting';this.errors=0;this.skipped=0;this.failures.clear();this.notify();
-    try {
-      const factory=config.transport==='webrtc' ? this.realtimeCapture : this.capture;
-      if(!factory)throw new Error('实时识别服务未初始化');
-      const capture=await factory({config,onObservation:row=>{if(epoch===this.epoch)this.onObservation(row);},onProgress:value=>{if(epoch===this.epoch)this.onState({state:this.state,skipped:this.skipped,errors:this.errors,...value});},signal:this.controller.signal,isCurrent:()=>epoch===this.epoch,onSample:sample=>this.sample(sample,config,epoch),onEnded:()=>{if(epoch===this.epoch)this.stop();},onError:error=>this.error(error,'capture',epoch),onSkip:()=>{if(epoch===this.epoch){this.skipped++;this.notify();}}});
-      if(epoch!==this.epoch){capture.stop();return;}
-      this.source=capture;this.state='running';this.notify();
-    }catch(error){if(epoch===this.epoch){this.stop();this.onError(error);throw error;}}
+    validateMediaConfig(config,true);this.errors=0;this.skipped=0;this.failures.clear();
+    const session={config,controller:new AbortController()};
+    const ready=new Promise((resolve,reject)=>Object.assign(session,{resolve,reject}));
+    this.actor.send({type:'START',session});return ready;
   }
-  error(error,kind,epoch){
-    if(epoch!==this.epoch)return;
+  current(session){return this.state!=='idle' && this.actor.getSnapshot().context.session===session;}
+  error(error,kind,session){
+    if(!this.current(session))return;
     this.errors++;const failures=(this.failures.get(kind) || 0)+1;this.failures.set(kind,failures);this.onError(error);
-    if(failures>=3 || /额度/u.test(error.message))this.stop();
-    this.notify();
+    if(failures>=3 || /额度/u.test(error.message))this.stop();else this.notify();
   }
-  async sample(sample,config,epoch){
-    if(epoch!==this.epoch || this.state==='idle')return;
+  async sample(sample,config,session){
+    if(!this.current(session))return;
     if(this.busy.has(sample.kind)){this.skipped++;this.notify();return;}
     const token={};this.busy.set(sample.kind,token);
-    try {
-      const row=await this.recognize(sample,config);
-      if(epoch===this.epoch){this.failures.set(sample.kind,0);if(row)this.onObservation(row);}
-    }catch(error){this.error(error,sample.kind,epoch);}
-    finally {if(this.busy.get(sample.kind)===token)this.busy.delete(sample.kind);}
+    try{
+      const row=await this.recognize(sample,config,{signal:session.controller.signal});
+      if(this.current(session)){this.failures.set(sample.kind,0);if(row)this.onObservation(row);}
+    }catch(error){this.error(error,sample.kind,session);}
+    finally{if(this.busy.get(sample.kind)===token)this.busy.delete(sample.kind);}
   }
-  stop(){this.epoch++;this.controller?.abort();this.controller=null;this.source?.stop();this.source=null;this.busy.clear();this.state='idle';this.notify();}
+  stop(){if(this.state==='idle'){this.notify();return;}this.actor.send({type:'STOP'});}
 }

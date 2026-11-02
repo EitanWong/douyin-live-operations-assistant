@@ -50,7 +50,7 @@ export function createWorkspaceBridge(panel) {
     if(node.tagName==='BR')return {kind:'break'};
     const content=children(node);if(!content.length)return null;
     const classes=[node.className?.baseVal ?? node.className,node.dataset.aiSection ? `product-ai-${node.dataset.aiSection}` : '',node.hasAttribute('data-workspace-contents') ? 'workspace-contents' : ''].filter(Boolean).join(' ');
-    return {kind:'group',id:id(node),tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:content,label:node.getAttribute('aria-label')};
+    return {kind:'group',id:id(node),layout:node.matches('.workspace-grid') && ['ai','appearance','runtime','profiles','moderation'].includes(panel.activeTab) ? 'settings' : null,tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:content,label:node.getAttribute('aria-label')};
   }
   function collect() {
     // Drop removed controls, including retired dynamic list rows.

@@ -9,13 +9,13 @@ export function mountProductPanel(panel,{load=()=>import('./runtime.js')}={}) {
   const source=panel.root.querySelector('.workspace'),surface=document.createElement('div'),style=document.createElement('style');
   surface.className='product-surface';style.textContent=SOURCE_CSS;
   let destroyed=false,failed=false,runtime,bridge;
-  const restore=()=>{source.classList.remove('product-source');source.inert=false;source.removeAttribute('aria-hidden');surface.remove();style.remove();};
+  const restore=()=>{panel.workspaceLayout?.grid.setSuspended(false);source.classList.remove('product-source');source.inert=false;source.removeAttribute('aria-hidden');surface.remove();style.remove();};
   const fail=()=>{if(failed || destroyed)return;failed=true;bridge?.destroy();restore();view.queueMicrotask(()=>runtime?.destroy());panel.host.dataset.productStatus='fallback';panel.toast('界面组件加载失败，已恢复兼容界面。',true);};
   const ready=load().then(module=>{
     if(destroyed)return false;
     bridge=createWorkspaceBridge(panel);panel.root.querySelector('.panel').append(style,surface);
     runtime=module.mountProductWorkspace({container:surface,bridge,onReady:()=>{
-      if(destroyed)return;source.classList.add('product-source');source.inert=true;source.setAttribute('aria-hidden','true');panel.host.dataset.productStatus='ready';
+      if(destroyed)return;panel.workspaceLayout?.grid.setSuspended(true);source.classList.add('product-source');source.inert=true;source.setAttribute('aria-hidden','true');panel.host.dataset.productStatus='ready';
     },onError:fail});return true;
   }).catch(()=>{if(!destroyed)fail();return false;});
   return {ready,refresh:()=>bridge?.refresh(),destroy(){destroyed=true;runtime?.destroy();bridge?.destroy();restore();}};

@@ -5,11 +5,17 @@ export class WorkspaceGrid {
   constructor(root){
     this.root=root;this.view=root.host.ownerDocument.defaultView;this.frame=0;
     this.grids=[...root.querySelectorAll('[data-workspace-grid]')];
-    this.schedule=()=>{if(!this.frame)this.frame=this.view.requestAnimationFrame(()=>{this.frame=0;this.layout();});};
-    if(this.view.ResizeObserver){this.observer=new this.view.ResizeObserver(this.schedule);for(const grid of this.grids){this.observer.observe(grid);for(const card of cards(grid))this.observer.observe(card);}}
+    this.schedule=()=>{if(!this.suspended && !this.frame)this.frame=this.view.requestAnimationFrame(()=>{this.frame=0;this.layout();});};
+    if(this.view.ResizeObserver)this.observer=new this.view.ResizeObserver(this.schedule);this.observe();
     root.addEventListener('toggle',this.schedule,true);this.schedule();
   }
+  observe(){for(const grid of this.grids){this.observer?.observe(grid);for(const card of cards(grid))this.observer?.observe(card);}}
+  setSuspended(value){
+    this.suspended=value;this.observer?.disconnect();this.view.cancelAnimationFrame(this.frame);this.frame=0;
+    if(!value){this.observe();this.schedule();}
+  }
   layout(){
+    if(this.suspended)return;
     for(const grid of this.grids){
       if(!grid.getBoundingClientRect().width)continue;
       const style=this.view.getComputedStyle(grid),row=Number.parseFloat(style.gridAutoRows),gap=Number.parseFloat(style.rowGap) || 0;

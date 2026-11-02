@@ -111,3 +111,11 @@ examples/                 可导入的示例配置
 外观由 `appearance.js` 定义模式、配色和材质白名单；`theme.js` 统一读写、跨窗口同步和失败回滚。配色基于 Radix Colors 的 12 阶亮暗色板，原 Solid Glass 仍为默认。`theme-palette.js` 统一生成宿主和组件主题变量，不修改直播网页 document 的主题；Select 弹层限定在本 Shadow Root。布局使用浮动窗口的容器查询，不使用默认视口定位 AppShell。Liquid Glass 是 CSS 模糊、高光和半透明表面的可选材质，不声称复刻苹果系统渲染；支持减少透明度、强制颜色与不支持 backdrop-filter 的退化。
 
 AI pipeline 的 Zod schema 在配置边界解析一次并保留扩展字段，中文错误和字段路径供原表单与新界面共用。本轮没有替换音视频传输、RAG 检索、权限网关、发送队列或存储，没有凭普通模型 SDK 推定支持 Omni 实时。
+
+### 成熟底层适配（2026-11-02）
+
+本地检索由 MiniSearch 管理倒排索引与 BM25+；`retrieval.js` 只保留中文切词、原文分块与证据预算。索引是本次查询的派生数据，不与其他房间共享可变状态，配置仍是唯一持久资料来源。`completion-stream.js` 用 eventsource-parser 解析协议事件，并用 Zod 校验文本；`intent.js` 用判别联合限定意图负载。
+
+Chrome 后台的 DurableStorage 使用 Dexie 事务，保持原生数据库版本 1 与 journalOrder 索引，记录与用量计数同时提交。仅后台拥有写入职责；原迁移“先校验已提交副本，再删除旧副本”规则不变。感知每个实例有独立 XState actor，active 范围持有采集资源和取消令牌；停止/结束/启动失败均退出 active，在途采样请求收到 AbortSignal。
+
+可见字段网格与设置页卡片分别使用 Mantine SimpleGrid / Stack。新界面接管时暂停旧 WorkspaceGrid 的观察和测量，失败回退时恢复。原控制器与 UI 桥仍在，不能据此认为旧模板与兼容开销已全部消失。选型、版本、许可和验证见[接入记录](../research/mature-foundation-integration-2026-11-02.zh-CN.md)。

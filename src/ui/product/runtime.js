@@ -1,6 +1,6 @@
 import React,{createElement as h,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {MantineProvider,Button,Switch,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Collapse,Progress} from '@mantine/core';
+import {MantineProvider,Button,Switch,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Collapse,Progress,SimpleGrid,Stack} from '@mantine/core';
 import {useTable,tableFeatures} from '@tanstack/react-table';
 import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
@@ -67,6 +67,9 @@ function View({node,bridge}) {
   if(node.kind==='break')return h('br');
   if(node.kind==='link')return h('a',{href:node.href,target:'_blank',rel:'noopener noreferrer'},node.text);
   const props={className:node.classes,'data-view-id':node.id,'aria-label':node.label};
+  if(node.layout==='settings')return h(Stack,{...props,className:node.classes.split(' ').filter(name=>name!=='workspace-grid').concat('product-settings-stack').join(' '),gap:'md'},renderChildren(node.children,bridge));
+  const layoutClasses=['grid','workspace-filter-fields','anchor-audience-controls','income-controls'];
+  if(node.classes.split(' ').some(name=>layoutClasses.includes(name)))return h(SimpleGrid,{...props,className:node.classes.split(' ').filter(name=>!layoutClasses.includes(name)).concat('product-field-grid').join(' '),type:'container',minColWidth:'200px',autoFlow:'auto-fit',spacing:'sm'},renderChildren(node.children,bridge));
   if(/(^| )(workspace-card|settings-group|ai-card|anchor-section|pk-visual|giveaway-config|giveaway-live)( |$)/u.test(node.classes))return h(Paper,{...props,withBorder:true,p:'md',radius:'md'},renderChildren(node.children,bridge));
   return h(node.tag || 'div',props,renderChildren(node.children,bridge));
 }

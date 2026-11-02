@@ -45,11 +45,11 @@ let mediaLicense='';
 for(const name of ['mpegts.js/LICENSE','hls.js/LICENSE','es6-promise/LICENSE','events/LICENSE'])mediaLicense+=`${name}\n${await readFile(`${root}node_modules/${name}`,'utf8')}\n`;
 let productLicenses="";
 // Include runtime UI and validation dependencies, including transitive MIT code.
-const productPackages=['@radix-ui/colors','react','react-dom','scheduler','@mantine/core','@mantine/hooks','@tanstack/react-table','@tanstack/table-core','@tanstack/react-store','@tanstack/store','use-sync-external-store','@floating-ui/react','@floating-ui/react-dom','@floating-ui/dom','@floating-ui/core','@floating-ui/utils','clsx','react-number-format','react-remove-scroll','react-remove-scroll-bar','react-style-singleton','use-callback-ref','use-sidecar','get-nonce','detect-node-es','tabbable','zod'];
+const productPackages=['@radix-ui/colors','react','react-dom','scheduler','@mantine/core','@mantine/hooks','@tanstack/react-table','@tanstack/table-core','@tanstack/react-store','@tanstack/store','use-sync-external-store','@floating-ui/react','@floating-ui/react-dom','@floating-ui/dom','@floating-ui/core','@floating-ui/utils','clsx','react-number-format','react-remove-scroll','react-remove-scroll-bar','react-style-singleton','use-callback-ref','use-sidecar','get-nonce','detect-node-es','tabbable','zod','minisearch','dexie','xstate','eventsource-parser'];
 for(const name of productPackages){
   let license;for(const file of ['LICENSE','LICENSE.md','LICENSE.txt']){try{license=await readFile(`${root}node_modules/${name}/${file}`,'utf8');break;}catch(error){if(error.code!=='ENOENT')throw error;}}
   if(!license && name==='react-remove-scroll-bar')license=await readFile(`${root}vendor/runtime-licenses/react-remove-scroll-bar/LICENSE`,'utf8');
-  if(!license)throw new Error(`Missing license for ${name}`);productLicenses+=`\n${name}\n${license}\n`;
+  if(!license)throw new Error(`Missing license for ${name}`);productLicenses+=`\n${name}\n${license}\n`;if(name==='dexie')productLicenses+=await readFile(`${root}node_modules/dexie/NOTICE`,'utf8');
 }
 const toolNotice=`/*! Cordis · MIT\n${cordisLicense}\nCosmokit · MIT\n${cosmokitLicense}\n*/`;
 const bundleNotice=`/*! Product UI foundations
@@ -58,6 +58,7 @@ ${productLicenses}
 /*! Live stream decoders\n${mediaLicense}\n*/\n${toolNotice}\n/*! jsonrepair · ISC\n${intentLicense}\n*/\n/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
 const toolBuild={entryPoints:[`${root}src/tools/cordis-adapter.js`],bundle:true,platform:'browser',minify:true,legalComments:'inline',target:'chrome111',banner:{js:toolNotice}};
 await mkdir(dist, { recursive: true });
+for(const [entry,name] of [['src/services/retrieval.js','knowledge-retrieval'],['src/browser/media-session.js','media-session'],['src/services/completion-stream.js','completion-stream']])await build({entryPoints:[`${root}${entry}`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/${name}.js`});
 await build({entryPoints:[`${root}src/ui/theme-palette.js`],bundle:true,format:'esm',minify:true,target:'chrome111',outfile:`${dist}/theme-palettes.js`});
 await build({entryPoints:[`${root}src/ui/product/runtime.js`],bundle:true,format:'esm',minify:true,loader:{'.css':'text'},define:{'process.env.NODE_ENV':'"production"'},legalComments:'inline',target:'chrome111',outfile:`${dist}/product-ui.js`});
 await build({entryPoints:[`${root}src/services/ai-pipeline.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/ai-pipeline.js`});
@@ -73,6 +74,7 @@ await mkdir(ext, { recursive:true });
 for (const name of ['manifest.json','popup.html','popup.css','popup.js','durable-storage.js','protocol-cache.js']) await writeFile(`${ext}/${name}`,await readFile(`${root}extension/${name}`));
 const glassLicense = await readFile(`${root}vendor/solid-glass/LICENSE`, 'utf8');
 await writeFile(`${ext}/solid-glass.css`, `/* Solid Glass · https://github.com/deeplethe/solid-glass\n${glassLicense}\n*/\n${SOLID_GLASS_CSS}`);
+await build({entryPoints:[`${root}extension/durable-storage.js`],bundle:true,format:'esm',target:'chrome120',banner:{js:bundleNotice},outfile:`${ext}/durable-storage.js`});
 await build({entryPoints:[`${root}src/ui/theme.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/theme.js`});
 // AI 模块的源码相对依赖不属于扩展目录，必须一起打包供后台加载。
 await build({entryPoints:[`${root}src/services/ai.js`],bundle:true,format:'esm',target:'chrome120',banner:{js:`/*! jsonrepair · ISC\n${intentLicense}\n*/`},outfile:`${ext}/ai.js`});

@@ -22,7 +22,7 @@ test('长资料按问题检索原文片段，保留来源、偏移和核对时�
   const config=settings([entry('产品资料',content),...Array.from({length:12},(_,i)=>entry(`同类${i}`,'陶瓷茶具的保养资料。'.repeat(100)))]);
   const data=payload(makeAIRequest({...prompt,target:{text:'茶具怎么清洗'}},config));
   const retrieval=data.evidence_context.retrieval;
-  assert.equal(retrieval.method,'local-bm25');assert.ok(data.evidence_context.memories.length<=8);
+  assert.equal(retrieval.method,'minisearch-bm25');assert.ok(data.evidence_context.memories.length<=8);
   const found=data.evidence_context.memories.find(row=>row.entryId==='产品资料');
   assert.ok(found.content.includes('温水清洗'));assert.equal(found.source,'主播确认');
   assert.equal(content.slice(found.range.start,found.range.end),found.content);
