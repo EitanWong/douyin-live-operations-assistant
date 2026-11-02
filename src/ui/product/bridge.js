@@ -20,8 +20,8 @@ export function createWorkspaceBridge(panel) {
     const label=wrapper.querySelector(':scope>span') || wrapper.querySelector('.feature-title');
     const textNodes=[...wrapper.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join(' ').trim();
     const labelText=label ? [...label.childNodes].filter(n=>n.nodeName!=='SMALL').map(n=>n.textContent).join(' ').trim() : '';
-    const name=labelText || input.getAttribute('aria-label') || wrapper.getAttribute('aria-label') || textNodes || input.name || input.type;
-    return {kind:'field',id:id(input),label:name,description:cleanText(wrapper.querySelector('small')),type:input.tagName==='SELECT' ? 'select' : input.tagName==='TEXTAREA' ? 'textarea' : input.type,
+    const name=input.getAttribute('aria-label') || labelText || wrapper.getAttribute('aria-label') || textNodes || input.name || input.type;
+    return {kind:'field',id:id(input),label:name,labelHidden:wrapper===input && input.hasAttribute('aria-label') || wrapper.matches('.switch') && !labelText && !textNodes,description:cleanText(wrapper.querySelector('small')),type:input.tagName==='SELECT' ? 'select' : input.tagName==='TEXTAREA' ? 'textarea' : input.type,
       value:input.type==='checkbox' ? input.checked : input.value,disabled:input.disabled,invalid:input.getAttribute('aria-invalid')==='true',placeholder:input.placeholder,appearance:input.hasAttribute('data-theme-palette') ? 'palette' : undefined,
       min:input.min,max:input.max,step:input.step,maxLength:input.maxLength>0 ? input.maxLength : undefined,readOnly:input.readOnly,
       options:input.tagName==='SELECT' ? [...input.options].filter(o=>!o.hidden).map(o=>({value:o.value,label:o.text,disabled:o.disabled})) : undefined};

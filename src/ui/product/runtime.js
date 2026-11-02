@@ -11,9 +11,10 @@ import {componentTheme,componentVariables,paletteScale} from '../theme-palette.j
 const features=tableFeatures({});
 const icon=html=>html ? h('span',{className:'product-icon',dangerouslySetInnerHTML:{__html:html},'aria-hidden':true}) : null;
 function Control({node,bridge}) {
-  const common={label:node.label,'aria-label':node.label,description:node.description || undefined,disabled:node.disabled,error:node.invalid ? '请检查此项设置' : undefined,'data-control-id':node.id};
+  const common={label:node.labelHidden ? undefined : node.label,'aria-label':node.label,description:node.description || undefined,disabled:node.disabled,error:node.invalid ? '请检查此项设置' : undefined,'data-control-id':node.id};
   const edit=value=>bridge.change(node.id,value);
   if(node.type==='checkbox')return h(Switch,{...common,checked:node.value,onChange:e=>edit(e.currentTarget.checked),className:'product-switch'});
+  common.inputWrapperOrder=['label','input','description','error'];
   if(node.type==='select'){
     const props={...common,value:node.value,data:node.options,onChange:edit,allowDeselect:false,comboboxProps:{withinPortal:false},searchable:node.options.length>10,nothingFoundMessage:'没有匹配项'};
     if(node.appearance==='palette'){
@@ -43,7 +44,7 @@ function Disclosure({node,bridge}) {
   const invalid=JSON.stringify(node.children).includes('"invalid":true');
   useEffect(()=>{if(invalid && !open)bridge.toggle(node.id,true);},[invalid,open,bridge,node.id]);
   useEffect(()=>{if(open && invalid){const input=body.current?.querySelector('[aria-invalid="true"]');input?.focus();input?.scrollIntoView?.({block:'center'});}},[open,invalid]);
-  return h(Paper,{withBorder:true,className:'product-disclosure','data-view-id':node.id},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>bridge.toggle(node.id,!open),rightSection:open ? '−' : '+'},node.title),h(Collapse,{expanded:open,transitionDuration:0,keepMountedMode:'display-none'},h(Stack,{className:'product-disclosure-body',gap:'sm',id:`detail-${node.id}`,ref:body},renderChildren(node.children,bridge))));
+  return h(Paper,{withBorder:true,className:'product-disclosure','data-surface':node.surface,'data-view-id':node.id},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>bridge.toggle(node.id,!open),rightSection:open ? '−' : '+'},node.title),h(Collapse,{expanded:open,transitionDuration:0,keepMountedMode:'display-none'},h(Stack,{className:'product-disclosure-body',gap:'sm',id:`detail-${node.id}`,ref:body},renderChildren(node.children,bridge))));
 }
 function Chart({node}) {
   const element=useRef(null),chart=useRef(null);
@@ -69,7 +70,9 @@ function View({node,bridge}) {
   if(node.kind==='link')return h('a',{href:node.href,target:'_blank',rel:'noopener noreferrer'},node.text);
   const props={className:[node.classes,node.layout ? 'product-layout' : ''].filter(Boolean).join(' '),'data-view-id':node.id,'data-layout':node.layout,'data-surface':node.surface,'aria-label':node.label,role:node.role,tabIndex:node.tag==='h3' ? -1 : undefined};
   const content=renderChildren(node.children,bridge);
-  if(['cards','fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:node.layout==='cards' ? 'md' : 'sm'},content);
+  if(node.layout==='cards')return h('div',{...props,...gridOptions(node)},content);
+  if(['fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:'12px'},content);
+  if(node.layout==='scoreboard')return h('div',props,content);
   if(node.surface==='card')return h(Paper,{...props,component:Stack,gap:'sm',withBorder:true,p:'md',radius:'md'},content);
   if(node.layout==='row')return h(Group,{...props,gap:'xs',wrap:'wrap',align:'center'},content);
   if(node.layout==='stack')return h(Stack,{...props,gap:'sm'},content);

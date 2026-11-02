@@ -89,3 +89,26 @@ test('单张配置卡片之后的高级折叠区跨整行，不再因兼容卡�
   assert.equal(config.span,undefined);assert.deepEqual(advanced.map(node=>node.span),['full','full']);
  }finally{f.close();}
 });
+
+test('重复规则独立排版，移动和删除仍作用于原规则且保留编辑内容',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page="ai"]');page.innerHTML='<div data-list="keywords"><div class="editor-row"><div class="row-head"><b>规则甲</b><div><button>上移</button></div></div><label><span>回复</span><textarea>甲的草稿</textarea></label></div><div class="editor-row"><label><span>回复</span><textarea>乙的草稿</textarea></label><button>删除</button></div></div>';
+  const list=page.querySelector('[data-list]'),second=list.lastElementChild;
+  list.querySelector('button').onclick=()=>list.prepend(second);second.querySelector('button').onclick=()=>second.remove();
+  f.bridge.refresh();let group=f.bridge.getSnapshot().content.children[0];
+  assert.equal(group.layout,'cards');assert.ok(group.children.every(node=>node.surface==='card' && !node.span));
+  assert.equal(group.children[0].children[0].layout,'row');
+  f.bridge.change(find(group.children[1],'field').id,'乙仍可编辑');f.bridge.activate(find(group.children[0],'button').id);
+  group=f.bridge.getSnapshot().content.children[0];assert.equal(find(group.children[0],'field').value,'乙仍可编辑');
+  f.bridge.activate(find(group.children[0],'button').id);assert.equal(list.children.length,1);assert.equal(list.querySelector('textarea').value,'甲的草稿');
+ }finally{f.close();}
+});
+
+test('PK 播报开关保留无重复文案的可访问标签，间隔优先使用完整名称',()=>{
+ const f=setup();try{
+  f.root.querySelector('[data-page="ai"]').innerHTML='<div class="pk-broadcast-option"><div class="pk-broadcast-copy">每日任务</div><label class="pk-broadcast-interval"><span>每隔</span><input type="number" aria-label="汇报间隔 / 秒" value="300"></label><label class="switch"><input type="checkbox" aria-label="定时汇报每日任务与展馆"><span aria-hidden="true"></span></label></div>';
+  f.bridge.refresh();const option=f.bridge.getSnapshot().content.children[0],[,interval,toggle]=option.children;
+  assert.equal(option.layout,'row');assert.equal(interval.label,'汇报间隔 / 秒');assert.equal(toggle.labelHidden,true);assert.equal(toggle.label,'定时汇报每日任务与展馆');
+  f.bridge.change(toggle.id,true);assert.equal(f.root.querySelector('input[type=checkbox]').checked,true);
+ }finally{f.close();}
+});
