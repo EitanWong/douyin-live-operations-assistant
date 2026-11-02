@@ -1,6 +1,6 @@
 import React,{createElement as h,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {MantineProvider,Button,Switch,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Collapse,Progress,SimpleGrid,Stack,Group,Tabs} from '@mantine/core';
+import {MantineProvider,Button,Switch,Input,Slider,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Collapse,Progress,SimpleGrid,Stack,Group,Tabs} from '@mantine/core';
 import {useTable,tableFeatures} from '@tanstack/react-table';
 import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
@@ -14,6 +14,7 @@ function Control({node,bridge}) {
   const common={label:node.labelHidden ? undefined : node.label,'aria-label':node.label,description:node.description || undefined,disabled:node.disabled,error:node.invalid ? '请检查此项设置' : undefined,'data-control-id':node.id};
   const edit=value=>bridge.change(node.id,value);
   if(node.type==='checkbox')return h(Switch,{...common,checked:node.value,onChange:e=>edit(e.currentTarget.checked),className:'product-switch'});
+  if(node.type==='range')return h(Input.Wrapper,common,h(Slider,{value:Number(node.value),min:Number(node.min),max:Number(node.max),step:Number(node.step || 1),onChange:edit,disabled:node.disabled || node.readOnly,thumbLabel:node.label,thumbValueText:node.valueText || node.label,label:node.label,mt:10,mb:10,marks:Array.from({length:Math.min(21,Math.floor((Number(node.max)-Number(node.min))/Number(node.step || 1))+1)},(_,i)=>({value:Number(node.min)+i*Number(node.step || 1)}))}));
   common.inputWrapperOrder=['label','input','description','error'];
   if(node.type==='select'){
     const props={...common,value:node.value,data:node.options,onChange:edit,allowDeselect:false,comboboxProps:{withinPortal:false},searchable:node.options.length>10,nothingFoundMessage:'没有匹配项'};

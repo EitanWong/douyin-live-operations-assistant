@@ -12,6 +12,8 @@ export const AI_SETTINGS_CSS=`
 .ai-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.ai-card-heading h3{margin:0}
 .ai-key-actions{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 14px;margin:-6px 0 8px}.ai-key-actions .toggle{font-size:12px;margin:0}
 .ai-test-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;margin:4px 0 18px}.ai-test-row .hint{margin:0;flex:1;min-width:180px}
+.ai-reply-frequency input[type=range]{padding:0;min-height:36px;accent-color:var(--sg-brand);cursor:pointer;background:transparent;border:0;box-shadow:none}
+.ai-reply-endpoints{word-spacing:2px}.ai-reply-frequency output{color:var(--sg-brand)}
 .ai-tag{font-size:10px;font-weight:400;color:var(--muted);margin-left:6px}.ai-empty{font-size:12px;color:var(--muted);line-height:1.8;padding:18px;border:1px dashed var(--line);border-radius:12px}
 .ai-service-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:0 16px;align-items:start}.ai-media-switches{display:flex;flex-wrap:wrap;gap:0 18px}
 .native-install-command{display:block;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:12px}

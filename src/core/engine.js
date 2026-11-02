@@ -1,5 +1,5 @@
-import {TurnTaking,conversational,jobTurn,turnViewerKey} from '../ai/turn-taking.js';
-import {HOST_SPEECH_INSTRUCTION} from '../ai/conversation-policy.js';
+import {REPLY_FREQUENCIES,TurnTaking,conversational,jobTurn,turnViewerKey} from '../ai/turn-taking.js';
+import {hostSpeechInstruction,EVERY_TURN_INSTRUCTION} from '../ai/conversation-policy.js';
 import {freshObservations,liveMoment,awaitingVisual,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
 import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
@@ -159,7 +159,7 @@ export function validateConfig(c) {
   range(c.ai.intervalSec, 0, 3600, 'AI 间隔'); range(c.ai.userCooldownSec, 0, 86400, 'AI 用户冷却');
   range(c.ai.contextSize, 1, 100, '上下文条数'); range(c.ai.contextAgeSec, 10, 600, '上下文有效秒数');
   range(c.ai.maxPerHour, 1, 36000, 'AI 每小时调用上限'); range(c.ai.idleSec, 60, 3600, '冷场秒数');
-  choice(c.ai.replyFrequency,['quiet','natural','mentions'],'AI 接话频率');
+  choice(c.ai.replyFrequency,REPLY_FREQUENCIES.map(([key])=>key),'AI 接话频率');
   if(typeof c.ai.proactiveEnabled!=='boolean')throw new Error('主动互动开关无效');
   range(c.ai.proactiveIntervalSec,30,3600,'主动互动间隔');
   range(c.ai.temperature, 0, 2, 'AI 温度');
@@ -280,8 +280,8 @@ export class Engine {
   update(config) {
     // 配置保存不会中断正在运行的场控；新规则从下一条事件开始生效。
     this.config = validateConfig(mergeConfig(config));
-    if (!this.config.ai.enabled || !this.config.ai.chatEnabled) this.chatAIBackground = null;
-    if (!this.config.ai.enabled || !(this.config.ai.chatEnabled || this.config.bot.enabled)) this.chatAIQueue = [];
+    if (!this.config.ai.enabled || !this.config.ai.chatEnabled || this.config.ai.replyFrequency==='off') this.chatAIBackground = null;
+    if (!this.config.ai.enabled || !(this.config.ai.chatEnabled || this.config.bot.enabled) || this.config.ai.replyFrequency==='off') this.chatAIQueue = [];
     if (!this.config.moderation.enabled || !this.config.moderation.warningsEnabled) this.queue = this.queue.filter(job => job.kind !== 'moderation');
     this.rotation.clear();
     this.changed();
@@ -828,7 +828,7 @@ export class Engine {
   proactiveCandidate(now) {
     const ai=this.config.ai,moment=liveMoment(this.mediaContext(this.config),now),speech=moment.speech;
     if(ai.proactiveEnabled && awaitingVisual(moment,now,resolveMediaConfig(ai).videoEnabled))return null;
-    if(ai.proactiveEnabled && speech && this.turnTaking.canAssess({...this.turnInput('speech',now),key:sceneKey(speech)}))return {mode:'speech',row:speech};
+    if(ai.proactiveEnabled && speech && this.turnTaking.canAssess({...this.turnInput('speech',now),key:ai.replyFrequency==='every' ? observationKey(speech) : sceneKey(speech)}))return {mode:'speech',row:speech};
     const mode=proactiveMode(ai,now-Math.max(this.lastChat,this.lastInteraction));
     if(!mode || !this.turnTaking.canSpeak(this.turnInput('proactive',now)) || now-this.lastProactiveAt<ai.proactiveIntervalSec*1000)return null;
     const row=moment.visual || (mode==='idle' ? speech : null);
@@ -841,16 +841,17 @@ export class Engine {
     const candidate=this.proactiveCandidate(now);if(!candidate)return false;
     const {mode,row}=candidate,speech=mode==='speech',pacingMode=speech ? 'speech' : 'proactive';
     const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row),...(speech ? {speechKey:sceneKey(row)} : {})};
-    if(speech)this.turnTaking.assessed(reply.contextKey,now,'speech',reply.speechKey);
+    if(speech)this.turnTaking.assessed(reply.contextKey,now,'speech',ai.replyFrequency==='every' ? observationKey(row) : reply.speechKey);
     else {this.lastProactiveAt=now;this.lastProactiveScene=sceneKey(row);}
     void this.requestAI(speech ? {type:'speech',text:row.text} : null,{kind:'ai',data:{proactive:true,interactionMode:mode,engagement:this.turnTaking.context(this.turnInput(pacingMode,now))},extra:{aiProactive:reply},
-      instruction:speech ? HOST_SPEECH_INSTRUCTION : '这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。默认旁听，不因看见一个动作或每段识别就起话题。主播在讲解、唱歌、回应别人、关键PK或严肃表达时不打断。只有主播向公屏抛出问题或确有值得回应的新变化，才选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
+      instruction:speech ? hostSpeechInstruction(ai.replyFrequency) : '这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。默认旁听，不因看见一个动作或每段识别就起话题。主播在讲解、唱歌、回应别人、关键PK或严肃表达时不打断。只有主播向公屏抛出问题或确有值得回应的新变化，才选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
     return true;
   }
   requestChatAI(event, addressed) {
+    if(this.config.ai.replyFrequency==='off')return;
     if(!addressed && (event.mentions?.length || /^\s*@/u.test(event.text)))return;
     const pending = {event:copy(event), addressed, at:this.now(), epoch:this.epoch, contextKey:this.chatContextKey()};
-    if (addressed) {
+    if (addressed || this.config.ai.replyFrequency==='every') {
       if (this.chatAIQueue.length >= 20) { this.filtered('AI 对话等待已满，本条不再排队'); return; }
       this.chatAIQueue.push(pending);
     } else {
@@ -864,20 +865,20 @@ export class Engine {
     const valid = item => item.epoch === this.epoch && item.contextKey===this.chatContextKey() && now - item.at < 45000;
     this.chatAIQueue = this.chatAIQueue.filter(valid);
     if (this.chatAIBackground && !valid(this.chatAIBackground)) this.chatAIBackground = null;
-    if (!this.running || !a.enabled || this.aiBusy || now - this.lastAI < a.intervalSec * 1000 || this.calls.filter(at => now - at < 3600000).length >= a.maxPerHour) return;
+    if (!this.running || !a.enabled || a.replyFrequency==='off' || this.aiBusy || now - this.lastAI < a.intervalSec * 1000 || this.calls.filter(at => now - at < 3600000).length >= a.maxPerHour) return;
     const pending = this.chatAIQueue[0] || this.chatAIBackground;
     if (!pending) return;
     const userKey=turnViewerKey(pending.event.user),scope=this.chatContextKey();
     const pacingMode=pending.addressed ? 'direct' : this.turnTaking.mode(userKey,scope,now);
     if(!pending.addressed && !this.turnTaking.canAssess(this.turnInput(pacingMode,now)))return;
-    if(pending.addressed)this.chatAIQueue.shift();
+    if(pending===this.chatAIQueue[0])this.chatAIQueue.shift();
     if(pacingMode==='contextual')this.turnTaking.assessed(scope,now);
     const engagement=this.turnTaking.context({...this.turnInput(pacingMode,now),userKey});
     if (pending === this.chatAIBackground) this.chatAIBackground = null;
     if (pending.addressed ? !(a.chatEnabled || this.config.bot.enabled) : !a.chatEnabled) return;
     void this.requestAI(pending.event, {
       kind:'ai', data:{pacingMode,engagement,replyMode:pending.addressed ? 'direct' : 'contextual', addressedToOther:!pending.addressed && (Boolean(pending.event.mentions?.length) || /^\s*@/u.test(pending.event.text))},
-      instruction:(pending.addressed
+      instruction:(a.replyFrequency==='every' ? EVERY_TURN_INSTRUCTION : pending.addressed
         ? '观众明确 @ 了当前登录场控账号，希望与你直接对话。结合目标弹幕、最近直播间聊天记录和 live_context 简短回应，不要求问句或呼叫词；普通招呼和闲聊也可回答。涉及主播安排等事实只用已核实资料，缺少资料时坦诚说明；仍跳过挑衅、不安全内容和完全相同的已回答请求。不要把普通聊天变成游戏或菜单。'
         : '先判断接话资格：综合目标弹幕、engagement.recentTurns、最近聊天、音画和 live_context，分清对话归属，再决定是否开口。未点名时默认旁听，只有明确向场控求助、清楚延续刚才与场控的对话，或尚无人回答且可用常识或已核实资料简短解答的公共问题，现场又适合补充时，才简短回复。问句不代表需要回复，反问、玩笑、感叹本身不是跳过理由；向场控接话、自然延续当前对话或能给出贴切帮助时可以简短回应，不能只因缺少主播资料就跳过常识或日常交流。观众彼此私聊、等待主播亲自回应、完全重复已答问题或接话没有帮助时输出 [SKIP]。data.addressedToOther=true 表示提及了其他账号，优先视为对他人的话而保持安静。结合当前游戏、PK和互动节奏避免打断，不为接话而硬接。判断与回复在本次请求完成，只输出回复正文或 [SKIP]，不输出判断过程。')
         + ' 观众询问主播直播数据时属于可回答的问题，按问题的本场、昨日、今日、本周、本月、本季、本年或累计范围读取 live_context，简短给出已采集的统计。明确查询但数据缺失或过期时说明尚未采集或当前无法确认，不编造数字；数据或统计范围变化后可以再次回答。'

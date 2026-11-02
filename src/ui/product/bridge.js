@@ -23,7 +23,7 @@ export function createWorkspaceBridge(panel) {
     const name=input.getAttribute('aria-label') || labelText || wrapper.getAttribute('aria-label') || textNodes || input.name || input.type;
     return {kind:'field',id:id(input),label:name,labelHidden:wrapper===input && input.hasAttribute('aria-label') || wrapper.matches('.switch') && !labelText && !textNodes,description:cleanText(wrapper.querySelector('small')),type:input.tagName==='SELECT' ? 'select' : input.tagName==='TEXTAREA' ? 'textarea' : input.type,
       value:input.type==='checkbox' ? input.checked : input.value,disabled:input.disabled,invalid:input.getAttribute('aria-invalid')==='true',placeholder:input.placeholder,appearance:input.hasAttribute('data-theme-palette') ? 'palette' : undefined,
-      min:input.min,max:input.max,step:input.step,maxLength:input.maxLength>0 ? input.maxLength : undefined,readOnly:input.readOnly,
+      min:input.min,max:input.max,step:input.step,valueText:input.getAttribute('aria-valuetext'),maxLength:input.maxLength>0 ? input.maxLength : undefined,readOnly:input.readOnly,
       options:input.tagName==='SELECT' ? [...input.options].filter(o=>!o.hidden).map(o=>({value:o.value,label:o.text,disabled:o.disabled})) : undefined};
   }
   function table(node) {

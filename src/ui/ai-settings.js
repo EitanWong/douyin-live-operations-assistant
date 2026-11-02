@@ -1,3 +1,4 @@
+import {REPLY_FREQUENCIES,REPLY_FREQUENCY_HELP} from '../ai/turn-taking.js';
 import {validateSkillPack} from '../ai/skills.js';
 import {aliEndpoints} from '../services/ai-pipeline.js';
 import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate} from '../services/knowledge.js';
@@ -8,6 +9,9 @@ export class AISettings {
   constructor(root,{dirty,start,stop,clear,forget,error,checkNative,diagnose}) {
     this.root=root;this.dirty=dirty;this.error=error;this.skills=[];
     root.querySelector('[data-skill-install]').addEventListener('click',()=>{try{const skill=validateSkillPack(JSON.parse(root.querySelector('[data-skill-json]').value));if(this.skills.length>=8 && !this.skills.some(s=>s.id===skill.id))throw new Error('自定义技能最多8个');this.skills=this.skills.filter(s=>s.id!==skill.id).concat(skill);this.showSkills();dirty();}catch(reason){error(reason);}});
+    const slider=root.querySelector('[data-reply-slider]');
+    const changeFrequency=()=>{root.querySelector('[data-field="ai.replyFrequency"]').value=REPLY_FREQUENCIES[Number(slider.value)][0];this.syncReplyFrequency();dirty();};
+    slider.addEventListener('input',changeFrequency);slider.addEventListener('change',changeFrequency);
     const navigation=root.querySelector('.ai-section-tabs');
     navigation.addEventListener('click',event=>{const tab=event.target.closest('[data-ai-section-tab]');if(tab)this.showSection(tab.dataset.aiSectionTab);});
     navigation.addEventListener('keydown',event=>this.navigate(event));
@@ -51,6 +55,13 @@ export class AISettings {
     root.querySelector('[data-media-clear]').addEventListener('click',()=>clear());
     for(const button of root.querySelectorAll('[data-media-forget]'))button.addEventListener('click',()=>{void Promise.resolve(forget(button.dataset.mediaForget)).catch(error);});
     for(const kind of ['vision','audio'])root.querySelector(`[data-field="ai.media.${kind}Endpoint"]`).addEventListener('input',()=>{root.querySelector(`[data-media-key="${kind}"]`).value='';});
+  }
+  syncReplyFrequency(){
+    const value=this.root.querySelector('[data-field="ai.replyFrequency"]').value;
+    const index=REPLY_FREQUENCIES.findIndex(([key])=>key===value),[key,label]=REPLY_FREQUENCIES[index<0 ? 2 : index];
+    const slider=this.root.querySelector('[data-reply-slider]');slider.value=String(index<0 ? 2 : index);slider.setAttribute('aria-valuetext',label);slider.setAttribute('aria-label','接话频率 · '+label);
+    this.root.querySelector('[data-reply-frequency-label]').textContent=label;
+    this.root.querySelector('[data-reply-frequency-status]').textContent=label+'：'+REPLY_FREQUENCY_HELP[key];
   }
   showSection(key){
     for(const tab of this.root.querySelectorAll('[data-ai-section-tab]')){
@@ -125,7 +136,7 @@ export class AISettings {
   }
   memoryValidity(row){const expires=row.querySelector('[data-memory-field="expiresOn"]').value,enabled=row.querySelector('[data-memory-field="enabled"]').checked;row.querySelector('[data-memory-validity]').textContent=!enabled ? '已停用，不参与检索' : expires && expires<beijingDate(Date.now()) ? '已过期，不参与检索' : '可参与检索，按问题相关性选择片段';}
   showSkills(){const target=this.root.querySelector('[data-skill-list]');target.replaceChildren();for(const skill of this.skills){const row=target.ownerDocument.createElement('p');row.textContent=skill.name+' · '+skill.scenes.join('、');const button=target.ownerDocument.createElement('button');button.type='button';button.textContent='移除技能';button.addEventListener('click',()=>{this.skills=this.skills.filter(s=>s.id!==skill.id);this.showSkills();this.dirty();});row.append(button);target.append(row);}}
-  populate(memory,assistant){this.skills=structuredClone(assistant?.skills || []);this.showSkills();this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
+  populate(memory,assistant){this.syncReplyFrequency();this.skills=structuredClone(assistant?.skills || []);this.showSkills();this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
   read(){
     const memory={enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>{
       const result={...row.record};for(const input of row.querySelectorAll('[data-memory-field]'))result[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();

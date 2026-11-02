@@ -13,8 +13,8 @@ test('文字模式也能选择接话频率，默认克制；草稿可读回且�
  try{
   panel.tab('ai');const picker=panel.node('[data-field="ai.replyFrequency"]');assert.ok(picker);
   assert.equal(picker.value,'quiet');assert.equal(picker.closest('[data-ai-section]').dataset.aiSection,'models');
-  assert.deepEqual([...picker.options].map(o=>o.value),['quiet','natural','mentions']);
-  picker.value='mentions';picker.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+  const slider=panel.node('[data-reply-slider]');assert.equal(slider.type,'range');assert.equal(slider.value,'2');
+  slider.value='1';slider.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
   const saved=panel.read();assert.equal(saved.ai.replyFrequency,'mentions');assert.equal(saved.ai.media.autoStart,config.ai.media.autoStart);
   assert.equal(config.ai.replyFrequency,'quiet','草稿不会提前改变运行策略');
   assert.throws(()=>validateConfig(mergeConfig({ai:{replyFrequency:'fast'}})),/接话频率/);
