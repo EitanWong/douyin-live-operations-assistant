@@ -57,7 +57,7 @@ function View({node,bridge}) {
   if(!node)return null;
   if(node.kind==='text')return node.text;
   if(node.kind==='field')return h(Control,{node,bridge});
-  if(node.kind==='button')return h(Button,{size:'xs',variant:node.primary || node.selected ? 'filled' : 'light',color:node.danger ? 'red' : undefined,disabled:node.disabled,loading:node.busy,'aria-label':node.label,'aria-pressed':node.selected || undefined,onClick:()=>bridge.activate(node.id),leftSection:icon(node.icon)},node.text);
+  if(node.kind==='button')return h(Button,{size:'sm',variant:node.primary || node.selected ? 'filled' : 'light',color:node.danger ? 'red' : undefined,disabled:node.disabled,loading:node.busy,'aria-label':node.label,'aria-pressed':node.selected || undefined,onClick:()=>bridge.activate(node.id),leftSection:icon(node.icon)},node.text);
   if(node.kind==='details')return h(Disclosure,{node,bridge});
   if(node.kind==='table')return h(DataTable,{node,bridge});
   if(node.kind==='chart')return h(Chart,{node});
@@ -70,12 +70,11 @@ function View({node,bridge}) {
   if(node.kind==='link')return h('a',{href:node.href,target:'_blank',rel:'noopener noreferrer'},node.text);
   const props={className:[node.classes,node.layout ? 'product-layout' : ''].filter(Boolean).join(' '),'data-view-id':node.id,'data-layout':node.layout,'data-surface':node.surface,'aria-label':node.label,role:node.role,tabIndex:node.tag==='h3' ? -1 : undefined};
   const content=renderChildren(node.children,bridge);
-  if(node.layout==='cards')return h('div',{...props,...gridOptions(node)},content);
-  if(['fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:'12px'},content);
+  if(['cards','fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:node.layout==='cards' ? 'var(--product-section-gap)' : 'var(--product-gap)'},content);
   if(node.layout==='scoreboard')return h('div',props,content);
-  if(node.surface==='card')return h(Paper,{...props,component:Stack,gap:'sm',withBorder:true,p:'md',radius:'md'},content);
-  if(node.layout==='row')return h(Group,{...props,gap:'xs',wrap:'wrap',align:'center'},content);
-  if(node.layout==='stack')return h(Stack,{...props,gap:'sm'},content);
+  if(node.surface==='card')return h(Paper,{...props,component:Stack,gap:'var(--product-gap)',withBorder:true,p:'var(--product-card-padding)',radius:'md'},content);
+  if(node.layout==='row')return h(Group,{...props,gap:'var(--product-gap)',wrap:'wrap',align:'center'},content);
+  if(node.layout==='stack')return h(Stack,{...props,gap:'var(--product-gap)'},content);
   return h(node.tag || 'div',props,renderChildren(node.children,bridge));
 }
 function Workspace({bridge,shadow,onReady}) {

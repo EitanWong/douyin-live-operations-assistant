@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {AdaptiveLayout} from '../../src/ui/adaptive-layout.js';
-import {describeLayout,gridOptions} from '../../src/ui/product/layout.js';
+import {describeLayout,gridOptions,layoutChildren} from '../../src/ui/product/layout.js';
 
 test('PK 比分、播报控制和并列概览保留各自的排列语义',()=>{
  const dom=new JSDOM('<div class="pk-scoreboard"></div><div class="pk-chart-head"></div><div class="pk-overview"></div><details class="pk-outlook"></details><div class="pk-broadcast-option"></div><div class="pk-broadcast-times"></div>');
@@ -17,7 +17,16 @@ test('整行说明不能创造空列，字段与指标的列数按实际项目�
  const children=[{kind:'field'},{kind:'field'},{span:'full'},{span:'full'}];
  assert.deepEqual(gridOptions({layout:'fields',children}),{cols:{base:1,'412px':2}});
  assert.deepEqual(gridOptions({layout:'metrics',children:children.slice(0,2)}),{cols:{base:1,'292px':2}});
- assert.deepEqual(gridOptions({layout:'cards',children}),{style:{columnCount:2}});
+ assert.deepEqual(gridOptions({layout:'cards',children}),{cols:{base:1,'656px':2}});
+});
+
+test('卡片按原顺序成对排成完整行，通栏内容两侧的单张卡片填满所在行',()=>{
+ const children=[{id:'a',surface:'card'},{id:'b',surface:'card'},{id:'c',surface:'card'},{id:'note',kind:'text'},{id:'d',surface:'card'}];
+ const result=layoutChildren('cards',children);
+ assert.deepEqual(result.map(node=>node.id),['a','b','c','note','d']);
+ assert.deepEqual(result.map(node=>node.span),[undefined,undefined,'full','full','full']);
+ assert.ok(children.every(node=>node.span===undefined),'投影不改变原表单与规则状态');
+ assert.deepEqual(gridOptions({layout:'cards',children:result}),{cols:{base:1,'656px':2}});
 });
 
 test('纯数据网格使用指标宽度，PK 速度与可信度不会占用表单的大列宽',()=>{

@@ -86,7 +86,7 @@ test('单张配置卡片之后的高级折叠区跨整行，不再因兼容卡�
  const f=setup();try{
   f.root.querySelector('[data-page="ai"]').innerHTML='<div class="workspace-grid"><section class="settings-group workspace-card"><h3>参与设置</h3><input value="draft"></section><details class="advanced workspace-card"><summary>定位</summary><input value="xpath"></details><details class="workspace-card"><summary>工具管理</summary><button>停用</button></details></div>';
   f.bridge.refresh();const [config,...advanced]=f.bridge.getSnapshot().content.children[0].children;
-  assert.equal(config.span,undefined);assert.deepEqual(advanced.map(node=>node.span),['full','full']);
+  assert.equal(config.span,'full');assert.deepEqual(advanced.map(node=>node.span),['full','full']);
  }finally{f.close();}
 });
 
