@@ -75,3 +75,15 @@ test('Harness恢复拒绝损坏任务，不执行未通过契约的持久输入'
  let calls=0;const h=new AgentHarness({store:{all:async()=>[{id:'broken-task',scope:'1:10',status:'queued',createdAt:now,question:null,input:{}}],put:async()=>{}},now:()=>now,execute:async()=>calls++});
  try{await h.ready;await new Promise(setImmediate);assert.equal(calls,0);assert.deepEqual(h.list('1:10'),[]);}finally{h.close();}
 });
+
+test('忘记一位观众不丢弃其他观众尚在交接的真实互动，删除水位随快照按人隔离',()=>{
+ let time=now;const memory=new AudienceMemory({anchor:'10',now:()=>time});
+ const chat=(id,user,receivedAt)=>({id,type:'chat',source:'socket',receivedAt,user:{id:user,name:'观众'+user},text:'喜欢陶瓷'});
+ memory.observe(chat('alice-1','1',time-1000));memory.forget('uid:1');
+ const restored=new AudienceMemory({anchor:'10',state:memory.snapshot(),now:()=>time});
+ assert.equal(restored.observe(chat('bob-1','2',time-500)),true);
+ assert.equal(restored.context({id:'2'}).recentStatements.length,1);
+ assert.equal(restored.observe(chat('alice-1','1',time-1000)),false);
+ time+=1;assert.equal(restored.observe(chat('alice-2','1',time)),true);
+ restored.clear();assert.equal(restored.observe(chat('bob-1','2',time-500)),false);
+});
