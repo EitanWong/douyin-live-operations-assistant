@@ -1,3 +1,4 @@
+import {TurnTaking,conversational,jobTurn,turnViewerKey} from '../ai/turn-taking.js';
 import {freshObservations,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
 import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
@@ -55,7 +56,7 @@ export const DEFAULTS = {
   ai: {
     enabled: false, chatEnabled: false, endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash',
     intervalSec: 0, userCooldownSec: 0,
-    assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180, proactiveEnabled:false, proactiveIntervalSec:90,
+    assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180, proactiveEnabled:false, proactiveIntervalSec:300, replyFrequency:'quiet',
     persona: '你是直播间里会聊天的场控。先听懂对方的意思，接着现场的话自然回应，有常识、有分寸，直接说重点，不端着、不用客服套话。轻松时可以有一点幽默，认真时说实在的；欢迎和答谢简短，聊天不机械套模板。不冒充主播，不编造经历或承诺，不抢话。',
     knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS
   },
@@ -157,6 +158,7 @@ export function validateConfig(c) {
   range(c.ai.intervalSec, 0, 3600, 'AI 间隔'); range(c.ai.userCooldownSec, 0, 86400, 'AI 用户冷却');
   range(c.ai.contextSize, 1, 100, '上下文条数'); range(c.ai.contextAgeSec, 10, 600, '上下文有效秒数');
   range(c.ai.maxPerHour, 1, 36000, 'AI 每小时调用上限'); range(c.ai.idleSec, 60, 3600, '冷场秒数');
+  choice(c.ai.replyFrequency,['quiet','natural','mentions'],'AI 接话频率');
   if(typeof c.ai.proactiveEnabled!=='boolean')throw new Error('主动互动开关无效');
   range(c.ai.proactiveIntervalSec,30,3600,'主动互动间隔');
   range(c.ai.temperature, 0, 2, 'AI 温度');
@@ -252,7 +254,7 @@ export class Engine {
     this.calls = []; this.running = false; this.epoch = 0; this.serial = 0;
     this.chatAIQueue = []; this.chatAIBackground = null; this.replyEvents = [];
     this.contextChat = []; this.liveData = liveData;this.mediaContext=mediaContext;
-    this.lastChat = now(); this.lastInteraction = now(); this.lastAI = -Infinity; this.lastProactiveAt=-Infinity; this.lastProactiveScene=''; this.interactionRevision=0; this.aiBusy = false; this.busy = false;
+    this.lastChat = now(); this.lastInteraction = now(); this.lastAI = -Infinity; this.turnTaking=new TurnTaking(); this.lastProactiveAt=-Infinity; this.lastProactiveScene=''; this.interactionRevision=0; this.aiBusy = false; this.busy = false;
     this.timerDue = new Map(); this.rotation = new Map(); this.selfTexts = new Map(); this.selfIdentity = null; this.giftStyleSerial = 0;
     this.moderation = new Moderation(this, manage);
     this.lastMaintenance = -Infinity;
@@ -288,6 +290,7 @@ export class Engine {
     const entries = map => [...map.entries()].slice(-5000);
     const bot = this.bot.session ? { ...this.bot.session, used: this.bot.session.used ? [...this.bot.session.used] : undefined } : null;
     return cloneRuntime({
+      turnTaking:this.turnTaking.snapshot(),
       version: 1, savedAt: this.now(), running: this.running || Boolean(this.resumeRequested),
       giveawayReceipts:[...this.giveawayReceipts],lastGiveawaySend:Number.isFinite(this.lastGiveawaySend) ? this.lastGiveawaySend : null,
       queue: this.queue, gifts: [...this.gifts.entries()], bot, botIdiomResult:this.bot.lastIdiomResult, botQuestions:this.bot.questionHistory,
@@ -302,6 +305,7 @@ export class Engine {
   restore(snapshot) {
     if (!snapshot || snapshot.version !== 1 || !Number.isFinite(snapshot.savedAt)) return false;
     snapshot = cloneRuntime(snapshot);
+    this.turnTaking.restore(snapshot.turnTaking,this.now());
     this.moderation.restore(snapshot.moderation);
     const map = value => new Map(Array.isArray(value) ? value.filter(pair => Array.isArray(pair) && pair.length === 2) : []);
     this.queue = Array.isArray(snapshot.queue) ? snapshot.queue.filter(job => job && typeof job.text === 'string' && Number.isFinite(job.created)) : [];
@@ -802,6 +806,9 @@ export class Engine {
     const broadcast=this.pkOperations.broadcast;
     return JSON.stringify([this.config.anchorId,broadcast?.anchorId===this.config.anchorId ? broadcast.roomId : this.liveMode.roomId,this.liveMode.endedAt]);
   }
+  roomChatCount(now=this.now()) { return this.contextChat.filter(row=>now-row.at>=0 && now-row.at<=30000).length; }
+  turnInput(mode,now=this.now()) {return {mode,scope:this.chatContextKey(),now,ai:this.config.ai,roomMessages:this.roomChatCount(now)};}
+  conversationReady(job,now=this.now()) {return !conversational(job) || this.turnTaking.canSpeak(this.turnInput(jobTurn(job).mode,now));}
   validChatReply(job) {
     if(job.aiProactive && !this.validProactive(job.aiProactive))return false;
     const reply=job.aiChat, ai=this.config.ai;
@@ -810,7 +817,7 @@ export class Engine {
   }
   validProactive(reply) {
     const now=this.now(),ai=this.config.ai;
-    const enabled=reply.mode==='scene' ? ai.proactiveEnabled : ai.idleEnabled && ai.chatEnabled;
+    const enabled=(reply.mode==='scene' ? ai.proactiveEnabled : ai.idleEnabled && ai.chatEnabled) && this.turnTaking.canSpeak(this.turnInput('proactive',now));
     return this.running && ai.enabled && enabled && reply.epoch===this.epoch && reply.contextKey===this.chatContextKey()
       && now-reply.created>=0 && now-reply.created<=30000 && reply.lastChat===this.lastChat && reply.lastInteraction===this.lastInteraction && reply.interactionRevision===this.interactionRevision
       && freshObservations(this.mediaContext(this.config),now).some(row=>observationKey(row)===reply.evidenceKey);
@@ -818,6 +825,7 @@ export class Engine {
   requestProactive(now) {
     const ai=this.config.ai,quiet=now-Math.max(this.lastChat,this.lastInteraction);
     const mode=proactiveMode(ai,quiet);
+    if(!this.turnTaking.canSpeak(this.turnInput('proactive',now)))return false;
     if(!mode || this.aiBusy || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
       || now-this.lastAI<ai.intervalSec*1000 || now-this.lastProactiveAt<ai.proactiveIntervalSec*1000
       || this.calls.filter(at=>now-at<3600000).length>=ai.maxPerHour)return false;
@@ -825,11 +833,12 @@ export class Engine {
     if(!row || sceneKey(row)===this.lastProactiveScene)return false;
     const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row)};
     this.lastProactiveAt=now;this.lastProactiveScene=sceneKey(row);
-    void this.requestAI(null,{kind:'ai',data:{proactive:true,interactionMode:mode},extra:{aiProactive:reply},
-      instruction:'这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。只选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
+    void this.requestAI(null,{kind:'ai',data:{proactive:true,interactionMode:mode,engagement:this.turnTaking.context(this.turnInput('proactive',now))},extra:{aiProactive:reply},
+      instruction:'这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。默认旁听，不因看见一个动作或每段识别就起话题。主播在讲解、唱歌、回应别人、关键PK或严肃表达时不打断。只有主播向公屏抛出问题或确有值得回应的新变化，才选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
     return true;
   }
   requestChatAI(event, addressed) {
+    if(!addressed && (event.mentions?.length || /^\s*@/u.test(event.text)))return;
     const pending = {event:copy(event), addressed, at:this.now(), epoch:this.epoch, contextKey:this.chatContextKey()};
     if (addressed) {
       if (this.chatAIQueue.length >= 20) { this.filtered('AI 对话等待已满，本条不再排队'); return; }
@@ -846,15 +855,21 @@ export class Engine {
     this.chatAIQueue = this.chatAIQueue.filter(valid);
     if (this.chatAIBackground && !valid(this.chatAIBackground)) this.chatAIBackground = null;
     if (!this.running || !a.enabled || this.aiBusy || now - this.lastAI < a.intervalSec * 1000 || this.calls.filter(at => now - at < 3600000).length >= a.maxPerHour) return;
-    const pending = this.chatAIQueue.shift() || this.chatAIBackground;
+    const pending = this.chatAIQueue[0] || this.chatAIBackground;
     if (!pending) return;
+    const userKey=turnViewerKey(pending.event.user),scope=this.chatContextKey();
+    const pacingMode=pending.addressed ? 'direct' : this.turnTaking.mode(userKey,scope,now);
+    if(!pending.addressed && !this.turnTaking.canAssess(this.turnInput(pacingMode,now)))return;
+    if(pending.addressed)this.chatAIQueue.shift();
+    if(pacingMode==='contextual')this.turnTaking.assessed(scope,now);
+    const engagement=this.turnTaking.context({...this.turnInput(pacingMode,now),userKey});
     if (pending === this.chatAIBackground) this.chatAIBackground = null;
     if (pending.addressed ? !(a.chatEnabled || this.config.bot.enabled) : !a.chatEnabled) return;
     void this.requestAI(pending.event, {
-      kind:'ai', data:{replyMode:pending.addressed ? 'direct' : 'contextual', addressedToOther:!pending.addressed && (Boolean(pending.event.mentions?.length) || /^\s*@/u.test(pending.event.text))},
+      kind:'ai', data:{pacingMode,engagement,replyMode:pending.addressed ? 'direct' : 'contextual', addressedToOther:!pending.addressed && (Boolean(pending.event.mentions?.length) || /^\s*@/u.test(pending.event.text))},
       instruction:(pending.addressed
         ? '观众明确 @ 了当前登录场控账号，希望与你直接对话。结合目标弹幕、最近直播间聊天记录和 live_context 简短回应，不要求问句或呼叫词；普通招呼和闲聊也可回答。涉及主播安排等事实只用已核实资料，缺少资料时坦诚说明；仍跳过挑衅、不安全内容和完全相同的已回答请求。不要把普通聊天变成游戏或菜单。'
-        : '先根据目标弹幕、最近直播间聊天记录、recent_replies 和 live_context 判断此时是否有必要由场控接话，再决定回复。问句不代表需要回复，反问、玩笑、感叹本身不是跳过理由；向场控接话、自然延续当前对话或能给出贴切帮助时可以简短回应，不能只因缺少主播资料就跳过常识或日常交流。观众彼此私聊、等待主播亲自回应、完全重复已答问题或接话没有帮助时输出 [SKIP]。data.addressedToOther=true 表示提及了其他账号，优先视为对他人的话而保持安静。结合当前游戏、PK和互动节奏避免打断，不为接话而硬接。判断与回复在本次请求完成，只输出回复正文或 [SKIP]，不输出判断过程。')
+        : '先判断接话资格：综合目标弹幕、engagement.recentTurns、最近聊天、音画和 live_context，分清对话归属，再决定是否开口。未点名时默认旁听，只有明确向场控求助、清楚延续刚才与场控的对话，或尚无人回答且可用常识或已核实资料简短解答的公共问题，现场又适合补充时，才简短回复。问句不代表需要回复，反问、玩笑、感叹本身不是跳过理由；向场控接话、自然延续当前对话或能给出贴切帮助时可以简短回应，不能只因缺少主播资料就跳过常识或日常交流。观众彼此私聊、等待主播亲自回应、完全重复已答问题或接话没有帮助时输出 [SKIP]。data.addressedToOther=true 表示提及了其他账号，优先视为对他人的话而保持安静。结合当前游戏、PK和互动节奏避免打断，不为接话而硬接。判断与回复在本次请求完成，只输出回复正文或 [SKIP]，不输出判断过程。')
         + ' 观众询问主播直播数据时属于可回答的问题，按问题的本场、昨日、今日、本周、本月、本季、本年或累计范围读取 live_context，简短给出已采集的统计。明确查询但数据缺失或过期时说明尚未采集或当前无法确认，不编造数字；数据或统计范围变化后可以再次回答。'
     });
   }
@@ -1040,7 +1055,7 @@ export class Engine {
     const earlier = (a, b) => !b || a.created < b.created || a.created === b.created && a.id < b.id;
     const higherPriority = (a, b) => !b || a.priority > b.priority || a.priority === b.priority && earlier(a, b);
     for (const item of queue) {
-      if (!this.giftReady(item, now)) continue;
+      if (!this.giftReady(item, now) || !this.conversationReady(item,now)) continue;
       if (higherPriority(item, best)) best = item;
       if (item.kind === 'gift' && earlier(item, oldestGift)) oldestGift = item;
       if ((item.kind === 'bot' || item.kind==='giveaway') && earlier(item, waitingBot)) waitingBot = item;
@@ -1126,7 +1141,7 @@ export class Engine {
           return;
         }
         if (output.trim() === '[SKIP]') { this.log('ai', 'AI 判断无需回复'); if (task.kind !== 'timer') fallback('AI 未生成回复'); }
-        else if (!this.enqueue(task.kind, output, {...task.extra,...(chatContext!==null ? {aiChat:{contextKey:chatContext,observedAt:now,replyMode:task.data.replyMode,facts:replyFacts}} : {})})) fallback('AI 回复未通过检查');
+        else if (!this.enqueue(task.kind, output, {...task.extra,...(chatContext!==null ? {aiChat:{contextKey:chatContext,observedAt:now,replyMode:task.data.replyMode,pacingMode:task.data.pacingMode || (task.data.replyMode==='direct' ? 'direct' : 'contextual'),userKey:turnViewerKey(event?.user),facts:replyFacts}} : {})})) fallback('AI 回复未通过检查');
       }
     } catch (error) { this.log('error', `AI 调用失败：${error.message}`); fallback('AI 调用失败'); }
     finally { clearTimeout(aiTimer); this.aiBusy = false; this.changed(); this.drainChatAI(); }
@@ -1250,8 +1265,11 @@ export class Engine {
     const delivery = this.config.mode === 'preview' ? null : this.deliveries.create(batch.text,batch.jobs,{id:this.config.selfId || this.selfIdentity?.id,secUid:this.selfIdentity?.secUid});
     if (delivery) this.inFlight.deliveryId = delivery.id;
     this.changed();
+    const sendScope=this.chatContextKey();let turnRecorded=false;
+    const recordTurn=()=>{if(!turnRecorded){this.turnTaking.record(q,sendScope,this.now());turnRecorded=true;}};
     const submitted = () => {
       const sentAt = this.now();
+      recordTurn();
       this.stats.maxQueueWaitMs = Math.max(this.stats.maxQueueWaitMs || 0, sentAt - Math.min(...batch.jobs.map(job => job.created)));
       if (q.kind === 'giveaway') this.lastGiveawaySend=sentAt;
       if (q.kind === 'bot') this.lastBotSend = sentAt;
@@ -1293,7 +1311,7 @@ export class Engine {
         if (this.epoch !== epoch) return;
         this.selfTexts.set(batch.text, now + 120000);
         const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.kind === 'giveaway' ? 'admin' : q.channel || 'chat';
-        const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
+        const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.conversationReady(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
           this.deliveries.clicked(delivery);
           try {
             await checkpointForSend(true);
@@ -1321,6 +1339,7 @@ export class Engine {
       if (this.epoch === epoch) {
         if(error.giveawayClaimed) {this.deliveries.finish(delivery,'cancelled',error.message);delivery.jobs=[];this.log('system',error.message);}
         else if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
+          recordTurn();
           this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知；不自动重发');
         } else {
           if (delivery) { this.deliveries.finish(delivery,'cancelled',error.message); delivery.jobs = []; }
@@ -1331,6 +1350,7 @@ export class Engine {
       }
     }
     finally {
+      if(delivery?.clickedAt && delivery.state!=='cancelled')recordTurn();
       if (delivery && this.epoch !== epoch && ['prepared','clicked'].includes(delivery.state)) {
         if (delivery.state === 'prepared') { this.deliveries.finish(delivery,'cancelled','点击前任务已取消'); delivery.jobs = []; }
         else this.deliveries.finish(delivery,'unknown','点击后运行中断；不自动重发');

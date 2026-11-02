@@ -79,7 +79,7 @@ test('抽奖口令优先报名并立即生成 @ 确认，不触发关键词或 A
     assert.equal(api.engine.queue.filter(row=>row.kind==='keyword').length,0);assert.equal(aiCalls,0);
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });
-test('应用入口在猜数字和 AI 聊天中优先登记抽奖，其他弹幕仍可正常触发 AI',async()=>{
+test('应用入口在猜数字和 AI 聊天中优先登记抽奖，其他点名弹幕仍可正常触发 AI',async()=>{
   const dom=page(),values=new Map();let api,onEvent;const prompts=[];
   boot({page:dom.window,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),
     adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true};},onReady:value=>{api=value;}});
@@ -96,7 +96,7 @@ test('应用入口在猜数字和 AI 聊天中优先登记抽奖，其他弹幕�
     engine.ai=prompt=>{prompts.push(prompt);return new Promise(()=>{});};
     await onEvent({type:'chat',id:'ai-entry',source:'socket',at:Date.now(),text:target,user:{id:'3',name:'小王'}});
     assert.equal(api.tools.state('giveaway').rounds[0].entrants.length,2);assert.equal(prompts.length,0);
-    await onEvent({type:'chat',id:'normal',source:'socket',at:Date.now(),text:'今天直播什么',user:{id:'4',name:'小陈'}});
+    await onEvent({type:'chat',id:'normal',source:'socket',at:Date.now(),text:'@场控 今天直播什么',user:{id:'4',name:'小陈'}});
     assert.equal(prompts.length,1);
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });

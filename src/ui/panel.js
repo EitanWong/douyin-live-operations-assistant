@@ -551,7 +551,7 @@ export class Panel {
     this.text('[data-summary=timers]', !get('timersEnabled').checked ? '定时消息已关闭。' : timers ? `已开启 ${timers} 组 · 间隔 ${intervals.map(value=>`${value} 秒`).join(' / ')} · ${activeTimerRows.some(row=>row.querySelector('[data-item=responseMode]')?.value === 'ai') ? '含 AI 生成组' : '预设话术'}。` : `${timerRows.length ? `共 ${timerRows.length} 组，` : ''}当前没有启用消息组。`);
     this.text('[data-feature-note=timers]', !get('timersEnabled').checked ? '已关闭' : timers ? `已启用 ${timers} 组消息` : '尚未配置消息组');
     this.text('[data-feature-note=ai-service]', aiReady ? 'AI 生成选项已开放' : '关闭时互动模块使用预设话术');
-    this.text('[data-feature-note=ai-chat]', get('ai.chatEnabled').checked ? (aiReady ? '按语境自动接话 · @账号直接对话' : '需先启用 AI 服务') : '不处理弹幕问答');
+    this.text('[data-feature-note=ai-chat]', get('ai.chatEnabled').checked ? (aiReady ? '按语境择机回应 · 发言节奏见 AI 设置' : '需先启用 AI 服务') : '不处理弹幕问答');
     this.text('[data-feature-note=ai-idle]', get('ai.idleEnabled').checked ? `无互动 ${get('ai.idleSec').value} 秒后依据现场线索接话` : '已关闭');
     this.text('[data-feature-note=moderation]', get('moderation.enabled').checked ? '敏感话题、辱骂与恶意言论分级处置' : '已关闭');
     this.text('[data-mode-note]', {preview:'仅预览，不会发送到直播间。AI 开启后仍会调用模型。',auto:'符合规则的回复会自动发送。'}[get('mode').value]);

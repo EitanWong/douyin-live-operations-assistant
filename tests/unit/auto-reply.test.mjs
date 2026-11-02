@@ -27,7 +27,7 @@ test('普通弹幕不限问句，由模型决定接话或静默；旧触发条�
   assert.ok(r.logs.some(item=>item.text==='AI 判断无需回复'));
   assert.equal(r.prompts[0].task.data.replyMode,'contextual');
   r.engine.ai=async prompt=>{r.prompts.push(prompt);return '点输入框旁的音量按钮试试。';};
-  r.chat('我一直找不到音量入口'); await settle();
+  r.advance(21000);r.chat('我一直找不到音量入口'); await settle();
   assert.equal(r.engine.queue[0].text,'点输入框旁的音量按钮试试。');
   assert.match(r.prompts[1].task.instruction,/问句不代表需要回复/);
 });
@@ -67,6 +67,8 @@ test('自动判断繁忙时合并待判断弹幕，@ 对话优先且菜单不受
   finish('[SKIP]');await settle();
   assert.equal(r.prompts[1].target.text,'@小助手 你好');
   finish('你好。');await settle();
+  assert.equal(r.prompts.length,2,'普通公屏判断应让出短暂空间，不紧跟点名对话');
+  r.advance(21000);await r.engine.tick(false);
   assert.equal(r.prompts[2].target.text,'第三条');
   assert.equal(r.prompts[2].context.length,5);
   assert.ok(r.prompts[2].recentReplies.includes('你好。'));
