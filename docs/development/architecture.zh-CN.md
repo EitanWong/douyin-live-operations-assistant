@@ -101,3 +101,13 @@ examples/                 可导入的示例配置
 - 模型识别为直播数据查询后携带结构化汇总事实版本；入队、排队及实际发送前复核，数值或状态变化后不再发送旧答案。
 
 协议依据、预算与验收边界见 [实施记录](../research/ai-realtime-implementation-2026-11-02.zh-CN.md)。WebRTC 结果由 VAD 触发，不代表固定窗口全覆盖；真实百炼与长时直播尚未验收。
+
+## 产品界面基础（2026-11-02）
+
+`ui/product` 使用 React 19、Mantine 9 和 TanStack Table 9。`bridge.js` 是渐进迁移边界：原 Panel/AISettings/AnchorDashboard 仍拥有唯一草稿、校验、领域数据和操作；桥只投影当前页的不可变视图快照，React 独占嵌套 Shadow Root 的 DOM。编辑派发一次原事件，操作调用一次原控件，筛选和导出继续走原领域数据。源控件在成功挂载后不可见且 inert，保留可测尺寸供旧图表控制器使用；加载/渲染失败恢复兼容界面。销毁释放订阅、React root 与图表。
+
+这是一层兼容迁移，并未删除字符串模板、WorkspaceLayout 或旧控制器，也未将全部配置交给 React/useForm。后续应按页面把视图模型从领域控制器直接输出，再删除对应 DOM 投影和旧布局代码；不再添加第三份状态。TanStack 当前承担表格列/行模型，源分页和排序仍按领域语义执行，没有启用全库排序或虚拟化。ECharts 接收原图表选项，在可见区拥有独立可交互实例；会增加少量图表实例开销。
+
+外观由 `appearance.js` 定义模式、配色和材质白名单；`theme.js` 统一读写、跨窗口同步和失败回滚。配色基于 Radix Colors 的 12 阶亮暗色板，原 Solid Glass 仍为默认。`theme-palette.js` 统一生成宿主和组件主题变量，不修改直播网页 document 的主题；Select 弹层限定在本 Shadow Root。布局使用浮动窗口的容器查询，不使用默认视口定位 AppShell。Liquid Glass 是 CSS 模糊、高光和半透明表面的可选材质，不声称复刻苹果系统渲染；支持减少透明度、强制颜色与不支持 backdrop-filter 的退化。
+
+AI pipeline 的 Zod schema 在配置边界解析一次并保留扩展字段，中文错误和字段路径供原表单与新界面共用。本轮没有替换音视频传输、RAG 检索、权限网关、发送队列或存储，没有凭普通模型 SDK 推定支持 Omni 实时。

@@ -2,7 +2,7 @@ import { installTheme } from './theme.js';
 import { validateSearchEndpoint } from './search.js';
 let tab;
 const status=document.querySelector('#status'),open=document.querySelector('#open'),endpoint=document.querySelector('#endpoint');
-installTheme({ target:document.documentElement, select:document.querySelector('[data-theme-choice]'), onError:message=>{ status.textContent=message; status.classList.add('error'); } });
+installTheme({ target:document.documentElement, select:document.querySelector('[data-theme-choice]'), paletteSelect:document.querySelector('[data-theme-palette]'), materialSelect:document.querySelector('[data-theme-material]'), onError:message=>{ status.textContent=message; status.classList.add('error'); } });
 open.disabled=true;
 void(async()=>{
   try { [tab]=await chrome.tabs.query({active:true,currentWindow:true}); }

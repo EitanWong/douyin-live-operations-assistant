@@ -1,3 +1,4 @@
+import {APPEARANCE_PREFERENCES} from '../src/ui/appearance.js';
 import {validateRealtimeEndpoint,validateSDP} from '../src/services/ai-pipeline.js';
 import { roomFromURL } from '../src/browser/room-context.js';
 import { accessPage } from './page-access.js';
@@ -34,8 +35,8 @@ const giftStore = new GiftStore({
   set: async (key, value) => writeRecord(key, value),
   all: readAll
 });
-const themeKey = 'douyin-live-assistant:theme';
-const themeValues = new Set(['system','light','dark']);
+const themeKey = APPEARANCE_PREFERENCES.theme.key;
+const themeValues = new Set(APPEARANCE_PREFERENCES.theme.values);
 const roomFromUrl = value => {
   try {
     const url = new URL(value);
@@ -170,6 +171,11 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       else if (message.type === 'theme-set' && (isRoom(sender) || extensionPage) && themeValues.has(message.value)) {
         await giftStore.transaction(() => writeRecord(themeKey,message.value)); value=true;
       }
+      else if (['appearance-get','appearance-set'].includes(message.type) && ['palette','material'].includes(message.kind) && (isRoom(sender) || extensionPage)) {
+        const preference=APPEARANCE_PREFERENCES[message.kind];
+        if(message.type==='appearance-get')value=await readRecord(preference.key) ?? preference.fallback;
+        else {if(!preference.values.includes(message.value))throw new Error('外观选项无效');await giftStore.transaction(()=>writeRecord(preference.key,message.value));value=true;}
+      }
       else if (message.type === 'set' && keyAllowed(message.key) && isRoom(sender)) {
         // Pending delivery state must not be truncated or rejected at the config limit.
         // Database failures retain the event journal for recovery.
@@ -275,7 +281,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
   return true;
 });
 async function notifyChanges(changes) {
-  const relevant = Object.fromEntries(Object.entries(changes).filter(([key]) => /^(live-assistant:(config|income|income-calibration|profile):\d+|douyin-live-assistant:theme)$/.test(key)));
+  const relevant = Object.fromEntries(Object.entries(changes).filter(([key]) => /^(live-assistant:(config|income|income-calibration|profile):\d+|douyin-live-assistant:(theme|palette|material))$/.test(key)));
   if (!Object.keys(relevant).length) return;
   // Delivery of change notifications must never turn a committed write into a failure.
   try {
@@ -286,8 +292,10 @@ async function notifyChanges(changes) {
       if (Object.keys(scoped).length) void chrome.tabs.sendMessage(tab.id,{type:'storage',changes:scoped}).catch(()=>{});
       if (Object.keys(relevant).some(key => /:(income|income-calibration|profile):/.test(key))) void chrome.tabs.sendMessage(tab.id,{type:'income-updated'}).catch(()=>{});
       if (relevant[themeKey]) void chrome.tabs.sendMessage(tab.id,{type:'theme-changed',value:relevant[themeKey].newValue}).catch(()=>{});
+      for(const kind of ['palette','material']){const change=relevant[APPEARANCE_PREFERENCES[kind].key];if(change)void chrome.tabs.sendMessage(tab.id,{type:'appearance-changed',kind,value:change.newValue}).catch(()=>{});}
     }
     if (changes[themeKey]) void chrome.runtime.sendMessage({type:'theme-changed',value:changes[themeKey].newValue}).catch(()=>{});
+    for(const kind of ['palette','material']){const change=relevant[APPEARANCE_PREFERENCES[kind].key];if(change)void chrome.runtime.sendMessage({type:'appearance-changed',kind,value:change.newValue}).catch(()=>{});}
   } catch {}
 }
 chrome.storage.onChanged.addListener(async(changes,area)=>{

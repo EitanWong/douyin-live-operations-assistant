@@ -43,10 +43,24 @@ const cosmokitLicense=await readFile(`${root}node_modules/cosmokit/LICENSE`,'utf
 const iconLicense=await readFile(`${root}vendor/lucide/LICENSE`,'utf8');
 let mediaLicense='';
 for(const name of ['mpegts.js/LICENSE','hls.js/LICENSE','es6-promise/LICENSE','events/LICENSE'])mediaLicense+=`${name}\n${await readFile(`${root}node_modules/${name}`,'utf8')}\n`;
+let productLicenses="";
+// Include runtime UI and validation dependencies, including transitive MIT code.
+const productPackages=['@radix-ui/colors','react','react-dom','scheduler','@mantine/core','@mantine/hooks','@tanstack/react-table','@tanstack/table-core','@tanstack/react-store','@tanstack/store','use-sync-external-store','@floating-ui/react','@floating-ui/react-dom','@floating-ui/dom','@floating-ui/core','@floating-ui/utils','clsx','react-number-format','react-remove-scroll','react-remove-scroll-bar','react-style-singleton','use-callback-ref','use-sidecar','get-nonce','detect-node-es','tabbable','zod'];
+for(const name of productPackages){
+  let license;for(const file of ['LICENSE','LICENSE.md','LICENSE.txt']){try{license=await readFile(`${root}node_modules/${name}/${file}`,'utf8');break;}catch(error){if(error.code!=='ENOENT')throw error;}}
+  if(!license && name==='react-remove-scroll-bar')license=await readFile(`${root}vendor/runtime-licenses/react-remove-scroll-bar/LICENSE`,'utf8');
+  if(!license)throw new Error(`Missing license for ${name}`);productLicenses+=`\n${name}\n${license}\n`;
+}
 const toolNotice=`/*! Cordis · MIT\n${cordisLicense}\nCosmokit · MIT\n${cosmokitLicense}\n*/`;
-const bundleNotice=`/*! Live stream decoders\n${mediaLicense}\n*/\n${toolNotice}\n/*! jsonrepair · ISC\n${intentLicense}\n*/\n/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
+const bundleNotice=`/*! Product UI foundations
+${productLicenses}
+*/
+/*! Live stream decoders\n${mediaLicense}\n*/\n${toolNotice}\n/*! jsonrepair · ISC\n${intentLicense}\n*/\n/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
 const toolBuild={entryPoints:[`${root}src/tools/cordis-adapter.js`],bundle:true,platform:'browser',minify:true,legalComments:'inline',target:'chrome111',banner:{js:toolNotice}};
 await mkdir(dist, { recursive: true });
+await build({entryPoints:[`${root}src/ui/theme-palette.js`],bundle:true,format:'esm',minify:true,target:'chrome111',outfile:`${dist}/theme-palettes.js`});
+await build({entryPoints:[`${root}src/ui/product/runtime.js`],bundle:true,format:'esm',minify:true,loader:{'.css':'text'},define:{'process.env.NODE_ENV':'"production"'},legalComments:'inline',target:'chrome111',outfile:`${dist}/product-ui.js`});
+await build({entryPoints:[`${root}src/services/ai-pipeline.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/ai-pipeline.js`});
 await build({entryPoints:[`${root}src/ui/live-charts.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/live-charts.js`});
 await build({entryPoints:[`${root}src/services/intent.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',banner:{js:`/*! jsonrepair · ISC\n${intentLicense}\n*/`},target:'chrome111',outfile:`${dist}/ai-intent.js`});
 await build({entryPoints:[`${root}src/services/live-stream-codecs.js`],bundle:true,format:'esm',minify:true,legalComments:'inline',banner:{js:`/*! Live stream decoders\n${mediaLicense}\n*/`},target:'chrome120',outfile:`${dist}/live-stream-codecs.js`});
@@ -59,7 +73,7 @@ await mkdir(ext, { recursive:true });
 for (const name of ['manifest.json','popup.html','popup.css','popup.js','durable-storage.js','protocol-cache.js']) await writeFile(`${ext}/${name}`,await readFile(`${root}extension/${name}`));
 const glassLicense = await readFile(`${root}vendor/solid-glass/LICENSE`, 'utf8');
 await writeFile(`${ext}/solid-glass.css`, `/* Solid Glass · https://github.com/deeplethe/solid-glass\n${glassLicense}\n*/\n${SOLID_GLASS_CSS}`);
-await writeFile(`${ext}/theme.js`, await readFile(`${root}src/ui/theme.js`));
+await build({entryPoints:[`${root}src/ui/theme.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/theme.js`});
 // AI 模块的源码相对依赖不属于扩展目录，必须一起打包供后台加载。
 await build({entryPoints:[`${root}src/services/ai.js`],bundle:true,format:'esm',target:'chrome120',banner:{js:`/*! jsonrepair · ISC\n${intentLicense}\n*/`},outfile:`${ext}/ai.js`});
 await build({entryPoints:[`${root}src/services/search.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/search.js`});
@@ -81,6 +95,7 @@ chartLicenses += `Lucide icon subset (vendor/lucide)\n${iconLicense}\n`;
 chartLicenses += `jsonrepair · ISC\n${intentLicense}\n`;
 chartLicenses += `Cordis 4.0.0-rc.12 (vendor/cordis)\n${cordisLicense}\nCosmokit\n${cosmokitLicense}\n`;
 chartLicenses+=mediaLicense;
+chartLicenses+=productLicenses;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 console.log('Built dist/chrome-extension (Manifest V3)');

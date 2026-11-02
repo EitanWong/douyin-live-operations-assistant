@@ -1,16 +1,23 @@
+import {z} from 'zod';
 // A preset is a projection, never a rewrite of the user's saved text connection.
 export const AI_PIPELINE_DEFAULTS={mode:'custom',region:'cn-beijing',workspaceId:'',realtimeModel:'qwen3.8-omni-flash-realtime',replyModel:'qwen3.8-omni-flash',visionModel:'qwen3-vl-plus',audioModel:'qwen3-asr-flash',contextBudgetChars:48000,sessionMinutes:30,sessionTokens:100000};
 export const AI_PIPELINE_MODES=[['custom','自定义 / 保留原有配置'],['text','仅文字模型'],['omni-llm','Omni 实时感知 + 现有文字模型回复'],['omni-only','Omni 实时感知 + Omni 回复'],['ali-split','阿里视觉 + 语音分段识别 + 现有文字模型回复']];
 const aliModes=['omni-llm','omni-only','ali-split'];
+const workspaceMessage='请填写百炼业务空间 ID（不是 API Key）';
+const modelSchema=z.string({error:'百炼模型名称无效'}).regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/u,{error:'百炼模型名称无效'});
+const integerSchema=(key,min,max)=>z.number({error:`AI ${key} 范围为 ${min}–${max}`}).int({error:`AI ${key} 范围为 ${min}–${max}`}).min(min,{error:`AI ${key} 范围为 ${min}–${max}`}).max(max,{error:`AI ${key} 范围为 ${min}–${max}`});
+export const pipelineSchema=z.object({
+  mode:z.enum(AI_PIPELINE_MODES.map(([mode])=>mode),{error:'AI 组合无效'}),
+  region:z.enum(['cn-beijing','ap-southeast-1'],{error:'百炼地域无效'}),
+  workspaceId:z.string({error:workspaceMessage}).refine(value=>!value || /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(value),{error:workspaceMessage}),
+  realtimeModel:modelSchema,replyModel:modelSchema,visionModel:modelSchema,audioModel:modelSchema,
+  contextBudgetChars:integerSchema('contextBudgetChars',16000,70000),sessionMinutes:integerSchema('sessionMinutes',1,60),sessionTokens:integerSchema('sessionTokens',1000,1000000)
+}).passthrough().superRefine((value,context)=>{if(aliModes.includes(value.mode) && !value.workspaceId)context.addIssue({code:'custom',path:['workspaceId'],message:workspaceMessage});});
 export function pipelineConfig(ai){return {...AI_PIPELINE_DEFAULTS,...ai?.pipeline};}
 export function validatePipeline(ai){
-  const p=pipelineConfig(ai);
-  if(!AI_PIPELINE_MODES.some(([mode])=>mode===p.mode))throw new Error('AI 组合无效');
-  if(!['cn-beijing','ap-southeast-1'].includes(p.region))throw new Error('百炼地域无效');
-  if(typeof p.workspaceId!=='string' || (p.workspaceId && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(p.workspaceId)) || aliModes.includes(p.mode) && !p.workspaceId)throw new Error('请填写百炼业务空间 ID（不是 API Key）');
-  for(const key of ['realtimeModel','replyModel','visionModel','audioModel'])if(typeof p[key]!=='string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$/u.test(p[key]))throw new Error('百炼模型名称无效');
-  for(const [key,min,max] of [['contextBudgetChars',16000,70000],['sessionMinutes',1,60],['sessionTokens',1000,1000000]])if(!Number.isInteger(p[key]) || p[key]<min || p[key]>max)throw new Error(`AI ${key} 范围为 ${min}–${max}`);
-  return p;
+  const result=pipelineSchema.safeParse(pipelineConfig(ai));
+  if(result.success)return result.data;
+  const issue=result.error.issues[0],error=new Error(issue.message);error.field=['ai','pipeline',...issue.path].join('.');throw error;
 }
 export function aliEndpoints(ai){
   const p=validatePipeline(ai);if(!p.workspaceId)throw new Error('请填写百炼业务空间 ID');

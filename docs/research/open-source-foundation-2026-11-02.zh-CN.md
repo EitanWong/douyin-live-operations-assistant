@@ -98,3 +98,13 @@
 快照中的部分最新版（WXT、p-queue、AI SDK 及 Alibaba provider）声明 Node >=22，而当前项目声明 Node >=20。选型不等于直接安装 latest；需锁定兼容版本或单独升级工具链，并核对选定版本的具体许可证、CSP、Shadow DOM、bundle 体积与运行时兼容性。Orama 的云服务、Web Awesome Pro、Stately 的托管服务等不属于这里建议安装的免费开源核心包。
 
 本文没有安装库、读取密钥、调用模型、修改数据库或重载 Chrome。没有运行 crapper、dryer、mutator；命令及当前工具目录均未提供这些检查。
+
+## 2026-11-02 接入决策与证据更新
+
+以上为最初调研；本轮已实际安装并使用 React/React DOM 19.3.1、Mantine Core/Hooks 9.7.4、TanStack React Table 9.3.1、Zod 4.6.7 和 Radix Colors 3.0.0，均锁定准确版本并保留许可证。React、Mantine、TanStack 和 Zod 的稳定版本发布日期分别为 2026-10-14、10-25、10-12、10-12，元数据未标记 deprecated。运行时 `npm audit --omit=dev` 本次返回 0 个已知漏洞，这不是无漏洞保证。
+
+npm 下载 API 的观测窗口为 2026-10-23 至 10-29：React 244728980、Mantine Core 3697688、TanStack React Table 33804945、Zod 442969207。下载量包含自动化与重复下载，只作为广泛使用信号，不等于独立用户数、稳定性排名或本项目性能证明。来源为 npm registry 与 api.npmjs.org，元数据、依赖树、测试和浏览器证据保存在 output/product-foundation-2026-11-02。
+
+配色选择 [Radix Colors](https://www.radix-ui.com/colors/docs/overview/usage)（MIT），采用官方 12 阶[语义用途](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale)，完整提供亮暗对应。它是静态色彩数据，3.0.0 发布于 2023-10-02；本次 npm 元数据 modified 为 2025-12-24，GitHub commits Atom 最近条目为 2025-12-17。不能将它表述为近期频繁发布的框架；选择理由是稳定的配对色板与清楚许可证，而不是追逐更新频率。31 套色板与原始配色共 32 项；偏浅文本色必要时上调至第 12 阶，普通文字/按钮前景对比度通过专项检查。Liquid Glass 作为自有可选 CSS 材质与色板正交组合，无需引入不成熟的液态玻璃运行时或外部远程脚本。
+
+实施边界：成熟库实际负责交互控件、主题、表格模型、图表和配置校验。当前 UI 用兼容桥迁移全部页面，旧控制器与模板尚在；不是已完成整仓 React 重写。数据表分页、排序、导出继续依赖原领域实现，未引入 Virtual、Dexie、XState、Orama、AI SDK 或 WXT。这样能先交付一致的控件和清楚的状态所有权，再按真实需求逐项替换底层，避免新旧框架重复承担同一职责。真实 Omni 服务、付费操作和长时间直播仍不由本轮 UI 验收证明。

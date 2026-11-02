@@ -33,3 +33,13 @@ test('阿里独立语音识别使用官方 ASR 消息格式，不附加通用生
   assert.equal((await recognize({kind:'audio',data:'UklGRiQAAABXQVZF',at:Date.now()},resolveMediaConfig(c.ai))).text,'欢迎来到直播间');
   assert.equal(sent.messages.length,1);assert.equal(sent.messages[0].content[0].input_audio.data,'data:audio/wav;base64,UklGRiQAAABXQVZF');assert.equal(sent.max_tokens,undefined);assert.doesNotThrow(()=>validateMediaRequest(sent));
 });
+
+test('配置边界提供带字段路径的校验结果，拒绝错误类型并保留扩展字段',async()=>{
+ const {pipelineSchema,AI_PIPELINE_DEFAULTS,validatePipeline}=await import('../../src/services/ai-pipeline.js');
+ assert.ok(pipelineSchema,'共享 schema 必须可供界面与导入入口复用');
+ const bad=pipelineSchema.safeParse({...AI_PIPELINE_DEFAULTS,sessionTokens:'1000'});assert.equal(bad.success,false);assert.deepEqual(bad.error.issues[0].path,['sessionTokens']);
+ const required=pipelineSchema.safeParse({...AI_PIPELINE_DEFAULTS,mode:'omni-only'});assert.equal(required.success,false);assert.deepEqual(required.error.issues[0].path,['workspaceId']);
+ assert.equal(validatePipeline({pipeline:{futureOption:'kept'}}).futureOption,'kept');
+ for(const value of [null,[],true,{},'bad/name'])assert.throws(()=>validatePipeline({pipeline:{replyModel:value}}),/百炼模型名称无效/);
+ for(const value of [NaN,Infinity,1000.5,999])assert.throws(()=>validatePipeline({pipeline:{sessionTokens:value}}),/AI sessionTokens 范围/);
+});

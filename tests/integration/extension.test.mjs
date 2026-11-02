@@ -993,3 +993,15 @@ test('构建后台独立交换百炼 WebRTC SDP，要求直播页、服务授权
   assert.equal((await w.send(message,{frameId:1,tab:{url:'https://live.douyin.com/1'}})).ok,false);assert.equal(w.requests.length,1);
   w.deny();assert.match((await w.send(message)).error,/授权/u);
 });
+
+test('配色与材质经同一后台白名单保存，直播页和弹窗共享，拒绝任意键和值',async()=>{
+ const w=await worker(),popup={url:'chrome-extension://test/popup.html'};
+ for(const [kind,initial,next] of [['palette','original','teal'],['material','glass','liquid']]){
+  assert.equal((await w.send({type:'appearance-get',kind})).value,initial);
+  assert.equal((await w.send({type:'appearance-set',kind,value:next},popup)).ok,true);
+  assert.equal((await w.send({type:'appearance-get',kind})).value,next);
+  assert.equal((await w.send({type:'appearance-set',kind,value:'bad'})).ok,false);
+ }
+ assert.equal((await w.send({type:'appearance-get',kind:'api-key'})).ok,false);
+ assert.equal((await w.send({type:'appearance-set',kind:'palette',value:'blue'},{frameId:0,tab:{url:'https://evil.example/'}})).ok,false);
+});
