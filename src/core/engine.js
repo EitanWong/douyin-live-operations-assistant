@@ -56,7 +56,7 @@ export const DEFAULTS = {
     enabled: false, chatEnabled: false, endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash',
     intervalSec: 0, userCooldownSec: 0,
     assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180, proactiveEnabled:false, proactiveIntervalSec:90,
-    persona: '你在直播间帮忙做简单招呼。说话简短、平常，欢迎或谢谢一句就够。把注意力留给主播，不主动找话题，不自称主持，不说帮忙转达或安排，没有必要就不插话。',
+    persona: '你是直播间里会聊天的场控。先听懂对方的意思，接着现场的话自然回应，有常识、有分寸，直接说重点，不端着、不用客服套话。轻松时可以有一点幽默，认真时说实在的；欢迎和答谢简短，聊天不机械套模板。不冒充主播，不编造经历或承诺，不抢话。',
     knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS
   },
   timers: [{ id: 'welcome', enabled: false, responseMode: 'rules', intervalSec: 300, start: '', end: '', quietSec: 15, messages: DEFAULT_TIMER_PHRASES }],
@@ -92,7 +92,7 @@ export function mergeConfig(input = {}, base = DEFAULTS) {
     for (const timer of result.timers) {
       if (LEGACY_TIMER_PHRASES.some(messages => same(timer.messages, messages))) timer.messages = copy(DEFAULT_TIMER_PHRASES);
     }
-    if (['你是直播间场控。用语自然、稍正式，简洁有礼、平和克制，直接回应具体内容。不冒充主播，不装熟，不煽情、不奉承，不夸大承诺。', '你是直播间的温和场控，语气自然、简短，不冒充主播，不夸大承诺。', '你是直播间帮忙招呼观众的场控。像平常聊天一样说话，短句为主，接着对方的话聊。不冒充主播，不装熟，不夸大承诺。'].includes(input.ai?.persona)) result.ai.persona = DEFAULTS.ai.persona;
+    if (['你在直播间帮忙做简单招呼。说话简短、平常，欢迎或谢谢一句就够。把注意力留给主播，不主动找话题，不自称主持，不说帮忙转达或安排，没有必要就不插话。', '你是直播间场控。用语自然、稍正式，简洁有礼、平和克制，直接回应具体内容。不冒充主播，不装熟，不煽情、不奉承，不夸大承诺。', '你是直播间的温和场控，语气自然、简短，不冒充主播，不夸大承诺。', '你是直播间帮忙招呼观众的场控。像平常聊天一样说话，短句为主，接着对方的话聊。不冒充主播，不装熟，不夸大承诺。'].includes(input.ai?.persona)) result.ai.persona = DEFAULTS.ai.persona;
   }
   // 为旧版仅含荣誉门槛的配置补齐灯牌条件，保留原有配置与基础欢迎下限。
   if (base === DEFAULTS && input.welcome?.admin?.minFanLevel === undefined) {
@@ -854,7 +854,7 @@ export class Engine {
       kind:'ai', data:{replyMode:pending.addressed ? 'direct' : 'contextual', addressedToOther:!pending.addressed && (Boolean(pending.event.mentions?.length) || /^\s*@/u.test(pending.event.text))},
       instruction:(pending.addressed
         ? '观众明确 @ 了当前登录场控账号，希望与你直接对话。结合目标弹幕、最近直播间聊天记录和 live_context 简短回应，不要求问句或呼叫词；普通招呼和闲聊也可回答。涉及主播安排等事实只用已核实资料，缺少资料时坦诚说明；仍跳过挑衅、不安全内容和完全相同的已回答请求。不要把普通聊天变成游戏或菜单。'
-        : '先根据目标弹幕、最近直播间聊天记录、recent_replies 和 live_context 判断此时是否有必要由场控接话，再决定回复。问句不代表需要回复；观众彼此聊天、反问、起哄、随口感叹、重复已答问题、等待主播回应或资料不足以提供帮助时，输出 [SKIP]。data.addressedToOther=true 表示提及了其他账号，优先视为对他人的话而保持安静。结合当前游戏、PK和互动节奏避免打断；有明确求助且能提供有用信息、或承接场控对话时才简短回复。非问句也可以需要回复。判断与回复在本次请求完成，只输出回复正文或 [SKIP]，不输出判断过程。')
+        : '先根据目标弹幕、最近直播间聊天记录、recent_replies 和 live_context 判断此时是否有必要由场控接话，再决定回复。问句不代表需要回复，反问、玩笑、感叹本身不是跳过理由；向场控接话、自然延续当前对话或能给出贴切帮助时可以简短回应，不能只因缺少主播资料就跳过常识或日常交流。观众彼此私聊、等待主播亲自回应、完全重复已答问题或接话没有帮助时输出 [SKIP]。data.addressedToOther=true 表示提及了其他账号，优先视为对他人的话而保持安静。结合当前游戏、PK和互动节奏避免打断，不为接话而硬接。判断与回复在本次请求完成，只输出回复正文或 [SKIP]，不输出判断过程。')
         + ' 观众询问主播直播数据时属于可回答的问题，按问题的本场、昨日、今日、本周、本月、本季、本年或累计范围读取 live_context，简短给出已采集的统计。明确查询但数据缺失或过期时说明尚未采集或当前无法确认，不编造数字；数据或统计范围变化后可以再次回答。'
     });
   }
