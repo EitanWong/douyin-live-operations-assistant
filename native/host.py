@@ -181,7 +181,10 @@ async def configure(ws, model):
                 await ws.send(json.dumps({'type': 'session.update', 'event_id': uuid.uuid4().hex, 'session': desired}))
             if event.get('type') == 'session.updated':
                 session = event.get('session', {})
-                if session.get('modalities') != ['text'] or 'turn_detection' not in session or session['turn_detection'] is not None or session.get('instructions') != INSTRUCTIONS:
+                # Alibaba omits nullable turn_detection in the acknowledgement.
+                # The acknowledged update explicitly requested manual turns;
+                # reject an explicit VAD override, allow an omitted/null field.
+                if session.get('modalities') != ['text'] or session.get('turn_detection') is not None or session.get('instructions') != INSTRUCTIONS:
                     raise ValueError('MODEL_FAILED')
                 return
 

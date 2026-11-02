@@ -95,6 +95,13 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
         ws = Socket()
         await configure(ws, 'qwen3.8-omni-flash-realtime')
         self.assertEqual([e['type'] for e in ws.sent], ['session.update'])
+        # Actual Alibaba session.updated omits the field when null disables VAD.
+        omitted = Socket()
+        del omitted.events[1]['session']['turn_detection']
+        await configure(omitted, 'qwen3.8-omni-flash-realtime')
+        vad = Socket()
+        vad.events[1]['session']['turn_detection'] = {'type':'server_vad'}
+        with self.assertRaises(ValueError): await configure(vad, 'qwen3.8-omni-flash-realtime')
         with self.assertRaises(ValueError): await configure(Socket(True), 'qwen3.8-omni-flash-realtime')
 
     async def test_continuous_silent_audio_commits_visual_turn_and_bounded_send(self):
