@@ -9,6 +9,8 @@
     "benchmark:runtime": "node --expose-gc scripts/benchmark-runtime.mjs",
     "check": "node scripts/check.mjs",
     "demo": "node scripts/serve.mjs",
+    "native:install": "node scripts/install-native.mjs",
+    "test:native": "python3 -m unittest discover -s native",
     "test:unit": "node --test tests/unit",
     "test:integration": "node --test tests/integration"
   },

@@ -42,3 +42,5 @@
 
 
 AI 新增规则来源、背景记忆和近实时音视频识别，配置与限制见 [AI 使用说明](guides/ai-context.zh-CN.md)。
+
+- [原生直播流实时感知：安装、Omni组合与故障处理](guides/native-perception.zh-CN.md)

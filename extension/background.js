@@ -1,3 +1,4 @@
+import {installNativePerceptionBridge} from './native-perception.js';
 import {createBackgroundAI} from './ai-background.js';
 import {APPEARANCE_PREFERENCES} from '../src/ui/appearance.js';
 import {validateRealtimeEndpoint,validateSDP} from '../src/services/ai-pipeline.js';
@@ -14,6 +15,7 @@ import { installCollectionKeeper } from './collection-keeper.js';
 import {parseGiveawayState} from '../src/core/giveaway.js';
 
 const collectionKeeper = installCollectionKeeper(chrome);
+installNativePerceptionBridge(chrome);
 
 const durableStorage = new DurableStorage({ local:chrome.storage.local });
 const storageReady = (async()=>{ await chrome.storage.local.setAccessLevel({ accessLevel:'TRUSTED_CONTEXTS' }); await durableStorage.migrate(); })();

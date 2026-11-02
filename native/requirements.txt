@@ -1,0 +1,2 @@
+streamget==4.0.10
+websockets==17.4

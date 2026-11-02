@@ -92,8 +92,8 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
 }
 
 export class LiveMediaAnalyzer {
-  constructor({capture=createDisplayCapture,realtimeCapture,recognize,onObservation=()=>{},onState=()=>{},onError=()=>{}}){
-    Object.assign(this,{capture,realtimeCapture,recognize,onObservation,onState,onError});this.skipped=0;this.errors=0;this.busy=new Map();this.failures=new Map();
+  constructor({capture=createDisplayCapture,realtimeCapture,nativeCapture,recognize,onObservation=()=>{},onState=()=>{},onError=()=>{}}){
+    Object.assign(this,{capture,realtimeCapture,nativeCapture,recognize,onObservation,onState,onError});this.skipped=0;this.errors=0;this.busy=new Map();this.failures=new Map();
     this.actor=createMediaSession(this);let previous=this.state;
     this.actor.subscribe(()=>{const current=this.state;if(current!==previous){previous=current;this.notify();}});
   }

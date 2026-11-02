@@ -81,7 +81,7 @@ async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{
 }
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
-  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
+  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
   for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
   const main=await readFile(file('page.js'),'utf8'); assert.doesNotMatch(main,/chrome\.storage|GM_getValue|api-key:|GM_xmlhttpRequest/);

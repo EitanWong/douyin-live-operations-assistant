@@ -14,7 +14,7 @@ export function createMediaSession(owner){
       onError:error=>{if(current())owner.error(error,'capture',session);},
       onSkip:()=>{if(current()){owner.skipped++;owner.notify();}}};
     try{
-      const factory=session.config.transport==='webrtc' ? owner.realtimeCapture : owner.capture;
+      const factory=session.config.inputSource==='native' ? owner.nativeCapture : session.config.transport==='webrtc' ? owner.realtimeCapture : owner.capture;
       if(!factory)throw new Error('实时识别服务未初始化');
       Promise.resolve(factory(options)).then(value=>{
         if(closed){value?.stop();return;}

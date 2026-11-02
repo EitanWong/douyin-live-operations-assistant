@@ -5,7 +5,7 @@ import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
 
 const fields=[['title','资料标题','text'],['content','背景正文','textarea'],['source','资料来源 / 确认人','text'],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 export class AISettings {
-  constructor(root,{dirty,start,stop,clear,forget,error}) {
+  constructor(root,{dirty,start,stop,clear,forget,error,checkNative}) {
     this.root=root;this.dirty=dirty;this.error=error;this.skills=[];
     root.querySelector('[data-skill-install]').addEventListener('click',()=>{try{const skill=validateSkillPack(JSON.parse(root.querySelector('[data-skill-json]').value));if(this.skills.length>=8 && !this.skills.some(s=>s.id===skill.id))throw new Error('自定义技能最多8个');this.skills=this.skills.filter(s=>s.id!==skill.id).concat(skill);this.showSkills();dirty();}catch(reason){error(reason);}});
     const navigation=root.querySelector('.ai-section-tabs');
@@ -39,6 +39,11 @@ export class AISettings {
       try {Promise.resolve(start()).catch(error);}catch(reason){error(reason);}
     });
     root.querySelector('[data-media-stop]').addEventListener('click',()=>stop());
+    root.querySelector('[data-native-check]').addEventListener('click',async event=>{
+      const button=event.currentTarget;button.disabled=true;this.showError('');
+      const status=this.root.querySelector('[data-native-status]');status.textContent='正在检查本地组件…';
+      try{status.textContent=await checkNative();}catch(reason){status.textContent=reason.message;}finally{button.disabled=false;}
+    });
     root.querySelector('[data-media-clear]').addEventListener('click',()=>clear());
     for(const button of root.querySelectorAll('[data-media-forget]'))button.addEventListener('click',()=>{void Promise.resolve(forget(button.dataset.mediaForget)).catch(error);});
     for(const kind of ['vision','audio'])root.querySelector(`[data-field="ai.media.${kind}Endpoint"]`).addEventListener('input',()=>{root.querySelector(`[data-media-key="${kind}"]`).value='';});
@@ -73,9 +78,10 @@ export class AISettings {
     this.syncMedia();
   }
   syncSource(){
-    const direct=this.root.querySelector('[data-field="ai.media.inputSource"]').value!=='display';
-    this.root.querySelector('[data-media-start]').textContent=direct ? '直接拉流并开始识别' : '选择直播标签页并开始识别';
-    this.root.querySelector('[data-source-help]').textContent=direct ? '自动读取当前直播间原始 FLV / HLS 流并在本机解码，无需选择共享窗口。需流支持 H264/AAC 和跨域读取；失败会提示，不自动改用屏幕共享。' : '请选择直播标签页并勾选“同时分享标签页音频”。仅在你选择此方式后才会请求共享。';
+    const source=this.root.querySelector('[data-field="ai.media.inputSource"]').value,direct=source!=='display';
+    this.root.querySelector('[data-native-install]').hidden=source!=='native';
+    this.root.querySelector('[data-media-start]').textContent=source==='native' ? '原生拉流并开始感知' : direct ? '直接拉流并开始识别' : '选择直播标签页并开始识别';
+    this.root.querySelector('[data-source-help]').textContent=source==='native' ? 'StreamGet 获取当前房间 CDN 地址，FFmpeg 在本地解码音画，通过 WebSocket 交给 Omni。支持有界重连和静音画面观察；不会自动改用录屏。首次使用请展开安装说明。' : direct ? '自动读取当前直播间原始 FLV / HLS 流并在本机解码，无需选择共享窗口。需流支持 H264/AAC 和跨域读取；失败会提示，不自动改用屏幕共享。' : '请选择直播标签页并勾选“同时分享标签页音频”。仅在你选择此方式后才会请求共享。';
   }
   syncMedia(){
     this.syncSource();
@@ -122,10 +128,13 @@ export class AISettings {
     return validateMemory(memory);
   }
   credentials(){return Object.fromEntries(['vision','audio','pipeline'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
-  state({state,skipped=0,errors=0,totalTokens,lastFinalAt}){
+  state({state,skipped=0,errors=0,totalTokens,lastFinalAt,phase}){
+    this.mediaPhase=state==='idle' ? undefined : phase || this.mediaPhase;phase=this.mediaPhase;
     this.root.querySelector('[data-media-start]').disabled=state!=='idle';this.root.querySelector('[data-media-stop]').disabled=state==='idle';
     const direct=this.root.querySelector('[data-field="ai.media.inputSource"]').value!=='display';
     this.root.querySelector('[data-media-status]').textContent=`${({idle:'识别已停止',starting:direct ? '正在获取原始流或等待服务配置确认' : '正在选择直播标签页或等待服务配置确认',running:direct ? '正在识别原始直播流' : '正在持续识别所选共享内容'})[state]} · 忙时跳过 ${skipped} 次 · 失败 ${errors} 次${totalTokens!==undefined ? ` · 已用 ${totalTokens} token` : ''}${lastFinalAt ? ` · 最近完成 ${new Date(lastFinalAt).toLocaleTimeString('zh-CN')}` : ''}`;
+    const phases={resolving:'正在解析当前房间 CDN 地址',connecting:'正在连接 Omni 并确认配置',decoding:'正在等待原始流音频与画面',observing:'音画已接入 Omni，等待或接收观察结果',recovering:'直播流中断，正在刷新地址并重连'};
+    if(phase && phases[phase])this.root.querySelector('[data-media-status]').textContent=`${phases[phase]}${totalTokens!==undefined ? ` · 已用 ${totalTokens} token` : ''}`;
     if(state==='starting')this.showError('');
   }
   showError(message){const target=this.root.querySelector('[data-media-error]');target.textContent=message;target.hidden=!message;}

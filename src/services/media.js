@@ -11,7 +11,8 @@ export const MEDIA_DEFAULTS = {
 export const MEDIA_REQUEST_LIMIT=1500000;
 
 export function validateMediaConfig(config,ready=false) {
-  if(config.inputSource!==undefined && !['direct','display'].includes(config.inputSource))throw new Error('直播感知输入来源无效');
+  if(config.inputSource!==undefined && !['native','direct','display'].includes(config.inputSource))throw new Error('直播感知输入来源无效');
+  if(ready && config.inputSource==='native' && config.transport!=='webrtc')throw new Error('本地原生感知请选择“Omni 实时感知 + 文字模型”或“Omni 实时感知 + Omni 回复”组合');
   if(config?.transport!==undefined && !['sampled','webrtc'].includes(config.transport))throw new Error('音视频传输方式无效');
   if(config?.transport==='webrtc'){
     validateRealtimeEndpoint(config.realtimeEndpoint);
@@ -105,11 +106,11 @@ export class MediaEvidence {
     if(previous && previous.receivedAt>=receivedAt)return;
     this.rows=this.rows.filter(value=>value.id!==id);
     this.rows.push({id,kind:row.kind,...(row.kind==='video' ? {frameCount:Number.isInteger(row.frameCount) && row.frameCount>=1 && row.frameCount<=3 ? row.frameCount : 1} : {}),at:row.at,endedAt,receivedAt,text:row.text.slice(0,1800),source:'model-recognition',isFinal:true,
-      model:typeof row.model==='string' ? row.model.slice(0,200) : null,transport:['chat-completions','webrtc'].includes(row.transport) ? row.transport : null,inputSource:row.inputSource==='direct' ? 'direct' : 'display'});
+      model:typeof row.model==='string' ? row.model.slice(0,200) : null,transport:['chat-completions','webrtc','websocket'].includes(row.transport) ? row.transport : null,inputSource:['native','direct'].includes(row.inputSource) ? row.inputSource : 'display'});
     this.rows=this.rows.sort((a,b)=>a.at-b.at || a.endedAt-b.endedAt || a.id.localeCompare(b.id)).slice(-12);
   }
   context(ageSec){
     const now=this.now(),rows=this.rows.filter(row=>now-row.at<=ageSec*1000);const latest=kind=>{const row=rows.filter(r=>r.kind===kind).at(-1);return row ? {...row,ageMs:now-row.endedAt} : null;};
-    return {coverage:!rows.length ? 'no-current-observation' : rows.some(row=>row.inputSource==='direct') ? (rows.some(row=>row.transport==='webrtc') ? 'realtime-vad-direct-stream' : 'sampled-direct-stream') : (rows.some(row=>row.transport==='webrtc') ? 'realtime-vad-shared-media' : 'sampled-shared-media'),at:now,observations:rows.map(row=>({...row})),scene:{visual:latest('video'),speech:latest('audio'),multimodal:latest('omni'),policy:'sampled model observations; never proof of identity, intent or unobserved activity'}};
+    return {coverage:!rows.length ? 'no-current-observation' : rows.some(row=>row.inputSource==='native') ? 'realtime-native-stream' : rows.some(row=>row.inputSource==='direct') ? (rows.some(row=>row.transport==='webrtc') ? 'realtime-vad-direct-stream' : 'sampled-direct-stream') : (rows.some(row=>row.transport==='webrtc') ? 'realtime-vad-shared-media' : 'sampled-shared-media'),at:now,observations:rows.map(row=>({...row})),scene:{visual:latest('video'),speech:latest('audio'),multimodal:latest('omni'),policy:'sampled model observations; never proof of identity, intent or unobserved activity'}};
   }
 }

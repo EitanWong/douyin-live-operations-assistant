@@ -14,6 +14,7 @@ export const AI_SETTINGS_CSS=`
 .ai-test-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;margin:4px 0 18px}.ai-test-row .hint{margin:0;flex:1;min-width:180px}
 .ai-tag{font-size:10px;font-weight:400;color:var(--muted);margin-left:6px}.ai-empty{font-size:12px;color:var(--muted);line-height:1.8;padding:18px;border:1px dashed var(--line);border-radius:12px}
 .ai-service-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:0 16px;align-items:start}.ai-media-switches{display:flex;flex-wrap:wrap;gap:0 18px}
+.native-install-command{display:block;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:12px}
 @container ai-settings (min-width:760px){.ai-service-grid:has(>[data-text-service]:not([hidden])):has(>[data-pipeline-ali]:not([hidden])){grid-template-columns:repeat(2,minmax(0,1fr))}.ai-service-grid:has(>[data-text-service]:not([hidden])):has(>[data-pipeline-ali]:not([hidden])) .grid{grid-template-columns:minmax(0,1fr)}}
 @container ai-settings (max-width:440px){.ai-card .grid{grid-template-columns:minmax(0,1fr)}.ai-section-tabs{gap:2px}.ai-section-tabs button{padding-inline:3px;font-size:11px}.ai-key-actions{align-items:flex-start}.ai-card{overflow-wrap:anywhere}}
 `;

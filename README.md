@@ -68,3 +68,5 @@ npm run dev
 
 
 AI 新增规则来源、背景记忆和近实时音视频识别，配置与限制见 [AI 使用说明](docs/guides/ai-context.zh-CN.md)。
+
+原生直播感知：支持 StreamGet → FFmpeg → 百炼 Omni WebSocket，直接分析当前房间的原始音视频，接入现有直播上下文与回复模型。需一次安装本地组件（macOS/Linux Chrome）；详见[安装与使用](docs/guides/native-perception.zh-CN.md)。

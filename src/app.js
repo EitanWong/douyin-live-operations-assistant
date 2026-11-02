@@ -3,6 +3,7 @@ import {AIWorkbench} from './ui/ai-workbench.js';
 import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
+import {createNativeCapture,checkNativeComponent} from './browser/native-perception.js';
 import { RoomContext } from './browser/room-context.js';
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
 import { matchesGiveawayChat } from './core/giveaway.js';
@@ -247,7 +248,7 @@ export function boot(options = {}) {
   const exchange=createSDPExchange({request,getKey:mediaKey});
   const realtimeCapture=createRealtimeCapture({exchange,env:window,sourceFactory:directSource});
   const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config)},window)),
-    realtimeCapture:options.realtimeCapture || realtimeCapture,recognize:recognizeMedia,
+    realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room}),recognize:recognizeMedia,
     onObservation:row=>{mediaEvidence.add(row);panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
@@ -554,6 +555,7 @@ export function boot(options = {}) {
         const started=media.start(activeMediaConfig);
         try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
       },
+      checkNative:()=>checkNativeComponent(options.nativeConnect),
       stopMedia:()=>media.stop(),clearMedia,
       forgetMediaKey:async(kind,endpoint)=>{const name=mediaSecretKey(endpoint);media.stop();await del(name);sessionKeys.delete(name);for(const input of panel.root.querySelectorAll('[data-media-key]'))input.value='';panel.toast('此服务的音视频密钥已清除；同域普通AI密钥需在服务连接中清除');},
       hasAIKey: (endpoint,omni=false) => Boolean(omni ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
@@ -734,6 +736,8 @@ export function boot(options = {}) {
       submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
       list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
     }});
+    const installCommand=panel.root.querySelector('[data-native-install-command]');
+    if(installCommand && /^[a-p]{32}$/u.test(options.nativeExtensionId || ''))installCommand.textContent=`npm run native:install -- --extension-id=${options.nativeExtensionId}`;
     options.onReady?.({ engine, panel, adapter, tools,media, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });
