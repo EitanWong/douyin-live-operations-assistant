@@ -661,3 +661,13 @@ crapper、dryer、mutator 不可用，未执行相应检查；真实直播现场
 交付回执：全页面统一卡片网格与消息区提交 `64eabc3` 已推送 `origin/dev`；远端 `refs/heads/dev` 与本地核对一致。工作区与独立版本的浏览器验收、测试、构建和检查日志保留在 output/ui-system-2026-11-02。
 
 最终验收与清理：最终 CSS 修复后两套 build/check 再次通过；独立版本 6 个实现/测试文件与提交字节一致，另外 37 个已有跟踪文件差异保持不变。回执暂存误带入已有文档草稿后，以 `e3e3682` 恢复草稿边界，工作区草稿保留。临时验收页已关闭，4192/4193 无监听进程，独立副本 node_modules 已回收；截图和备份保留。Chrome 本轮更新受 Mac 锁屏阻塞，已生成新版 dist/chrome-extension，但未完成重载；此前用户要求的上一轮更新已重载成功。crapper、dryer、mutator 均不可用，未执行。
+
+## 2026-11-02：扩展 UI 与底层开源选型调研
+
+| 执行动作 | 原因 | 验证结果 / 未完成项 |
+| --- | --- | --- |
+| 读取现有架构、依赖、构建、UI 容器与本地 RAG，并复核此前布局调研 | 使推荐对应现有 Shadow DOM、Chrome/油猴双输出和业务边界 | 发现模板、DOM 后处理、多套 CSS 共同控制页面；无越界不能证明信息架构合理 |
+| 并发读取官方文档、README 与 npm 元数据，保存来源快照 | 核实组件、协议支持和许可证，避免只提供项目名 | 已核对 Mantine、Lit/Web Awesome、TanStack、Zod、Dexie、XState、Orama、AI SDK、WXT 和验证工具；GitHub API 元数据限流，未据此声称活跃度排名 |
+| 比较两条 UI 主路线，评估重复实现替换点和渐进迁移边界 | 减少重复造轮子，同时保留已验证的业务能力 | 推荐 React+Mantine 为单一 UI 体系，Lit+Web Awesome 为替代；明确 AppShell 视口定位、Portal/Shadow DOM、Node 版本、免费/Pro 边界，以及 Omni 实时不能由普通 SDK 支持推定 |
+| 记录五类页面模板、完整工作台入口与验收标准 | 组件库需与明确的信息架构共同改善体验 | 报告位于 docs/research/open-source-foundation-2026-11-02.zh-CN.md；本次未安装依赖、未改业务代码、未使用真实密钥、未重载 Chrome |
+| 检查文档差异并仅提交报告及本条日志 | 保护已有未提交开发与日志草稿 | 文档任务未运行代码测试，不将文档检查视为功能测试；crapper、dryer、mutator 命令及当前工具均不可用，未执行；最终提交和推送回执见完成报告 |
