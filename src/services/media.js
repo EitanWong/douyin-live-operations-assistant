@@ -3,7 +3,7 @@ import {validateEndpoint} from './ai.js';
 import {requestJSON} from './search.js';
 
 export const MEDIA_DEFAULTS = {
-  videoEnabled:false,audioEnabled:false,omniEnabled:false,transport:'sampled',inputSource:'direct',
+  autoStart:true,videoEnabled:false,audioEnabled:false,omniEnabled:false,transport:'sampled',inputSource:'direct',
   visionEndpoint:'https://api.openai.com/v1/chat/completions',visionModel:'',
   audioEndpoint:'https://api.openai.com/v1/chat/completions',audioModel:'',
   videoIntervalSec:12,audioIntervalSec:8,maxPerHour:120,contextAgeSec:60
@@ -11,6 +11,7 @@ export const MEDIA_DEFAULTS = {
 export const MEDIA_REQUEST_LIMIT=1500000;
 
 export function validateMediaConfig(config,ready=false) {
+  if(config.autoStart!==undefined && typeof config.autoStart!=='boolean')throw new Error('自动感知开关无效');
   if(config.inputSource!==undefined && !['native','direct','display'].includes(config.inputSource))throw new Error('直播感知输入来源无效');
   if(ready && config.inputSource==='native' && config.transport!=='webrtc')throw new Error('本地原生感知请选择“Omni 实时感知 + 文字模型”或“Omni 实时感知 + Omni 回复”组合');
   if(config?.transport!==undefined && !['sampled','webrtc'].includes(config.transport))throw new Error('音视频传输方式无效');

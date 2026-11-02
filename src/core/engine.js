@@ -1,3 +1,4 @@
+import {freshObservations,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
 import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
 import { IDIOM_GAME_DEFAULTS } from './idiom-game.js';
@@ -54,7 +55,7 @@ export const DEFAULTS = {
   ai: {
     enabled: false, chatEnabled: false, endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash',
     intervalSec: 0, userCooldownSec: 0,
-    assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180,
+    assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180, proactiveEnabled:false, proactiveIntervalSec:90,
     persona: '你在直播间帮忙做简单招呼。说话简短、平常，欢迎或谢谢一句就够。把注意力留给主播，不主动找话题，不自称主持，不说帮忙转达或安排，没有必要就不插话。',
     knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS
   },
@@ -156,6 +157,8 @@ export function validateConfig(c) {
   range(c.ai.intervalSec, 0, 3600, 'AI 间隔'); range(c.ai.userCooldownSec, 0, 86400, 'AI 用户冷却');
   range(c.ai.contextSize, 1, 100, '上下文条数'); range(c.ai.contextAgeSec, 10, 600, '上下文有效秒数');
   range(c.ai.maxPerHour, 1, 36000, 'AI 每小时调用上限'); range(c.ai.idleSec, 60, 3600, '冷场秒数');
+  if(typeof c.ai.proactiveEnabled!=='boolean')throw new Error('主动互动开关无效');
+  range(c.ai.proactiveIntervalSec,30,3600,'主动互动间隔');
   range(c.ai.temperature, 0, 2, 'AI 温度');
   validateMemory(c.ai.memory);validateAssistant(c.ai.assistant);
   validateMediaConfig(c.ai.media);
@@ -249,7 +252,7 @@ export class Engine {
     this.calls = []; this.running = false; this.epoch = 0; this.serial = 0;
     this.chatAIQueue = []; this.chatAIBackground = null; this.replyEvents = [];
     this.contextChat = []; this.liveData = liveData;this.mediaContext=mediaContext;
-    this.lastChat = now(); this.lastInteraction = now(); this.lastAI = -Infinity; this.aiBusy = false; this.busy = false;
+    this.lastChat = now(); this.lastInteraction = now(); this.lastAI = -Infinity; this.lastProactiveAt=-Infinity; this.lastProactiveScene=''; this.interactionRevision=0; this.aiBusy = false; this.busy = false;
     this.timerDue = new Map(); this.rotation = new Map(); this.selfTexts = new Map(); this.selfIdentity = null; this.giftStyleSerial = 0;
     this.moderation = new Moderation(this, manage);
     this.lastMaintenance = -Infinity;
@@ -386,7 +389,7 @@ export class Engine {
     const canonical = profile ? {...milestone,name:profile.name} : milestone;
     if (!this.acceptMilestone(canonical)) return;
     const text = milestoneThankYou(canonical,profile ? audienceAddress(profile,this.now()) : canonical.name);
-    this.lastInteraction = this.now(); this.enqueue('milestone',text);
+    this.lastInteraction = this.now(); this.interactionRevision++; this.enqueue('milestone',text);
   }
   observeMilestoneSession(event) {
     const roomId = event.source === 'socket' && ['chat','gift','start'].includes(event.type) ? String(event.roomId || '') : '';
@@ -454,7 +457,7 @@ export class Engine {
     const resuming = Boolean(this.resumeRequested);
     this.running = true; this.resumeRequested = false; this.epoch++;
     for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
-    if (!resuming) { this.lastChat = this.now(); this.lastInteraction = this.now(); this.timerDue.clear(); }
+    if (!resuming) { this.lastChat = this.now(); this.lastInteraction = this.now(); this.interactionRevision++; this.timerDue.clear(); }
     this.log('system', resuming ? '场控已从上次状态恢复' : '场控已开始'); this.changed();
   }
   stop(reason = '已暂停', { preserveWork = false } = {}) {
@@ -685,7 +688,7 @@ export class Engine {
       const decision = welcomeDecision(u, this.config);
       if (!decision.pass) this.filtered(`${u.name}：${decision.reason}`);
       else {
-        this.lastInteraction = now;
+        this.lastInteraction = now; this.interactionRevision++;
         const club = (u.fanClubs || []).find(c => c.anchorId === this.config.anchorId);
         const fallback = renderAudienceTemplate(this.choose('welcome', this.config.welcome.templates), u, { level: u.wealthLevel ?? '?', fanLevel: club?.level ?? '?' }, now);
         const extra = { channel: this.welcomeChannel(u), welcomeUser: copy(u) };
@@ -760,7 +763,7 @@ export class Engine {
         this.queueMilestone(milestone);
         return;
       }
-      this.lastChat = now; this.lastInteraction = now;
+      this.lastChat = now; this.lastInteraction = now; this.interactionRevision++;
       this.history.push({ name: u.name.slice(0, 40), text: String(event.text).slice(0, 300), at: now });
       const contextAge = this.config.ai.contextAgeSec * 1000;
       while (this.history.length && (now - this.history[0].at > contextAge || this.history.length > this.config.ai.contextSize)) this.history.shift();
@@ -800,9 +803,31 @@ export class Engine {
     return JSON.stringify([this.config.anchorId,broadcast?.anchorId===this.config.anchorId ? broadcast.roomId : this.liveMode.roomId,this.liveMode.endedAt]);
   }
   validChatReply(job) {
+    if(job.aiProactive && !this.validProactive(job.aiProactive))return false;
     const reply=job.aiChat, ai=this.config.ai;
     return !reply || (!reply.facts || reply.facts===liveFactFingerprint(this.aiContext().liveContext)) && reply.contextKey===this.chatContextKey() && this.now()-reply.observedAt<45000 && ai.enabled
       && (reply.replyMode==='direct' ? ai.chatEnabled || this.config.bot.enabled : ai.chatEnabled);
+  }
+  validProactive(reply) {
+    const now=this.now(),ai=this.config.ai;
+    const enabled=reply.mode==='scene' ? ai.proactiveEnabled : ai.idleEnabled && ai.chatEnabled;
+    return this.running && ai.enabled && enabled && reply.epoch===this.epoch && reply.contextKey===this.chatContextKey()
+      && now-reply.created>=0 && now-reply.created<=30000 && reply.lastChat===this.lastChat && reply.lastInteraction===this.lastInteraction && reply.interactionRevision===this.interactionRevision
+      && freshObservations(this.mediaContext(this.config),now).some(row=>observationKey(row)===reply.evidenceKey);
+  }
+  requestProactive(now) {
+    const ai=this.config.ai,quiet=now-Math.max(this.lastChat,this.lastInteraction);
+    const mode=proactiveMode(ai,quiet);
+    if(!mode || this.aiBusy || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
+      || now-this.lastAI<ai.intervalSec*1000 || now-this.lastProactiveAt<ai.proactiveIntervalSec*1000
+      || this.calls.filter(at=>now-at<3600000).length>=ai.maxPerHour)return false;
+    const row=freshObservations(this.mediaContext(this.config),now)[0];
+    if(!row || sceneKey(row)===this.lastProactiveScene)return false;
+    const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row)};
+    this.lastProactiveAt=now;this.lastProactiveScene=sceneKey(row);
+    void this.requestAI(null,{kind:'ai',data:{proactive:true,interactionMode:mode},extra:{aiProactive:reply},
+      instruction:'这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。只选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
+    return true;
   }
   requestChatAI(event, addressed) {
     const pending = {event:copy(event), addressed, at:this.now(), epoch:this.epoch, contextKey:this.chatContextKey()};
@@ -835,7 +860,7 @@ export class Engine {
   }
   recordLike(event) {
     const user = event.user, config = this.config.like;
-    this.lastInteraction = this.now();
+    this.lastInteraction = this.now(); this.interactionRevision++;
     const fallback = renderAudienceTemplate(this.choose('like', config.templates), user, {count:event.count || 1},this.now());
     if (config.responseMode === 'ai') {
       void this.requestAI({ type: 'like', user }, {
@@ -894,7 +919,7 @@ export class Engine {
       const maxWindowMs = Math.min(g.mergeSec * 1000, 3000);
       state.due = state.ended ? now : Math.min(now + quietMs, state.pendingSince + maxWindowMs);
     }
-    this.gifts.set(key, state); this.lastInteraction = now;
+    this.gifts.set(key, state); this.lastInteraction = now; this.interactionRevision++;
     // 内存回收只能移除已入队的结算记录，不能删掉队列满时仍在等待感谢的礼物。
     if (this.gifts.size > 5000) {
       for (const [oldKey, old] of this.gifts) {
@@ -1039,7 +1064,7 @@ export class Engine {
   }
   async requestAI(event = null, task = { kind: 'ai', instruction: '只简短回答目标弹幕中需要回答的问题，没有必要回复时输出 [SKIP]，不主动发起话题。' }) {
     const a = this.config.ai, now = this.now(), epoch = this.epoch;
-    const proactiveCurrent=()=>!task.data?.proactive || this.config.ai.idleEnabled && this.config.ai.chatEnabled && this.now()-now<=30000 && this.now()-this.lastChat>=this.config.ai.idleSec*1000;
+    const proactiveCurrent=()=>!task.data?.proactive || Boolean(task.extra?.aiProactive && this.validProactive(task.extra.aiProactive));
     const chatContext=task.kind==='ai' && task.data?.replyMode ? this.chatContextKey() : null;
     const currentJob = () => task.targetJob && this.queue.includes(task.targetJob) && task.targetJob.revision === task.revision && task.targetJob.aiPending;
     const fallback = reason => {
@@ -1065,7 +1090,7 @@ export class Engine {
     };
     let replyFacts=null;prompt.onLiveFacts=value=>{replyFacts=value;};
     prompt.reserveFollowup=()=>{
-      if(!this.running || epoch!==this.epoch || chatContext!==null && chatContext!==this.chatContextKey())return false;
+      if(!this.running || epoch!==this.epoch || !proactiveCurrent() || chatContext!==null && chatContext!==this.chatContextKey())return false;
       this.calls=this.calls.filter(at=>this.now()-at<3600000);
       if(this.calls.length>=this.config.ai.maxPerHour)return false;
       this.lastAI=this.now();this.calls.push(this.lastAI);this.stats.aiCalls++;return true;
@@ -1173,9 +1198,7 @@ export class Engine {
       if (t.responseMode === 'ai') void this.requestAI(null, { kind: 'timer', instruction: '保留本次参考话术的原意，只写一句简短提醒。默认只欢迎大家、轻轻提醒喜欢可以关注，不发起话题，不征集问题或点歌，不说替大家转达。现场正在聊天、近期已有类似招呼或没有必要插话时输出 [SKIP]。', data: { intervalSec: t.intervalSec, reference: fallback }, fallback });
       else this.enqueue('timer', fallback);
     }
-    if (this.config.ai.enabled && this.config.ai.chatEnabled && this.config.ai.idleEnabled && (this.mediaContext(this.config)?.observations || []).some(row=>Number.isFinite(row.endedAt ?? row.at) && now-(row.endedAt ?? row.at)>=0 && now-(row.endedAt ?? row.at)<=30000) && now - this.lastChat >= this.config.ai.idleSec * 1000 && now - this.lastInteraction >= this.config.ai.idleSec * 1000) {
-      this.lastInteraction = now; stateChanged = true; void this.requestAI(null, { kind: 'ai', data:{proactive:true}, instruction: '这是用户已开启的冷场自然互动。仅在最近30秒内有有效音画线索或明确本场话题时，可像观众一样自然补充一句或问主播一个贴合内容的小问题；不用全场号召，不催关注消费，不声称自己是真人或有线下经历。不确定、正在争执、刚回答过类似内容、没有新线索时输出 [SKIP]。' });
-    }
+    stateChanged=this.requestProactive(now) || stateChanged;
     return stateChanged;
   }
 

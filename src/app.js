@@ -239,7 +239,7 @@ export function boot(options = {}) {
   const request = options.request || (details => GM_xmlhttpRequest(details));
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
   const mediaSecretKey=endpoint=>`live-assistant:media-key:${new URL(validateEndpoint(endpoint)).origin}`;
-  let activeMediaConfig=resolveMediaConfig(config.ai),mediaAnchor=config.anchorId;
+  let activeMediaConfig=resolveMediaConfig(config.ai),mediaAnchor=config.anchorId,mediaAttemptKey='';
   const mediaEvidence=new MediaEvidence();
   const mediaKey=endpoint=>(sessionKeys.get(mediaSecretKey(endpoint)) ?? get(mediaSecretKey(endpoint),'')) || (sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''));
   const recognizeMedia=createMediaClient({request,getKey:mediaKey});
@@ -453,6 +453,30 @@ export function boot(options = {}) {
     for(const [name,value] of keys)sessionKeys.set(name,value.key);
     return async()=>{for(const [name,value] of keys)if(value.remember)await set(name,value.key);else await del(name);};
   }
+  const mediaRunKey=()=>JSON.stringify([engine.epoch,engine.config.anchorId,resolveMediaConfig(engine.config.ai)]);
+  async function startMedia(c,credentials){
+    mediaAttemptKey=mediaRunKey();
+    if(media.state!=='idle')return;
+    if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
+    const effective=resolveMediaConfig(c.ai);validateMediaConfig(effective,true);const persistKeys=prepareMediaKeys(c,credentials);
+    for(const kind of ['vision','audio'])if(!(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
+    activeMediaConfig=copy(effective);mediaAnchor=engine.config.anchorId;clearMedia();
+    const started=media.start(activeMediaConfig);
+    try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
+  }
+  function syncMedia(){
+    if(demo || closed || suspended || persistenceDisabled || !engine.running || !engine.config.ai.enabled || !roomContext.current() || engine.liveMode.endedAt)return;
+    const effective=resolveMediaConfig(engine.config.ai);
+    if(!effective.autoStart || effective.inputSource==='display' || !effective.videoEnabled && !effective.audioEnabled)return;
+    const key=mediaRunKey();
+    if(key===mediaAttemptKey || media.state!=='idle')return;
+    // One attempt per run/config: completion, errors and budget limits stay stopped.
+    mediaAttemptKey=key;
+    void startMedia(engine.config,{}).catch(error=>{
+      if(key!==mediaAttemptKey || closed || suspended || !engine.running)return;
+      panel?.aiSettings.showError(error.message);log('ai',`自动音画感知未启动：${error.message}；检查后可手动重试`);
+    });
+  }
   function download(name, content) {
     const url = URL.createObjectURL(new Blob([content], { type: 'application/json;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -488,6 +512,7 @@ export function boot(options = {}) {
       }
       if (!roomContext.current()) { lock.release(); throw new Error('直播间已切换，请刷新页面'); }
       engine.start();
+      syncMedia();
       if (options.journal && adapter.replayJournal) void adapter.replayJournal().catch(error => reportPersistenceError(error, '恢复事件日志失败'));
       autoStartError = '';
       return true;
@@ -543,21 +568,14 @@ export function boot(options = {}) {
         await prepareMediaKeys(c,mediaCredentials)();
         if (c.identity.autoAnchor && identity.anchor) c.anchorId = identity.anchor.id;
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
-        if(c.anchorId!==mediaAnchor || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(activeMediaConfig))media.stop();
+        if(c.ai.enabled!==engine.config.ai.enabled || c.anchorId!==mediaAnchor || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(activeMediaConfig) || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(resolveMediaConfig(engine.config.ai))){media.stop();mediaAttemptKey='';}
         await set(configKey, c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
       },
-      startMedia:async(c,credentials)=>{
-        if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
-        const effective=resolveMediaConfig(c.ai);validateMediaConfig(effective,true);const persistKeys=prepareMediaKeys(c,credentials);
-        for(const kind of ['vision','audio'])if(!(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
-        activeMediaConfig=copy(effective);mediaAnchor=engine.config.anchorId;clearMedia();
-        const started=media.start(activeMediaConfig);
-        try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
-      },
+      startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
-      stopMedia:()=>media.stop(),clearMedia,
+      stopMedia:()=>{mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
       forgetMediaKey:async(kind,endpoint)=>{const name=mediaSecretKey(endpoint);media.stop();await del(name);sessionKeys.delete(name);for(const input of panel.root.querySelectorAll('[data-media-key]'))input.value='';panel.toast('此服务的音视频密钥已清除；同域普通AI密钥需在服务连接中清除');},
       hasAIKey: (endpoint,omni=false) => Boolean(omni ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
       generatePhrases: async (c, key, remember, options,mediaCredentials) => {
@@ -688,6 +706,7 @@ export function boot(options = {}) {
       if ((engine.pk.current()?.phase === 'active' || panel.activeTab === 'pk') && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
       void tryAutoStart();
+      syncMedia();
       if (persistenceDisabled) return;
       const waiting = engine.running && !demo && engine.config.mode !== 'preview' && !adapter.healthy();
       if (waiting !== waitingForConnection) { waitingForConnection = waiting; if (engine.running) log('system', waiting ? '直播数据重连中，暂缓发送；连接恢复后继续' : '直播数据连接已恢复，继续场控'); }
