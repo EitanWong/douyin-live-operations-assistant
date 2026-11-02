@@ -1,5 +1,6 @@
 import {TurnTaking,conversational,jobTurn,turnViewerKey} from '../ai/turn-taking.js';
-import {freshObservations,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
+import {HOST_SPEECH_INSTRUCTION} from '../ai/conversation-policy.js';
+import {freshObservations,liveMoment,awaitingVisual,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
 import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
 import { IDIOM_GAME_DEFAULTS } from './idiom-game.js';
@@ -20,7 +21,7 @@ import { milestoneThankYou, recognizeMilestone } from './milestones.js';
 import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplate, validAudienceAI } from './audience.js';
 import { AnchorStats } from './anchor-stats.js';
 import { audienceReplyContext, giftReplyContext, isIntrusiveReply, liveReplyContext, observedReplyEvent } from './reply-context.js';
-import {AI_PIPELINE_DEFAULTS,validatePipeline} from '../services/ai-pipeline.js';
+import {AI_PIPELINE_DEFAULTS,validatePipeline,resolveMediaConfig} from '../services/ai-pipeline.js';
 
 export { recognizeMilestone };
 
@@ -816,25 +817,34 @@ export class Engine {
       && (reply.replyMode==='direct' ? ai.chatEnabled || this.config.bot.enabled : ai.chatEnabled);
   }
   validProactive(reply) {
-    const now=this.now(),ai=this.config.ai;
-    const enabled=(reply.mode==='scene' ? ai.proactiveEnabled : ai.idleEnabled && ai.chatEnabled) && this.turnTaking.canSpeak(this.turnInput('proactive',now));
+    const now=this.now(),ai=this.config.ai,speech=reply.mode==='speech';
+    const enabled=(reply.mode==='idle' ? ai.idleEnabled && ai.chatEnabled : ai.proactiveEnabled) && this.turnTaking.canSpeak(this.turnInput(speech ? 'speech' : 'proactive',now));
+    const media=this.mediaContext(this.config),currentSpeech=liveMoment(media,now).speech;
     return this.running && ai.enabled && enabled && reply.epoch===this.epoch && reply.contextKey===this.chatContextKey()
       && now-reply.created>=0 && now-reply.created<=30000 && reply.lastChat===this.lastChat && reply.lastInteraction===this.lastInteraction && reply.interactionRevision===this.interactionRevision
-      && freshObservations(this.mediaContext(this.config),now).some(row=>observationKey(row)===reply.evidenceKey);
+      && (!speech || currentSpeech && sceneKey(currentSpeech)===reply.speechKey)
+      && freshObservations(media,now).some(row=>observationKey(row)===reply.evidenceKey);
+  }
+  proactiveCandidate(now) {
+    const ai=this.config.ai,moment=liveMoment(this.mediaContext(this.config),now),speech=moment.speech;
+    if(ai.proactiveEnabled && awaitingVisual(moment,now,resolveMediaConfig(ai).videoEnabled))return null;
+    if(ai.proactiveEnabled && speech && this.turnTaking.canAssess({...this.turnInput('speech',now),key:sceneKey(speech)}))return {mode:'speech',row:speech};
+    const mode=proactiveMode(ai,now-Math.max(this.lastChat,this.lastInteraction));
+    if(!mode || !this.turnTaking.canSpeak(this.turnInput('proactive',now)) || now-this.lastProactiveAt<ai.proactiveIntervalSec*1000)return null;
+    const row=moment.visual || (mode==='idle' ? speech : null);
+    return row && sceneKey(row)!==this.lastProactiveScene ? {mode,row} : null;
   }
   requestProactive(now) {
-    const ai=this.config.ai,quiet=now-Math.max(this.lastChat,this.lastInteraction);
-    const mode=proactiveMode(ai,quiet);
-    if(!this.turnTaking.canSpeak(this.turnInput('proactive',now)))return false;
-    if(!mode || this.aiBusy || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
-      || now-this.lastAI<ai.intervalSec*1000 || now-this.lastProactiveAt<ai.proactiveIntervalSec*1000
-      || this.calls.filter(at=>now-at<3600000).length>=ai.maxPerHour)return false;
-    const row=freshObservations(this.mediaContext(this.config),now)[0];
-    if(!row || sceneKey(row)===this.lastProactiveScene)return false;
-    const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row)};
-    this.lastProactiveAt=now;this.lastProactiveScene=sceneKey(row);
-    void this.requestAI(null,{kind:'ai',data:{proactive:true,interactionMode:mode,engagement:this.turnTaking.context(this.turnInput('proactive',now))},extra:{aiProactive:reply},
-      instruction:'这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。默认旁听，不因看见一个动作或每段识别就起话题。主播在讲解、唱歌、回应别人、关键PK或严肃表达时不打断。只有主播向公屏抛出问题或确有值得回应的新变化，才选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
+    const ai=this.config.ai;
+    if(!ai.enabled || this.aiBusy || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
+      || now-this.lastAI<ai.intervalSec*1000 || this.calls.filter(at=>now-at<3600000).length>=ai.maxPerHour)return false;
+    const candidate=this.proactiveCandidate(now);if(!candidate)return false;
+    const {mode,row}=candidate,speech=mode==='speech',pacingMode=speech ? 'speech' : 'proactive';
+    const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row),...(speech ? {speechKey:sceneKey(row)} : {})};
+    if(speech)this.turnTaking.assessed(reply.contextKey,now,'speech',reply.speechKey);
+    else {this.lastProactiveAt=now;this.lastProactiveScene=sceneKey(row);}
+    void this.requestAI(speech ? {type:'speech',text:row.text} : null,{kind:'ai',data:{proactive:true,interactionMode:mode,engagement:this.turnTaking.context(this.turnInput(pacingMode,now))},extra:{aiProactive:reply},
+      instruction:speech ? HOST_SPEECH_INSTRUCTION : '这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。默认旁听，不因看见一个动作或每段识别就起话题。主播在讲解、唱歌、回应别人、关键PK或严肃表达时不打断。只有主播向公屏抛出问题或确有值得回应的新变化，才选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
     return true;
   }
   requestChatAI(event, addressed) {
@@ -1100,7 +1110,7 @@ export class Engine {
     this.aiBusy = true; this.lastAI = now; this.calls.push(now); this.stats.aiCalls++;
     const prompt = {
       persona: a.persona, knowledge: a.knowledge, ...this.aiContext(),
-      target: event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user) : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
+      target: event?.type==='speech' ? {type:'speech',text:event.text,source:'live-audio',speaker:'unverified'} : event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user) : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
     let replyFacts=null;prompt.onLiveFacts=value=>{replyFacts=value;};

@@ -16,7 +16,7 @@ export function aiDiagnostics({config,context,mediaState,memoryCount,knownGaps,n
   `观众记忆：${ai.assistant.memoryEnabled ? '开启' : '关闭'} · 已存 ${memoryCount} 位；只记录来源可靠、身份明确的近期互动。`,
   mediaState==='running' ? `直播感知：已接入 · ${observations ? `完成观察 ${observations}` : '等待模型完成观察'}；仅使用当前主播仍有效的观察。` : `直播感知：${mediaState==='starting' ? '正在启动，尚未确认完成观察' : '未开启'}。`,
   `接话策略：${frequency}；先按语境判断对话归属，再受实际发言节奏约束。持续感知不代表持续发言。`,
-  `自动感知：${ai.media.autoStart ? '随 AI 场控开启（手动共享需点击）' : '关闭'}；内容互动：${ai.replyFrequency==='mentions' ? '仅回应 @ 模式下静默' : ai.proactiveEnabled ? `开启 · 最短间隔 ${Math.max(profile.proactiveGap/1000,ai.proactiveIntervalSec)} 秒` : '关闭'}；冷场互动：${ai.idleEnabled && ai.chatEnabled ? '开启' : '关闭'}。`,
+  `自动感知：${ai.media.autoStart ? '随 AI 场控开启（手动共享需点击）' : '关闭'}；内容互动：${ai.replyFrequency==='mentions' ? '仅回应 @ 模式下静默' : ai.proactiveEnabled ? `开启 · 完成语音择机回应（判断至少隔20秒）；另起话题最短间隔 ${Math.max(profile.proactiveGap/1000,ai.proactiveIntervalSec)} 秒` : '关闭'}；冷场互动：${ai.idleEnabled && ai.chatEnabled ? '开启' : '关闭'}。`,
   `采集完整性：已知缺口 ${knownGaps}（事件或帧）；现场数据是本机采集的部分记录，不能当作平台完整账单。`
  ];
 }

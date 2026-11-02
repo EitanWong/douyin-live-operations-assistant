@@ -92,3 +92,18 @@ test('自定义直连感知也随AI运行自动采样，演示环境不会自动
     await f.api.panel.callbacks.start();await settle();assert.equal(f.opened,0);assert.equal(f.api.media.state,'idle');
   },{boot:{demo:true}});
 });
+
+test('原生语音与画面完成后自动判断主播接话，不需要弹幕、不等待冷场且不重复回应',async()=>fixture(async f=>{
+ f.config.ai.proactiveEnabled=true;f.config.ai.chatEnabled=false;await f.save(f.config);
+ const prompts=[];f.api.engine.ai=async p=>{prompts.push(p);return '蓝色和这个花纹挺搭的。';};
+ await f.api.panel.callbacks.start();await wait(()=>f.api.media.state==='running');const at=Date.now();
+ f.source.onObservation({kind:'audio',id:'partial',at,endedAt:at,text:'大家觉得',isFinal:false,inputSource:'native'});
+ await new Promise(setImmediate);assert.equal(prompts.length,0);
+ f.source.onObservation({kind:'omni',id:'picture',at,endedAt:at,text:'主播拿着蓝色和绿色两个杯子。',inputSource:'native'});
+ f.source.onObservation({kind:'audio',id:'question',at,endedAt:at,text:'大家觉得蓝色还是绿色好看？',inputSource:'native'});
+ await wait(()=>f.api.engine.stats.previews===1);assert.equal(prompts.length,1);assert.equal(prompts[0].target.type,'speech');assert.equal(prompts[0].target.text,'大家觉得蓝色还是绿色好看？');
+ assert.ok(prompts[0].mediaContext.observations.some(row=>row.text.includes('两个杯子')));
+ f.source.onObservation({kind:'audio',id:'same-question',at:Date.now(),endedAt:Date.now(),text:'大家觉得蓝色还是绿色好看？',inputSource:'native'});
+ await settle();assert.equal(prompts.length,1);assert.equal(f.api.engine.stats.previews,1);assert.equal(f.opened,1);
+ f.api.stop('暂停');assert.equal(f.closed,1);
+}));
