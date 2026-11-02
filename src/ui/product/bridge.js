@@ -1,5 +1,7 @@
 // Transitional boundary: the controller owns drafts and actions; React owns
 // presentation. Only the active page is projected, never a second config store.
+import {describeLayout,isTransparentLayout,layoutChildren} from './layout.js';
+
 const ignored = 'STYLE,SCRIPT,OPTION,SUMMARY,TEMPLATE'.split(',');
 const containers = 'DIV,SECTION,ARTICLE,MAIN,HEADER,FOOTER,FORM,FIELDSET,LABEL,NAV,UL,OL,LI,DL,DT,DD'.split(',');
 const cleanText = node => node?.textContent.replace(/\s+/gu, ' ').trim() || '';
@@ -13,7 +15,7 @@ export function createWorkspaceBridge(panel) {
     if(!ids.has(node)){const key=`control-${++serial}`;ids.set(node,key);nodes.set(key,node);}
     return ids.get(node);
   }
-  function children(node) { return [...node.childNodes].map(project).filter(Boolean); }
+  function children(node) { return [...node.childNodes].flatMap(child=>child.nodeType===1 && shown(child) && isTransparentLayout(child) ? children(child) : [project(child)]).filter(Boolean); }
   function field(input,wrapper=input) {
     const label=wrapper.querySelector(':scope>span') || wrapper.querySelector('.feature-title');
     const textNodes=[...wrapper.childNodes].filter(n=>n.nodeType===3).map(n=>n.textContent).join(' ').trim();
@@ -43,14 +45,15 @@ export function createWorkspaceBridge(panel) {
     if(chartName){const owner=node.hasAttribute('data-pk-chart') ? panel.charts : panel.anchorDashboard?.charts,chart=owner?.instances.get(chartName);if(chart)return {kind:'chart',id:id(node),option:chart.getOption(),label:node.getAttribute('aria-label')};}
     if(node.tagName==='BUTTON')return {kind:'button',id:id(node),text:cleanText(node) || node.getAttribute('aria-label'),label:node.getAttribute('aria-label'),disabled:node.disabled,busy:node.getAttribute('aria-busy')==='true',selected:node.getAttribute('aria-pressed')==='true' || node.getAttribute('aria-selected')==='true',primary:node.matches('.primary'),danger:node.matches('.danger'),icon:node.querySelector('svg')?.outerHTML};
     if(node.tagName==='TABLE')return table(node);
-    if(node.tagName==='DETAILS')return {kind:'details',id:id(node),open:node.open,title:cleanText(node.querySelector(':scope>summary')),children:children(node)};
+    if(node.tagName==='DETAILS')return {kind:'details',id:id(node),...describeLayout(node),open:node.open,title:cleanText(node.querySelector(':scope>summary')),children:children(node)};
     if(node.localName==='svg')return {kind:'svg',id:id(node),html:node.outerHTML,label:node.getAttribute('aria-label')};
     if(node.tagName==='A')return /^https?:/u.test(node.href) ? {kind:'link',id:id(node),text:cleanText(node),href:node.href} : {kind:'text',text:cleanText(node)};
     if(node.tagName==='IMG')return {kind:'image',id:id(node),src:node.src,alt:node.alt};
     if(node.tagName==='BR')return {kind:'break'};
     const content=children(node);if(!content.length)return null;
     const classes=[node.className?.baseVal ?? node.className,node.dataset.aiSection ? `product-ai-${node.dataset.aiSection}` : '',node.hasAttribute('data-workspace-contents') ? 'workspace-contents' : ''].filter(Boolean).join(' ');
-    return {kind:'group',id:id(node),layout:node.matches('.workspace-grid') && ['ai','appearance','runtime','profiles','moderation'].includes(panel.activeTab) ? 'settings' : null,tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:content,label:node.getAttribute('aria-label')};
+    const layout=describeLayout(node);
+    return {kind:'group',id:id(node),...layout,tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
   }
   function collect() {
     // Drop removed controls, including retired dynamic list rows.
@@ -60,7 +63,7 @@ export function createWorkspaceBridge(panel) {
     const toolbar=[...(root.querySelector('[data-workspace-toolbar] .foot')?.children || [])].filter(shown).flatMap(n=>n.matches('button,small') ? [project(n)] : children(n)).filter(Boolean);
     const subviews=[...root.querySelectorAll('[data-workspace-views] button')].filter(n=>available(n)).map(project);
     return {key,title:nav.find(n=>n.key===key)?.label || cleanText(page?.querySelector('h2')),nav,toolbar,subviews,sidebar:{side:panel.navigation?.side || 'left',collapsed:Boolean(panel.navigation?.collapsed),toggle:project(root.querySelector('[data-sidebar-toggle]'))},
-      content:page ? {kind:'group',id:id(page),tag:'div',classes:'product-page',children:children(page)} : null,
+      content:page ? {kind:'group',id:id(page),layout:'stack',tag:'div',classes:'product-page',children:children(page)} : null,
       messages:[...(root.querySelector('.workspace-message-list')?.children || [])].filter(shown).map(node=>({...project(node),error:node.classList.contains('error')})).filter(Boolean),status:[...(root.querySelector('.shell-status')?.children || [])].map(cleanText).join(' · '),theme:panel.host.dataset.theme || 'system',palette:panel.host.dataset.palette || 'original',material:panel.host.dataset.material || 'glass',focus};
   }
   function refresh() {
@@ -69,7 +72,7 @@ export function createWorkspaceBridge(panel) {
     signature=value;snapshot=next;for(const listener of listeners)listener();
   }
   const observer=new view.MutationObserver(records=>{const invalid=records.find(r=>r.attributeName==='aria-invalid' && r.target.getAttribute('aria-invalid')==='true');if(invalid)focus={id:id(invalid.target),serial:++focusSerial};refresh();});
-  observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','class']});
+  observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','open','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','class']});
   const themeObserver=new view.MutationObserver(refresh);themeObserver.observe(panel.host,{attributes:true,attributeFilter:['data-theme','data-palette','data-material']});
   root.addEventListener('input',refresh);root.addEventListener('change',refresh);
   refresh();
@@ -80,6 +83,7 @@ export function createWorkspaceBridge(panel) {
       node.dispatchEvent(new view.Event(node.tagName==='SELECT' || ['checkbox','date','month','time','color','range'].includes(node.type) ? 'change' : 'input',{bubbles:true}));refresh();return true;},
     activate(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node) || node.disabled)return false;node.click();refresh();return true;},
     toggle(key,open){const node=nodes.get(key);if(!node || !root.contains(node) || node.tagName!=='DETAILS')return false;node.open=open;refresh();return true;},
+    reveal(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node))return false;for(let parent=node;parent && parent!==root;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;refresh();return true;},
     navigate(key){if(!snapshot.nav.some(n=>n.key===key))return;panel.tab(key);refresh();},
     destroy(){destroyed=true;observer.disconnect();themeObserver.disconnect();root.removeEventListener('input',refresh);root.removeEventListener('change',refresh);listeners.clear();nodes.clear();}
   };

@@ -49,12 +49,43 @@ test('展开诊断详情沿用原 toggle 处理器，日志加载后进入可见
  }finally{f.close();}
 });
 
+test('分区跳转先打开祖先折叠区，隐藏页面的目标不能被打开',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page="ai"]');page.innerHTML='<details><summary>更多分析</summary><details><summary>高级</summary><h3>上下文预算</h3><input value="draft"></details></details>';f.bridge.refresh();
+  const target=f.bridge.getSnapshot().content.children[0].children[0].children[0];
+  assert.equal(f.bridge.reveal(target.id),true);assert.ok([...page.querySelectorAll('details')].every(n=>n.open));
+  f.bridge.navigate('anchor');assert.equal(f.bridge.reveal(target.id),false);assert.equal(page.querySelector('input').value,'draft');
+ }finally{f.close();}
+});
+
 test('成熟界面接管后暂停旧布局，渲染失败恢复兼容布局且保留草稿',async()=>{
  const {mountProductPanel}=await import('../../src/ui/product/mount.js');const f=setup();let mounted,fail;const states=[];
  try{
-  f.dom.window.CSS={supports:()=>true};f.panel.workspaceLayout={grid:{setSuspended:value=>states.push(value)}};f.panel.toast=()=>{};
+  const adaptive=[];f.dom.window.CSS={supports:()=>true};f.panel.workspaceLayout={grid:{setSuspended:value=>states.push(value)}};f.panel.adaptive={setSuspended:value=>adaptive.push(value)};f.panel.toast=()=>{};
   const panelElement=f.dom.window.document.createElement('div');panelElement.className='panel';f.root.append(panelElement);panelElement.append(f.root.querySelector('.workspace'));
   mounted=mountProductPanel(f.panel,{load:async()=>({mountProductWorkspace({onReady,onError}){fail=onError;onReady();return {destroy(){}};}})});
-  await mounted.ready;assert.equal(states.at(-1),true);fail();assert.equal(states.at(-1),false);assert.equal(f.root.querySelector('input').value,'qwen-plus');
+  await mounted.ready;assert.equal(states.at(-1),true);assert.equal(adaptive.at(-1),true);fail();assert.equal(states.at(-1),false);assert.equal(adaptive.at(-1),false);assert.equal(f.root.querySelector('input').value,'qwen-plus');
  }finally{mounted?.destroy();f.close();}
+});
+
+test('布局边界展开透明包装，卡片/字段/操作区各有唯一语义且保留草稿顺序',()=>{
+ const f=setup();try{
+  f.root.querySelector('[data-page="ai"]').innerHTML='<div class="ai-settings"><div class="workspace-grid" data-ai-section="models" role="tabpanel" aria-label="连接与模型"><section class="ai-card"><h3>组合</h3><select aria-label="组合"><option>文字</option></select></section><div class="ai-service-grid" data-workspace-contents><section class="ai-card"><h3>回复</h3><div class="grid"><label><span>服务</span><input value="draft"></label><div data-ai-modes="custom"><label><span>提示词</span><textarea>保留内容</textarea></label></div></div></section><section class="ai-card" hidden><h3>不可见服务</h3></section></div><div data-ai-modes="custom"><section class="ai-card"><h3>感知</h3></section></div><div class="ai-test-row"><button>测试</button><p>连接说明</p></div></div></div>';
+  f.bridge.refresh();const section=f.bridge.getSnapshot().content.children[0];
+  assert.equal(section.layout,'cards');assert.equal(section.role,'tabpanel');assert.equal(section.label,'连接与模型');
+  assert.deepEqual(section.children.map(n=>n.children[0]?.children?.[0]?.text || n.children[0]?.text),['组合','回复','感知','测试']);
+  assert.equal(section.children[0].span,'full');assert.equal(section.children[1].surface,'card');
+  const fields=section.children[1].children[1];assert.equal(fields.layout,'fields');assert.deepEqual(fields.children.map(n=>n.value),['draft','保留内容']);assert.equal(fields.children[1].span,'full');
+  assert.equal(section.children[3].layout,'row');assert.equal(section.children[3].span,'full');
+  const field=fields.children[0];f.bridge.change(field.id,'仍可编辑');assert.equal(f.root.querySelector('input').value,'仍可编辑');
+  assert.doesNotMatch(JSON.stringify(section),/不可见服务|workspace-contents|ai-service-grid/);
+ }finally{f.close();}
+});
+
+test('单张配置卡片之后的高级折叠区跨整行，不再因兼容卡片类名预留空列',()=>{
+ const f=setup();try{
+  f.root.querySelector('[data-page="ai"]').innerHTML='<div class="workspace-grid"><section class="settings-group workspace-card"><h3>参与设置</h3><input value="draft"></section><details class="advanced workspace-card"><summary>定位</summary><input value="xpath"></details><details class="workspace-card"><summary>工具管理</summary><button>停用</button></details></div>';
+  f.bridge.refresh();const [config,...advanced]=f.bridge.getSnapshot().content.children[0].children;
+  assert.equal(config.span,undefined);assert.deepEqual(advanced.map(node=>node.span),['full','full']);
+ }finally{f.close();}
 });

@@ -32,13 +32,17 @@ export class AdaptiveLayout {
     this.apply();
   }
   apply() {
-    if (!this.mode || this.destroyed) return;
+    if (!this.mode || this.destroyed || this.suspended) return;
     for (const detail of this.details) {
       const open = this.choices.get(detail)?.[this.mode] ?? this.mode === 'wide';
       // Never remove the field or link the user is currently using.
       if (!open && detail.contains(this.root.activeElement) && this.root.activeElement !== detail.querySelector('summary')) continue;
       detail.open = open;
     }
+  }
+  setSuspended(value) {
+    this.suspended=Boolean(value);
+    if(!this.suspended)this.apply();
   }
   destroy() {
     this.destroyed = true;

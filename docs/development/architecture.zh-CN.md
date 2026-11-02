@@ -127,3 +127,9 @@ Chrome 后台的 DurableStorage 使用 Dexie 事务，保持原生数据库版�
 `ai/audience-memory.js` 管理主播范围内、30天/100位观众的有界事实；同名不合并，礼物累计去重，删除水位阻止旧事件恢复。目标记忆以不含UID/secUID的形式注入回复，用户可查看、纠正和删除。`ai/skills.js` 仅解析声明式提示包，不执行代码。公开网页提取使用linkedom worker + Readability，只读取明确链接的已授权文字，不分析主页视频或进行跨平台身份匹配。
 
 `services/retrieval.js` 的lru-cache缓存MiniSearch派生索引，完整资料元数据变化会失效；实时答案不缓存。媒体上下文区分最新语音、顺序视觉采样和音画联合观察，显示覆盖与年龄。冷场任务要求新鲜现场线索，出现新弹幕或关闭开关后丢弃迟到结果。详见[实施记录](../research/agent-harness-memory-2026-11-02.zh-CN.md)。
+
+## 2026-11-02 布局契约补充
+
+可见工作台的结构决策集中在 `src/ui/product/layout.js`：cards / fields / metrics 使用 Mantine 容器 SimpleGrid，stack / row 使用 Stack / Group；卡片表面和跨行语义独立。兼容桥先过滤不可见节点、展开纯布局包装，再生成快照。可见层不再以源类名重复声明网格或 display:contents。只有一个布局控制者，新界面就绪时暂停 WorkspaceGrid 与 AdaptiveLayout，失败回退时恢复。
+
+分类统一使用 Mantine Tabs；折叠状态由桥接源唯一持有，跳转到隐藏分区会先展开其祖先。工具栏显示操作，保存状态与运行状态进入底部状态区。详细决策、术语和边界见 [统一布局研究](../research/layout-foundation-2026-11-02.zh-CN.md)。

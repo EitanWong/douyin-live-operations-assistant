@@ -1,10 +1,11 @@
 import React,{createElement as h,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {MantineProvider,Button,Switch,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Collapse,Progress,SimpleGrid,Stack} from '@mantine/core';
+import {MantineProvider,Button,Switch,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Collapse,Progress,SimpleGrid,Stack,Group,Tabs} from '@mantine/core';
 import {useTable,tableFeatures} from '@tanstack/react-table';
 import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
+import {gridOptions} from './layout.js';
 import {componentTheme,componentVariables,paletteScale} from '../theme-palette.js';
 
 const features=tableFeatures({});
@@ -37,12 +38,12 @@ function DataTable({node,bridge}) {
       h(Table.Tbody,null,table.getRowModel().rows.map(row=>h(Table.Tr,{key:row.id},(node.cells[row.index] || []).map((cell,i)=>h(Table.Td,{key:i,colSpan:cell.colSpan},renderChildren(cell.children,bridge))))))));
 }
 function Disclosure({node,bridge}) {
-  // Expansion belongs to the visible view, independent of adaptive source DOM.
-  const [open,setOpen]=useState(node.open),body=useRef(null);
+  // The bridge is the only expansion owner, including section jumps and errors.
+  const open=node.open,body=useRef(null);
   const invalid=JSON.stringify(node.children).includes('"invalid":true');
-  useEffect(()=>{if(invalid)setOpen(true);},[invalid]);
+  useEffect(()=>{if(invalid && !open)bridge.toggle(node.id,true);},[invalid,open,bridge,node.id]);
   useEffect(()=>{if(open && invalid){const input=body.current?.querySelector('[aria-invalid="true"]');input?.focus();input?.scrollIntoView?.({block:'center'});}},[open,invalid]);
-  return h(Paper,{withBorder:true,className:'product-disclosure'},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>{setOpen(!open);bridge.toggle(node.id,!open);},rightSection:open ? '−' : '+'},node.title),h(Collapse,{expanded:open,transitionDuration:0,keepMountedMode:'display-none'},h('div',{className:'product-disclosure-body',id:`detail-${node.id}`,ref:body},renderChildren(node.children,bridge))));
+  return h(Paper,{withBorder:true,className:'product-disclosure','data-view-id':node.id},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>bridge.toggle(node.id,!open),rightSection:open ? '−' : '+'},node.title),h(Collapse,{expanded:open,transitionDuration:0,keepMountedMode:'display-none'},h(Stack,{className:'product-disclosure-body',gap:'sm',id:`detail-${node.id}`,ref:body},renderChildren(node.children,bridge))));
 }
 function Chart({node}) {
   const element=useRef(null),chart=useRef(null);
@@ -50,7 +51,7 @@ function Chart({node}) {
   useEffect(()=>{chart.current.update(node.option);},[node.option]);
   return h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'});
 }
-function renderChildren(nodes,bridge){return nodes.map((node,i)=>h(View,{node,bridge,key:node.id || i}));}
+function renderChildren(nodes,bridge){return nodes.map((node,i)=>node.span==='full' ? h('div',{key:node.id || i,className:'product-full'},h(View,{node,bridge})) : h(View,{node,bridge,key:node.id || i}));}
 function View({node,bridge}) {
   if(!node)return null;
   if(node.kind==='text')return node.text;
@@ -66,18 +67,21 @@ function View({node,bridge}) {
   if(node.kind==='image')return h('img',{src:node.src,alt:node.alt,loading:'lazy',className:'product-image'});
   if(node.kind==='break')return h('br');
   if(node.kind==='link')return h('a',{href:node.href,target:'_blank',rel:'noopener noreferrer'},node.text);
-  const props={className:node.classes,'data-view-id':node.id,'aria-label':node.label};
-  if(node.layout==='settings')return h(Stack,{...props,className:node.classes.split(' ').filter(name=>name!=='workspace-grid').concat('product-settings-stack').join(' '),gap:'md'},renderChildren(node.children,bridge));
-  const layoutClasses=['grid','workspace-filter-fields','anchor-audience-controls','income-controls'];
-  if(node.classes.split(' ').some(name=>layoutClasses.includes(name)))return h(SimpleGrid,{...props,className:node.classes.split(' ').filter(name=>!layoutClasses.includes(name)).concat('product-field-grid').join(' '),type:'container',minColWidth:'200px',autoFlow:'auto-fit',spacing:'sm'},renderChildren(node.children,bridge));
-  if(/(^| )(workspace-card|settings-group|ai-card|anchor-section|pk-visual|giveaway-config|giveaway-live)( |$)/u.test(node.classes))return h(Paper,{...props,withBorder:true,p:'md',radius:'md'},renderChildren(node.children,bridge));
+  const props={className:[node.classes,node.layout ? 'product-layout' : ''].filter(Boolean).join(' '),'data-view-id':node.id,'data-layout':node.layout,'data-surface':node.surface,'aria-label':node.label,role:node.role,tabIndex:node.tag==='h3' ? -1 : undefined};
+  const content=renderChildren(node.children,bridge);
+  if(['cards','fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:node.layout==='cards' ? 'md' : 'sm'},content);
+  if(node.surface==='card')return h(Paper,{...props,component:Stack,gap:'sm',withBorder:true,p:'md',radius:'md'},content);
+  if(node.layout==='row')return h(Group,{...props,gap:'xs',wrap:'wrap',align:'center'},content);
+  if(node.layout==='stack')return h(Stack,{...props,gap:'sm'},content);
   return h(node.tag || 'div',props,renderChildren(node.children,bridge));
 }
 function Workspace({bridge,shadow,onReady}) {
-  const state=useSyncExternalStore(bridge.subscribe,bridge.getSnapshot),[menu,setMenu]=useState(false),main=useRef(null),[systemDark,setSystemDark]=useState(()=>shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)').matches);
+  const state=useSyncExternalStore(bridge.subscribe,bridge.getSnapshot),[menu,setMenu]=useState(false),[jump,setJump]=useState(null),main=useRef(null),[systemDark,setSystemDark]=useState(()=>shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)').matches);
+  const selectedView=state.subviews.find(node=>node.selected)?.id;
   useEffect(()=>{const query=shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)'),change=()=>setSystemDark(query.matches);query.addEventListener('change',change);return ()=>query.removeEventListener('change',change);},[shadow]);
-  useEffect(()=>{main.current?.scrollTo?.({top:0});setMenu(false);},[state.key]);
+  useEffect(()=>{main.current?.scrollTo?.({top:0});setMenu(false);},[state.key,selectedView]);
   useEffect(()=>{onReady?.();},[onReady]);
+  useEffect(()=>{if(!jump)return;const heading=shadow.querySelector(`[data-view-id="${jump.id}"]`);heading?.focus?.({preventScroll:true});heading?.scrollIntoView?.({block:'start',behavior:'instant'});},[jump,shadow]);
   useEffect(()=>{if(!state.focus)return;const field=shadow.querySelector(`[data-control-id="${state.focus.id}"]`);const input=field?.matches('input,textarea,select') ? field : field?.querySelector('input,textarea,select');input?.focus();input?.scrollIntoView?.({block:'center'});},[state.focus,shadow]);
   const dark=state.theme==='dark' || state.theme==='system' && systemDark;
   const groups=[...new Set(state.nav.map(n=>n.group))];
@@ -87,10 +91,10 @@ function Workspace({bridge,shadow,onReady}) {
     h('div',{className:'product-shell','data-menu-open':menu,'data-sidebar-side':state.sidebar.side,'data-sidebar-collapsed':state.sidebar.collapsed,'data-material':state.material,'data-mantine-color-scheme':dark ? 'dark' : 'light'},
       h('div',{className:'product-sidebar'},state.sidebar.toggle ? h('div',{className:'product-nav-toggle'},h(View,{node:state.sidebar.toggle,bridge})) : null,nav),
       h('div',{className:'product-main'},
-        h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar,bridge))),
-        h('div',{className:'product-subviews'},renderChildren(state.subviews,bridge),headings.length>2 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const heading=shadow.querySelector(`[data-view-id="${e.currentTarget.value}"]`);heading?.scrollIntoView?.({block:'start',behavior:'instant'});}}) : null),
-        h('main',{className:'product-content',ref:main,key:state.key,'aria-label':state.title},h(View,{node:state.content,bridge})),
-        h('footer',{className:'product-status'},h('div',{className:'product-state'},state.status || '已暂停'),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite'},state.messages.map((message,i)=>h(Alert,{key:message.id || i,variant:'light',color:message.error ? 'red' : 'blue'},h(View,{node:message,bridge})))) : null))));
+        h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge))),
+        h('div',{className:'product-subviews'},state.subviews.length ? h(Tabs,{id:'product-sections',value:selectedView,variant:'pills',className:'product-subview-tabs',onChange:value=>{if(value)bridge.activate(value);}},h(Tabs.List,{'aria-label':`${state.title}分类`},state.subviews.map(node=>h(Tabs.Tab,{key:node.id,value:node.id,disabled:node.disabled},node.text)))) : null,headings.length>2 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const id=e.currentTarget.value;if(bridge.reveal(id))setJump({id});}}) : null),
+        h('main',{className:'product-content',ref:main,key:state.key,id:selectedView ? `product-sections-panel-${selectedView}` : undefined,'aria-label':state.title,'aria-labelledby':selectedView ? `product-sections-tab-${selectedView}` : undefined},h(View,{node:state.content,bridge})),
+        h('footer',{className:'product-status'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite'},state.messages.map((message,i)=>h(Alert,{key:message.id || i,variant:'light',color:message.error ? 'red' : 'blue'},h(View,{node:message,bridge})))) : null))));
 }
 class WorkspaceBoundary extends React.Component {
   state={failed:false};
