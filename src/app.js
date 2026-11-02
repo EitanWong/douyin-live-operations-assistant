@@ -1,4 +1,5 @@
 import {AudienceMemory} from './ai/audience-memory.js';
+import {aiDiagnostics} from './ai/diagnostics.js';
 import {AIWorkbench} from './ui/ai-workbench.js';
 import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
@@ -574,6 +575,7 @@ export function boot(options = {}) {
         panel.recordSearch({...result,question:'搜索连接测试'});panel.toast(`搜索连接通过，返回 ${result.results.length} 条来源。`);
       },
       forgetSearchKey:async endpoint=>{const name=searchSecretKey(endpoint);await del(name);sessionKeys.delete(name);panel.node('[data-search-key]').value='';panel.toast('搜索服务密钥已清除');},
+      diagnoseAI:()=>aiDiagnostics({config:engine.config,context:engine.aiContext(),mediaState:media.state,memoryCount:currentMemory().list().length,knownGaps:(network.ingestion?.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(network.capture?.gaps || 0)}),
       diagnose: () => ({...adapter.diagnose(),roomData:engine.roomData}),
       acknowledgeRuntimeAlert: async () => {
         acknowledgedRuntimeAlert = runtimeAlertState(network);

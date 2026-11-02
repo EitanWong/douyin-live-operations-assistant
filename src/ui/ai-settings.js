@@ -1,11 +1,11 @@
 import {validateSkillPack} from '../ai/skills.js';
 import {aliEndpoints} from '../services/ai-pipeline.js';
-import {MEMORY_LIMITS,validateMemory,retrieveMemories} from '../services/knowledge.js';
+import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate} from '../services/knowledge.js';
 import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
 
 const fields=[['title','资料标题','text'],['content','背景正文','textarea'],['source','资料来源 / 确认人','text'],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 export class AISettings {
-  constructor(root,{dirty,start,stop,clear,forget,error,checkNative}) {
+  constructor(root,{dirty,start,stop,clear,forget,error,checkNative,diagnose}) {
     this.root=root;this.dirty=dirty;this.error=error;this.skills=[];
     root.querySelector('[data-skill-install]').addEventListener('click',()=>{try{const skill=validateSkillPack(JSON.parse(root.querySelector('[data-skill-json]').value));if(this.skills.length>=8 && !this.skills.some(s=>s.id===skill.id))throw new Error('自定义技能最多8个');this.skills=this.skills.filter(s=>s.id!==skill.id).concat(skill);this.showSkills();dirty();}catch(reason){error(reason);}});
     const navigation=root.querySelector('.ai-section-tabs');
@@ -17,7 +17,7 @@ export class AISettings {
     });
     root.querySelector('[data-field="ai.pipeline.mode"]').addEventListener('change',()=>this.syncPipeline());
     for(const key of ['workspaceId','region'])root.querySelector(`[data-field="ai.pipeline.${key}"]`).addEventListener('input',()=>{root.querySelector('[data-media-key="pipeline"]').value='';});
-    const edited=event=>{if(event.target.matches('[data-memory-field],[data-media-key],[data-media-remember]'))dirty();};
+    const edited=event=>{if(event.target.matches('[data-memory-field]'))this.memoryValidity(event.target.closest('.editor-row'));if(event.target.matches('[data-memory-field],[data-media-key],[data-media-remember]'))dirty();};
     root.addEventListener('input',edited);root.addEventListener('change',edited);
     root.querySelector('[data-memory-add]').addEventListener('click',()=>{
       if(this.list.children.length>=MEMORY_LIMITS.entries){error(new Error('背景记忆最多40条'));return;}
@@ -39,6 +39,10 @@ export class AISettings {
       try {Promise.resolve(start()).catch(error);}catch(reason){error(reason);}
     });
     root.querySelector('[data-media-stop]').addEventListener('click',()=>stop());
+    root.querySelector('[data-ai-diagnose]').addEventListener('click',async event=>{
+      const button=event.currentTarget,status=root.querySelector('[data-ai-context-status]');button.disabled=true;status.textContent='正在检查已保存的运行配置…';
+      try{const rows=await diagnose();status.replaceChildren(...rows.map(text=>{const p=status.ownerDocument.createElement('p');p.textContent=text;return p;}));}catch(reason){status.textContent=`检查失败：${reason.message}`;}finally{button.disabled=false;}
+    });
     root.querySelector('[data-native-check]').addEventListener('click',async event=>{
       const button=event.currentTarget;button.disabled=true;this.showError('');
       const status=this.root.querySelector('[data-native-status]');status.textContent='正在检查本地组件…';
@@ -116,8 +120,10 @@ export class AISettings {
     const label=document.createElement('label');label.className='toggle';const enabled=document.createElement('input');enabled.type='checkbox';enabled.dataset.memoryField='enabled';enabled.checked=record.enabled;label.append(enabled,'使用这条资料');row.append(label);
     const checked=document.createElement('small');checked.textContent=`核对时间：${new Date(record.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}`;row.append(checked);
     row.querySelector('[data-memory-remove]').addEventListener('click',()=>{row.remove();this.empty();this.dirty();});
+    const validity=document.createElement('small');validity.dataset.memoryValidity='';row.append(validity);this.memoryValidity(row);
     this.list.append(row);
   }
+  memoryValidity(row){const expires=row.querySelector('[data-memory-field="expiresOn"]').value,enabled=row.querySelector('[data-memory-field="enabled"]').checked;row.querySelector('[data-memory-validity]').textContent=!enabled ? '已停用，不参与检索' : expires && expires<beijingDate(Date.now()) ? '已过期，不参与检索' : '可参与检索，按问题相关性选择片段';}
   showSkills(){const target=this.root.querySelector('[data-skill-list]');target.replaceChildren();for(const skill of this.skills){const row=target.ownerDocument.createElement('p');row.textContent=skill.name+' · '+skill.scenes.join('、');const button=target.ownerDocument.createElement('button');button.type='button';button.textContent='移除技能';button.addEventListener('click',()=>{this.skills=this.skills.filter(s=>s.id!==skill.id);this.showSkills();this.dirty();});row.append(button);target.append(row);}}
   populate(memory,assistant){this.skills=structuredClone(assistant?.skills || []);this.showSkills();this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
   read(){
