@@ -17,7 +17,7 @@ def read_message(stream):
     if len(header) != 4:
         raise ValueError('INVALID')
     size, = struct.unpack('<I', header)
-    if not 0 < size <= 65536:
+    if not 0 < size <= 800000:
         raise ValueError('INVALID')
     data = stream.read(size)
     if len(data) != size:
