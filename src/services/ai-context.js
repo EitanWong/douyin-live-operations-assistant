@@ -1,6 +1,9 @@
 import {compactMediaContext,optionalMediaRows} from '../ai/media-context.js';
 import {retrieveMemories} from './knowledge.js';
 import {DOUYIN_RULES} from '../data/douyin-rules.js';
+import {selectLiveSources} from '../ai/context-policy.js';
+
+export function applyPromptSources(prompt,config){return prompt.liveContext && Object.values(config.contextSources || {}).includes(false) ? {...prompt,liveContext:selectLiveSources(structuredClone(prompt.liveContext),config.contextSources)} : prompt;}
 
 export function currentAIPrompt(prompt) {
   const current=prompt.getAIContext?.();
@@ -18,7 +21,7 @@ export function assembleAIContext(prompt,config) {
   retrievalMeta.contextQueryChars=retrievalContext?.length || 0;
   const memories=chunks.map(row=>({...row,id:row.entryId,chunkId:row.id}));
   return {
-    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta,accounts:prompt.getAccountContext?.(query) || prompt.accountContext || []},
+    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta,accounts:config.contextSources?.accounts===false ? [] : prompt.getAccountContext?.(query) || prompt.accountContext || []},
     media_context:compactMediaContext(media,now),
     context_meta:{schemaVersion:1,assembledAt:now,liveObservedAt:prompt.liveContext?.observedAt ?? null,
       sourcePolicy:'media_context.scene separates recent speech, visual samples and multimodal observations; inspect ages and sampling coverage before claiming current activity. Viewer memories are limited observed events or operator notes, not verified personality. Current structured live observations for metrics; media recognition for sampled scene clues; local passages for background; web results for external facts. Conflicts and missing evidence stay unknown.',

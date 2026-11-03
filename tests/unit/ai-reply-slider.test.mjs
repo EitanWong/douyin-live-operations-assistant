@@ -40,7 +40,7 @@ test('改到最低档撤销已经生成的待发送对话，其他规则功能�
  const f=fixture('every');try{await f.chat('@场控 你好');f.engine.config.ai.replyFrequency='off';await f.tick();assert.equal(f.spoken.length,0);assert.equal(f.engine.conversationReady({kind:'gift'}),true);}finally{f.engine.stop();}
 });
 test('最高档仍尊重模型额度、功能开关及已过期语境',async()=>{
- const f=fixture('every');try{f.engine.config.ai.maxPerHour=1;await f.chat('第一句');await f.tick();f.advance(1000);await f.chat('第二句');await f.tick();assert.equal(f.prompts.length,1);f.advance(46000);f.engine.config.ai.maxPerHour=3600;await f.tick();assert.equal(f.prompts.length,1);f.engine.config.ai.chatEnabled=false;await f.chat('关闭后');assert.equal(f.prompts.length,1);}finally{f.engine.stop();}
+ const f=fixture('every');try{f.engine.config.ai.edge.enabled=false;f.engine.config.ai.maxPerHour=1;await f.chat('第一句');await f.tick();f.advance(1000);await f.chat('第二句');await f.tick();assert.equal(f.prompts.length,1);f.advance(46000);f.engine.config.ai.maxPerHour=3600;await f.tick();assert.equal(f.prompts.length,1);f.engine.config.ai.chatEnabled=false;await f.chat('关闭后');assert.equal(f.prompts.length,1);}finally{f.engine.stop();}
 });
 test('最高档与最低档运行诊断不再展示固定20秒判断限制',()=>{
  for(const replyFrequency of ['off','every']){

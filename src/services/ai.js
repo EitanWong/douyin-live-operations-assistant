@@ -3,7 +3,7 @@ import {skillInstructions} from '../ai/skills.js';
 import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
 import { parseAIIntent } from './intent.js';
-import { assembleAIContext,currentAIPrompt,applyContextBudget,liveFactFingerprint } from './ai-context.js';
+import { assembleAIContext,currentAIPrompt,applyPromptSources,applyContextBudget,liveFactFingerprint } from './ai-context.js';
 import {resolveReplyConfig,pipelineConfig} from './ai-pipeline.js';
 import { GROUNDING_INSTRUCTION } from '../data/douyin-rules.js';
 import { CONVERSATION_INSTRUCTION,TURN_TAKING_INSTRUCTION,EVERY_TURN_INSTRUCTION,NATURAL_STYLE_INSTRUCTION,SUPPORTER_INSTRUCTION } from '../ai/conversation-policy.js';
@@ -17,7 +17,7 @@ export function validateEndpoint(value) {
 }
 export function makeAIRequest(prompt, config) {
   config=resolveReplyConfig(config);
-  prompt=currentAIPrompt(prompt);
+  prompt=applyPromptSources(currentAIPrompt(prompt),config);
   if(prompt.target && prompt.target.type!=='speech' && ['ai','gift','welcome'].includes(prompt.task?.kind || 'ai'))prompt={...prompt,target:{...prompt.target,support:supportContext(prompt.target,prompt.task,config,prompt.getNow?.() ?? prompt.now ?? Date.now())}};
   const request=makeBaseAIRequest(prompt,config);
   request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;

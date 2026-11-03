@@ -2,9 +2,15 @@ import base64
 import io
 import unittest
 import wave
-from local_asr import pcm16, clean_transcript, performance_phase
+from local_asr import pcm16, clean_transcript, performance_phase, LocalASR
 
 class LocalASRContracts(unittest.TestCase):
+    def test_uninstalled_model_is_unavailable_without_loading_weights(self):
+        runtime = LocalASR(None)
+        self.assertFalse(runtime.status['available'])
+        self.assertEqual(runtime.status['phase'], 'unprepared')
+        self.assertIsNone(runtime.recognizer)
+
     def test_only_bounded_mono_16k_pcm_enters_recognizer(self):
         out = io.BytesIO()
         with wave.open(out, 'wb') as wav:

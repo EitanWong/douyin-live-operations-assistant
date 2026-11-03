@@ -549,7 +549,7 @@ test('暂停后迟到的礼物 AI 响应不会触发规则兜底', async () => {
   assert.equal(e.queue.length, 0);
 });
 test('AI 调用频率、每小时预算与最近上下文', async () => {
-  const { e, advance } = harness(c => { c.ai.enabled = true; c.ai.maxPerHour = 1; }); const prompts = []; e.ai = async prompt => { prompts.push(prompt); return '[SKIP]'; };
+  const { e, advance } = harness(c => { c.ai.enabled = true; c.ai.maxPerHour = 1; c.ai.edge.enabled = false; }); const prompts = []; e.ai = async prompt => { prompts.push(prompt); return '[SKIP]'; };
   e.ingest({ type: 'chat', id: 'chat', user, text: '普通弹幕' }); await e.requestAI({ user, text: '哪里？' });
   assert.equal(prompts[0].context.length, 1); await e.requestAI(); assert.equal(prompts.length, 1);
   advance(60000); await e.requestAI(); assert.equal(prompts.length, 1);

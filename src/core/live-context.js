@@ -1,4 +1,5 @@
 import { summarizeAnchorBattles } from './anchor-stats.js';
+import {selectLiveSources,roomSignalContext} from '../ai/context-policy.js';
 
 export const sharedLiveContext = (() => {
 const text = value => typeof value === 'string' ? [...value].slice(0,160).join('') : '';
@@ -35,9 +36,10 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
   const view=engine.pkOperations.view(), exhibition=view.exhibition, rank=engine.anchorStats.rank.get(anchorId);
   const events=engine.replyEvents.filter(row=>fresh(row.at));
   const roomEvents=room.activities.filter(row=>fresh(stamp(row))).slice(-30);
-  let income=null;
+  let income=null,collectionHealth=null;
   try {
-    const observed=engine.liveData()?.income;
+    const external=engine.liveData(),observed=external?.income,h=external?.collectionHealth;
+    if(h)collectionHealth={connected:Boolean(h.connected),gaps:num(h.gaps),lastFrameAt:num(h.lastFrameAt),basis:'连接状态和已检测缺口；未知不当作零，不证明完整采集'};
     if(observed && observed.anchorId===anchorId && (!currentRoom || observed.roomId===currentRoom)) income={
       at:num(observed.at),stale:!fresh(observed.at,120000),source:text(observed.source),
       startAt:num(observed.startAt),endAt:num(observed.endAt),pending:num(observed.pending),
@@ -49,7 +51,7 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
   } catch { /* A failed income provider must not prevent replies. Unknown stays null. */ }
   const competitors=pk?.competitors || [];
   const scoreHistory=(pk?.trend || []).filter(row=>row.at<=now);
-  return {
+  return selectLiveSources({
     schemaVersion:2,observedAt:now,timeZone:'Asia/Shanghai',
     roomStats:stats ? {at:stamp(stats),stale:!fresh(stamp(stats)),hidden:Boolean(stats.hidden),metricType:text(stats.metricType),value:stats.hidden ? null:num(stats.displayValue),display:stats.hidden ? '':text(stats.displayLong || stats.displayMiddle || stats.displayShort)} : null,
     audience:audience ? {at:stamp(audience),stale:!fresh(stamp(audience)),online:num(audience.onlineCount),cumulativeUsers:num(audience.cumulativeUsers),popularity:num(audience.popularity),
@@ -59,7 +61,7 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
     recentChat:chat.slice(-config.ai.contextSize).map(row=>({at:row.at,name:text(row.name),text:text(row.text)})),
     activityLastMinute:countActivity(buckets.filter(row=>fresh(row.at,60000))),
     activity:{windowSec:600,bucketSec:10,totals:countActivity(buckets),history:buckets.map(row=>({at:row.at,...fields(row,activityKeys)}))},
-    income,
+    income,collectionHealth,roomSignals:roomSignalContext(room.activities,now,age),
     recentEvents:events.slice(-20).map(row=>({type:text(row.type),at:row.at,name:text(row.name),text:text(row.text),...(row.type==='gift' ? {gift:text(row.gift),count:num(row.count),unitDiamonds:num(row.unitDiamonds),cumulative:true}:row.type==='like' ? {count:num(row.count)}:{})})),
     roomEvents:roomEvents.map(row=>({type:text(row.type),at:stamp(row),name:text(row.user?.name),text:text(row.text || row.description || row.title || row.display || row.status),
       ...fields(row,['followCount','shareCount','count','total','memberCount','diamondCount'])})),
@@ -96,7 +98,7 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
     exhibitionRetention:view.exhibitionRetention ? {at:view.exhibitionRetention.observedAt,stale:view.exhibitionRetention.stale,name:text(view.exhibitionRetention.name),remaining:num(view.exhibitionRetention.remaining)} : null,
     coverage:{chat:sample(chat,config.ai.contextSize),events:sample(events,20),roomEvents:sample(room.activities.filter(row=>fresh(stamp(row))),30),
       limits:'仅页面已采集的数据；历史有界采样并保留汇总，不含直播音视频理解。null 为未知，stale 为过期；礼物连击 count 为累计，不可直接相加。'}
-  };
+  },config.ai.contextSources);
 }
 
 return buildSharedLiveContext;

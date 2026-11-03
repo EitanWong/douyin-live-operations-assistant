@@ -22,6 +22,8 @@ import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplat
 import { AnchorStats } from './anchor-stats.js';
 import { audienceReplyContext, giftReplyContext, isIntrusiveReply, liveReplyContext, observedReplyEvent } from './reply-context.js';
 import {AI_PIPELINE_DEFAULTS,validatePipeline,resolveMediaConfig} from '../services/ai-pipeline.js';
+import {CONTEXT_DEFAULTS} from '../ai/context-policy.js';
+import {ACCOUNT_COLLECTION_DEFAULTS,validateAccountCollection} from '../services/account-refresh.js';
 import {LATENCY_DEFAULTS,EDGE_DEFAULTS,withDeadline} from '../services/ai-resilience.js';
 
 export { recognizeMilestone };
@@ -60,7 +62,7 @@ export const DEFAULTS = {
     intervalSec: 0, userCooldownSec: 0,
     assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180, proactiveEnabled:false, proactiveIntervalSec:300, replyFrequency:'quiet',
     persona: '你是直播间里会聊天的场控。先听懂对方的意思，接着现场的话自然回应，有常识、有分寸，直接说重点，不端着、不用客服套话。轻松时可以有一点幽默，认真时说实在的；欢迎和答谢简短，聊天不机械套模板。不冒充主播，不编造经历或承诺，不抢话。',
-    knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS,latency:LATENCY_DEFAULTS,edge:EDGE_DEFAULTS
+    knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS,latency:LATENCY_DEFAULTS,edge:EDGE_DEFAULTS,contextSources:CONTEXT_DEFAULTS,accountCollection:ACCOUNT_COLLECTION_DEFAULTS
   },
   timers: [{ id: 'welcome', enabled: false, responseMode: 'rules', intervalSec: 300, start: '', end: '', quietSec: 15, messages: DEFAULT_TIMER_PHRASES }],
   adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', startSelector: '', endSelector: '' }
@@ -169,8 +171,14 @@ export function validateConfig(c) {
   validatePipeline(c.ai);
   for(const [key,min,max] of [['cloudMs',1000,25000],['totalMs',2000,42000],['edgeDelayMs',500,10000]])range(c.ai.latency[key],min,max,'AI 等待时限');
   if(c.ai.latency.totalMs<c.ai.latency.cloudMs)throw new Error('AI 总时限不能小于云端时限');
-  choice(c.ai.edge.audioBackend,['native-sensevoice','browser-whisper'],'本地语音方案');
-  for(const key of ['enabled','audioEnabled'])if(typeof c.ai.edge[key]!=='boolean')throw new Error('端侧开关无效');
+  choice(c.ai.edge.audioBackend,['auto','native-sensevoice','browser-whisper'],'本地语音方案');
+  choice(c.ai.edge.textModel,['auto','qwen-0.5b','qwen-1.5b'],'端侧文字模型');
+  for(const key of ['enabled','audioEnabled','autoTune','localOnly'])if(typeof c.ai.edge[key]!=='boolean')throw new Error('端侧开关无效');
+  range(c.ai.edge.maxPerHour,1,3600,'本地推理每小时额度');
+  if(!Number.isInteger(c.ai.edge.maxPerHour))throw new Error('本地推理额度须为整数');
+  if(c.ai.edge.localOnly && !c.ai.edge.enabled)throw new Error('仅本地回复需要启用端侧模型');
+  for(const key of Object.keys(CONTEXT_DEFAULTS))if(typeof c.ai.contextSources[key]!=='boolean')throw new Error('上下文来源开关无效');
+  c.ai.accountCollection=validateAccountCollection(c.ai.accountCollection);
   if(typeof c.ai.knowledge!=='string' || c.ai.knowledge.length>12000)throw new Error('主播与本场资料最多12000字');
   if (typeof c.ai.search.enabled!=='boolean') throw new Error('联网搜索开关无效');
   choice(c.ai.search.provider,['bocha','tavily','searxng'],'搜索服务');
@@ -276,7 +284,7 @@ export class Engine {
     this.liveMetrics = new LiveMetrics({now});
     this.liveMode = new LiveModeTracker({now});
     this.pkSeen = new Map();
-    this.roomData = {stats:null,audience:null,activities:[]};
+    this.roomData = {stats:null,audience:null,activities:[]};this.localCalls=[];
     this.anchorStats = new AnchorStats({now});
     this.pkOperations = new PKOperations(this);
     this.observationSignatures = new Map();
@@ -846,7 +854,7 @@ export class Engine {
     if(this.activeAI?.current && !this.activeAI.current())this.cancelAI();
     const ai=this.config.ai;
     if(!ai.enabled || this.aiBusy || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
-      || now-this.lastAI<ai.intervalSec*1000 || this.calls.filter(at=>now-at<3600000).length>=ai.maxPerHour)return false;
+      || now-this.lastAI<ai.intervalSec*1000 || !this.hasAIQuota(now))return false;
     const candidate=this.proactiveCandidate(now);if(!candidate)return false;
     const {mode,row}=candidate,speech=mode==='speech',pacingMode=speech ? 'speech' : 'proactive';
     const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row),...(speech ? {speechKey:sceneKey(row)} : {})};
@@ -875,7 +883,7 @@ export class Engine {
     const valid = item => item.epoch === this.epoch && item.contextKey===this.chatContextKey() && now - item.at < 45000;
     this.chatAIQueue = this.chatAIQueue.filter(valid);
     if (this.chatAIBackground && !valid(this.chatAIBackground)) this.chatAIBackground = null;
-    if (!this.running || !a.enabled || a.replyFrequency==='off' || this.aiBusy || now - this.lastAI < a.intervalSec * 1000 || this.calls.filter(at => now - at < 3600000).length >= a.maxPerHour) return;
+    if (!this.running || !a.enabled || a.replyFrequency==='off' || this.aiBusy || now - this.lastAI < a.intervalSec * 1000 || !this.hasAIQuota(now)) return;
     const pending = this.chatAIQueue[0] || this.chatAIBackground;
     if (!pending) return;
     const userKey=turnViewerKey(pending.event.user),scope=this.chatContextKey();
@@ -1096,9 +1104,10 @@ export class Engine {
       const liveContext=liveReplyContext(this,this.now(),config);
       return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8),mediaContext:this.mediaContext(config)};
     };
-    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getAccountContext:query=>this.accountContext(query)};
+    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getAccountContext:query=>config.ai.contextSources.accounts ? this.accountContext(query) : []};
   }
   cancelAI(){const active=this.activeAI;this.activeAI=null;this.aiBusy=false;active?.controller.abort();}
+  hasAIQuota(now=this.now()){const a=this.config.ai;return !a.edge.localOnly && this.calls.filter(at=>now-at<3600000).length<a.maxPerHour || a.edge.enabled && this.localCalls.filter(at=>now-at<3600000).length<a.edge.maxPerHour;}
   async requestAI(event = null, task = { kind: 'ai', instruction: '只简短回答目标弹幕中需要回答的问题，没有必要回复时输出 [SKIP]，不主动发起话题。' }) {
     const a = this.config.ai, now = this.now(), epoch = this.epoch;
     const proactiveCurrent=()=>!task.data?.proactive || Boolean(task.extra?.aiProactive && this.validProactive(task.extra.aiProactive));
@@ -1117,17 +1126,20 @@ export class Engine {
     this.calls = this.calls.filter(t => now - t < 3600000);
     if (!this.running) return;
     if (!a.enabled) { fallback('AI 服务未启用'); return; }
-    if (this.aiBusy || (task.kind === 'gift' && task.targetJob && this.queue.filter(q => q.kind === 'gift').length >= 3) || now - this.lastAI < a.intervalSec * 1000 || this.calls.length >= a.maxPerHour) { fallback('AI 调用频率或额度已达上限'); return; }
+    const cloudAllowed=!a.edge.localOnly && this.calls.length<a.maxPerHour;
+    this.localCalls=this.localCalls.filter(at=>now-at<3600000);
+    if (this.aiBusy || (task.kind === 'gift' && task.targetJob && this.queue.filter(q => q.kind === 'gift').length >= 3) || now - this.lastAI < a.intervalSec * 1000 || !cloudAllowed && (!a.edge.enabled || this.localCalls.length>=a.edge.maxPerHour)) { fallback('AI 调用频率或额度已达上限'); return; }
     if (event?.user && !this.cooldown(`ai-user:${task.kind}:${keyFor(event.user)}`, a.userCooldownSec)) { fallback('该用户 AI 回复冷却中'); return; }
-    this.aiBusy = true; this.lastAI = now; this.calls.push(now); this.stats.aiCalls++;
+    this.aiBusy = true; this.lastAI = now;if(cloudAllowed)this.calls.push(now);this.stats.aiCalls++;
     const active={controller:new AbortController(),background:Boolean(task.data?.proactive || task.data?.replyMode==='contextual')};this.activeAI=active;
     const prompt = {
-      signal:active.controller.signal,
+      signal:active.controller.signal,cloudAllowed,
       persona: a.persona, knowledge: a.knowledge, ...this.aiContext(),
       target: event?.type==='speech' ? {type:'speech',text:event.text,source:'live-audio',speaker:'unverified'} : event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user) : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
     let replyFacts=null;prompt.onLiveFacts=value=>{replyFacts=value;};
+    prompt.reserveLocal=()=>{this.localCalls=this.localCalls.filter(at=>this.now()-at<3600000);if(active.controller.signal.aborted || this.localCalls.length>=this.config.ai.edge.maxPerHour)return false;this.localCalls.push(this.now());return true;};
     prompt.reserveFollowup=()=>{
       if(!this.running || epoch!==this.epoch || !proactiveCurrent() || chatContext!==null && chatContext!==this.chatContextKey())return false;
       this.calls=this.calls.filter(at=>this.now()-at<3600000);
@@ -1140,7 +1152,7 @@ export class Engine {
     prompt.canFollowup=()=>this.calls.filter(at=>this.now()-at<3600000).length<this.config.ai.maxPerHour;
     active.current=prompt.isCurrent;
     try {
-      const rawOutput=await withDeadline(signal=>this.ai({...prompt,signal},a),{signal:active.controller.signal,timeout:task.timeoutMs || a.latency.totalMs});
+      const rawOutput=await withDeadline(signal=>this.ai({...prompt,signal},a),{signal:active.controller.signal,timeout:task.timeoutMs || (a.edge.autoTune ? LATENCY_DEFAULTS.totalMs : a.latency.totalMs)});
       if(!prompt.isCurrent())return;
       const output = task.transform ? task.transform(rawOutput) : rawOutput;
       // 拒绝明确的代主持和留存分析用语；昵称自身不参与措辞判断。

@@ -45,7 +45,7 @@ test('settings prepare the selected Chinese backend, collect bounded sources and
  try{
   panel=new Panel({config:mergeConfig({anchorId:'123'}),callbacks:{}});
   settings=new FoundationSettings(panel.root,{anchor:()=> '123',accounts,changed:async()=>{},onError:e=>errors.push(e),edge:{prepare:async(kind,backend)=>{calls.push([kind,backend]);return {phase:'ready'};}},collector:{collect:async url=>{if(failRefresh)throw Error('页面已不可见');return normalizeAccountPayload({user:{sec_uid:'target',nickname:'陶艺',signature:'<img src=x onerror=alert(1)>作品'}},accountSource(url));},cancel:async()=>{}}});
-  panel.root.querySelector('[data-edge-prepare="audio"]').click();await flush();assert.deepEqual(calls,[['audio','native-sensevoice']]);
+  panel.root.querySelector('[data-field="ai.edge.audioBackend"]').value='native-sensevoice';panel.root.querySelector('[data-edge-prepare="audio"]').click();await flush();assert.deepEqual(calls,[['audio','native-sensevoice']]);
   panel.root.querySelector('[data-account-url]').value='https://www.douyin.com/user/target';panel.root.querySelector('[data-account-collect]').click();await flush();
   assert.equal(accounts.list('123').length,1);assert.equal(panel.root.querySelector('[data-account-records] img'),null);
   failRefresh=true;panel.root.querySelector('[data-account-collect]').click();await flush();

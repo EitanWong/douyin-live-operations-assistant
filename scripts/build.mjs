@@ -58,7 +58,7 @@ ${productLicenses}
 /*! Live stream decoders\n${mediaLicense}\n*/\n${toolNotice}\n/*! jsonrepair · ISC\n${intentLicense}\n*/\n/*! Lucide\n${iconLicense}\n*/\n/*! chinese-xinhua\n${await readFile(`${root}vendor/chinese-xinhua/LICENSE`,'utf8')}\nchinese-dictionary\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n*/`;
 const toolBuild={entryPoints:[`${root}src/tools/cordis-adapter.js`],bundle:true,platform:'browser',minify:true,legalComments:'inline',target:'chrome111',banner:{js:toolNotice}};
 await mkdir(dist, { recursive: true });
-for(const [entry,name] of [['src/ai/audience-memory.js','audience-memory'],['src/ai/assistant-config.js','assistant-config'],['src/ai/skills.js','assistant-skills'],['src/ai/local-agent.js','local-agent'],['src/services/retrieval.js','knowledge-retrieval'],['src/browser/media-session.js','media-session'],['src/services/completion-stream.js','completion-stream']])await build({entryPoints:[`${root}${entry}`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/${name}.js`});
+for(const [entry,name] of [['src/ai/audience-memory.js','audience-memory'],['src/ai/assistant-config.js','assistant-config'],['src/ai/skills.js','assistant-skills'],['src/ai/local-agent.js','local-agent'],['src/services/retrieval.js','knowledge-retrieval'],['src/browser/media-session.js','media-session'],['src/services/completion-stream.js','completion-stream'],['src/services/ai-resilience.js','ai-resilience'],['src/ai/account-context.js','account-context'],['src/services/account-refresh.js','account-refresh']])await build({entryPoints:[`${root}${entry}`],bundle:true,format:'esm',minify:true,legalComments:'inline',target:'chrome111',outfile:`${dist}/${name}.js`});
 await build({entryPoints:[`${root}src/ui/window-presence.js`],bundle:true,format:'esm',minify:true,define:{'process.env.NODE_ENV':'"production"'},target:'chrome111',outfile:`${dist}/window-presence.js`});
 await build({entryPoints:[`${root}src/ui/theme-palette.js`],bundle:true,format:'esm',minify:true,target:'chrome111',outfile:`${dist}/theme-palettes.js`});
 await build({entryPoints:[`${root}src/ui/product/runtime.js`],bundle:true,format:'esm',minify:true,loader:{'.css':'text'},define:{'process.env.NODE_ENV':'"production"'},legalComments:'inline',target:'chrome111',outfile:`${dist}/product-ui.js`});
@@ -113,7 +113,7 @@ chartLicenses+=`\nSilero VAD v5 · MIT\n${await readFile(`${root}vendor/runtime-
 chartLicenses+=productLicenses;
 chartLicenses+=await readFile(`${root}vendor/runtime-licenses/onnxruntime-web/ThirdPartyNotices.txt`,'utf8');
 for(const name of ['@ricky0123/vad-web','@huggingface/transformers','onnxruntime-web','onnxruntime-common','@huggingface/jinja','@huggingface/tokenizers','cockatiel'])chartLicenses+=`\n${name}\n${await readPackageLicense(root,name)}\n`;
-chartLicenses+=`\nModel weights are downloaded separately: Qwen2.5-0.5B-Instruct (Apache-2.0), Whisper tiny (MIT). See docs/ai-foundation.zh-CN.md.\n`;
+chartLicenses+=`\nModel weights are downloaded separately: Qwen2.5-0.5B-Instruct and Qwen2.5-1.5B-Instruct (Apache-2.0), Whisper tiny (MIT). See docs/ai-foundation.zh-CN.md.\n`;
 chartLicenses+=`\nLiquid Glass React · https://github.com/rdev/liquid-glass-react\n${liquidGlassLicense}\n`;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);

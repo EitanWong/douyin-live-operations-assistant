@@ -1,7 +1,7 @@
 import {circuitBreaker,handleWhen,ConsecutiveBreaker} from 'cockatiel';
 
 export const LATENCY_DEFAULTS=Object.freeze({cloudMs:8000,totalMs:16000,edgeDelayMs:1500});
-export const EDGE_DEFAULTS=Object.freeze({enabled:false,audioEnabled:false,audioBackend:'native-sensevoice'});
+export const EDGE_DEFAULTS=Object.freeze({enabled:true,audioEnabled:true,audioBackend:'auto',textModel:'auto',autoTune:true,localOnly:false,maxPerHour:1200});
 const cancelled=()=>Object.assign(new Error('AI 请求已取消'),{name:'AbortError'});
 export function withDeadline(run,{signal,timeout=16000}={}){
  const controller=new AbortController();let timer,listener;
@@ -16,7 +16,7 @@ export function withDeadline(run,{signal,timeout=16000}={}){
   .finally(()=>{clearTimeout(timer);signal?.removeEventListener('abort',listener);});
 }
 export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
- const circuits=new Map();
+ const circuits=new Map(),quotaPauses=new Map();
  const breaker=config=>{
   const key=JSON.stringify([config.endpoint,config.model]);
   if(!circuits.has(key)){
@@ -26,12 +26,17 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
   return circuits.get(key);
  };
  return async(prompt,config)=>{
-  const started=now(),limits={...LATENCY_DEFAULTS,...config.latency},current=()=>!prompt.signal?.aborted && (!prompt.isCurrent || prompt.isCurrent());
+  const started=now(),limits={...LATENCY_DEFAULTS,...config.latency,...(config.edge?.autoTune ? edge?.tuning?.() : {})},current=()=>!prompt.signal?.aborted && (!prompt.isCurrent || prompt.isCurrent());
   const trace=(provider,status)=>{try{onTrace({provider,status,elapsedMs:now()-started,kind:prompt.task?.kind || 'ai',at:now()});}catch{}};
   const cloudSignal=new AbortController(),edgeSignal=new AbortController();let delayTimer;
   const abort=()=>{cloudSignal.abort();edgeSignal.abort();};
   prompt.signal?.addEventListener('abort',abort,{once:true});
-  const cloudWork=()=>breaker(config).execute(()=>withDeadline(signal=>cloud({...prompt,signal},config,{signal}),{signal:cloudSignal.signal,timeout:limits.cloudMs}));
+  const provider=JSON.stringify([config.pipeline?.mode,config.pipeline?.workspaceId,config.pipeline?.region,config.endpoint,config.model,config.pipeline?.replyModel]);
+  const cloudWork=async()=>{
+   if(prompt.cloudAllowed===false || config.edge?.localOnly || (quotaPauses.get(provider) || 0)>now())throw new Error('云端额度暂停或使用本地模式，需要已准备的端侧模型');
+   try{return await breaker(config).execute(()=>withDeadline(signal=>cloud({...prompt,signal},config,{signal}),{signal:cloudSignal.signal,timeout:limits.cloudMs}));}
+   catch(error){if(error.aiQuota || error.status===402){if(quotaPauses.size>=8)quotaPauses.delete(quotaPauses.keys().next().value);quotaPauses.set(provider,now()+300000);}throw error;}
+  };
   try{
    if(prompt.signal?.aborted)throw cancelled();
    const remote=cloudWork().then(output=>({output,provider:'cloud'}));let cloudFailure;
@@ -42,6 +47,7 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
     const completed=await Promise.race([failed,new Promise(resolve=>{delayTimer=setTimeout(()=>resolve(null),limits.edgeDelayMs);})]);
     if(completed)throw new Error('云端已完成');
     clearTimeout(delayTimer);if(!current() || edgeSignal.signal.aborted)throw cancelled();
+    if(prompt.reserveLocal && !prompt.reserveLocal())throw new Error('本地推理调用额度已达上限');
     const remaining=limits.totalMs-(now()-started);if(remaining<=0)throw new Error('AI 请求超时');
     const output=await withDeadline(signal=>edge.reply({...prompt,signal},config),{signal:edgeSignal.signal,timeout:remaining});
     return {output,provider:'edge'};
