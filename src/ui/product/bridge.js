@@ -1,6 +1,6 @@
 // Transitional boundary: the controller owns drafts and actions; React owns
 // presentation. Only the active page is projected, never a second config store.
-import {describeLayout,isTransparentLayout,layoutChildren} from './layout.js';
+import {describeLayout,describeCollection,isTransparentLayout,layoutChildren} from './layout.js';
 import {APPEARANCE_PREFERENCES} from '../appearance.js';
 
 const ignored = 'STYLE,SCRIPT,OPTION,SUMMARY,TEMPLATE'.split(',');
@@ -30,7 +30,10 @@ export function createWorkspaceBridge(panel) {
   function table(node) {
     const body=node.tBodies[0], headers=[...node.querySelectorAll('thead th')].map(cleanText);
     const rows=[...(body?.rows || [])];
-    return {kind:'table',id:id(node),headers,rows:rows.map(row=>[...row.cells].map(cleanText)),cells:rows.map(row=>[...row.cells].map(cell=>({children:children(cell),colSpan:cell.colSpan}))),caption:node.getAttribute('aria-label') || cleanText(node.caption)};
+    let scope='loaded';
+    for(let parent=node.parentElement;parent && !parent.matches('[data-page]');parent=parent.parentElement)if(parent.querySelector(':scope>.anchor-pagination')){scope='page';break;}
+    const heading=node.closest('details')?.querySelector(':scope>summary') || node.closest('section')?.querySelector('h3');
+    return {kind:'table',id:id(node),headers,scope,sourceControlled:Boolean(node.closest('[data-collection-source]')),rows:rows.map(row=>[...row.cells].map(cleanText)),cells:rows.map(row=>[...row.cells].map(cell=>({children:children(cell),colSpan:cell.colSpan}))),caption:node.getAttribute('aria-label') || cleanText(node.caption) || cleanText(heading)};
   }
   function project(node) {
     if(!node)return null;
@@ -54,7 +57,7 @@ export function createWorkspaceBridge(panel) {
     const content=children(node);if(!content.length)return null;
     const classes=[node.className?.baseVal ?? node.className,node.dataset.aiSection ? `product-ai-${node.dataset.aiSection}` : '',node.hasAttribute('data-workspace-contents') ? 'workspace-contents' : ''].filter(Boolean).join(' ');
     const layout=describeLayout(node);
-    return {kind:'group',id:id(node),...layout,tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
+    return {kind:'group',id:id(node),...layout,collection:describeCollection(node),tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
   }
   function collect() {
     // Drop removed controls, including retired dynamic list rows.

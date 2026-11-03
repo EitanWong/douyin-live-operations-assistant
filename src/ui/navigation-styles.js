@@ -8,7 +8,7 @@ export const NAVIGATION_CSS = `
 .subnav button{display:inline-flex;align-items:center;gap:7px}.subnav .ui-icon{width:16px;height:16px}
 .workspace[data-nav-layout=sidebar]{flex-direction:row}
 .workspace[data-nav-layout=sidebar][data-nav-side=right]{flex-direction:row-reverse}
-.workspace[data-nav-layout=sidebar]>.nav{width:172px;flex:0 0 172px;min-height:0;box-sizing:border-box;padding:12px 10px 20px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--sg-scroll) transparent;border:0;border-right:1px solid var(--line);background:var(--sg-background)}
+.workspace[data-nav-layout=sidebar]>.nav{width:172px;flex:0 0 172px;min-height:0;box-sizing:border-box;padding:12px 10px 20px;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;border:0;border-right:1px solid var(--line);background:var(--sg-background)}
 .workspace[data-nav-layout=sidebar][data-nav-side=right]>.nav{border-right:0;border-left:1px solid var(--line)}
 .workspace[data-nav-layout=sidebar] .primary-nav{display:none}
 .workspace[data-nav-layout=sidebar] .sidebar-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 2px 8px 8px;font-size:12px;font-weight:600;color:var(--ink)}

@@ -10,6 +10,12 @@ const surfaces='.workspace-card,.settings-group,.ai-card,.anchor-section,.pk-vis
 const blocks='div,section,article,main,header,footer,form,fieldset,nav,ul,ol,li,dl';
 
 export const isTransparentLayout=node=>node.matches(transparent);
+export function describeCollection(node) {
+ if(node.matches('[data-list],[data-memory-list],.anchor-gifts,[data-anchor-fanclub-activities]'))return {mode:'scroll'};
+ for(const [selector,label] of [['[data-logs]','运行记录'],['[data-profiles]','主播列表'],['[data-agent-results]','研究任务'],['[data-account-records]','账号资料'],['[data-search-history]','问答来源'],['[data-skill-list]','回复技能']]){
+  if(node.matches(selector))return {mode:'records',label};
+ }
+}
 export function describeLayout(node) {
  const surface=node.matches(surfaces) ? 'card' : undefined;
  const dataGrid=node.matches('.grid') && !node.querySelector('input,textarea,select');
