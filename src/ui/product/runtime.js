@@ -95,6 +95,12 @@ function View({node,bridge}) {
   if(node.layout==='stack')return h(Stack,{...props,gap:'var(--product-gap)'},content);
   return h(node.tag || 'div',props,renderChildren(node.children,bridge));
 }
+function KnowledgeDialog({node,bridge,shadow}) {
+  const trigger=useRef(shadow.activeElement),row=useRef(shadow.activeElement?.closest('.product-disclosure'));
+  useEffect(()=>()=>{const target=trigger.current?.isConnected ? trigger.current : row.current?.querySelector('button');target?.focus();},[]);
+  const keyDown=event=>{if(event.key==='Escape' && !event.isComposing){event.preventDefault();event.stopPropagation();bridge.activate(node.cancelId);}};
+  return h(Modal,{opened:true,onClose:()=>bridge.activate(node.cancelId),onKeyDown:keyDown,title:node.title,size:'lg',centered:true,withinPortal:false,lockScroll:false,returnFocus:false,closeOnEscape:false,closeOnClickOutside:false,closeButtonProps:{'aria-label':'关闭知识编辑弹窗'},className:'product-knowledge-dialog'},h(Stack,{gap:'md'},renderChildren(node.children,bridge)));
+}
 function Workspace({bridge,shadow,onReady}) {
   const state=useSyncExternalStore(bridge.subscribe,bridge.getSnapshot),[menu,setMenu]=useState(false),[jump,setJump]=useState(null),main=useRef(null),[systemDark,setSystemDark]=useState(()=>shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)').matches);
   const [compact,setCompact]=useState(()=>shadow.host.getBoundingClientRect().width<=660);
@@ -116,7 +122,7 @@ function Workspace({bridge,shadow,onReady}) {
   const headings=[];function walk(node){if(node?.tag==='h3')headings.push({value:node.id,label:node.children.filter(n=>n.kind==='text').map(n=>n.text).join('').trim()});for(const child of node?.children || [])walk(child);}walk(state.content);
   const nav=h('nav',{id:'product-navigation',className:'product-nav','aria-label':'功能导航'},groups.map(group=>h('div',{key:group,className:'product-nav-group'},h(motion.div,{className:'product-nav-label',initial:false,'aria-hidden':state.sidebar.collapsed && !compact,animate:groupReveal},group),state.nav.filter(n=>n.group===group).map(item=>h(Button,{key:item.key,className:'product-nav-button',variant:state.key===item.key ? 'light' : 'subtle',fullWidth:true,'aria-label':item.label,title:item.label,'aria-current':state.key===item.key ? 'page' : undefined,onClick:()=>bridge.navigate(item.key),leftSection:icon(item.icon)},item.label)))));
   return h(MantineProvider,{forceColorScheme:dark ? 'dark' : 'light',getRootElement:()=>shadow.host,cssVariablesSelector:':host',deduplicateCssVariables:false,withGlobalClasses:false,cssVariablesResolver:componentVariables,theme:componentTheme(state.palette,dark)},
-    state.dialog ? h(Modal,{opened:true,onClose:()=>bridge.activate(state.dialog.cancelId),title:state.dialog.title,size:'lg',centered:true,withinPortal:false,lockScroll:false,closeOnClickOutside:false,closeButtonProps:{'aria-label':'关闭知识编辑弹窗'},className:'product-knowledge-dialog'},h(Stack,{gap:'md'},renderChildren(state.dialog.children,bridge))) : null,
+    state.dialog ? h(KnowledgeDialog,{node:state.dialog,bridge,shadow}) : null,
     h(motion.div,{initial:false,animate:sidebarWidth,className:'product-shell','data-menu-open':menu,'data-sidebar-side':state.sidebar.side,'data-sidebar-collapsed':state.sidebar.collapsed,'data-material':state.material,'data-mantine-color-scheme':dark ? 'dark' : 'light'},
       h(motion.aside,{className:'product-sidebar','aria-label':'功能侧边栏',initial:false,inert:compact && !menu,'aria-hidden':compact && !menu,animate:sidebarReveal},h('div',{className:'product-sidebar-inner'},state.sidebar.toggle ? h('div',{className:'product-nav-toggle'},h(Button,{className:'product-nav-button',variant:'subtle',fullWidth:true,'aria-label':state.sidebar.toggle.label,title:state.sidebar.toggle.label,'aria-expanded':!state.sidebar.collapsed,'aria-controls':'product-navigation',onClick:()=>bridge.activate(state.sidebar.toggle.id),leftSection:icon(state.sidebar.toggle.icon)},state.sidebar.toggle.label)) : null,nav)),
       h('div',{className:'product-main'},

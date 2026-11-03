@@ -104,13 +104,18 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   const add=document.createElement('button');add.textContent='添加知识';add.onclick=()=>{dialog.hidden=false;};
   let committed='';dialog.querySelector('[data-memory-cancel]').onclick=()=>{dialog.hidden=true;};dialog.querySelector('[data-confirm]').onclick=()=>{committed=dialog.querySelector('input').value;dialog.hidden=true;};
   root.querySelector('[data-page=ai]').append(add,dialog);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
-  [...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识').click();await new Promise(resolve=>setTimeout(resolve,40));
+  {const trigger=[...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识');trigger.focus();trigger.click();}await new Promise(resolve=>setTimeout(resolve,40));
   const popup=ui.querySelector('[role="dialog"]');assert.ok(popup);assert.match(popup.textContent,/添加知识/);
   const popupInput=popup.querySelector('input');setter.call(popupInput,'已核对的资料');popupInput.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
   assert.equal(dialog.querySelector('input').value,'已核对的资料');
   [...popup.querySelectorAll('button')].find(b=>b.textContent==='确定').click();await new Promise(resolve=>setTimeout(resolve,30));assert.equal(committed,'已核对的资料');assert.equal(ui.querySelector('[role="dialog"]'),null);
-  [...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识').click();await new Promise(resolve=>setTimeout(resolve,30));
+  {const trigger=[...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识');trigger.focus();trigger.click();}await new Promise(resolve=>setTimeout(resolve,30));
   [...ui.querySelector('[role="dialog"]').querySelectorAll('button')].find(b=>b.textContent==='取消').click();await new Promise(resolve=>setTimeout(resolve,30));assert.equal(ui.querySelector('[role="dialog"]'),null);
+  assert.equal(ui.activeElement?.textContent,'添加知识','关闭弹窗后焦点回到可见的触发按钮');
+  {const trigger=ui.activeElement;trigger.click();}await new Promise(resolve=>setTimeout(resolve,30));
+  let collapsed=false;root.addEventListener('keydown',event=>{if(event.key==='Escape' && !event.defaultPrevented)collapsed=true;});
+  ui.querySelector('[role="dialog"] input').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(collapsed,false,'Escape关闭知识弹窗时不触发外层面板收起');assert.equal(ui.querySelector('[role="dialog"]'),null);assert.equal(ui.activeElement?.textContent,'添加知识');
   assert.equal(document.documentElement.getAttribute('data-mantine-color-scheme'),null);assert.equal(document.body.querySelector('[data-portal]'),null);
   runtime.destroy();runtime=null;assert.equal(container.shadowRoot.childNodes.length,0);
  }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);if(navigatorDescriptor)Object.defineProperty(globalThis,'navigator',navigatorDescriptor);else delete globalThis.navigator;dom.window.close();await rm(dir,{recursive:true,force:true});}
