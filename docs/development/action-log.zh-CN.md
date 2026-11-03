@@ -1715,3 +1715,5 @@ crapper、dryer、mutator不可用，未执行；不将上述检查作为它们�
 最终浏览器复验发现 Escape 会冒泡触发浮动窗口收起；先补实际 React 键盘事件回归并得到预期失败（red-escape.log），再由知识弹窗在当前 Shadow DOM 中接管 Escape、阻止外层快捷键。专项 **9/9** 通过；本地演示实测 Escape 只关闭弹窗、面板保持展开且焦点回到可见“编辑知识”按钮。最终截图 editor-dialog.jpg 已更新，未操作用户真实直播页或资料。第二轮全量1296/1296及check通过；最后Escape修正后的冻结树全量正在复验，最终结果随后补充。
 
 最终冻结树验证：JavaScript **1296/1296**、0失败/跳过，Escape专项9/9、最终build、check及git diff --check全部通过（final-test-3.log / final-build-3.log / final-check-3.log）。依赖安装审计0漏洞；无原生代码变更，未重复原生测试。crapper/dryer/mutator不可用、未执行。临时演示标签和本轮4183服务已关闭；当前聊天工作树保留审查，其他在用工作树未删除。接下来提交推送dev并在干净主目录安全快进、重新构建扩展，实际交付回执随后补充；用户需重新加载扩展并刷新直播页生效。
+
+交付回执：功能提交 `3df4351` 与键盘收尾提交 `3a74eca92ae6da0e9232b9b8936ceb79f942f623` 已成功推送 origin/dev（80c686a → 3a74eca），远端引用逐字核对一致。干净主目录已安全快进到相同提交，dist/chrome-extension 和油猴脚本重新构建成功，截图和验证证据已复制至主目录 output/knowledge-editor-dialog-2026-11-04，工作区干净。GitHub [CI 41697739871](https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/41697739871) 已触发，首次核对 queued，未预记成功。本段仅补实际交付记录，单独提交推送 dev，最终文档提交结果见完成报告；main、0.1.2版本和标签保持不变。剩余用户操作：重新加载扩展并刷新直播页应用新版，本轮未操作用户实播。
