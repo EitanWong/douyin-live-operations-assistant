@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { SOLID_GLASS_CSS } from '../src/ui/solid-glass.js';
 import { build } from 'esbuild';
 import { bundleStandalone } from './standalone-build.mjs';
+import { readPackageLicense } from './dependency-licenses.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dist = process.env.DOUYIN_DIST_DIR || `${root}dist`;
 const development = process.argv.includes('--dev');
@@ -47,8 +48,7 @@ let productLicenses="";
 // Include runtime UI and validation dependencies, including transitive MIT code.
 const productPackages=['@radix-ui/colors','react','react-dom','scheduler','@mantine/core','@mantine/hooks','@tanstack/react-table','@tanstack/table-core','@tanstack/react-store','@tanstack/store','use-sync-external-store','@floating-ui/react','@floating-ui/react-dom','@floating-ui/dom','@floating-ui/core','@floating-ui/utils','clsx','react-number-format','react-remove-scroll','react-remove-scroll-bar','react-style-singleton','use-callback-ref','use-sidecar','get-nonce','detect-node-es','tabbable','zod','minisearch','dexie','xstate','eventsource-parser','lru-cache','linkedom','@mozilla/readability','css-select','cssomnom','html-escaper','htmlparser2','uhyphen','domhandler','domutils','domelementtype','entities','dom-serializer','css-what','nth-check','boolbase'];
 for(const name of productPackages){
-  let license;for(const file of ['LICENSE','LICENSE.md','LICENSE.txt']){try{license=await readFile(`${root}node_modules/${name}/${file}`,'utf8');break;}catch(error){if(error.code!=='ENOENT')throw error;}}
-  if(!license && name==='react-remove-scroll-bar')license=await readFile(`${root}vendor/runtime-licenses/react-remove-scroll-bar/LICENSE`,'utf8');
+  const license=await readPackageLicense(root,name);
   if(!license)throw new Error(`Missing license for ${name}`);productLicenses+=`\n${name}\n${license}\n`;if(name==='dexie')productLicenses+=await readFile(`${root}node_modules/dexie/NOTICE`,'utf8');
 }
 const toolNotice=`/*! Cordis · MIT\n${cordisLicense}\nCosmokit · MIT\n${cosmokitLicense}\n*/`;
