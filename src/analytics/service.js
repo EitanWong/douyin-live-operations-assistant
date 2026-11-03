@@ -49,7 +49,7 @@ export class PredictionService {
 
 export function createPredictionClient({transport,context,clock=Date.now}={}){
  const supported=Boolean(transport || globalThis.indexedDB);
- let local,failed='',latest=null,lastPulse=0,activeScope='',tail=Promise.resolve(),enabled=supported;
+ let local,failed='',latest=null,lastPulse=0,activeScope='',tail=Promise.resolve(),enabled=supported,paused=false;
  const scope=()=>{const c={...context()},key=c.anchor ? `${c.room}:${c.anchor}`:'';if(key!==activeScope){activeScope=key;latest=null;lastPulse=0;enabled=supported;}return c;};
  const perform=async(c,action,value)=>{
   if(!c.anchor)throw new Error('请先识别主播后使用预测');
@@ -60,12 +60,12 @@ export function createPredictionClient({transport,context,clock=Date.now}={}){
  const call=(action,value,c=scope())=>{const work=tail.catch(()=>{}).then(()=>perform(c,action,value));tail=work;return work;};
  const ingest=event=>{
   const c=scope();
-  if(!enabled || !['gift','chat','enter','start','end','room-audience'].includes(event.type) || !c.anchor)return Promise.resolve();
+  if(paused || !enabled || !['gift','chat','enter','start','end','room-audience'].includes(event.type) || !c.anchor)return Promise.resolve();
   const user=event.user,value={...event,id:event.id || event._journalId,receivedAt:event.receivedAt || clock(),user:user ? {id:/^\d{1,30}$/.test(String(user.id))?String(user.id):undefined,secUid:user.secUid || undefined,name:user.name,minor:user.minor}:undefined};
   return call('event',value,c);
  };
- return {ingest,call,scope:()=>{const c=scope();return `${c.room}:${c.anchor}`;},enabled:()=>{scope();return enabled;},
-  pulse:async info=>{const c=scope();if(clock()-lastPulse<5000 || !c.anchor)return;lastPulse=clock();try{await call('pulse',info,c);failed='';}catch(e){failed=e.message;}},
+ return {ingest,call,scope:()=>{const c=scope();return `${c.room}:${c.anchor}`;},pause:()=>{paused=true;latest=null;},resume:()=>{paused=false;lastPulse=0;},enabled:()=>{scope();return enabled && !paused;},
+  pulse:async info=>{const c=scope();if(paused || clock()-lastPulse<5000 || !c.anchor)return;lastPulse=clock();try{await call('pulse',info,c);failed='';}catch(e){failed=e.message;}},
   report:async()=>{const c=scope();try{const r=await call('report',undefined,c);if(`${scope().room}:${scope().anchor}`===`${c.room}:${c.anchor}`){latest=r;enabled=r.settings?.enabled!==false;failed='';}return r;}catch(e){failed=e.message;return {phase:'unavailable',reason:failed};}},
   context:()=>{scope();return latest && clock()-latest.asOf<30000 ? {scope:latest.scope,asOf:latest.asOf,modelVersion:latest.modelVersion,revenue:latest.revenue,month:latest.month,online:latest.online,pk:latest.pk,coverage:latest.coverage,basis:latest.basis}:null;},
   error:()=>failed,close:()=>local?.close()};

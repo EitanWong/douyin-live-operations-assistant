@@ -70,9 +70,10 @@ test('PK 播报设置通过内联摘要展开，开关联动、零点预览与�
   try{
     assert.equal(panel.root.querySelector('[data-tab=pk-settings]'),null);
     assert.equal(panel.root.querySelector('[data-pk-settings-open],[data-pk-settings-close]'),null);
-    const settings=panel.node('[data-pk-settings]');assert.equal(settings.closest('[data-page]').dataset.page,'pk');assert.equal(settings.open,false);
+    panel.tab('pk');
+    const settings=panel.node('[data-pk-settings]');assert.equal(settings.closest('[data-page]').dataset.page,'anchor');assert.equal(settings.closest('[data-anchor-content]').dataset.anchorContent,'pk');assert.equal(settings.open,false);
     const summary=settings.querySelector('summary');summary.click();
-    assert.equal(panel.activeTab,'pk');assert.equal(settings.open,true);assert.equal(panel.dirty,false);
+    assert.equal(panel.activeTab,'anchor');assert.equal(panel.anchorView,'pk');assert.equal(settings.open,true);assert.equal(panel.dirty,false);
     assert.equal(panel.root.querySelectorAll('[data-field="pkOperations.enabled"]').length,1);
     assert.equal(panel.node('[data-field="pkOperations.aiEnabled"]').closest('details'),settings);
     assert.equal(panel.node('[data-field="pkOperations.reportEnabled"]').matches(':disabled'),true);
@@ -98,14 +99,14 @@ test('PK 播报设置通过内联摘要展开，开关联动、零点预览与�
     grace.value='10';grace.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
     const read=panel.read();assert.equal(read.pkOperations.enabled,true);assert.equal(read.ai.enabled,false);
     assert.match(settings.textContent,/固定格式示例/);
-    summary.click();assert.equal(panel.activeTab,'pk');assert.equal(settings.open,false);
+    summary.click();assert.equal(panel.activeTab,'anchor');assert.equal(panel.anchorView,'pk');assert.equal(settings.open,false);
     summary.click();assert.equal(panel.node('[data-field="pkOperations.enabled"]').checked,true);assert.equal(interval.value,'90');
     panel.node('[data-field="pkOperations.enabled"]').click();assert.equal(interval.matches(':disabled'),true);assert.equal(panel.node('[data-pk-midnight-settings]').hidden,true);
     panel.node('[data-field="pkOperations.enabled"]').click();assert.equal(interval.value,'90');assert.equal(report.checked,true);
     for(const key of ['gift','welcome','like','keyword','bot'])panel.node(`[data-field="${key}.enabled"]`).checked=false;
     panel.node('[data-field="timersEnabled"]').checked=false;panel.applyFeatureVisibility();
     panel.tab('ai');panel.node('[data-category=interaction]').click();assert.equal(panel.activeTab,'anchor');
-    panel.node('[data-tab=pk]').click();assert.equal(panel.activeTab,'pk');assert.equal(settings.open,true);assert.equal(interval.value,'90');
+    panel.node('[data-anchor-view=pk]').click();assert.equal(panel.activeTab,'anchor');assert.equal(panel.anchorView,'pk');assert.equal(settings.open,true);assert.equal(interval.value,'90');
     panel.tab('ai');
     const contextInfo=[...panel.root.querySelectorAll('h3')].find(node=>node.textContent==='所有 AI 功能共用直播上下文');
     assert.equal(contextInfo.closest('[data-chat-controls]'),null);

@@ -1,10 +1,10 @@
 import { anchorEscape } from './stat-visuals.js';
 import { giftDate } from '../data/gifts.js';
 
-export function anchorPageTemplate(room) {
+export function anchorPageTemplate(room,analytics='',pk='') {
   return `          <section class="page" role="tabpanel" id="page-anchor" aria-labelledby="tab-anchor" data-page="anchor" hidden>
             <h2>主播数据</h2><p class="intro">按直播场次查看主播表现和礼物账本，开播与下播时间均为北京时间。</p>
-            <div class="anchor-views" role="group" aria-label="主播数据视图"><button type="button" data-anchor-view="overview" aria-pressed="true" aria-controls="anchor-overview">数据概览</button><button type="button" data-anchor-view="income" aria-pressed="false" aria-controls="anchor-income">收入账本</button></div>
+            <div class="anchor-views" role="group" aria-label="主播数据视图"><button type="button" data-anchor-view="overview" aria-pressed="true" aria-controls="anchor-overview">数据概览</button><button type="button" data-anchor-view="pk" aria-pressed="false" aria-controls="anchor-pk">PK 预测</button><button type="button" data-anchor-view="income" aria-pressed="false" aria-controls="anchor-income">收入账本</button></div>
             <div id="anchor-overview" data-anchor-content="overview">
             <div class="status"><strong data-anchor-report-name>正在识别主播…</strong><span class="badge" data-anchor-scope>本机已观测</span></div>
 <div class="anchor-controls">
@@ -18,7 +18,7 @@ export function anchorPageTemplate(room) {
               <div><b data-anchor-stat="income">未知</b><span><span data-anchor-period-label>当前场次</span>收入估算</span></div><div><b data-anchor-stat="winRate">未知</b><span><span data-anchor-period-label>当前场次</span> PK 胜率</span></div><div><b data-anchor-stat="battles">未知</b><span><span data-anchor-period-label>当前场次</span> PK 场数</span></div><div><b data-anchor-stat="score">未知</b><span><span data-anchor-period-label>当前场次</span> PK 总分</span></div>
             </div>
             <p class="choice-hint" data-anchor-income-note>收入按已采集礼物估算，不代表平台结算。</p>
-            <section class="anchor-section" aria-label="直播点赞"><div class="anchor-section-head"><h3>直播点赞</h3><span data-anchor-likes-at>未采集</span></div><div class="anchor-rank"><strong data-anchor-likes>未知</strong><span data-anchor-likes-scope>所选场次累计点赞</span></div><p class="hint" data-anchor-likes-note>等待所选直播场次的点赞数据；未采集的场次保持未知。</p></section>
+            ${analytics}<section class="anchor-section" aria-label="直播点赞"><div class="anchor-section-head"><h3>直播点赞</h3><span data-anchor-likes-at>未采集</span></div><div class="anchor-rank"><strong data-anchor-likes>未知</strong><span data-anchor-likes-scope>所选场次累计点赞</span></div><p class="hint" data-anchor-likes-note>等待所选直播场次的点赞数据；未采集的场次保持未知。</p></section>
             <section class="anchor-section" aria-label="粉丝团数据"><div class="anchor-section-head"><h3>粉丝团</h3><span data-anchor-fanclub-at>未采集</span></div><p data-anchor-fanclub-title>等待粉丝团数据</p><div class="anchor-exhibition-grid"><div><b data-anchor-fanclub-count>未知</b><span>粉丝团总人数</span></div><div><b data-anchor-fanclub-lighted>未知</b><span>勋章点亮人数</span></div><div><b data-anchor-fanclub-loaded>0</b><span>已加载成员</span></div><div><b data-anchor-fanclub-level>未知</b><span>采集时账号等级</span></div></div><p class="hint" data-anchor-fanclub-viewer></p><p class="hint" data-anchor-fanclub-note>打开原生粉丝团成员页后自动采集。</p><details><summary>粉丝团成员明细</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>序号</th><th>成员昵称</th><th>灯牌等级</th><th>灯牌名称</th><th>亲密度</th></tr></thead><tbody data-anchor-fanclub-members></tbody></table></div><div class="anchor-pagination"><span data-anchor-fanclub-page-note></span><div class="actions"><button type="button" data-anchor-fanclub-page="-1">上一页</button><button type="button" data-anchor-fanclub-page="1">下一页</button></div></div></details><details><summary>最近粉丝团动态</summary><div data-anchor-fanclub-activities></div><p class="hint">仅保留本机收到的加入、升级和播报消息，不据此推算完整增员数量。</p></details></section>
 <div class="anchor-workspace">            <section class="anchor-section anchor-trend-section"><div class="anchor-section-head"><h3>各直播场次 PK 总分</h3><span data-anchor-pk-note>等待明确终局样本</span></div><div class="anchor-bars" data-anchor-trend aria-label="各直播场次已确认终局比分趋势"><p class="empty">暂无已观测场次</p></div></section>
             <section class="anchor-section"><div class="anchor-section-head"><h3>PK 结果分布</h3><span data-anchor-results-note></span></div><div data-anchor-results></div><div class="anchor-kpis"><span>胜 <b data-anchor-stat="wins">未知</b></span><span>负 <b data-anchor-stat="losses">未知</b></span><span>平 <b data-anchor-stat="draws">未知</b></span><span>待确认 <b data-anchor-stat="pending">未知</b></span></div></section>
@@ -28,6 +28,7 @@ export function anchorPageTemplate(room) {
             <details class="anchor-section anchor-battles-section" data-adaptive-details><summary>PK 场次明细</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>北京时间</th><th>对手</th><th>已观测比分</th><th>结果</th></tr></thead><tbody data-anchor-battles><tr><td colspan="4">暂无场次</td></tr></tbody></table></div><div class="anchor-pagination"><span data-anchor-page-note></span><div class="actions"><button type="button" data-anchor-page="-1">上一页</button><button type="button" data-anchor-page="1">下一页</button></div></div></details>
 </div>            <p class="pk-note" data-anchor-basis>统计仅代表当前浏览器已采集到的数据；明确终局前的场次会保留为待确认，不会被算入胜率和总分。</p>
             </div>
+            <div id="anchor-pk" data-anchor-content="pk" hidden>${pk}</div>
             <div id="anchor-income" data-anchor-content="income" hidden>
               <p class="mode-note" data-income-paused hidden>收入采集已关闭，历史账本仍可查看和导出。<button type="button" class="text-button" data-go="features">前往功能开关</button></p>
             <section class="anchor-section income-dashboard" data-income-dashboard aria-labelledby="income-dashboard-title">
