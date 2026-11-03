@@ -11,9 +11,11 @@ import {createWorkspaceBridge} from '../../src/ui/product/bridge.js';
 test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现 TanStack 表格，销毁后清理',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'product-ui-')), dom=new JSDOM('<div id="host"></div>',{url:'https://live.douyin.com/123',pretendToBeVisual:true});
  const previous=Object.fromEntries(['window','document','HTMLElement','Element','getComputedStyle','MutationObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
+ const navigatorDescriptor=Object.getOwnPropertyDescriptor(globalThis,'navigator');
  let runtime,bridge;
  try{
   Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,Element:dom.window.Element,getComputedStyle:dom.window.getComputedStyle,MutationObserver:dom.window.MutationObserver,requestAnimationFrame:dom.window.requestAnimationFrame.bind(dom.window),cancelAnimationFrame:dom.window.cancelAnimationFrame.bind(dom.window)});
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:dom.window.navigator});
   dom.window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
   dom.window.ResizeObserver=class{observe(){}disconnect(){}unobserve(){}};
   const root=document.querySelector('#host').attachShadow({mode:'open'});root.innerHTML='<div class="workspace"><button data-tab="ai" aria-label="AI 设置">AI</button><header data-workspace-toolbar><div class="foot"><small>未保存草稿</small><button data-action="save">保存设置</button></div></header><div data-workspace-views><button role="tab" aria-selected="true">模型设置</button><button role="tab" aria-selected="false">额度设置</button></div><section data-page="ai"><div class="workspace-grid"><div class="ai-service-grid" data-workspace-contents><section class="ai-card"><h3>回复模型</h3><div class="grid"><label class="field"><span>模型名</span><input value="qwen-plus"><small>模型名称按服务商提供的完整 ID 填写。</small></label></div><label class="toggle"><input type="checkbox">启用 AI</label><label class="field"><span>接话频率</span><input type="range" min="0" max="4" step="1" value="2" aria-valuetext="克制陪伴"></label><table><thead><tr><th>观众</th><th>钻石</th></tr></thead><tbody><tr><td>甲</td><td>9</td></tr></tbody></table><details><summary>高级参数</summary><label class="field"><span>测试高级字段</span><input value="draft"></label></details></section></div></div></section></div>';
@@ -34,5 +36,5 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   [...ui.querySelectorAll('button')].find(b=>b.textContent.includes('高级参数')).click();await new Promise(resolve=>setTimeout(resolve,240));assert.notEqual(ui.querySelector('.product-disclosure-body').style.display,'none');
   assert.equal(document.documentElement.getAttribute('data-mantine-color-scheme'),null);assert.equal(document.body.querySelector('[data-portal]'),null);
   runtime.destroy();runtime=null;assert.equal(container.shadowRoot.childNodes.length,0);
- }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);dom.window.close();await rm(dir,{recursive:true,force:true});}
+ }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);if(navigatorDescriptor)Object.defineProperty(globalThis,'navigator',navigatorDescriptor);else delete globalThis.navigator;dom.window.close();await rm(dir,{recursive:true,force:true});}
 });
