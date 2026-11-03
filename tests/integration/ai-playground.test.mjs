@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {Panel} from '../../src/ui/panel.js';
 import {copy,DEFAULTS} from '../../src/core/engine.js';
+import {AI_TEST_CASES} from '../../src/services/ai-playground.js';
 import {AIPlayground} from '../../src/ui/ai-playground.js';
 import {createWorkspaceBridge} from '../../src/ui/product/bridge.js';
 import {boot} from '../../src/app.js';
@@ -23,7 +24,8 @@ test('扩展工具的AI问答支持真实可见投影、任意问题、连续对
  const inputs=[],f=fixture({run:async value=>{inputs.push(value);value.onProgress({stage:'search',query:'查资料'});return result(value.question);}});
  const bridge=createWorkspaceBridge(f.panel);
  try{
-  f.panel.node('[data-tab="ai-playground"]').click();await flush();assert.equal(f.panel.activeCategory,'tools');
+  f.panel.tab('ai');f.panel.node('[data-ai-section-tab="playground"]').click();await flush();assert.equal(f.panel.activeCategory,'settings');
+  assert.equal(f.panel.node('[data-tab="ai-playground"]'),null);assert.equal(f.panel.node('[data-ai-section="playground"]').hidden,false);
   const controls=()=>walk(bridge.getSnapshot().content);
   const question=controls().find(row=>row.kind==='field' && row.label==='测试问题');assert.ok(question);
   bridge.change(question.id,'怎么查询规则？');bridge.activate(controls().find(row=>row.kind==='button' && row.text==='测试回复').id);await flush();
@@ -47,12 +49,12 @@ test('重复点击只运行一次，取消、清空与迟到结果不污染新�
 test('预设场景串行运行且相互独立，显示基本检查与人工核对提示',async()=>{
  const calls=[];let active=0,max=0;const f=fixture({run:async value=>{active++;max=Math.max(max,active);calls.push(value);await flush();active--;return result(value.question);}});
  try{
-  f.panel.node('[data-playground-suite]').click();for(let i=0;i<30 && calls.length<4;i++)await flush();await flush();
-  assert.equal(calls.length,4);assert.equal(max,1);assert.ok(calls.every(c=>c.turns.length===0 && c.testCase));
-  assert.equal(f.ui.records.length,4);assert.match(f.panel.node('[data-page="ai-playground"]').textContent,/人工核对/u);
+  f.panel.node('[data-playground-suite]').click();for(let i=0;i<100 && calls.length<AI_TEST_CASES.length;i++)await flush();await flush();
+  assert.equal(calls.length,AI_TEST_CASES.length);assert.equal(max,1);assert.ok(calls.every(c=>c.turns.length===0 && c.testCase));
+  assert.equal(f.ui.records.length,AI_TEST_CASES.length);assert.match(f.panel.node('[data-ai-section="playground"]').textContent,/人工核对/u);
   assert.equal(f.panel.node('[data-playground-suite]').disabled,false);
   f.panel.node('[data-playground-question]').value='手动继续';f.panel.node('[data-playground-run]').click();await flush();await flush();
-  assert.equal(calls[4].turns.length,0,'批量测试结果不混入连续问答');
+  assert.equal(calls[AI_TEST_CASES.length].turns.length,0,'批量测试结果不混入连续问答');
  }finally{f.close();}
 });
 test('服务失败可重试，恶意模型内容按纯文本显示，危险来源不生成链接',async()=>{
@@ -73,6 +75,15 @@ test('关闭工具中止在途测试，取消场景组不再启动后续付费�
   finish();await flush();assert.equal(f.ui.records.length,1);assert.equal(calls,2);
  }finally{f.close();}
 });
+test('质量汇总将内容检查失败计为待改进，重新运行和清空会重置本轮统计',async()=>{
+ let calls=0;const f=fixture({run:async({question})=>result(question,{checks:[{label:'给出正确低温',pass:++calls%2===0}]})});
+ try{
+  f.panel.node('[data-playground-suite]').click();for(let i=0;i<100 && f.ui.busy;i++)await flush();
+  assert.match(f.panel.node('[data-playground-summary]').textContent,/已运行 12\/12，达标 6，待改进 6/u);
+  f.panel.node('[data-playground-clear]').click();assert.match(f.panel.node('[data-playground-summary]').textContent,/尚未运行/u);
+  assert.equal(f.ui.records.length,0);
+ }finally{f.close();}
+});
 test('应用内入口贯通当前密钥、搜索、模型与预览，暂停场控也能测且没有发送',async()=>{
  const dom=page(),values=new Map([['live-assistant:config:demo',{ai:{search:{enabled:true},edge:{enabled:false}},automation:{autoStart:false}}],['live-assistant:api-key:https://api.deepseek.com','model-key'],['live-assistant:search-key:https://api.bochaai.com','search-key']]);
  let api,searches=0,calls=0;const sent=[];
@@ -83,7 +94,7 @@ test('应用内入口贯通当前密钥、搜索、模型与预览，暂停场�
    d.onload({status:200,responseText:JSON.stringify(output)});
   },send:text=>sent.push(text),adapterFactory:()=>({status:{},sync(){},observeDOM(){},stopDOM(){},healthy:()=>true}),onReady:value=>api=value});
  try{
-  for(let i=0;i<50 && !api;i++)await flush();assert.ok(api);api.panel.tab('ai-playground');
+  for(let i=0;i<50 && !api;i++)await flush();assert.ok(api);api.panel.tab('ai');api.panel.node('[data-ai-section-tab="playground"]').click();
   api.panel.node('[data-playground-question]').value='赤鹤星周期是多少？';api.panel.node('[data-playground-run]').click();
   for(let i=0;i<100 && !api.panel.node('[data-playground-results]').textContent.includes('73天');i++)await flush();
   assert.match(api.panel.node('[data-playground-results]').textContent,/赤鹤星周期73天。\[1\]/u);

@@ -5,13 +5,8 @@ import {createLocalReply} from './local-search.js';
 import {cleanMessage} from '../core/engine.js';
 import {isIntrusiveReply} from '../core/reply-context.js';
 import {DIRECT_TURN_INSTRUCTION,TURN_TAKING_INSTRUCTION} from '../ai/conversation-policy.js';
-
-export const AI_TEST_CASES=Object.freeze([
- {id:'greeting',label:'日常对话',question:'你好，晚上好。',intents:['chat']},
- {id:'live-data',label:'直播数据',question:'本场已采集了多少礼物钻石？没有数据请直接说明。',intents:['live-data']},
- {id:'web-search',label:'联网知识',question:'请查证抖音直播PK活动的加成规则，结合来源回答，不能确认的部分请说明。',intents:['web-search','knowledge'],sources:true},
- {id:'clarify',label:'条件澄清',question:'帮我查明天天气，地点还没告诉你，请先问我。',intents:['clarify']}
-]);
+import {evaluateReply} from '../ai/reply-evaluation.js';
+export {AI_TEST_CASES} from '../ai/reply-evaluation.js';
 
 const fingerprint=c=>JSON.stringify([c.anchorId,c.ai,c.sending]);
 const cancelled=()=>Object.assign(new Error('测试已取消或配置、直播间已变化'),{name:'AbortError'});
@@ -26,6 +21,7 @@ function replyChecks(result,config,testCase){
  if(testCase){
   checks.push({label:`场景意图符合预期（${testCase.label}）`,pass:testCase.intents.includes(result.intent)});
   if(testCase.sources)checks.push({label:'知识场景有可核对的来源',pass:result.sources.length>0});
+  checks.push(...evaluateReply(result,testCase));
  }
  return checks;
 }
@@ -43,26 +39,29 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
   if(typeof question!=='string' || !question.trim() || [...question.trim()].length>1000)throw new Error('请填写1–1000字的测试问题');
   if(!['direct','contextual'].includes(mode))throw new Error('测试问答模式无效');
   if(busy)throw new Error('已有测试进行中，请等待或取消');
-  const config=structuredClone(getConfig()),version=fingerprint(config),started=now(),reply=resolveReplyConfig(config.ai);
+  const config=structuredClone(getConfig()),version=fingerprint(config),started=now(),controlled=testCase?.fixture;
+  if(controlled)config.ai={...config.ai,knowledge:'',memory:{...config.ai.memory,enabled:false},search:{...config.ai.search,enabled:true,rememberKnowledge:false}};
+  const reply=resolveReplyConfig(config.ai);
   if(version!==configVersion){configVersion=version;contextRevision++;}
   busy=true;
-  const result={question:question.trim(),mode,contextRevision,status:'running',answer:'',error:'',at:started,elapsedMs:0,intent:'',provider:'',model:reply.model,
-   query:'',cached:false,searchedAt:null,sources:[],searchError:'',calls:{cloud:0,local:0},checks:[]};
+  const result={question:question.trim(),mode,contextRevision,status:'running',answer:'',error:'',at:started,elapsedMs:0,intent:'',provider:'',model:reply.model,controlled:Boolean(controlled),
+   query:'',cached:false,searchedAt:null,sources:[],searchError:'',citationWarning:'',calls:{cloud:0,local:0},checks:[]};
   const current=()=>!signal?.aborted && isCurrent() && version===fingerprint(getConfig());
   const emit=progress=>{if(current())try{onProgress(progress);}catch{}};
   const context=()=>{
-   const live=getContext(config),history=turns.filter(row=>row.contextRevision===contextRevision).slice(-6);
+   const live=controlled ? structuredClone(controlled.context) : getContext(config),history=controlled ? [] : turns.filter(row=>row.contextRevision===contextRevision).slice(-6);
    return {...live,context:[...(live.context || []),...history.map(row=>({name:'测试提问',text:row.question,at:started}))],
     recentReplies:[...(live.recentReplies || []),...history.map(row=>row.answer)].slice(-10)};
   };
   const onIntent=row=>{result.intent=row.intent;emit({stage:'intent',intent:row.intent});};
-  const onSearch=row=>{Object.assign(result,{query:row.query,cached:Boolean(row.cached),searchedAt:row.searchedAt ?? null,sources:structuredClone(row.results || []),searchError:row.error || ''});};
+  const onSearch=row=>{Object.assign(result,{query:row.query,cached:Boolean(row.cached),searchedAt:row.searchedAt ?? null,sources:structuredClone(row.results || []),searchError:row.error || '',citationWarning:row.citationWarning || ''});};
   const localReserve=()=>{reserve('local',config.ai.edge.maxPerHour);result.calls.local++;return true;};
   const readOnlyKnowledge=knowledge ? {revision:()=>knowledge.revision(),candidates:(...args)=>knowledge.candidates(...args),find:(...args)=>knowledge.find(...args),remember:async()=>{}} : undefined;
-  const cloud=createAIClient({getKey,search,knowledge:readOnlyKnowledge,onIntent,onSearch,request:details=>{
+  const lookup=controlled ? async query=>({query,searchedAt:now(),results:structuredClone(controlled.sources)}) : search;
+  const cloud=createAIClient({getKey,search:lookup,knowledge:readOnlyKnowledge,onIntent,onSearch,request:details=>{
    if(!current())throw cancelled();reserve('cloud',config.ai.maxPerHour);result.calls.cloud++;return request(details);
   }});
-  const local=edge && {...edge,reply:createLocalReply({edge,search,knowledge:readOnlyKnowledge,onSearch,onIntent})};
+  const local=edge && {...edge,reply:createLocalReply({edge,search:lookup,knowledge:readOnlyKnowledge,onSearch,onIntent})};
   const client=createResilientAI({cloud,edge:local,now,onTrace:row=>{result.provider=row.provider;if(row.provider==='edge')result.model=`本地 · ${config.ai.edge.textModel}`;}});
   try{
    if(!current())throw cancelled();

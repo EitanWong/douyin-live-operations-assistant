@@ -37,6 +37,7 @@ test('搜索完成后只整理已有来源，移除初次路由和接话判断�
   assert.match(system,/先给出来源支持的具体答案/u);
   assert.match(system,/资料不足或矛盾/u);
   assert.match(system,/\[1\]/u);
+  assert.doesNotMatch(system,/或 \[SKIP\]|不适合回复时输出 \[SKIP\]|没有必要回复时输出 \[SKIP\]/u);
   assert.deepEqual(JSON.parse(request.messages[1].content).web_search,found);
 });
 

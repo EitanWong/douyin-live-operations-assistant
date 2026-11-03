@@ -1,6 +1,6 @@
 import {AI_TEST_CASES} from '../services/ai-playground.js';
 
-export function aiPlaygroundTemplate(){return `<section class="page" role="tabpanel" id="page-ai-playground" aria-labelledby="tab-ai-playground" data-page="ai-playground" hidden>
+export function aiPlaygroundTemplate(){return `<div data-ai-playground>
  <h2>AI 问答测试</h2><p class="intro">使用已保存的回复模型、联网搜索、知识库和当前直播上下文，直接查看 AI 会怎样回答。无需开始场控，测试结果只在这里显示，不发公屏。</p>
  <section class="workspace-card"><h3>问一句</h3><p class="hint" data-playground-config>读取已保存配置</p>
  <p class="hint">先在 AI 设置保存模型、密钥和搜索配置。这里会调用实际服务并产生费用；模型测试额度独立计数，按已保存的每小时上限执行，搜索沿用搜索服务额度。测试不写入联网知识缓存。</p>
@@ -8,10 +8,10 @@ export function aiPlaygroundTemplate(){return `<section class="page" role="tabpa
  <div class="grid"><label class="field"><span>问答模式</span><select data-playground-mode><option value="direct">直接问答（模拟 @ 场控）</option><option value="contextual">弹幕接话判断（允许不回复）</option></select></label><label class="toggle"><input type="checkbox" data-playground-fresh>跳过联网缓存，重新查证</label></div>
  <div class="actions"><button type="button" class="primary" data-playground-run>测试回复</button><button type="button" data-playground-cancel disabled>取消测试</button><button type="button" data-playground-clear>清空对话</button></div>
  <p role="status" aria-live="polite" data-playground-status>输入问题后开始测试。</p></section>
- <section class="workspace-card"><h3>常用场景测试</h3><p class="hint">点击场景填入问题；也可依次测试全部4项。联网问答通常需要两次模型调用。每项独立，不带入测试对话；失败或取消后停止。基本检查只验证意图、格式和引用，事实内容仍需人工核对。</p>
+ <section class="workspace-card"><h3>回答质量评测</h3><p class="hint">点击场景只填入问题，按当前真实资料问答；“运行全部场景”使用固定测试资料与直播数据，调用已保存模型逐项评测${AI_TEST_CASES.length}项，不消耗搜索服务额度。覆盖事实、天气日期、追问、计算、错误前提、未知数据、矛盾与网页指令。模型只看问题与资料，看不到评分答案。每项独立，执行失败或取消后停止。全部检查通过才计达标；这套有限评测不能替代真实问题的人工核对。</p>
  <div class="actions">${AI_TEST_CASES.map(row=>`<button type="button" data-playground-case="${row.id}">${row.label}</button>`).join('')}<button type="button" data-playground-suite>运行全部场景</button></div></section>
- <section class="workspace-card"><div class="row"><h3>回复与测试记录</h3><button type="button" data-playground-export disabled>导出测试记录</button></div><p class="hint">保留本页最近20次结果；连续提问带入最近6轮测试对话，失败和取消不带入。刷新页面后清空。导出只含问题、回复和测试依据，不含密钥或完整直播上下文。</p><div data-playground-results aria-live="polite">尚无测试记录。</div></section>
- </section>`;}
+ <section class="workspace-card"><div class="row"><h3>回复与测试记录</h3><button type="button" data-playground-export disabled>导出测试记录</button></div><p role="status" data-playground-summary>尚未运行质量评测。</p><p class="hint">保留本页最近20次结果；连续提问带入最近6轮测试对话，失败和取消不带入。刷新页面后清空。导出只含问题、回复和测试依据，不含密钥或完整直播上下文。</p><div data-playground-results aria-live="polite">尚无测试记录。</div></section>
+ </div>`;}
 
 const statusLabels={succeeded:'已回答',skipped:'选择不回复',failed:'失败',cancelled:'已取消'};
 const intents={'live-data':'直播数据','web-search':'联网查询',knowledge:'复用知识',chat:'日常对话',clarify:'澄清条件',skip:'不回复'};
@@ -25,6 +25,8 @@ function renderResult(parent,row){
  if(row.query)append(item,'p',`搜索词：${row.query}`);
  if(row.searchedAt)append(item,'p',`资料采集：${new Date(row.searchedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}`);
  if(row.searchError)append(item,'p',`查询提示：${row.searchError}`);
+ if(row.citationWarning)append(item,'p',row.citationWarning);
+ if(row.controlled)append(item,'p','固定资料评测 · 非真实天气或直播数据');
  for(const check of row.checks || [])append(item,'p',`${check.pass ? '通过' : '需核对'}：${check.label}`);
  if(row.context)append(item,'p',`上下文：${row.context.chat}条对话 · ${row.context.media}条音画观察 · 知识库${row.context.knowledge ? '开启' : '关闭'}`);
  if(row.sources?.length){
@@ -44,7 +46,7 @@ export class AIPlayground {
   on('[data-playground-run]','click',()=>void this.run());
   on('[data-playground-suite]','click',()=>void this.run(true));
   on('[data-playground-cancel]','click',()=>this.cancel());
-  on('[data-playground-clear]','click',()=>{this.cancel();this.serial++;this.records=[];this.render();this.status('对话与测试记录已清空。');});
+  on('[data-playground-clear]','click',()=>{this.cancel();this.serial++;this.records=[];this.suite=[];this.render();this.status('对话与测试记录已清空。');});
   on('[data-playground-export]','click',()=>{try{this.exportReport({schemaVersion:1,createdAt:Date.now(),results:structuredClone(this.records)});}catch(error){this.status(`导出失败：${error.message}`);}});
   for(const button of root.querySelectorAll('[data-playground-case]')){
    const fn=()=>{const row=AI_TEST_CASES.find(row=>row.id===button.dataset.playgroundCase);this.node('[data-playground-question]').value=row.question;this.node('[data-playground-question]').dispatchEvent(new root.ownerDocument.defaultView.Event('input',{bubbles:true}));this.node('[data-playground-question]').focus();};
@@ -63,7 +65,7 @@ export class AIPlayground {
   if(!suite && (!question || [...question].length>1000)){this.status('请填写1–1000字的测试问题。');return;}
   const serial=++this.serial,controller=this.controller=new AbortController(),mode=this.node('[data-playground-mode]').value,fresh=this.node('[data-playground-fresh]').checked;
   const turns=this.records.filter(row=>!row.scenario && row.status==='succeeded' && row.checks?.every(check=>check.pass)).map(({question,answer,contextRevision})=>({question,answer,contextRevision}));
-  this.setBusy(true);this.updateConfig();
+  this.setBusy(true);this.updateConfig();if(suite){this.suite=[];this.render();}
   try{
    for(const entry of suite ? AI_TEST_CASES : [{question}]){
     if(controller.signal.aborted)break;
@@ -74,6 +76,7 @@ export class AIPlayground {
     }catch(error){result={question:entry.question,status:'failed',error:error.message,answer:''};}
     if(this.closed || serial!==this.serial)return;
     if(controller.signal.aborted)result={...result,status:'cancelled',answer:'',error:'测试已取消'};
+    if(suite)this.suite.push(result);
     this.records=[...this.records,{...result,scenario:suite ? entry.id : null}].slice(-20);this.render();
     if(result.status==='failed' || result.status==='cancelled')break;
    }
@@ -84,6 +87,8 @@ export class AIPlayground {
   const target=this.node('[data-playground-results]');target.replaceChildren();
   if(!this.records.length)target.textContent='尚无测试记录。';
   for(const row of [...this.records].reverse())renderResult(target,row);
+  if(this.suite?.length){const passed=this.suite.filter(row=>row.status==='succeeded' && row.checks?.length && row.checks.every(check=>check.pass)).length;this.node('[data-playground-summary]').textContent=`质量评测：已运行 ${this.suite.length}/${AI_TEST_CASES.length}，达标 ${passed}，待改进 ${this.suite.length-passed}。目标为全部达标，请逐项核对未通过原因。`;}
+  else this.node('[data-playground-summary]').textContent='尚未运行质量评测。';
   this.node('[data-playground-export]').disabled=!this.records.length;
  }
  close(){this.closed=true;this.serial++;this.controller?.abort();for(const off of this.listeners)off();}

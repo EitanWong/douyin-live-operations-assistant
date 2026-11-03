@@ -83,12 +83,12 @@ test('联网意图先搜索再生成答案；搜索摘要只作为数据，来�
 test('未启用搜索、服务失败、零结果、额度与取消都不会伪造已联网答案',async()=>{
   const run=async({settings=config,search,extra={}}={})=>{
     let count=0;
-    const ai=createAIClient({getKey:()=> 'key',search,request:details=>{count++;response(details,plan('web-search','','上海天气'));}});
-    const result=await ai({...prompt,...extra},settings);assert.equal(count,1);return result;
+    const ai=createAIClient({getKey:()=> 'key',search,request:details=>{count++;response(details,count===1 ? plan('web-search','','上海天气') : '上海实时天气暂未查到，请问你要查实时还是全天预报？');}});
+    const result=await ai({...prompt,...extra},settings);assert.equal(count,extra.reserveFollowup || extra.isCurrent ? 1 : 2);return result;
   };
-  assert.match(await run({settings:{...config,search:{...config.search,enabled:false}},search:()=>assert.fail()}),/未启用/);
-  assert.match(await run({search:async()=>{throw new Error('HTTP 429');}}),/暂不可用/);
-  assert.match(await run({search:async()=>({results:[]})}),/没查到/);
+  assert.match(await run({settings:{...config,search:{...config.search,enabled:false}},search:()=>assert.fail()}),/上海实时天气/);
+  assert.match(await run({search:async()=>{throw new Error('HTTP 429');}}),/上海实时天气/);
+  assert.match(await run({search:async()=>({results:[]})}),/上海实时天气/);
   assert.match(await run({search:async()=>({results:[{index:1,url:'https://x.test'}]}),extra:{reserveFollowup:()=>false}}),/额度/);
   let valid=true;
   assert.equal(await run({search:async()=>{valid=false;return {results:[{}]};},extra:{isCurrent:()=>valid}}),'[SKIP]');
@@ -103,11 +103,11 @@ test('意图JSON异常不会直接发到公屏；非问答模块不进入联网�
   assert.equal(await ai({...prompt,task:{kind:'gift'}},config),'谢谢支持。');
 });
 
-test('联网答案缺少实际来源编号或引用不存在的结果时不当作核实结论发送',async()=>{
+test('联网答案缺少引用仍返回正文，虚构引用移除且可核对来源',async()=>{
   for(const answer of ['上海晴。','上海晴。[99]']){
     let count=0;
     const ai=createAIClient({getKey:()=> 'key',search:async()=>({results:[{index:1,url:'https://x.test'}]}),request:details=>response(details,++count===1 ? plan('web-search','','上海天气') : answer)});
-    assert.equal(await ai(prompt,config),'搜索资料不足，暂时无法确认。');
+    assert.equal(await ai(prompt,config),'上海晴。');
   }
 });
 

@@ -1,3 +1,4 @@
+import {aiPlaygroundTemplate} from './ai-playground.js';
 import {TEXT_MODELS} from '../ai/device-policy.js';
 import {CONTEXT_SOURCES} from '../ai/context-policy.js';
 import {REPLY_FREQUENCIES} from '../ai/turn-taking.js';
@@ -7,7 +8,7 @@ import {SEARCH_PROVIDERS} from '../services/search.js';
 import {AI_PIPELINE_MODES} from '../services/ai-pipeline.js';
 import {DOUYIN_RULES} from '../data/douyin-rules.js';
 
-export const AI_SETTINGS_SECTIONS=[['models','连接与模型'],['perception','直播感知'],['knowledge','知识与搜索'],['advanced','高级设置']];
+export const AI_SETTINGS_SECTIONS=[['models','连接与模型'],['perception','直播感知'],['knowledge','知识与搜索'],['playground','问答测试'],['advanced','高级设置']];
 const scope=(modes,content)=>`<div data-ai-modes="${modes}">${content}</div>`;
 const card=(title,content,wide=false)=>`<section class="ai-card${wide ? ' workspace-wide' : ''}"><h3>${title}</h3>${content}</section>`;
 function credentials(kind,title){return `<label class="field"><span>${title} API Key</span><input type="password" data-media-key="${kind}" autocomplete="new-password" placeholder="留空使用已保存密钥"><small>密钥只在本机使用，不随配置导出。</small></label><div class="ai-key-actions"><label class="toggle"><input type="checkbox" data-media-remember="${kind}">记住密钥（仅此设备）</label><button type="button" class="text-button" data-media-forget="${kind}">清除密钥</button></div>`;}
@@ -46,6 +47,7 @@ export function aiSettingsTemplate(panel){return `<div class="ai-settings"><div 
 <div role="tabpanel" id="ai-section-models" aria-labelledby="ai-tab-models" data-ai-section="models">${card('识别与回复组合',panel.select('ai.pipeline.mode','AI 组合',AI_PIPELINE_MODES)+'<p class="group-note" data-pipeline-description></p>')}<div class="ai-service-grid">${replyTemplate(panel)}${pipelineTemplate(panel)}</div>${customMediaTemplate(panel)}${edgeTemplate(panel)}${card('接话与发言节奏','<input type="hidden" hidden data-field="ai.replyFrequency"><label class="field ai-reply-frequency"><span>接话频率 · <output data-reply-frequency-label></output></span><input type="range" min="0" max="4" step="1" value="2" data-reply-slider aria-label="接话频率" aria-describedby="ai-reply-frequency-help"><small class="ai-reply-endpoints">完全不接话 ← → 每句都接</small></label><p class="hint" id="ai-reply-frequency-help" data-reply-frequency-status role="status" aria-live="polite"></p><p class="hint">'+REPLY_FREQUENCIES.map(([,label])=>label).join(' → ')+'。保存后生效；主播语音回应还需开启直播感知与主播互动，弹幕回应需开启弹幕问答。</p>')}<div class="ai-test-row"><button type="button" data-action="test-ai">测试回复模型连接</button><p class="hint">测试当前组合的回复服务。感知连接在“直播感知”中开启。</p></div></div>
 <div role="tabpanel" id="ai-section-perception" aria-labelledby="ai-tab-perception" data-ai-section="perception" hidden>${perceptionTemplate(panel)}</div>
 <div role="tabpanel" id="ai-section-knowledge" aria-labelledby="ai-tab-knowledge" data-ai-section="knowledge" hidden>${card('场控风格与本场资料',`<div data-ai-profile>${panel.area('ai.persona','场控风格','text')}${panel.area('ai.knowledge','主播与本场直播资料','text','填写已核实的主题、开播安排和本场口径。')}</div>`)}${contextTemplate(panel)}${accountTemplate(panel)}${assistantTemplate(panel)}${searchTemplate(panel)}${rulesTemplate()}</div>
+<div role="tabpanel" id="ai-section-playground" aria-labelledby="ai-tab-playground" data-ai-section="playground" hidden>${aiPlaygroundTemplate()}</div>
 <div role="tabpanel" id="ai-section-advanced" aria-labelledby="ai-tab-advanced" data-ai-section="advanced" hidden>${advancedTemplate(panel)}</div></div>`;}
 
 function rulesTemplate(){return `  <details class="ai-card ai-help"><summary>抖音直播与 PK 规则依据</summary><p class="group-note">核对日期：2026-11-01。内置公开条款摘要和采集边界，所有 AI 功能共用。规则会更新，具体活动、加成和段位任务以平台当期说明为准。</p><details><summary>查看规则摘要与来源</summary>${DOUYIN_RULES.map(row=>`<div class="editor-row"><strong>${row.id} · ${row.authority==='official' ? '官方条款摘要' : '助手事实边界'}</strong><p>${row.text}</p>${row.source.url ? `<a href="${row.source.url}" target="_blank" rel="noopener noreferrer">${row.source.title} · ${row.source.publishedOn}</a>` : '<small>本助手的使用限制，不是平台官方条款。</small>'}</div>`).join('')}</details><p class="hint">最新政策或不明活动条件需要联网核对官方来源。未找到、资料冲突或采集不足时，AI 应说明无法确认，不补造价格、承诺或计分公式。</p></details>`;}

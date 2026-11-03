@@ -15,19 +15,19 @@ function setup(callbacks={}){
 }
 function visible(el){for(let node=el;node;node=node.parentElement)if(node.hidden)return false;return true;}
 
-test('AI 设置分成四个页签，切换不修改配置、不丢草稿或密钥，键盘可导航',async()=>{
+test('AI 设置分成五个页签，切换不修改配置、不丢草稿或密钥，键盘可导航',async()=>{
   let saved;const s=setup({save:async config=>saved=config});
   try{
     const {panel,section,dom}=s,tabs=[...panel.root.querySelectorAll('[data-ai-section-tab]')];
-    assert.deepEqual(tabs.map(t=>t.textContent),['连接与模型','直播感知','知识与搜索','高级设置']);
+    assert.deepEqual(tabs.map(t=>t.textContent),['连接与模型','直播感知','知识与搜索','问答测试','高级设置']);
     assert.ok(section('models'));assert.equal(section('models').hidden,false);
     tabs[1].click();assert.equal(section('models').hidden,true);assert.equal(section('perception').hidden,false);assert.equal(panel.dirty,false);
     tabs[2].click();const knowledge=panel.node('[data-field="ai.knowledge"]');knowledge.value='周六八点开播';knowledge.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
-    tabs[0].click();panel.node('[data-api-key]').value='draft-secret';tabs[3].click();tabs[0].click();
+    tabs[0].click();panel.node('[data-api-key]').value='draft-secret';tabs[4].click();tabs[0].click();
     assert.equal(knowledge.value,'周六八点开播');assert.equal(panel.node('[data-api-key]').value,'draft-secret');
     tabs[0].focus();tabs[0].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'End',bubbles:true}));
-    assert.equal(panel.root.activeElement,tabs[3]);assert.equal(section('advanced').hidden,false);
-    tabs[3].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(panel.root.activeElement,tabs[0]);
+    assert.equal(panel.root.activeElement,tabs[4]);assert.equal(section('advanced').hidden,false);
+    tabs[4].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(panel.root.activeElement,tabs[0]);
     assert.equal(tabs.filter(t=>t.tabIndex===0).length,1);assert.equal(tabs[0].getAttribute('aria-selected'),'true');
     panel.node('[data-action="save"]').click();await new Promise(setImmediate);assert.equal(saved.ai.knowledge,'周六八点开播');
     assert.ok(!JSON.stringify(saved).includes('draft-secret'));

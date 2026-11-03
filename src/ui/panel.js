@@ -39,7 +39,6 @@ import {knowledgePageTemplate} from './knowledge-template.js';
 import {KNOWLEDGE_CSS} from './knowledge-styles.js';
 import {AISettings} from './ai-settings.js';
 import {aiSettingsTemplate} from './ai-settings-template.js';
-import {aiPlaygroundTemplate} from './ai-playground.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
@@ -329,7 +328,6 @@ export class Panel {
             <p class="hint">每组独立循环，话术每行一条。时段留空表示全天，支持跨午夜。</p>
           </section>
           ${moderationTemplate(this)}
-          ${aiPlaygroundTemplate()}
           ${this.tools.list().filter(tool=>!tool.embeddedIn).map(tool=>this.toolTemplate(tool)).join('')}
 
 

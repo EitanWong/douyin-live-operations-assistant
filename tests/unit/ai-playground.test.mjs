@@ -73,7 +73,7 @@ test('基本检查发现超长、代主持和缺来源；预设场景只检查�
   const result=await f.service.run({question:'你好'});assert.ok(result.status==='failed' || result.checks.some(c=>!c.pass));
  }
  const skip=fixture({request:d=>respond(d,plan('skip'))});assert.equal((await skip.service.run({question:'噪声'})).status,'skipped');
- assert.deepEqual(AI_TEST_CASES.map(c=>c.id),['greeting','live-data','web-search','clarify']);
+ assert.equal(AI_TEST_CASES.length,12);assert.ok(AI_TEST_CASES.every(c=>c.fixture && c.criteria.length));
 });
 test('非法输入不调用模型，断开的页面不能继续测试',async()=>{
  const f=fixture();for(const question of ['', '字'.repeat(1001)])await assert.rejects(f.service.run({question}),/问题/u);
@@ -93,4 +93,26 @@ test('切换主播或已保存配置后不带入此前测试对话',async()=>{
  const second=await f.service.run({question:'当前问题',turns:[first]});
  const input=JSON.parse(f.requests.at(-1).messages[1].content);
  assert.equal(second.contextRevision,2);assert.ok(!input.recent_chat.some(row=>row.text===first.question));assert.ok(!input.recent_replies.includes(first.answer));
+});
+
+test('固定评测使用隔离资料和实际模型请求，不读取现场、不调用搜索服务且评分答案不泄露',async()=>{
+ for(const answer of ['上海11月5日小雨，18至23℃。[2]','上海11月5日晴，35至40℃。[1]']){
+  let count=0;const bodies=[];
+  const f=fixture({getContext:()=>assert.fail('固定评测不能读取现场'),search:()=>assert.fail('不能调用外部搜索'),request:d=>{
+   bodies.push(JSON.parse(JSON.parse(d.data).messages[1].content));respond(d,++count===1 ? plan('web-search','','上海2026年11月5日天气') : answer);
+  }});
+  const testCase=AI_TEST_CASES.find(c=>c.id==='weather');
+  const result=await f.service.run({question:testCase.question,testCase});
+  assert.equal(result.controlled,true);assert.equal(result.calls.cloud,2);assert.equal(result.sources.length,2);
+  assert.equal(result.checks.every(c=>c.pass),answer.includes('小雨'));
+  assert.ok(!JSON.stringify(bodies).includes('选对日期与天气'));
+  assert.ok(!JSON.stringify(bodies).includes('citationIndices'));
+  assert.equal(f.config.ai.search.rememberKnowledge,true);
+ }
+});
+
+test('无引用答案在问答测试内保留并显示可核对原因，不会被判成完全达标',async()=>{
+ let count=0;const f=fixture({search:async()=>({results:[{index:1,content:'上海小雨。'}]}),request:d=>respond(d,++count===1 ? plan('web-search','','上海天气') : '上海小雨。')});
+ const result=await f.service.run({question:'上海天气'});
+ assert.equal(result.answer,'上海小雨。');assert.match(result.citationWarning,/引用/);assert.ok(result.checks.some(c=>!c.pass));
 });

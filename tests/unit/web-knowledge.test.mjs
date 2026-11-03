@@ -83,13 +83,13 @@ test('本地模型使用同一份长期资料，知识存储失败不会吞掉�
  }finally{cache.close();}
 });
 
-test('路由期间过期的缓存自动重查，停用搜索时仍可使用有效知识；错误引用不放行',async()=>{
+test('路由期间过期的缓存自动重查，停用搜索时仍可使用有效知识；虚构引用移除不吞答案',async()=>{
  const env=setup(),cache=env.open();let searches=0;
  try{
   await cache.remember(sources('抖音PK规则',env.now()),settings.search,{freshness:'rules'});
   const generate=async p=>p.intentRouting ? plan('knowledge',p.knowledgeCandidates[0].id,'以活动页为准。[1]') : '更新后以活动页为准。[1]';
   const offline=createAIClient({knowledge:cache,generate});assert.equal(await offline(prompt,{...settings,search:{...settings.search,enabled:false}}),'以活动页为准。[1]');
-  const invalid=createAIClient({knowledge:cache,generate:async p=>plan('knowledge',p.knowledgeCandidates[0].id,'错误引用。[99]')});assert.match(await invalid(prompt,settings),/无法确认/);
+  const invalid=createAIClient({knowledge:cache,generate:async p=>plan('knowledge',p.knowledgeCandidates[0].id,'错误引用。[99]')});assert.equal(await invalid(prompt,settings),'错误引用。');
   const expires=createAIClient({knowledge:cache,generate:async p=>{if(p.intentRouting)env.advance(86400000);return generate(p);},search:async q=>{searches++;return sources(q,env.now());}});
   assert.equal(await expires(prompt,settings),'更新后以活动页为准。[1]');assert.equal(searches,1);
  }finally{cache.close();}
@@ -98,8 +98,8 @@ test('路由期间过期的缓存自动重查，停用搜索时仍可使用有�
 test('搜索空结果、网络失败、取消及私有后台研究不写入自动知识',async()=>{
  const env=setup(),cache=env.open();try{
   for(const mode of ['empty','failure','cancel']){
-   let current=true;const ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : '以活动页为准。[1]',search:async q=>{if(mode==='failure')throw Error('network');if(mode==='cancel')current=false;return mode==='empty' ? {results:[]} : sources(q,env.now());}});
-   const answer=await ai({...prompt,isCurrent:()=>current},settings);assert.match(answer,mode==='empty' ? /没查到/ : mode==='failure' ? /暂不可用/ : /SKIP/);
+   let current=true;const ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : '本次活动规则未查到，请提供活动名称。',search:async q=>{if(mode==='failure')throw Error('network');if(mode==='cancel')current=false;return mode==='empty' ? {results:[]} : sources(q,env.now());}});
+   const answer=await ai({...prompt,isCurrent:()=>current},settings);assert.match(answer,mode==='cancel' ? /SKIP/ : /活动规则未查到/);
   }
   const privateAI=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : '后台结论。[1]',search:async q=>sources(q,env.now())});await privateAI({...prompt,task:{kind:'agent'}},settings);
   assert.deepEqual(await cache.list(),[]);
