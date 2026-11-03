@@ -18,7 +18,7 @@ export function createEdgeClient({connect}){
  });
  return {detect:()=>call('device'),status:()=>call('status'),ready:async kind=>{try{return (await call('status'))?.[kind]?.phase==='ready';}catch{return false;}},
   prepare:async(kind,selection='auto')=>kind==='text' ? prepareRecommendedText(selection,await call('device'),model=>call('prepare',{kind,model},undefined,240000)) : call('prepare',{kind},undefined,240000),release:()=>call('release'),
-  reply:async(p,c)=>{const fresh=currentAIPrompt(p),facts=liveFactFingerprint(fresh.liveContext);const text=await call('infer',{kind:'text',messages:makeEdgeMessages(fresh,c),maxLength:Math.min(p.maxLength || 50,50)},p.signal);if(typeof text!=='string' || !text.trim() || [...text].length>(p.maxLength || 50))throw new Error('端侧回复未通过长度检查');p.onLiveFacts?.(facts);return text.trim();},
+  reply:async(p,c)=>{const fresh=currentAIPrompt(p),facts=liveFactFingerprint(fresh.liveContext),limit=p.intentRouting ? 600 : Math.min(p.maxLength || 50,50);const text=await call('infer',{kind:'text',messages:makeEdgeMessages(fresh,c),maxLength:limit,intentRouting:Boolean(p.intentRouting)},p.signal);if(typeof text!=='string' || !text.trim() || [...text].length>limit)throw new Error('端侧回复未通过长度检查');if(!p.intentRouting && !p.searchResults)p.onLiveFacts?.(facts);return text.trim();},
   classify:async(text,signal)=>parseSemanticLabels(await call('infer',{kind:'text',messages:semanticMessages(text),maxLength:40},signal)),
   transcribe:(sample,signal)=>call('infer',{kind:'audio',data:sample.data},signal),
   close:()=>{const active=port;failure();active?.disconnect();}};

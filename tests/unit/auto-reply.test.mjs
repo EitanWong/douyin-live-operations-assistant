@@ -96,7 +96,7 @@ test('暂停、关闭模块、失效和调用限额不会让待回复绕过控�
   r.chat('@小助手 第一个');r.chat('@小助手 第二个');
   r.engine.stop();r.engine.start();finish('迟到回复');await settle();
   assert.equal(r.prompts.length,1);assert.equal(r.engine.queue.length,0);
-  r.chat('@小助手 新请求');r.chat('@小助手 过期请求');r.advance(45001);
+  r.chat('@小助手 新请求');r.chat('@小助手 过期请求');r.advance(120001);
   finish('已经过期');await settle();assert.equal(r.prompts.length,2);assert.equal(r.engine.queue.length,0);
   r.chat('@小助手 最后一个');r.chat('@小助手 等待中');
   r.engine.update({...r.engine.config,ai:{...r.engine.config.ai,chatEnabled:false}});
@@ -106,7 +106,35 @@ test('暂停、关闭模块、失效和调用限额不会让待回复绕过控�
   const limited=room({ai:{enabled:true,chatEnabled:true,maxPerHour:1,edge:{enabled:false}}});
   limited.chat('普通弹幕');limited.chat('@小助手 你好');await settle();
   assert.equal(limited.prompts.length,1);
-  limited.advance(45001);await limited.engine.tick(false);
+  limited.advance(120001);await limited.engine.tick(false);
   assert.equal(limited.engine.chatAIQueue.length,0);
   assert.equal(limited.prompts.length,1);
+});
+
+test('@ 提问优先于每句都接的普通积压，同一观众不受普通调用冷却丢弃',async()=>{
+  const r=room({version:2,ai:{enabled:true,chatEnabled:true,replyFrequency:'every',intervalSec:60,userCooldownSec:60}});
+  let finish;r.engine.ai=p=>{r.prompts.push(p);return new Promise(resolve=>{finish=resolve;});};
+  r.chat('@小助手 第一个问题');r.chat('普通问题一');r.chat('普通问题二');r.chat('@小助手 上海今天天气怎么样');
+  finish('第一个回答');await settle();
+  assert.equal(r.prompts.length,2);assert.equal(r.prompts[1].target.text,'@小助手 上海今天天气怎么样');
+  finish('上海晴。');await settle();assert.ok(r.engine.queue.some(q=>q.text==='上海晴。'));r.engine.stop();
+});
+
+test('@ 回复在礼物持续积压时仍可及时发送',async()=>{
+  const r=room();r.engine.ai=async()=> '正在回答你的问题。';
+  r.chat('@小助手 帮忙看看');await settle();
+  for(let i=0;i<5;i++)r.engine.enqueue('gift',`礼物感谢${i}`);
+  await r.engine.tick();
+  assert.ok(r.logs.some(row=>row.kind==='preview' && row.text.includes('正在回答你的问题')));
+  await r.engine.tick();assert.ok(r.logs.some(row=>row.kind==='preview' && row.text.includes('礼物感谢')));r.engine.stop();
+});
+
+test('普通弹幕填满等待队列也为新的@提问让位',async()=>{
+ const r=room({ai:{enabled:true,chatEnabled:true,replyFrequency:'every'}});let finish;
+ r.engine.ai=p=>{r.prompts.push(p);return new Promise(resolve=>{finish=resolve;});};
+ try{
+  r.chat('@小助手 正在回复');for(let i=0;i<20;i++)r.chat(`普通积压${i}`);
+  r.chat('@小助手 新提问');finish('第一个回答');await settle();
+  assert.equal(r.prompts.at(-1).target.text,'@小助手 新提问');finish('新的回答');await settle();
+ }finally{r.engine.stop();}
 });

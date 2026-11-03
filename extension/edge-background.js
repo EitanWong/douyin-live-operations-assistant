@@ -20,7 +20,7 @@ export function installEdgeBridge(chrome){
     try{
      if(!['status','device','prepare','infer','cancel','release'].includes(m.action) || JSON.stringify(m).length>810000)throw new Error('端侧请求无效');
      if(m.action==='prepare' && m.kind==='text' && m.model && !TEXT_MODELS[m.model])throw new Error('端侧模型无效');
-     if(m.action==='infer' && (m.kind==='text' ? !Array.isArray(m.messages) || JSON.stringify(m.messages).length>8000 || !Number.isInteger(m.maxLength) || m.maxLength<1 || m.maxLength>50 : m.kind!=='audio' || typeof m.data!=='string' || m.data.length>800000))throw new Error('端侧输入超出预算');
+     if(m.action==='infer' && (m.kind==='text' ? !Array.isArray(m.messages) || JSON.stringify(m.messages).length>8000 || !Number.isInteger(m.maxLength) || m.maxLength<1 || m.maxLength>(m.intentRouting===true ? 600 : 50) : m.kind!=='audio' || typeof m.data!=='string' || m.data.length>800000))throw new Error('端侧输入超出预算');
      if(m.action==='cancel'){cancelled.add(m.id);while(cancelled.size>128)cancelled.delete(cancelled.values().next().value);await send({...m,id:`${sender.tab.id}:${m.id}`});return;}
      await ensure();if(closed)return;if(cancelled.has(m.id))throw new Error('端侧请求已取消');active.add(m.id);
      const value=await send({...m,id:`${sender.tab.id}:${m.id}`});if(!closed)port.postMessage({...value,id:m.id});

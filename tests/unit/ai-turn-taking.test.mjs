@@ -59,11 +59,11 @@ test('主动看直播不是每段都起话题，回复过观众后也要留出�
  f.advance(220000);f.scene();await f.tick();assert.equal(f.spoken.length,2,'最近已回复观众，不跟着另起话题');f.engine.stop();
 });
 
-test('按发送记录持久限频，暂停续跑、刷新及切换模式不清零，房间间不串用',async()=>{
+test('持久限频只限制普通接话，@ 不因十分钟总数而漏回，房间间不串用',async()=>{
  const f=fixture();for(let i=0;i<10;i++){await f.chat(`@场控 问题${i}`,`v${i}`);await f.tick();f.advance(8000);}
  assert.equal(f.spoken.length,10);const snapshot=f.engine.snapshot();f.engine.stop();
- const g=fixture();g.engine.ai=async prompt=>{g.prompts.push(prompt);return `新回应${g.prompts.length}`;};g.advance(80000);assert.equal(g.engine.restore(snapshot),true);await g.chat('@场控 还有个问题','last',{id:'restored-new'});await g.tick();assert.equal(g.spoken.length,0);
- g.engine.config.ai.replyFrequency='natural';await g.tick();assert.equal(g.spoken.length,1,'切换模式沿用记录，再按新额度判断');
+ const g=fixture();g.engine.ai=async prompt=>{g.prompts.push(prompt);return `新回应${g.prompts.length}`;};g.advance(80000);assert.equal(g.engine.restore(snapshot),true);await g.chat('@场控 还有个问题','last',{id:'restored-new'});await g.tick();assert.equal(g.spoken.length,1);
+ await g.chat('普通提问','other');assert.equal(g.prompts.length,1,'普通接话仍沿用已保存的发言上限');
  g.engine.config.anchorId='other';await g.chat('@场控 新主播的问题','new',{id:'other-room-new'});await g.tick();assert.equal(g.spoken.length,2);g.engine.stop();
 });
 
@@ -100,7 +100,8 @@ test('发言窗口过期恢复额度，恢复时丢弃未来和损坏记录并�
  t.restore({turns:[{...row,at:now-1000},row,{...row,at:now+1},{...row,mode:'bad'},{...row,at:now-600000}]},now);
  assert.equal(t.turns.length,2);assert.equal(t.canSpeak({mode:'direct',scope:'room',now:now+8000,ai}),true);
  for(let i=0;i<10;i++)t.record({kind:'ai',text:'回复',aiChat:{replyMode:'direct'}},'room',now+i*8000);
- assert.equal(t.canSpeak({mode:'direct',scope:'room',now:now+80000,ai}),false);
+ assert.equal(t.canSpeak({mode:'direct',scope:'room',now:now+80000,ai}),true);
+ assert.equal(t.canSpeak({mode:'continuation',scope:'room',now:now+80000,ai}),false);
  assert.equal(t.canSpeak({mode:'direct',scope:'room',now:now+672000,ai}),true);
 });
 

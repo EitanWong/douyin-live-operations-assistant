@@ -37,6 +37,17 @@ test('local readiness requires the known Chinese fact check as well as token spe
  assert.equal(acceptChineseSelfTest(''),false);
 });
 
+test('端侧意图JSON有独立输出预算，查证答案不被无关直播统计作废',async()=>{
+ const sent=[],listeners=[];let facts=0;
+ const client=createEdgeClient({connect:()=>({postMessage:m=>{sent.push(m);queueMicrotask(()=>listeners.forEach(fn=>fn({id:m.id,value:m.intentRouting ? JSON.stringify({intent:'web-search',query:'上海明天天气',reply:''}) : '上海晴。[1]'})));},onMessage:{addListener:fn=>listeners.push(fn)},onDisconnect:{addListener(){}},disconnect(){}})});
+ try{
+  const prompt={intentRouting:true,searchAvailable:true,task:{kind:'ai',data:{replyMode:'direct'}},target:{text:'上海明天会下雨吗'},maxLength:30,onLiveFacts:()=>facts++};
+  assert.equal(JSON.parse(await client.reply(prompt,{})).intent,'web-search');assert.equal(sent[0].maxLength,600);
+  assert.match(sent[0].messages[0].content,/不要求出现“联网”/);assert.equal(facts,0);
+  assert.equal(await client.reply({...prompt,intentRouting:false,searchResults:{results:[{index:1,content:'晴'}]}},{}),'上海晴。[1]');assert.equal(facts,0);
+ }finally{client.close();}
+});
+
 test('local prompts preserve integrated statistical forecasts with provenance and obey the forecast source switch',()=>{
  const predictions={asOf:10,revenue:{status:'ready',point:120,unit:'diamonds'},basis:'本机统计预测，非实测'};
  const prompt={target:{text:'未来收入呢'},liveContext:{predictions}};

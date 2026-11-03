@@ -39,7 +39,7 @@ self.onmessage=async({data:m})=>{
   }else if(m.action==='infer' && model){
    if(kind==='text'){
     const messages=await fitEdgeMessages(m.messages,async rows=>(await model.tokenizer(model.tokenizer.apply_chat_template(rows,{tokenize:false,add_generation_prompt:true}))).input_ids.dims.at(-1));
-    postMessage({id:m.id,value:(await generate(messages,Math.min(72,m.maxLength*2))).text.trim()});
+    postMessage({id:m.id,value:(await generate(messages,Math.min(m.intentRouting ? 256 : 72,m.maxLength*2))).text.trim()});
    }
    else {const pcm=decodePCM16(m.data),started=performance.now(),result=await model(pcm,{language:'chinese',task:'transcribe',max_new_tokens:100});
     if(performance.now()-started>Math.min(3000,pcm.length/16*.7))throw new Error('语音推理超过实时预算');
