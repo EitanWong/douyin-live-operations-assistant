@@ -1,4 +1,4 @@
-import { readFile, mkdir, writeFile, rm, rename } from 'node:fs/promises';
+import { readFile, mkdir, writeFile, rm, rename, readdir, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { SOLID_GLASS_CSS } from '../src/ui/solid-glass.js';
@@ -82,6 +82,16 @@ await build({entryPoints:[`${root}src/services/ai.js`],bundle:true,format:'esm',
 await build({entryPoints:[`${root}src/services/search.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/search.js`});
 await writeFile(`${ext}/gifts.js`,await readFile(`${root}src/data/gifts.js`));
 await build({entryPoints:[`${root}extension/collection-keeper.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/collection-keeper.js`});
+// Runtime code and ORT executable assets stay inside MV3; only pinned model data is downloaded.
+for(const name of ['edge-offscreen.html'])await copyFile(`${root}extension/${name}`,`${ext}/${name}`);
+for(const name of ['edge-worker','edge-offscreen','account-page','speech-vad'])await build({entryPoints:[`${root}extension/${name}.js`],bundle:true,format:name==='account-page' ? 'iife' : 'esm',platform:'browser',target:'chrome120',outfile:`${ext}/${name}.js`});
+await rm(`${ext}/vad`,{recursive:true,force:true});
+await mkdir(`${ext}/vad/ort`,{recursive:true});
+for(const name of ['vad.worklet.bundle.min.js','silero_vad_v5.onnx'])await copyFile(`${root}node_modules/@ricky0123/vad-web/dist/${name}`,`${ext}/vad/${name}`);
+for(const name of await readdir(`${root}node_modules/@ricky0123/vad-web/node_modules/onnxruntime-web/dist`))if(/^ort-wasm-simd-threaded\.(wasm|mjs)$/u.test(name))await copyFile(`${root}node_modules/@ricky0123/vad-web/node_modules/onnxruntime-web/dist/${name}`,`${ext}/vad/ort/${name}`);
+await rm(`${ext}/ort`,{recursive:true,force:true});
+await mkdir(`${ext}/ort`,{recursive:true});
+for(const name of await readdir(`${root}node_modules/onnxruntime-web/dist`))if(/^ort-wasm.*\.(wasm|mjs)$/u.test(name))await copyFile(`${root}node_modules/onnxruntime-web/dist/${name}`,`${ext}/ort/${name}`);
 await build({entryPoints:[`${root}extension/background.js`],bundle:true,format:'esm',target:'chrome120',banner:{js:bundleNotice},outfile:`${ext}/background.js`});
 await writeFile(`${ext}/page.js`,await bundleStandalone({entry:`${root}extension/page.js`,banner:bundleNotice}));
 await writeFile(`${ext}/content.js`,await bundleStandalone({entry:`${root}extension/content.js`,banner:bundleNotice}));
@@ -98,7 +108,11 @@ chartLicenses += `Lucide icon subset (vendor/lucide)\n${iconLicense}\n`;
 chartLicenses += `jsonrepair · ISC\n${intentLicense}\n`;
 chartLicenses += `Cordis 4.0.0-rc.12 (vendor/cordis)\n${cordisLicense}\nCosmokit\n${cosmokitLicense}\n`;
 chartLicenses+=mediaLicense;
+chartLicenses+=`\nSilero VAD v5 · MIT\n${await readFile(`${root}vendor/runtime-licenses/silero-vad/LICENSE`,'utf8')}\n`;
 chartLicenses+=productLicenses;
+chartLicenses+=await readFile(`${root}vendor/runtime-licenses/onnxruntime-web/ThirdPartyNotices.txt`,'utf8');
+for(const name of ['@ricky0123/vad-web','@huggingface/transformers','onnxruntime-web','onnxruntime-common','@huggingface/jinja','@huggingface/tokenizers','cockatiel'])chartLicenses+=`\n${name}\n${await readPackageLicense(root,name)}\n`;
+chartLicenses+=`\nModel weights are downloaded separately: Qwen2.5-0.5B-Instruct (Apache-2.0), Whisper tiny (MIT). See docs/ai-foundation.zh-CN.md.\n`;
 chartLicenses+=`\nLiquid Glass React · https://github.com/rdev/liquid-glass-react\n${liquidGlassLicense}\n`;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);

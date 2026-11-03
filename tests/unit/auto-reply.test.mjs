@@ -59,12 +59,13 @@ test('AI 接收有界直播摘要与时间、未知值，不发送原始 UID、U
 });
 
 test('自动判断繁忙时合并待判断弹幕，@ 对话优先且菜单不受 AI 等待影响', async () => {
-  const r=room({bot:{enabled:true}}); let finish;
-  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;});};
+  const r=room({bot:{enabled:true}}); let finish,firstFinish;
+  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;if(r.prompts.length===1)firstFinish=resolve;});};
   r.chat('第一条');r.chat('第二条');r.chat('第三条');r.chat('@小助手 你好');
   r.chat('@小助手 菜单');
-  assert.equal(r.prompts.length,1); assert.equal(r.engine.queue[0].kind,'bot');
-  finish('[SKIP]');await settle();
+  assert.equal(r.prompts.length,2); assert.equal(r.engine.queue[0].kind,'bot');
+  assert.equal(r.prompts[0].signal.aborted,true,'明确点名立即取消普通插话');
+  firstFinish('[SKIP]');await settle();
   assert.equal(r.prompts[1].target.text,'@小助手 你好');
   finish('你好。');await settle();
   assert.equal(r.prompts.length,2,'普通公屏判断应让出短暂空间，不紧跟点名对话');
@@ -90,8 +91,8 @@ test('游戏与 @聊天并行，不把普通四字聊天或新问题当作答题
 });
 
 test('暂停、关闭模块、失效和调用限额不会让待回复绕过控制', async () => {
-  const r=room();let finish;
-  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;});};
+  const r=room();let finish,firstFinish;
+  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;if(r.prompts.length===1)firstFinish=resolve;});};
   r.chat('@小助手 第一个');r.chat('@小助手 第二个');
   r.engine.stop();r.engine.start();finish('迟到回复');await settle();
   assert.equal(r.prompts.length,1);assert.equal(r.engine.queue.length,0);

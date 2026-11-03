@@ -261,11 +261,38 @@ async def main():
                 loop.call_soon_threadsafe(deliver, None)
     threading.Thread(target=reader, daemon=True).start()
     task = None
+    local = None
+    local_task = None
+    async def local_request(message):
+        nonlocal local
+        try:
+            if local is None:
+                from local_asr import LocalASR
+                runtime = json.loads((ROOT / 'runtime.json').read_text()) if (ROOT / 'runtime.json').exists() else {}
+                local = LocalASR(runtime.get('asrModelDir'))
+            action = message.get('action')
+            if action == 'prepare':
+                value = await asyncio.to_thread(local.prepare)
+            elif action == 'infer':
+                value = await asyncio.to_thread(local.infer, message.get('data'))
+            elif action == 'status':
+                value = local.status
+            else:
+                raise ValueError()
+            emit({'id': message.get('id'), 'value': value})
+        except Exception:
+            emit({'id': message.get('id'), 'error': 'SenseVoice 本地识别不可用，请检查组件、模型安装及设备测速结果'})
     try:
         while True:
             message = await queue.get()
             if message is None or message.get('type') == 'stop':
                 return
+            if message.get('type') == 'local-asr' and not task:
+                if local_task and not local_task.done():
+                    emit({'id': message.get('id'), 'error': '本地语音繁忙'})
+                else:
+                    local_task = asyncio.create_task(local_request(message))
+                continue
             if message.get('type') == 'probe' and not task:
                 try:
                     runtime = json.loads((ROOT / 'runtime.json').read_text()) if (ROOT / 'runtime.json').exists() else {}
@@ -285,6 +312,9 @@ async def main():
                 return
             task = asyncio.create_task(session(message))
     finally:
+        if local_task:
+            local_task.cancel()
+            await asyncio.gather(local_task, return_exceptions=True)
         if task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

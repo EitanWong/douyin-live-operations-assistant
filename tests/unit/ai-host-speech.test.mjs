@@ -75,9 +75,9 @@ test('语音问题沿用现有联网和知识库路由；音画时间不重叠�
 
 
 test('音画模式先短暂等候同一片段画面；上一段音画不能靠时间边沿冒充同步',async()=>{
- const f=fixture({pipeline:{mode:'omni-llm',workspaceId:'workspace'}});f.advance(2000);f.speech();await f.assess();assert.equal(f.prompts.length,0);
+ const f=fixture({pipeline:{mode:'omni-llm',workspaceId:'workspace'}});f.advance(2000);f.speech('看看这两个杯子哪个好看？');await f.assess();assert.equal(f.prompts.length,0);
  f.advance(1000);f.visual(undefined,1000);await f.assess();assert.equal(f.prompts.length,1,'同一语音片段画面到达即进入判断');f.engine.stop();
- const g=fixture({pipeline:{mode:'omni-llm',workspaceId:'workspace'}});g.advance(2000);g.visual('上一片段主播背对画面。',1000);g.speech();await g.assess();assert.equal(g.prompts.length,0);
+ const g=fixture({pipeline:{mode:'omni-llm',workspaceId:'workspace'}});g.advance(2000);g.visual('上一片段主播背对画面。',1000);g.speech('看看这两个杯子哪个好看？');await g.assess();assert.equal(g.prompts.length,0);
  g.advance(3001);await g.assess();assert.equal(g.prompts.length,1,'画面缺失不会无限阻塞，只按可用证据回应');
  const input=JSON.parse(makeAIRequest(g.prompts[0],g.engine.config.ai).messages[1].content);assert.equal(input.media_context.moment.alignment,'separate');g.engine.stop();
 });

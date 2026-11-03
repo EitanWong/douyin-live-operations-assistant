@@ -17,5 +17,6 @@ export function liveMoment(media,now){
 
 export function awaitingVisual(moment,now,videoEnabled){
  if(!videoEnabled || !moment.speech || now-(moment.speech.receivedAt ?? moment.speech.endedAt)>=3000)return false;
+ if(!/这[个些种款边里张幅两]|那[个些种款边里张幅两]|哪[个些种款边]|看[看下]|画面|左边|右边|手[里上]|眼前/u.test(moment.speech.text))return false;
  return moment.alignment!=='overlapping' || (moment.visual.endedAt ?? moment.visual.at)<moment.speech.endedAt-2000;
 }
