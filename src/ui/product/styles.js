@@ -21,7 +21,7 @@ export const PRODUCT_CSS=`
 .product-sidebar .product-nav-button{display:block;max-width:100%;height:40px;padding:0 10px;font-size:12px;font-weight:500;border-radius:12px}
 .product-nav-button .mantine-Button-inner{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:center;justify-content:stretch}
 .product-nav-button .mantine-Button-section{margin:0}
-.product-nav-button .mantine-Button-label{display:block;min-width:0;text-align:left;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}
+.product-nav-button .mantine-Button-label{display:block;height:auto;line-height:20px;text-box-trim:none;min-width:0;text-align:left;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}
 .product-icon{width:18px;height:18px;display:inline-flex;flex-shrink:0}.product-icon svg{width:100%;height:100%}
 .product-shell[data-sidebar-collapsed=true] .product-nav-label{display:none}
 .product-shell[data-sidebar-collapsed=true] .product-nav-button{width:40px;padding:0;margin-inline:auto}
