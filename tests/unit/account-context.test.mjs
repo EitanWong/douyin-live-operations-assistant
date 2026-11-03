@@ -25,3 +25,12 @@ test('restored evidence rejects executable links and duplicate work sources do n
  store.replace('anchor',url,[row]);const workURL='https://www.douyin.com/video/7777';store.replace('anchor',workURL,[{...row,source:workURL}]);
  assert.equal(store.context('anchor','陶艺').length,1);
 });
+test('public profile handles, verification and work topics retain their original descriptive evidence',()=>{
+ const source=accountSource(url),rows=normalizeAccountPayload({user:{sec_uid:source.id,nickname:'茶友',signature:'分享陶艺',unique_id:'pottery-live',custom_verify:'陶艺创作者'},aweme_list:[{aweme_id:'55',desc:'青瓷杯',author:{sec_uid:source.id},text_extra:[{hashtag_name:'手工陶艺'}],music:{title:'背景曲'}}]},source);
+ assert.match(rows.find(r=>r.kind==='profile').text,/pottery-live/);assert.match(rows.find(r=>r.kind==='profile').text,/陶艺创作者/);
+ assert.match(rows.find(r=>r.kind==='work').text,/手工陶艺/);assert.match(rows.find(r=>r.kind==='work').text,/背景曲/);
+});
+test('a sparse work author cannot erase the richer profile in the same native payload',()=>{
+ const source=accountSource(url),rows=normalizeAccountPayload({user:{sec_uid:source.id,nickname:'茶友',signature:'每周六分享陶艺',follower_count:42},aweme_list:[{aweme_id:'56',desc:'作品',author:{sec_uid:source.id,nickname:'茶友'}}]},source);
+ const profile=rows.find(r=>r.kind==='profile');assert.match(profile.text,/每周六/);assert.equal(profile.counts.followers,42);
+});

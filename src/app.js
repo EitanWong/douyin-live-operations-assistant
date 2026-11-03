@@ -1,4 +1,6 @@
 import {createSpeechRecognizer} from './services/speech-routing.js';
+import {createAccountRefresh} from './services/account-refresh.js';
+import {createLocalReply} from './services/local-search.js';
 import {createEdgeRouter} from './browser/edge-router.js';
 import {createPredictionClient} from './analytics/service.js';
 import {analyzeSamples} from './analytics/ai.js';
@@ -253,6 +255,8 @@ export function boot(options = {}) {
     }
   };
   const edge=createEdgeRouter({browser:options.edge,native:options.nativeASR,config:()=>engine?.config.ai.edge || config.ai.edge});
+  const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
+    changed:async()=>{accountRevision++;engine?.cancelAI();await persistRuntime(true);},onStatus:text=>{log('ai',text);foundationSettings?.showAccounts();}});
   const request = options.request || (details => GM_xmlhttpRequest(details));
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
   const mediaSecretKey=endpoint=>`live-assistant:media-key:${new URL(validateEndpoint(endpoint)).origin}`;
@@ -279,7 +283,7 @@ export function boot(options = {}) {
     onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `联网搜索：${record.query} · ${record.results.length} 条来源`);}
   });
-  const client=createResilientAI({cloud:cloudClient,edge,onTrace:r=>{
+  const client=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,search:searchClient})},onTrace:r=>{
     foundationSettings?.trace(r);if(r.provider==='edge'){panel?.setAIServiceStatus('');log('ai',`端侧兜底完成 · ${r.elapsedMs}ms`);}
   }});
   const lock = options.lock || new RoomLock({ room });
@@ -405,7 +409,7 @@ export function boot(options = {}) {
       const current=engine.pkOperations.broadcast?.roomId;
       const income=saved && (!current || saved.roomId===current) ? saved : local && ledgerAnchorId===engine.config.anchorId && (!current || local.roomId===current)
         ? {...local,anchorId:engine.config.anchorId,at:Date.now(),source:'page-ledger'} : null;
-      return {income:income ? {...income,pending:incomePending.size} : null,predictions:predictions.context()};
+      return {income:income ? {...income,pending:incomePending.size} : null,predictions:predictions.context(),collectionHealth:{connected:adapter.healthy?.() || false,lastFrameAt:network.lastFrame || null,gaps:(network.ingestion?.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(network.capture?.gaps || 0)}};
     },
     manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
@@ -723,6 +727,7 @@ export function boot(options = {}) {
     let stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
     const timer = setInterval(async () => {
       if (closed || suspended) return;
+      if(roomContext.current())void accountRefresh.tick().catch(error=>log('ai',`公开资料更新：${error.message}`));
       tools.notify('tick');
       if(!persistenceDisabled && roomContext.current())void predictions.pulse(predictionPulse({engine,network,identity,connected:(demo || adapter.healthy()) && (!identity.live?.status || identity.live.status==='live')}));
       if (demo) { network.lastFrame = adapter.status.lastFrame = Date.now(); }
@@ -733,7 +738,7 @@ export function boot(options = {}) {
       }
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
-      if (!roomContext.current()) { media.stop(); void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (!roomContext.current()) { media.stop(); accountRefresh.close();void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
       if ((engine.pk.current()?.phase === 'active' || panel.isPKVisible()) && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
@@ -751,6 +756,7 @@ export function boot(options = {}) {
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
     window.addEventListener('pagehide', event => {
       media.stop();
+      void accountRefresh.cancel().catch(()=>{});
       void (event.persisted ? tools.suspend() : tools.close());
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
       const wasRunning = engine.running || engine.resumeRequested;
@@ -758,7 +764,7 @@ export function boot(options = {}) {
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { predictions.close();workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
+      if (closed) { accountRefresh.close();predictions.close();workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();
@@ -785,7 +791,7 @@ export function boot(options = {}) {
       });
       return localAgentReady;
     };
-    foundationSettings=new FoundationSettings(panel.root,{edge,collector:options.accountCollector,accounts,anchor:()=>engine.config.anchorId,
+    foundationSettings=new FoundationSettings(panel.root,{edge,collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
       changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
     workbench=new AIWorkbench(panel.root,{memory:currentMemory,saveMemory:()=>persistRuntime(true),onError:error=>panel.toast(error.message,true),tasks:{
       submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},

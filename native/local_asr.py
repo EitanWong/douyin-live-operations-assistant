@@ -1,6 +1,7 @@
 """Optional sherpa-onnx SenseVoice adapter. No downloader, microphone or model code."""
 import base64
 import io
+import importlib.util
 from pathlib import Path
 import re
 import time
@@ -36,7 +37,9 @@ class LocalASR:
     def __init__(self, folder):
         self.folder = Path(folder) if folder else None
         self.recognizer = None
-        self.status = {'phase': 'unprepared', 'model': 'SenseVoiceSmall-int8', 'device': 'cpu'}
+        available = bool(self.folder and all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav'])
+                         and importlib.util.find_spec('sherpa_onnx') and importlib.util.find_spec('numpy'))
+        self.status = {'phase': 'unprepared', 'available': available, 'model': 'SenseVoiceSmall-int8', 'device': 'cpu'}
 
     def decode(self, frames):
         import numpy as np

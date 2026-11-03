@@ -83,7 +83,7 @@ test('AI 繁忙、额度用尽、服务关闭时立即用内置反馈', async()=
     const {engine,chat}=fixture(c=>{c.ai.enabled=false;});
     chat('@Eitan 真心话');engine.config.ai.enabled=mode!=='disabled';
     if(mode==='busy')engine.aiBusy=true;
-    if(mode==='quota')engine.calls=Array(engine.config.ai.maxPerHour).fill(1800000000000);
+    if(mode==='quota'){engine.config.ai.edge.enabled=false;engine.calls=Array(engine.config.ai.maxPerHour).fill(1800000000000);}
     engine.ai=async()=>assert.fail('无法调用时应立即 fallback');
     chat('梦想成为一个大明星');await settle();
     assert.equal(engine.stats.aiCalls,0);

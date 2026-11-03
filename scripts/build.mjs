@@ -114,7 +114,7 @@ chartLicenses+=`\nSilero VAD v5 · MIT\n${await readFile(`${root}vendor/runtime-
 chartLicenses+=productLicenses;
 chartLicenses+=await readFile(`${root}vendor/runtime-licenses/onnxruntime-web/ThirdPartyNotices.txt`,'utf8');
 for(const name of ['@ricky0123/vad-web','@huggingface/transformers','onnxruntime-web','onnxruntime-common','@huggingface/jinja','@huggingface/tokenizers','cockatiel'])chartLicenses+=`\n${name}\n${await readPackageLicense(root,name)}\n`;
-chartLicenses+=`\nModel weights are downloaded separately: Qwen2.5-0.5B-Instruct (Apache-2.0), Whisper tiny (MIT). See docs/ai-foundation.zh-CN.md.\n`;
+chartLicenses+=`\nModel weights are downloaded separately: Qwen2.5-0.5B-Instruct and Qwen2.5-1.5B-Instruct (Apache-2.0), Whisper tiny (MIT). See docs/ai-foundation.zh-CN.md.\n`;
 chartLicenses+=`\nLiquid Glass React · https://github.com/rdev/liquid-glass-react\n${liquidGlassLicense}\n`;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);

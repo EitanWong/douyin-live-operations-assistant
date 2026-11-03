@@ -44,3 +44,30 @@ test('stopping engine aborts active inference and a late result cannot unlock a 
  pending[0].resolve('旧回复');await old;assert.equal(engine.aiBusy,true);assert.equal(engine.queue.length,0);
  pending[1].resolve('新回复');await next;assert.equal(engine.aiBusy,false);assert.equal(engine.queue[0].text,'新回复');engine.stop();
 });
+test('local-only and exhausted operator quota never invoke cloud; unavailable local fails explicitly',async()=>{
+ let cloud=0;const ai=createResilientAI({cloud:async()=>{cloud++;return '云端';},edge:{ready:async()=>true,reply:async()=> '本地'}});
+ assert.equal(await ai({cloudAllowed:false},{edge:{enabled:true}}),'本地');
+ assert.equal(await ai({},{edge:{enabled:true,localOnly:true}}),'本地');assert.equal(cloud,0);
+ const unavailable=createResilientAI({cloud:async()=>cloud++,edge:{ready:async()=>false}});
+ await assert.rejects(unavailable({cloudAllowed:false},{edge:{enabled:true}}),/本地|端侧/);assert.equal(cloud,0);
+});
+test('billing exhaustion pauses only the affected provider and automatically serves prepared local replies',async()=>{
+ let cloud=0,now=1000;const ai=createResilientAI({now:()=>now,cloud:async()=>{cloud++;throw Object.assign(Error('quota'),{status:402,aiQuota:true});},edge:{ready:async()=>true,reply:async()=> '本地'}});
+ const c={endpoint:'https://service.example',model:'a',edge:{enabled:true}};
+ assert.equal(await ai({},c),'本地');assert.equal(await ai({},c),'本地');assert.equal(cloud,1);
+ await ai({},{...c,model:'b'});assert.equal(cloud,2);now+=300001;await ai({},c);assert.equal(cloud,3);
+});
+test('engine reaches prepared local inference after its cloud quota is exhausted',async()=>{
+ let cloud=0;const ai=createResilientAI({cloud:async()=>{cloud++;return '云端';},edge:{ready:async()=>true,reply:async()=> '端侧兜底'}});
+ const engine=new Engine({config:mergeConfig({ai:{enabled:true,maxPerHour:1,edge:{enabled:true}}}),ai});engine.start();
+ try{await engine.requestAI();await engine.requestAI();assert.equal(cloud,1);assert.ok(engine.queue.some(r=>r.text==='端侧兜底'));}finally{engine.stop();}
+});
+test('addressed chat can use local quota after cloud cap without bypassing the local cap',async()=>{
+ let now=1800000000000,cloud=0;const ai=createResilientAI({cloud:async()=>{cloud++;return '{"intent":"chat","reply":"云端"}';},edge:{ready:async()=>true,reply:async()=> '本地回复'}});
+ const engine=new Engine({now:()=>now,config:mergeConfig({ai:{enabled:true,chatEnabled:true,maxPerHour:1,edge:{enabled:true,maxPerHour:1}}}),ai});engine.start();engine.calls=[now];
+ try{
+  engine.requestChatAI({type:'chat',user:{id:'a',name:'观众'},text:'你好呀'},true);await new Promise(setImmediate);
+  assert.equal(cloud,0);assert.equal(engine.queue[0]?.text,'本地回复');assert.equal(engine.localCalls.length,1);
+  now+=21000;engine.requestChatAI({type:'chat',user:{id:'b',name:'其他人'},text:'再聊一句'},true);await new Promise(setImmediate);assert.equal(engine.localCalls.length,1);
+ }finally{engine.stop();}
+});

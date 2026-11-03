@@ -1,7 +1,9 @@
+import {detectDevice} from '../src/browser/device-capabilities.js';
 const slots=new Map();
 function release(kind){const slot=slots.get(kind);slot?.worker.terminate();slot?.job?.reply({error:'端侧请求已取消'});slots.delete(kind);}
 chrome.runtime.onMessage.addListener((m,sender,reply)=>{
  if(m?.target!=='edge-offscreen' || sender.id!==chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL('')))return;
+ if(m.action==='device'){void detectDevice().then(value=>reply({value}),()=>reply({error:'设备检测失败'}));return true;}
  if(m.action==='status'){reply({value:Object.fromEntries([...slots].map(([kind,s])=>[kind,{...s.status,busy:Boolean(s.job)}]))});return;}
  if(m.action==='release'){for(const kind of slots.keys())release(kind);reply({value:true});return;}
  if(m.action==='cancel'){for(const [kind,s] of slots)if(s.job?.id===m.id)release(kind);reply({value:true});return;}

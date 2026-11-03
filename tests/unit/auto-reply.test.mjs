@@ -103,7 +103,7 @@ test('暂停、关闭模块、失效和调用限额不会让待回复绕过控�
   finish('关闭后不发送');await settle();
   assert.equal(r.engine.queue.length,0);assert.equal(r.engine.chatAIQueue.length,0);
 
-  const limited=room({ai:{enabled:true,chatEnabled:true,maxPerHour:1}});
+  const limited=room({ai:{enabled:true,chatEnabled:true,maxPerHour:1,edge:{enabled:false}}});
   limited.chat('普通弹幕');limited.chat('@小助手 你好');await settle();
   assert.equal(limited.prompts.length,1);
   limited.advance(45001);await limited.engine.tick(false);

@@ -1,4 +1,4 @@
-import {accountSource,normalizeAccountPayload} from '../src/ai/account-context.js';
+import {accountSource,normalizeAccountPayload,mergeAccountRecord} from '../src/ai/account-context.js';
 // Observe only responses the native page already requests; no signer or cookies leave the page.
 const key='__liveAssistantPublicAccountV1';
 let source;try{source=accountSource(location.href);}catch{}
@@ -7,7 +7,7 @@ if(source && !window[key]){
  const ingest=payload=>{
   for(const r of normalizeAccountPayload(payload,source)){
    const key=`${r.kind}:${r.id}`,old=rows.get(key);
-   rows.set(key,old ? {...r,text:r.text.length>=old.text.length ? r.text : old.text,counts:Object.fromEntries(Object.entries(r.counts).map(([k,v])=>[k,v ?? old.counts[k] ?? null]))} : r);
+   rows.set(key,mergeAccountRecord(old,r));
   }
   while(rows.size>30)rows.delete(rows.keys().next().value);
  };
