@@ -23,6 +23,7 @@ export function makeAIRequest(prompt, config) {
   prompt=applyPromptSources(currentAIPrompt(prompt),config);
   if(!prompt.searchResults && prompt.target && prompt.target.type!=='speech' && ['ai','gift','welcome'].includes(prompt.task?.kind || 'ai'))prompt={...prompt,target:{...prompt.target,support:supportContext(prompt.target,prompt.task,config,prompt.getNow?.() ?? prompt.now ?? Date.now())}};
   const request=makeBaseAIRequest(prompt,config);
+  if(prompt.intentRouting)request.temperature=0;
   if (new URL(config.endpoint).hostname==='api.deepseek.com' && ['deepseek-flash','deepseek-v4-pro'].includes(config.model)) request.thinking={type:'disabled'};
   if(!prompt.searchResults && !isSpeechRouting(prompt))request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {})};
