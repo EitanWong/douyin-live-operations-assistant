@@ -141,7 +141,10 @@ test('键盘缩放、恢复默认、标题栏移动及视口缩小后恢复偏�
 test('减少动态效果移除空间动画，修改系统偏好会终止在途运动', () => {
   const f=floatingFixture({reduced:true}),w=f.floating;
   try {
-    w.setOpen(false); f.tick(50);
+    w.setOpen(false);
+    assert.equal(w.shell.hidden,true,'减少动态效果时立即关闭，不等待动画帧');
+    assert.equal(f.frames.size,0);
+    f.tick(50);
     assert.match(w.panel.style.transform,/scale\(1\)/);
     assert.match(w.panel.style.transform,/translate3d\(0,0px,0\)/);
     f.pointer(w.launcher,'pointerdown',w.x.value,w.y.value);
@@ -163,4 +166,24 @@ test('保存的吸附边和纵向比例适配新视口；销毁清理动画和�
   assert.equal(w.presence.value,value); assert.equal(f.frames.size,0);
   f.pointer(w.launcher,'pointerdown',100,100); assert.equal(w.gesture,null);
   f.dom.window.close();
+});
+
+
+test('玻璃展开和收起的每一帧保留外部背景采样，内容淡入不降低窗口祖先透明度', () => {
+  const f=floatingFixture(),w=f.floating;
+  try {
+    w.setOpen(false);f.settle();w.setOpen(true);
+    assert.ok(Number(w.panel.style.transform.match(/scale\(([^)]+)\)/)[1])<.05,'玻璃应从收拢几何展开，不能突然出现近乎完整的玻璃面板');
+    for(let i=0;i<36;i++){
+      f.tick();
+      assert.equal(w.shell.hidden,false);
+      assert.equal(Number(w.shell.style.opacity || 1),1,'祖先 opacity<1 会创建 backdrop root，遮断玻璃对页面的模糊采样');
+      assert.equal(Number(w.panel.style.opacity || 1),1);
+    }
+    w.setOpen(false);
+    for(let i=0;i<10;i++){
+      f.tick();assert.equal(Number(w.shell.style.opacity || 1),1);
+    }
+    w.setOpen(true);f.settle();assert.equal(w.shell.hidden,false);
+  } finally {f.dispose();}
 });

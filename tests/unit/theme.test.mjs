@@ -107,7 +107,7 @@ test('用户脚本接收同源窗口外观变化，未知值安全回到系统�
   } finally { controller.destroy(); s.dom.window.close(); }
 });
 
-test('默认流光玻璃；配色与材质独立持久保存，亮暗切换不覆盖皮肤',async()=>{
+test('默认液态玻璃；配色与材质独立持久保存，亮暗切换不覆盖皮肤',async()=>{
  const {PALETTE_KEY,MATERIAL_KEY}=await import('../../src/ui/appearance.js');
  const s=surface(),document=s.dom.window.document,paletteSelect=document.createElement('select'),materialSelect=document.createElement('select');document.body.append(paletteSelect,materialSelect);
  let controller=installTheme({...s,paletteSelect,materialSelect});

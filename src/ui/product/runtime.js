@@ -1,6 +1,8 @@
 import React,{createElement as h,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {MantineProvider,Button,Switch,Input,Slider,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Collapse,Progress,SimpleGrid,Stack,Group,Tabs} from '@mantine/core';
+import {MantineProvider,Switch,Input,Slider,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Progress,SimpleGrid,Stack,Group,Tabs} from '@mantine/core';
+import {m as motion,LazyMotion,domAnimation} from 'motion/react';
+import {Button,MotionIcon,Chevron,Reveal,PageEntrance,MotionPreferences,useMotionTarget,springs,fade} from './motion.js';
 import {useTable,tableFeatures} from '@tanstack/react-table';
 import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
@@ -9,7 +11,7 @@ import {gridOptions} from './layout.js';
 import {componentTheme,componentVariables,paletteScale} from '../theme-palette.js';
 
 const features=tableFeatures({});
-const icon=html=>html ? h('span',{className:'product-icon',dangerouslySetInnerHTML:{__html:html},'aria-hidden':true}) : null;
+const icon=html=>html ? h(MotionIcon,{html}) : null;
 function Control({node,bridge}) {
   const common={label:node.labelHidden ? undefined : node.label,'aria-label':node.label,description:node.description || undefined,disabled:node.disabled,error:node.invalid ? '请检查此项设置' : undefined,'data-control-id':node.id};
   const edit=value=>bridge.change(node.id,value);
@@ -45,7 +47,7 @@ function Disclosure({node,bridge}) {
   const invalid=JSON.stringify(node.children).includes('"invalid":true');
   useEffect(()=>{if(invalid && !open)bridge.toggle(node.id,true);},[invalid,open,bridge,node.id]);
   useEffect(()=>{if(open && invalid){const input=body.current?.querySelector('[aria-invalid="true"]');input?.focus();input?.scrollIntoView?.({block:'center'});}},[open,invalid]);
-  return h(Paper,{withBorder:true,className:'product-disclosure','data-surface':node.surface,'data-view-id':node.id},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>bridge.toggle(node.id,!open),rightSection:open ? '−' : '+'},node.title),h(Collapse,{expanded:open,transitionDuration:0,keepMountedMode:'display-none'},h(Stack,{className:'product-disclosure-body',gap:'sm',id:`detail-${node.id}`,ref:body},renderChildren(node.children,bridge))));
+  return h(Paper,{withBorder:true,className:'product-disclosure','data-surface':node.surface,'data-view-id':node.id},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(Reveal,{open,id:`detail-${node.id}`},h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body},renderChildren(node.children,bridge))));
 }
 function Chart({node}) {
   const element=useRef(null),chart=useRef(null);
@@ -80,6 +82,14 @@ function View({node,bridge}) {
 }
 function Workspace({bridge,shadow,onReady}) {
   const state=useSyncExternalStore(bridge.subscribe,bridge.getSnapshot),[menu,setMenu]=useState(false),[jump,setJump]=useState(null),main=useRef(null),[systemDark,setSystemDark]=useState(()=>shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)').matches);
+  const [compact,setCompact]=useState(()=>shadow.host.getBoundingClientRect().width<=660);
+  useEffect(()=>{
+    const observer=new shadow.host.ownerDocument.defaultView.ResizeObserver(entries=>setCompact(entries[0].contentRect.width<=660));
+    observer.observe(shadow.host);return ()=>observer.disconnect();
+  },[shadow]);
+  const sidebarWidth=useMotionTarget({'--product-sidebar-width':state.sidebar.collapsed ? '64px' : '184px'},springs.layout);
+  const sidebarReveal=useMotionTarget({height:compact ? menu ? 'auto' : 0 : '100%',opacity:compact && !menu ? 0 : 1},{...springs.disclosure,opacity:fade});
+  const groupReveal=useMotionTarget({height:state.sidebar.collapsed && !compact ? 0 : 24,opacity:state.sidebar.collapsed && !compact ? 0 : 1},{...springs.layout,opacity:fade});
   const selectedView=state.subviews.find(node=>node.selected)?.id;
   useEffect(()=>{const query=shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)'),change=()=>setSystemDark(query.matches);query.addEventListener('change',change);return ()=>query.removeEventListener('change',change);},[shadow]);
   useEffect(()=>{main.current?.scrollTo?.({top:0});setMenu(false);},[state.key,selectedView]);
@@ -89,15 +99,15 @@ function Workspace({bridge,shadow,onReady}) {
   const dark=state.theme==='dark' || state.theme==='system' && systemDark;
   const groups=[...new Set(state.nav.map(n=>n.group))];
   const headings=[];function walk(node){if(node?.tag==='h3')headings.push({value:node.id,label:node.children.filter(n=>n.kind==='text').map(n=>n.text).join('').trim()});for(const child of node?.children || [])walk(child);}walk(state.content);
-  const nav=h('nav',{id:'product-navigation',className:'product-nav','aria-label':'功能导航'},groups.map(group=>h('div',{key:group,className:'product-nav-group'},h('div',{className:'product-nav-label'},group),state.nav.filter(n=>n.group===group).map(item=>h(Button,{key:item.key,className:'product-nav-button',variant:state.key===item.key ? 'light' : 'subtle',fullWidth:true,'aria-label':item.label,title:item.label,'aria-current':state.key===item.key ? 'page' : undefined,onClick:()=>bridge.navigate(item.key),leftSection:icon(item.icon)},item.label)))));
+  const nav=h('nav',{id:'product-navigation',className:'product-nav','aria-label':'功能导航'},groups.map(group=>h('div',{key:group,className:'product-nav-group'},h(motion.div,{className:'product-nav-label',initial:false,'aria-hidden':state.sidebar.collapsed && !compact,animate:groupReveal},group),state.nav.filter(n=>n.group===group).map(item=>h(Button,{key:item.key,className:'product-nav-button',variant:state.key===item.key ? 'light' : 'subtle',fullWidth:true,'aria-label':item.label,title:item.label,'aria-current':state.key===item.key ? 'page' : undefined,onClick:()=>bridge.navigate(item.key),leftSection:icon(item.icon)},item.label)))));
   return h(MantineProvider,{forceColorScheme:dark ? 'dark' : 'light',getRootElement:()=>shadow.host,cssVariablesSelector:':host',deduplicateCssVariables:false,withGlobalClasses:false,cssVariablesResolver:componentVariables,theme:componentTheme(state.palette,dark)},
-    h('div',{className:'product-shell','data-menu-open':menu,'data-sidebar-side':state.sidebar.side,'data-sidebar-collapsed':state.sidebar.collapsed,'data-material':state.material,'data-mantine-color-scheme':dark ? 'dark' : 'light'},
-      h('aside',{className:'product-sidebar','aria-label':'功能侧边栏'},state.sidebar.toggle ? h('div',{className:'product-nav-toggle'},h(Button,{className:'product-nav-button',variant:'subtle',fullWidth:true,'aria-label':state.sidebar.toggle.label,title:state.sidebar.toggle.label,'aria-expanded':!state.sidebar.collapsed,'aria-controls':'product-navigation',onClick:()=>bridge.activate(state.sidebar.toggle.id),leftSection:icon(state.sidebar.toggle.icon)},state.sidebar.toggle.label)) : null,nav),
+    h(motion.div,{initial:false,animate:sidebarWidth,className:'product-shell','data-menu-open':menu,'data-sidebar-side':state.sidebar.side,'data-sidebar-collapsed':state.sidebar.collapsed,'data-material':state.material,'data-mantine-color-scheme':dark ? 'dark' : 'light'},
+      h(motion.aside,{className:'product-sidebar','aria-label':'功能侧边栏',initial:false,inert:compact && !menu,'aria-hidden':compact && !menu,animate:sidebarReveal},h('div',{className:'product-sidebar-inner'},state.sidebar.toggle ? h('div',{className:'product-nav-toggle'},h(Button,{className:'product-nav-button',variant:'subtle',fullWidth:true,'aria-label':state.sidebar.toggle.label,title:state.sidebar.toggle.label,'aria-expanded':!state.sidebar.collapsed,'aria-controls':'product-navigation',onClick:()=>bridge.activate(state.sidebar.toggle.id),leftSection:icon(state.sidebar.toggle.icon)},state.sidebar.toggle.label)) : null,nav)),
       h('div',{className:'product-main'},
-        h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge))),
+        h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},h(Chevron,{open:menu}),menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge))),
         h('div',{className:'product-subviews'},state.subviews.length ? h(Tabs,{id:'product-sections',value:selectedView,variant:'pills',className:'product-subview-tabs',onChange:value=>{if(value)bridge.activate(value);}},h(Tabs.List,{'aria-label':`${state.title}分类`},state.subviews.map(node=>h(Tabs.Tab,{key:node.id,value:node.id,disabled:node.disabled},node.text)))) : null,headings.length>2 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const id=e.currentTarget.value;if(bridge.reveal(id))setJump({id});}}) : null),
-        h('main',{className:'product-content',ref:main,key:state.key,id:selectedView ? `product-sections-panel-${selectedView}` : undefined,'aria-label':state.title,'aria-labelledby':selectedView ? `product-sections-tab-${selectedView}` : undefined},h(View,{node:state.content,bridge})),
-        h('footer',{className:'product-status'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite'},state.messages.map((message,i)=>h(Alert,{key:message.id || i,variant:'light',color:message.error ? 'red' : 'blue'},h(View,{node:message,bridge})))) : null))));
+        h('main',{className:'product-content',ref:main,key:state.key,id:selectedView ? `product-sections-panel-${selectedView}` : undefined,'aria-label':state.title,'aria-labelledby':selectedView ? `product-sections-tab-${selectedView}` : undefined},h(PageEntrance,{key:`${state.key}:${selectedView || ''}`},h(View,{node:state.content,bridge}))),
+        h('footer',{className:'product-status'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite'},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null))));
 }
 class WorkspaceBoundary extends React.Component {
   state={failed:false};
@@ -107,6 +117,6 @@ class WorkspaceBoundary extends React.Component {
 }
 export function mountProductWorkspace({container,bridge,onReady,onError}) {
   const shadow=container.attachShadow({mode:'open'}),style=container.ownerDocument.createElement('style'),mount=container.ownerDocument.createElement('div');
-  style.textContent=mantineCss+'\n'+PRODUCT_CSS;shadow.append(style,mount);const root=createRoot(mount);root.render(h(WorkspaceBoundary,{onError},h(Workspace,{bridge,shadow,onReady})));
+  style.textContent=mantineCss+'\n'+PRODUCT_CSS;shadow.append(style,mount);const root=createRoot(mount);root.render(h(WorkspaceBoundary,{onError},h(LazyMotion,{features:domAnimation,strict:true},h(MotionPreferences,{view:container.ownerDocument.defaultView},h(Workspace,{bridge,shadow,onReady})))));
   return {destroy(){root.unmount();shadow.replaceChildren();}};
 }

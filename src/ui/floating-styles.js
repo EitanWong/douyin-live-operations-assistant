@@ -79,4 +79,11 @@ button.window-resize[data-resize=se]:focus-visible{outline-offset:-3px}
 }
 @media (pointer:coarse){.window-resize[data-resize=e],.window-resize[data-resize=w]{width:16px}.window-resize[data-resize=n],.window-resize[data-resize=s]{height:16px}button.window-resize[data-resize=se]{width:28px;height:28px}}
 @media (prefers-reduced-motion:reduce){.dock-hint{display:none}}
+
+.floating-panel>.panel>:is(.head,.workspace,.product-surface,.banner,.foot){opacity:var(--window-content-opacity,1)}
+.head button{transition:background-color 140ms ease-out,transform 240ms cubic-bezier(.2,.8,.2,1)}
+.head button:active{transform:scale(.94)}
+.head button:focus-visible{outline:2px solid var(--sg-focus);outline-offset:3px}
+@media(hover:hover){.head button:hover svg{transform:scale(1.07)}.head button svg{transition:transform 240ms cubic-bezier(.2,.8,.2,1)}}
+@media(prefers-reduced-motion:reduce){.head button,.head button svg{transition:none;transform:none}}
 `;
