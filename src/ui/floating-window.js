@@ -1,4 +1,5 @@
 import { Spring } from './spring.js';
+import {WindowPresence,windowPresentation} from './window-presence.js';
 
 const floatingClamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
 const floatingRubber = (value, min, max) => {
@@ -39,7 +40,7 @@ export class FloatingWindow {
     const position = this.manual ? this.clampPanel(savedWindow.left, savedWindow.top) : this.attachedPosition();
     this.px = new Spring(position.left, 26, .1);
     this.py = new Spring(position.top, 26, .1);
-    this.presence = new Spring(1, 26, .001);
+    this.presence = new WindowPresence();
     this.press = new Spring(1, 32, .001);
     this.hintPresence = new Spring(0, 30, .001);
     this.channels = [this.x, this.y, this.px, this.py, this.presence, this.press, this.hintPresence];
@@ -126,12 +127,13 @@ export class FloatingWindow {
     const anchorX = floatingClamp(x + this.launcherWidth / 2 - this.px.value, 0, this.width);
     const anchorY = floatingClamp(y + this.launcherHeight / 2 - this.py.value, 0, this.height);
     this.panel.style.transformOrigin = `${anchorX}px ${anchorY}px`;
-    const distance = this.reduced ? 0 : 1 - amount;
-    this.panel.style.transform = `translate3d(0,${(anchorY < this.height / 2 ? -10 : 10) * distance}px,0) scale(${this.reduced ? 1 : Math.max(.001, amount)})`;
+    const appearance=windowPresentation(amount,this.reduced);
+    this.panel.style.transform = `translate3d(0,${(anchorY < this.height / 2 ? -1 : 1)*appearance.travel}px,0) scale(${appearance.scale})`;
     // opacity<1 on an ancestor creates a backdrop root and cuts the glass off
-    // from the page. Keep the material live; fade only foreground content.
+    // from the page. Fade the material itself and its foreground separately.
     this.shell.style.opacity = '1';
-    this.panel.style.setProperty('--window-content-opacity', String(amount));
+    this.panel.style.setProperty('--window-material-opacity', String(appearance.material));
+    this.panel.style.setProperty('--window-content-opacity', String(appearance.content));
     this.shell.hidden = this.panel.hidden = !this.open && !this.presence.active;
     this.shell.dataset.motionState = this.presence.active ? this.open ? 'opening' : 'closing' : this.open ? 'open' : 'closed';
     const b = this.launcherBounds();
@@ -151,7 +153,6 @@ export class FloatingWindow {
     this.shell.inert = !open;
     this.shell.setAttribute('aria-hidden', String(!open));
     this.shell.dataset.interactive = String(open);
-    this.presence.frequency = open ? 26 : 34;
     this.presence.target = open ? 1 : 0;
     if (this.reduced) this.finish();
     else { this.render(); this.request(); }

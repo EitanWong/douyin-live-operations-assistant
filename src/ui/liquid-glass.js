@@ -31,9 +31,10 @@ export const LIQUID_GLASS_CSS=`
  --sg-well:var(--lg-card);--sg-control:var(--lg-field);
  --sg-muted:var(--lg-muted);--sg-brand:var(--lg-accent);--sg-focus:var(--lg-accent);
  --sg-brand-wash:color-mix(in srgb,var(--sg-brand) 12%,transparent);
- background:var(--sg-solid);border:1px solid var(--sg-border);border-radius:22px;
- box-shadow:inset 0 1px 0 var(--lg-rim),0 24px 64px -18px var(--sg-shade),0 6px 18px -8px var(--sg-contact);
+ background:transparent;border:0;border-radius:22px;
+ box-shadow:0 24px 64px -18px var(--window-shade,var(--sg-shade)),0 6px 18px -8px var(--window-contact,var(--sg-contact));
 }
+@supports not (backdrop-filter:blur(1px)){:root[data-material=liquid] .glass-panel{background:var(--sg-solid)}}
 @supports(backdrop-filter:blur(1px)){
  :host([data-material=liquid]) .panel{
   isolation:isolate;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;
@@ -56,10 +57,12 @@ export const LIQUID_GLASS_CSS=`
 :host([data-material=liquid]) :is(.workspace-card,.settings-group,.income-hero,.pk-scoreboard){background:var(--lg-card);box-shadow:var(--lg-shadow)}
 :host([data-material=liquid]) :is(input,select,textarea){background:var(--lg-field)}
 @media(prefers-reduced-transparency:reduce),(forced-colors:active){
- :host([data-material=liquid]) .panel,:root[data-material=liquid] .glass-panel{background:var(--sg-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
- :host([data-material=liquid]) .panel::before,:host([data-material=liquid]) .panel::after{display:none}
+ :host([data-material=liquid]) .panel,:root[data-material=liquid] .glass-panel{background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none}
+ :root[data-material=liquid] .glass-panel{background:var(--sg-solid)}
+ :host([data-material=liquid]) .panel::before{display:block;background:var(--sg-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
+ :host([data-material=liquid]) .panel::after{box-shadow:none}
 }
-@media(forced-colors:active){:host([data-material=liquid]) .panel{background:Canvas;border:1px solid CanvasText}}
+@media(forced-colors:active){:host([data-material=liquid]) .panel{background:transparent;border:0;box-shadow:none}:host([data-material=liquid]) .panel::before{background:Canvas;border:1px solid CanvasText}}
 `;
 
 export const PRODUCT_LIQUID_GLASS_CSS=`

@@ -173,7 +173,8 @@ test('玻璃展开和收起的每一帧保留外部背景采样，内容淡入�
   const f=floatingFixture(),w=f.floating;
   try {
     w.setOpen(false);f.settle();w.setOpen(true);
-    assert.ok(Number(w.panel.style.transform.match(/scale\(([^)]+)\)/)[1])<.05,'玻璃应从收拢几何展开，不能突然出现近乎完整的玻璃面板');
+    assert.ok(Number(w.panel.style.transform.match(/scale\(([^)]+)\)/)[1])>=.96,'文字不能随整个窗口从极小尺寸放大');
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-material-opacity')),0,'玻璃与边缘应从不可见状态连续过渡');
     for(let i=0;i<36;i++){
       f.tick();
       assert.equal(w.shell.hidden,false);
@@ -185,5 +186,34 @@ test('玻璃展开和收起的每一帧保留外部背景采样，内容淡入�
       f.tick();assert.equal(Number(w.shell.style.opacity || 1),1);
     }
     w.setOpen(true);f.settle();assert.equal(w.shell.hidden,false);
+  } finally {f.dispose();}
+});
+
+
+test('开合的玻璃和文字错峰过渡，文字只在接近原尺寸时出现，退出不留整块残影', () => {
+  const f=floatingFixture(),w=f.floating;
+  try {
+    w.setOpen(false);f.settle();w.setOpen(true);
+    f.tick(32);
+    const material=Number(w.panel.style.getPropertyValue('--window-material-opacity'));
+    const content=Number(w.panel.style.getPropertyValue('--window-content-opacity'));
+    assert.ok(material>0 && material<1);
+    assert.ok(content<material,'玻璃先建立，文字随后淡入，避免微缩字和密集线条同时涌现');
+    const origin=w.panel.style.transformOrigin;f.tick(48);
+    const position=w.presence.value,velocity=w.presence.velocity;
+    w.setOpen(false);
+    assert.equal(w.presence.value,position);assert.equal(w.presence.velocity,velocity);
+    assert.equal(w.panel.style.transformOrigin,origin,'中途反向不能切换缩放锚点');
+    for(let i=0;i<90;i++){
+      f.tick(8);
+      const scale=Number(w.panel.style.transform.match(/scale\(([^)]+)\)/)[1]);
+      assert.ok(scale>=.96 && scale<=1.001,'退出过程中保持内容的原始大小');
+    }
+    f.settle();assert.equal(w.panel.hidden,true);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-material-opacity')),0);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-content-opacity')),0);
+    w.setOpen(true);f.settle();assert.equal(w.panel.hidden,false);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-material-opacity')),1);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-content-opacity')),1);
   } finally {f.dispose();}
 });

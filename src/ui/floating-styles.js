@@ -2,7 +2,14 @@ export const FLOATING_WINDOW_CSS = `
 /* Geometry lives on the shell, presence on the panel, press feedback on the
    launcher. Each transform has a single owner, so gestures never fight CSS. */
 .floating-panel{position:fixed;container:assistant / size;pointer-events:none;isolation:isolate;z-index:2}
-.floating-panel>.panel{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;animation:none;border:0;border-radius:16px;box-shadow:inset 0 0 0 1px var(--sg-inner),0 16px 48px -16px var(--sg-shade),0 4px 12px -4px var(--sg-contact)}
+.floating-panel>.panel{position:absolute;inset:0;width:100%;height:100%;max-width:none;max-height:none;margin:0;animation:none;border:0;border-radius:16px;isolation:isolate;background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;--window-shade:color-mix(in srgb,var(--sg-shade) calc(var(--window-material-opacity,1)*100%),transparent);--window-contact:color-mix(in srgb,var(--sg-contact) calc(var(--window-material-opacity,1)*100%),transparent);box-shadow:0 16px 48px -16px var(--window-shade),0 4px 12px -4px var(--window-contact)}
+/* Fade the material itself, never an ancestor of backdrop-filter. Content
+   keeps almost its full size; no miniature text or moving blur radius. */
+.floating-panel>.panel::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;border-radius:inherit;background:var(--sg-popover);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);opacity:var(--window-material-opacity,1)}
+.floating-panel>.panel::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;border-radius:inherit;opacity:var(--window-material-opacity,1);box-shadow:inset 0 0 0 1px var(--sg-inner)}
+:host([data-material=solid]) .floating-panel>.panel{background:transparent;box-shadow:0 12px 40px var(--window-shade)}
+:host([data-material=solid]) .floating-panel>.panel::before{background:var(--sg-solid);backdrop-filter:none;-webkit-backdrop-filter:none}
+@supports not (backdrop-filter:blur(1px)){.floating-panel>.panel::before{background:var(--sg-solid)}}
 .floating-panel[data-interactive=false],.floating-panel[data-interactive=false] *{pointer-events:none!important}
 button.launcher,button.launcher:active:not(:disabled),button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.launcher.dragging:active:not(:disabled){transition:background-color 140ms ease-out;outline:none}
 .launcher{z-index:1;max-width:calc(100vw - 16px)}
