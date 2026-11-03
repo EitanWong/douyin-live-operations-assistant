@@ -13,7 +13,7 @@ test('用户添加背景、来源与到期时间，保存后刷新仍能编辑�
   const dom=setup();let saved;
   let panel=new Panel({room:'1',config:copy(DEFAULTS),callbacks:{save:async c=>{saved=c;}}});
   try {
-    panel.tab('ai');panel.node('[data-memory-add]').click();
+    panel.tab('knowledge');panel.node('[data-memory-add]').click();
     const input=name=>panel.node(`[data-memory-field="${name}"]`);
     input('title').value='开播安排';input('content').value='主播每周六晚上八点开播';input('source').value='主播11月1日确认';input('expiresOn').value='2026-12-01';
     input('content').dispatchEvent(new dom.window.Event('input',{bubbles:true}));
@@ -94,11 +94,11 @@ test('自动联网知识独立展示来源和时效，可停用、删除、清�
  let rows=[{id:'learned',query:'<img src=x onerror=alert(1)> PK规则',searchedAt:Date.now(),expiresAt:Date.now()+86400000,results:[{index:1,title:'<script>bad()</script>',url:'https://www.douyin.com/rules',content:'规则原文摘要'}]}],removed=[],cleared=0;
  const panel=new Panel({room:'1',config,callbacks:{webKnowledge:{persistent:true,list:async()=>rows,remove:async id=>{removed.push(id);rows=[];},clear:async()=>{cleared++;rows=[];}}}});
  try{
-  panel.tab('ai');panel.aiSettings.showSection('knowledge');panel.node('[data-web-knowledge-refresh]').click();await new Promise(setImmediate);
+  panel.tab('knowledge');panel.node('[data-web-knowledge-refresh]').click();await new Promise(setImmediate);
   const list=panel.node('[data-web-knowledge-list]');assert.match(list.textContent,/规则原文摘要/);assert.match(list.textContent,/到期/);assert.equal(list.querySelector('img,script'),null);assert.equal(list.querySelector('a').href,'https://www.douyin.com/rules');
   assert.equal(panel.node('[data-field="ai.search.rememberKnowledge"]').checked,true);panel.node('[data-field="ai.search.rememberKnowledge"]').click();assert.equal(panel.read().ai.search.rememberKnowledge,false);
   panel.node('[data-web-knowledge-remove]').click();await new Promise(setImmediate);assert.deepEqual(removed,['learned']);assert.match(list.textContent,/没有/);
-  panel.node('[data-web-knowledge-clear]').click();await new Promise(setImmediate);assert.equal(cleared,1);assert.equal(panel.read().ai.memory.entries[0].content,'主播安排');
+  panel.node('[data-web-knowledge-clear]').click();assert.equal(cleared,0);panel.node('[data-web-knowledge-confirm-clear]').click();await new Promise(setImmediate);assert.equal(cleared,1);assert.equal(panel.read().ai.memory.entries[0].content,'主播安排');
   assert.equal(panel.node('[data-search-config]').hidden,true);assert.equal(panel.node('[data-web-knowledge-refresh]').closest('[hidden]'),null);
  }finally{panel.destroy();dom.window.close();}
 });

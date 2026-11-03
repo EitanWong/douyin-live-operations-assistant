@@ -34,6 +34,9 @@ import { SEARCH_PROVIDERS, validateSearchEndpoint } from '../services/search.js'
 import { giftDate } from '../data/gifts.js';
 import { BOT_COMMANDS, RoomBot } from '../core/bot.js';
 import { hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
+import {KnowledgeLibrary} from './knowledge-library.js';
+import {knowledgePageTemplate} from './knowledge-template.js';
+import {KNOWLEDGE_CSS} from './knowledge-styles.js';
 import {AISettings} from './ai-settings.js';
 import {aiSettingsTemplate} from './ai-settings-template.js';
 
@@ -129,12 +132,12 @@ export class Panel {
     this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'anchor'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}${WORKSPACE_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style,createLiquidGlassFilter(document));
+    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}${WORKSPACE_CSS}${KNOWLEDGE_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style,createLiquidGlassFilter(document));
     this.root.append(this.build()); this.workspaceLayout=new WorkspaceLayout(this.root);decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onNavigate:key=>this.tab(key),onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), paletteSelect:this.root.querySelector('[data-theme-palette]'), materialSelect:this.root.querySelector('[data-theme-material]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.predictionCharts=new PredictionCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
-      webKnowledge:this.callbacks.webKnowledge,
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
       forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
+    this.knowledgeLibrary=new KnowledgeLibrary(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),reveal:element=>this.revealError(element),webKnowledge:this.callbacks.webKnowledge});
     this.modelPickers=new ModelPickers(this.root);
     this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});this.workspaceLayout.show(this.activeTab);
     this.productUI=mountProductPanel(this);
@@ -164,7 +167,7 @@ export class Panel {
     const before=field.value, version=this.config;
     const config=copy(this.config);
     for (const key of ['endpoint','model','persona','knowledge']) config.ai[key]=this.node(`[data-field="ai.${key}"]`).value.trim();
-    config.ai.memory=this.aiSettings.read();config.ai.assistant.skills=structuredClone(this.aiSettings.skills);config.ai.pipeline=this.readPipeline();
+    config.ai.memory=this.knowledgeLibrary.read();config.ai.assistant.skills=structuredClone(this.aiSettings.skills);config.ai.pipeline=this.readPipeline();
     try {
       this.setBusy('generate-phrases',true); button.textContent='正在生成…'; button.setAttribute('aria-busy','true');
       const lines=await this.callbacks.generatePhrases(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,{kind,reference:before,keywords},this.aiSettings.credentials());
@@ -291,6 +294,7 @@ export class Panel {
             <div data-list="keywords"></div><button type="button" class="list-add" data-add="keywords">添加关键词回复</button>
             <p class="hint">按列表顺序匹配；可用“上移 / 下移”调整优先级。每条规则支持包含关键词或完全一致。</p>
           </section>
+          ${knowledgePageTemplate(this)}
           <section class="page" role="tabpanel" id="page-ai" aria-labelledby="tab-ai" data-page="ai" hidden>
             <h2>AI 设置</h2><p class="intro">先连接模型，再按需开启直播感知、知识检索和联网搜索。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="ai"></p></div>
@@ -428,7 +432,7 @@ export class Panel {
     for (const item of config.keyword.rules) this.addRow('keywords',item,false);
     for (const item of config.welcome.listed) this.addRow('listed',item,false);
     for (const item of config.timers) this.addRow('timers',item,false);
-    this.aiSettings.populate(config.ai.memory,config.ai.assistant);
+    this.aiSettings.populate(config.ai.assistant);this.knowledgeLibrary.populate(config.ai.memory);
     this.node('[data-api-key]').value = '';
     this.node('[data-search-key]').value = '';
     const preset = Object.entries(presets).find(([,values])=>values[0] === config.ai.endpoint)?.[0] || 'custom';
@@ -550,7 +554,7 @@ export class Panel {
     if (new Set(prices.map(p=>p.key)).size !== prices.length) throw new Error('礼物价格有重复名称或 ID，请合并');
     result.gift.prices = Object.fromEntries(prices.map(p=>[p.key,p.value]));
     result.keyword.rules = this.readList('keywords'); result.welcome.listed = [...new Set(this.readList('listed'))]; result.timers = this.readList('timers');
-    result.ai.memory=this.aiSettings.read();result.ai.assistant.skills=structuredClone(this.aiSettings.skills);
+    result.ai.memory=this.knowledgeLibrary.read();result.ai.assistant.skills=structuredClone(this.aiSettings.skills);
     if (result.welcome.admin.enabled) {
       for (const [admin, basic, label] of [['minWealth','minWealth','荣誉'], ['minFanLevel','minFanLevel','灯牌']]) {
         if (result.welcome.admin[admin] < result.welcome[basic]) {
@@ -850,6 +854,7 @@ export class Panel {
       node.hidden = node.dataset.page !== key || Boolean(disabled);
     }
     this.workspaceLayout.show(key);
+    if(key==='knowledge') {this.knowledgeLibrary.filter();void this.knowledgeLibrary.refresh();}
     if(this.isPKVisible() && this.latest) this.renderPK(this.latest[0]);
     if(key==='anchor' && this.latest) this.renderAnchor(this.latest[0]);
   }

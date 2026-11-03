@@ -51,7 +51,7 @@ export function createWorkspaceBridge(panel) {
     if(chartName){const owner=node.hasAttribute('data-pk-chart') ? panel.charts : panel.anchorDashboard?.charts,chart=owner?.instances.get(chartName);if(chart)return {kind:'chart',id:id(node),option:chart.getOption(),label:node.getAttribute('aria-label')};}
     if(node.tagName==='BUTTON')return {kind:'button',id:id(node),text:cleanText(node) || node.getAttribute('aria-label'),label:node.getAttribute('aria-label'),disabled:node.disabled,busy:node.getAttribute('aria-busy')==='true',selected:node.getAttribute('aria-pressed')==='true' || node.getAttribute('aria-selected')==='true',primary:node.matches('.primary'),danger:node.matches('.danger'),icon:node.querySelector('svg')?.outerHTML};
     if(node.tagName==='TABLE')return table(node);
-    if(node.tagName==='DETAILS')return {kind:'details',id:id(node),...describeLayout(node),open:node.open,title:cleanText(node.querySelector(':scope>summary')),children:children(node)};
+    if(node.tagName==='DETAILS')return {kind:'details',id:id(node),classes:node.className,...describeLayout(node),open:node.open,title:cleanText(node.querySelector(':scope>summary')),children:children(node)};
     if(node.localName==='svg')return {kind:'svg',id:id(node),html:node.outerHTML,label:node.getAttribute('aria-label')};
     if(node.tagName==='A')return /^https?:/u.test(node.href) ? {kind:'link',id:id(node),text:cleanText(node),href:node.href} : {kind:'text',text:cleanText(node)};
     if(node.tagName==='IMG')return {kind:'image',id:id(node),src:node.src,alt:node.alt};

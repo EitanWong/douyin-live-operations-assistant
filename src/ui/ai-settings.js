@@ -1,15 +1,11 @@
 import {REPLY_FREQUENCIES,REPLY_FREQUENCY_HELP} from '../ai/turn-taking.js';
 import {validateSkillPack} from '../ai/skills.js';
 import {aliEndpoints} from '../services/ai-pipeline.js';
-import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate} from '../services/knowledge.js';
 import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
 
-const fields=[['title','资料标题','text'],['content','背景正文','textarea'],['source','资料来源 / 确认人','text'],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 export class AISettings {
-  constructor(root,{dirty,start,stop,clear,forget,error,checkNative,diagnose,webKnowledge}) {
+  constructor(root,{dirty,start,stop,clear,forget,error,checkNative,diagnose}) {
     this.root=root;this.dirty=dirty;this.error=error;this.skills=[];
-    this.webKnowledge=webKnowledge;this.knowledgeSerial=0;
-    for(const action of ['refresh','clear'])root.querySelector(`[data-web-knowledge-${action}]`).addEventListener('click',()=>{void this.updateWebKnowledge(action);});
     root.querySelector('[data-skill-install]').addEventListener('click',()=>{try{const skill=validateSkillPack(JSON.parse(root.querySelector('[data-skill-json]').value));if(this.skills.length>=8 && !this.skills.some(s=>s.id===skill.id))throw new Error('自定义技能最多8个');this.skills=this.skills.filter(s=>s.id!==skill.id).concat(skill);this.showSkills();dirty();}catch(reason){error(reason);}});
     const slider=root.querySelector('[data-reply-slider]');
     const changeFrequency=()=>{root.querySelector('[data-field="ai.replyFrequency"]').value=REPLY_FREQUENCIES[Number(slider.value)][0];this.syncReplyFrequency();dirty();};
@@ -23,24 +19,8 @@ export class AISettings {
     });
     root.querySelector('[data-field="ai.pipeline.mode"]').addEventListener('change',()=>this.syncPipeline());
     for(const key of ['workspaceId','region'])root.querySelector(`[data-field="ai.pipeline.${key}"]`).addEventListener('input',()=>{root.querySelector('[data-media-key="pipeline"]').value='';});
-    const edited=event=>{if(event.target.matches('[data-memory-field]'))this.memoryValidity(event.target.closest('.editor-row'));if(event.target.matches('[data-memory-field],[data-media-key],[data-media-remember]'))dirty();};
+    const edited=event=>{if(event.target.matches('[data-media-key],[data-media-remember]'))dirty();};
     root.addEventListener('input',edited);root.addEventListener('change',edited);
-    root.querySelector('[data-memory-add]').addEventListener('click',()=>{
-      if(this.list.children.length>=MEMORY_LIMITS.entries){error(new Error('背景记忆最多40条'));return;}
-      this.add({id:crypto.randomUUID(),title:'',content:'',source:'用户填写',updatedAt:Date.now(),expiresOn:'',enabled:true});this.empty();dirty();this.list.lastElementChild.querySelector('input').focus();
-    });
-    root.querySelector('[data-memory-search]').addEventListener('click',()=>{
-      try {
-        const query=root.querySelector('[data-memory-query]').value.trim();
-        if(!query)throw new Error('请先输入要检索的问题');
-        const result=retrieveMemories(this.read(),query),target=root.querySelector('[data-memory-matches]');
-        target.replaceChildren();
-        const summary=document.createElement('p');summary.textContent=`命中 ${result.chunks.length} 个片段，原文 ${result.usedChars} 字${result.truncated ? '（已按预算与去重规则筛选）' : ''}。`;target.append(summary);
-        for(const chunk of result.chunks){
-          const item=document.createElement('p');item.textContent=`${chunk.title} · ${chunk.source || '未填写来源'} · 核对时间 ${new Date(chunk.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})} · 原文位置 ${chunk.range.start}–${chunk.range.end}：${chunk.content}`;target.append(item);
-        }
-      } catch(reason){error(reason);}
-    });
     root.querySelector('[data-media-start]').addEventListener('click',()=>{
       try {Promise.resolve(start()).catch(error);}catch(reason){error(reason);}
     });
@@ -71,29 +51,6 @@ export class AISettings {
     }
     for(const section of this.root.querySelectorAll('[data-ai-section]'))section.hidden=section.dataset.aiSection!==key;
     this.root.querySelector('.ai-section-tabs').scrollIntoView?.({block:'start',behavior:'instant'});
-    if(key==='knowledge' && this.webKnowledge)void this.updateWebKnowledge('refresh');
-  }
-  async updateWebKnowledge(action,id){
-    const serial=++this.knowledgeSerial,status=this.root.querySelector('[data-web-knowledge-status]');
-    if(!this.webKnowledge){status.textContent='当前环境没有可用的联网知识存储。';return;}
-    try{
-      if(action==='clear')await this.webKnowledge.clear();
-      if(action==='remove')await this.webKnowledge.remove(id);
-      const rows=await this.webKnowledge.list();if(serial!==this.knowledgeSerial)return;
-      status.textContent=`${this.webKnowledge.persistent ? '本机已保存' : '当前环境仅临时保存，刷新后丢失'} · ${rows.length}/100条有效资料；停用后停止保存与复用。`;
-      const target=this.root.querySelector('[data-web-knowledge-list]'),doc=target.ownerDocument;target.replaceChildren();
-      if(!rows.length){const p=doc.createElement('p');p.textContent='没有有效的自动联网知识。';target.append(p);}
-      for(const row of rows){
-        const details=doc.createElement('details'),summary=doc.createElement('summary');summary.textContent=row.query;details.append(summary);
-        const time=doc.createElement('p');time.textContent=`采集 ${new Date(row.searchedAt).toLocaleString('zh-CN')} · 到期 ${new Date(row.expiresAt).toLocaleString('zh-CN')}`;details.append(time);
-        for(const source of row.results){
-          const p=doc.createElement('p');p.textContent=source.content;details.append(p);
-          let url;try{url=new URL(source.url);}catch{continue;}if(!['https:','http:'].includes(url.protocol) || url.username || url.password)continue;
-          const a=doc.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`[${source.index}] ${source.title}`;details.append(a);
-        }
-        const button=doc.createElement('button');button.type='button';button.dataset.webKnowledgeRemove='';button.textContent='删除这条联网知识';button.addEventListener('click',()=>{void this.updateWebKnowledge('remove',row.id);});details.append(button);target.append(details);
-      }
-    }catch(reason){if(serial===this.knowledgeSerial)status.textContent=`知识存储不可用：${reason.message}`;}
   }
   navigate(event){
     const tab=event.target.closest('[data-ai-section-tab]');
@@ -143,32 +100,8 @@ export class AISettings {
     const ai={pipeline:{mode:this.root.querySelector('[data-field="ai.pipeline.mode"]').value,region:this.root.querySelector('[data-field="ai.pipeline.region"]').value,workspaceId:this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim()}};
     return aliEndpoints(ai).chat;
   }
-  get list(){return this.root.querySelector('[data-memory-list]');}
-  empty(){this.root.querySelector('[data-memory-empty]').hidden=Boolean(this.list.children.length);}
-  add(record){
-    const row=document.createElement('div');row.className='editor-row';row.record=structuredClone(record);
-    row.innerHTML='<div class="row-head"><b>背景资料</b><button type="button" data-memory-remove>删除这条记忆</button></div>';
-    for(const [name,title,type] of fields){
-      const label=document.createElement('label');label.className='field';const span=document.createElement('span');span.textContent=title;
-      const control=document.createElement(type==='textarea' ? 'textarea' : 'input');if(type!=='textarea')control.type=type;
-      control.dataset.memoryField=name;control.value=record[name];control.maxLength=name==='content' ? 2000 : name==='title' ? 80 : 200;label.append(span,control);row.append(label);
-    }
-    const label=document.createElement('label');label.className='toggle';const enabled=document.createElement('input');enabled.type='checkbox';enabled.dataset.memoryField='enabled';enabled.checked=record.enabled;label.append(enabled,'使用这条资料');row.append(label);
-    const checked=document.createElement('small');checked.textContent=`核对时间：${new Date(record.updatedAt).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false})}`;row.append(checked);
-    row.querySelector('[data-memory-remove]').addEventListener('click',()=>{row.remove();this.empty();this.dirty();});
-    const validity=document.createElement('small');validity.dataset.memoryValidity='';row.append(validity);this.memoryValidity(row);
-    this.list.append(row);
-  }
-  memoryValidity(row){const expires=row.querySelector('[data-memory-field="expiresOn"]').value,enabled=row.querySelector('[data-memory-field="enabled"]').checked;row.querySelector('[data-memory-validity]').textContent=!enabled ? '已停用，不参与检索' : expires && expires<beijingDate(Date.now()) ? '已过期，不参与检索' : '可参与检索，按问题相关性选择片段';}
   showSkills(){const target=this.root.querySelector('[data-skill-list]');target.replaceChildren();for(const skill of this.skills){const row=target.ownerDocument.createElement('p');row.textContent=skill.name+' · '+skill.scenes.join('、');const button=target.ownerDocument.createElement('button');button.type='button';button.textContent='移除技能';button.addEventListener('click',()=>{this.skills=this.skills.filter(s=>s.id!==skill.id);this.showSkills();this.dirty();});row.append(button);target.append(row);}}
-  populate(memory,assistant){this.syncReplyFrequency();this.skills=structuredClone(assistant?.skills || []);this.showSkills();this.list.replaceChildren();for(const record of memory.entries)this.add(record);this.empty();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
-  read(){
-    const memory={enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>{
-      const result={...row.record};for(const input of row.querySelectorAll('[data-memory-field]'))result[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();
-      if(Object.keys(result).some(key=>result[key]!==row.record[key]))result.updatedAt=Date.now();return result;
-    })};
-    return validateMemory(memory);
-  }
+  populate(assistant){this.syncReplyFrequency();this.skills=structuredClone(assistant?.skills || []);this.showSkills();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
   credentials(){return Object.fromEntries(['vision','audio','pipeline'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
   state({state,skipped=0,errors=0,totalTokens,lastFinalAt,phase}){
     this.mediaPhase=state==='idle' ? undefined : phase || this.mediaPhase;phase=this.mediaPhase;

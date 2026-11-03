@@ -61,7 +61,7 @@ function Disclosure({node,bridge}) {
   const invalid=JSON.stringify(node.children).includes('"invalid":true');
   useEffect(()=>{if(invalid && !open)bridge.toggle(node.id,true);},[invalid,open,bridge,node.id]);
   useEffect(()=>{if(open && invalid){const input=body.current?.querySelector('[aria-invalid="true"]');input?.focus();input?.scrollIntoView?.({block:'center'});}},[open,invalid]);
-  return h(Paper,{withBorder:true,className:'product-disclosure','data-surface':node.surface,'data-view-id':node.id},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(Reveal,{open,id:`detail-${node.id}`},h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body},renderChildren(node.children,bridge))));
+  return h(Paper,{withBorder:true,className:['product-disclosure',node.classes].filter(Boolean).join(' '),'data-surface':node.surface,'data-view-id':node.id},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':`detail-${node.id}`,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(Reveal,{open,id:`detail-${node.id}`},h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body},renderChildren(node.children,bridge))));
 }
 function Chart({node}) {
   const element=useRef(null),chart=useRef(null);

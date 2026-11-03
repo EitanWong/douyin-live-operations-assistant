@@ -94,4 +94,6 @@ export const PRODUCT_CSS=`
 .product-data-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px 12px;font-size:12px;color:var(--mantine-color-dimmed);font-variant-numeric:tabular-nums}
 .product-data-footer nav{display:flex;gap:6px}
 .product-record-scroll .logs{max-height:none;border:0}
+
+.knowledge-workspace.product-layout{gap:12px}.knowledge-heading,.knowledge-section-heading{justify-content:space-between}.knowledge-toolbar.product-layout{gap:8px;padding:12px}.knowledge-metrics.product-layout[data-layout=metrics]>.product-layout{min-height:56px}.knowledge-heading>.product-layout{gap:4px}.knowledge-heading>.product-layout{flex:1 1 260px}.knowledge-heading h3{font-size:21px;line-height:1.45}.knowledge-eyebrow{color:var(--sg-brand);font-size:10px;letter-spacing:1.6px;font-weight:700}.knowledge-metrics strong{font-size:22px;font-variant-numeric:tabular-nums}.knowledge-record.product-disclosure{padding:6px 12px;border-radius:8px}.knowledge-record>.mantine-Button-root{font-size:13px}.knowledge-editor>p{white-space:pre-wrap}.knowledge-editor>.mantine-Button-root{align-self:flex-start}
 `+PRODUCT_LIQUID_GLASS_CSS+SCROLLBAR_CSS;

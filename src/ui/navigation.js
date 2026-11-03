@@ -11,7 +11,7 @@ export const NAVIGATION_GROUPS = [
   {key:'tools',label:'扩展工具',items:[]},
   {key:'settings',label:'设置',items:[
     ['features','功能开关','sliders-horizontal'],['appearance','外观','palette'],
-    ['moderation','内容治理','activity'],['ai','AI 设置','sparkles'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],
+    ['moderation','内容治理','activity'],['ai','AI 设置','sparkles'],['knowledge','知识库','library'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],
     ['diagnostics','连接诊断','activity']
   ]}
 ];
