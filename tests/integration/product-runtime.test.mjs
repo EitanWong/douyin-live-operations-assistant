@@ -16,7 +16,9 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
  try{
   Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,Element:dom.window.Element,getComputedStyle:dom.window.getComputedStyle,MutationObserver:dom.window.MutationObserver,requestAnimationFrame:dom.window.requestAnimationFrame.bind(dom.window),cancelAnimationFrame:dom.window.cancelAnimationFrame.bind(dom.window)});
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:dom.window.navigator});
-  dom.window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+  dom.window.scrollTo=()=>{}; // jsdom has no scrolling layout; Motion measures auto heights in the real browser.
+  const reducedQuery=new dom.window.EventTarget();reducedQuery.matches=false;
+  dom.window.matchMedia=query=>query.includes('prefers-reduced-motion') ? reducedQuery : {matches:false,addEventListener(){},removeEventListener(){}};
   dom.window.ResizeObserver=class{observe(){}disconnect(){}unobserve(){}};
   const root=document.querySelector('#host').attachShadow({mode:'open'});root.innerHTML='<div class="workspace"><button data-tab="ai" aria-label="AI 设置">AI</button><header data-workspace-toolbar><div class="foot"><small>未保存草稿</small><button data-action="save">保存设置</button></div></header><div data-workspace-views><button role="tab" aria-selected="true">模型设置</button><button role="tab" aria-selected="false">额度设置</button></div><section data-page="ai"><div class="workspace-grid"><div class="ai-service-grid" data-workspace-contents><section class="ai-card"><h3>回复模型</h3><div class="grid"><label class="field"><span>模型名</span><input value="qwen-plus"><small>模型名称按服务商提供的完整 ID 填写。</small></label></div><label class="toggle"><input type="checkbox">启用 AI</label><label class="field"><span>接话频率</span><input type="range" min="0" max="4" step="1" value="2" aria-valuetext="克制陪伴"></label><table><thead><tr><th>观众</th><th>钻石</th></tr></thead><tbody><tr><td>甲</td><td>9</td></tr></tbody></table><details><summary>高级参数</summary><label class="field"><span>测试高级字段</span><input value="draft"></label></details></section></div></div></section></div>';
   let saves=0,changes=0;root.querySelector('button[data-action]').onclick=()=>saves++;root.querySelector('input').addEventListener('input',()=>changes++);
@@ -37,7 +39,26 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   await new Promise(resolve=>setTimeout(resolve,25));assert.equal(root.querySelector('input').value,'new-model');assert.equal(changes,1);
   [...ui.querySelectorAll('button')].find(b=>b.textContent==='保存设置').click();assert.equal(saves,1);
   ui.querySelector('input[type=checkbox]').click();assert.equal(root.querySelector('input[type=checkbox]').checked,true);
-  [...ui.querySelectorAll('button')].find(b=>b.textContent.includes('高级参数')).click();await new Promise(resolve=>setTimeout(resolve,240));assert.notEqual(ui.querySelector('.product-disclosure-body').style.display,'none');
+  const disclosure=[...ui.querySelectorAll('button')].find(b=>b.textContent.includes('高级参数'));
+  const reveal=ui.getElementById(disclosure.getAttribute('aria-controls'));
+  assert.equal(reveal.getAttribute('aria-hidden'),'true');assert.ok(reveal.hasAttribute('inert'));
+  disclosure.click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(reveal.hasAttribute('inert'),false);
+  reducedQuery.matches=true;reducedQuery.dispatchEvent(new dom.window.Event('change'));
+  await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(Number(reveal.style.opacity),1,'运行中开启减少动态效果应立即结束内容淡入');
+  reducedQuery.matches=false;reducedQuery.dispatchEvent(new dom.window.Event('change'));
+  const draft=reveal.querySelector('input');setter.call(draft,'retained-draft');draft.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));
+  await new Promise(resolve=>setTimeout(resolve,25));
+  // Reverse before the spring settles: keep the same editable node and draft.
+  disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));
+  assert.equal(reveal.getAttribute('aria-hidden'),'true');assert.ok(reveal.hasAttribute('inert'));
+  disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));
+  disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));
+  disclosure.click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(reveal.hasAttribute('inert'),false);
+  assert.equal(reveal.querySelector('input'),draft);assert.equal(draft.value,'retained-draft');
+  assert.equal(root.querySelector('details input').value,'retained-draft');
   assert.equal(document.documentElement.getAttribute('data-mantine-color-scheme'),null);assert.equal(document.body.querySelector('[data-portal]'),null);
   runtime.destroy();runtime=null;assert.equal(container.shadowRoot.childNodes.length,0);
  }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);if(navigatorDescriptor)Object.defineProperty(globalThis,'navigator',navigatorDescriptor);else delete globalThis.navigator;dom.window.close();await rm(dir,{recursive:true,force:true});}

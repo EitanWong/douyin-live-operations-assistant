@@ -21,6 +21,7 @@
 
 ## 调研资料
 
+- [液态玻璃与统一交互动效](research/ui-motion-and-liquid-glass-2026-11-03.zh-CN.md)：Motion、GSAP、react-spring、Anime.js 选型，Apple 动效原则、背景模糊连续性与验证。
 - [直播收入估算、实时预测与浏览器端建模](research/live-prediction-and-income-modeling-2026-11-03.zh-CN.md)：按可执行性排序的历史收入、本场/下月预测、PK/千票榜、观众送礼与弹幕分析方案，以及端侧模型许可、MV3 架构和回测门槛。
 
 - [AI 基础层与阿里 Omni](research/ai-foundation-and-omni-2026-11-01.zh-CN.md)：实时接口官方依据、持续观察与问答分离、统一证据上下文、本地 RAG、联网与分阶段验收。

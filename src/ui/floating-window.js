@@ -127,8 +127,11 @@ export class FloatingWindow {
     const anchorY = floatingClamp(y + this.launcherHeight / 2 - this.py.value, 0, this.height);
     this.panel.style.transformOrigin = `${anchorX}px ${anchorY}px`;
     const distance = this.reduced ? 0 : 1 - amount;
-    this.panel.style.transform = `translate3d(0,${(anchorY < this.height / 2 ? -10 : 10) * distance}px,0) scale(${1 - .055 * distance})`;
-    this.shell.style.opacity = String(amount);
+    this.panel.style.transform = `translate3d(0,${(anchorY < this.height / 2 ? -10 : 10) * distance}px,0) scale(${this.reduced ? 1 : Math.max(.001, amount)})`;
+    // opacity<1 on an ancestor creates a backdrop root and cuts the glass off
+    // from the page. Keep the material live; fade only foreground content.
+    this.shell.style.opacity = '1';
+    this.panel.style.setProperty('--window-content-opacity', String(amount));
     this.shell.hidden = this.panel.hidden = !this.open && !this.presence.active;
     this.shell.dataset.motionState = this.presence.active ? this.open ? 'opening' : 'closing' : this.open ? 'open' : 'closed';
     const b = this.launcherBounds();
@@ -150,8 +153,8 @@ export class FloatingWindow {
     this.shell.dataset.interactive = String(open);
     this.presence.frequency = open ? 26 : 34;
     this.presence.target = open ? 1 : 0;
-    this.render();
-    this.request();
+    if (this.reduced) this.finish();
+    else { this.render(); this.request(); }
   }
   listen(target, type, handler, options) {
     target.addEventListener(type, handler, options);
