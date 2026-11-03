@@ -828,7 +828,7 @@ export class Panel {
   }
   isPKVisible() {return this.activeTab==='anchor' && this.anchorView==='pk';}
   setAnchorView(view) {
-    if (!['overview','pk','income','broadcast'].includes(view)) return;
+    if (!['overview','pk','income'].includes(view)) return;
     this.anchorView = view;
     for (const button of this.root.querySelectorAll('[data-anchor-view]')) button.setAttribute('aria-pressed', String(button.dataset.anchorView === view));
     for (const content of this.root.querySelectorAll('[data-anchor-content]')) content.hidden = content.dataset.anchorContent !== view;

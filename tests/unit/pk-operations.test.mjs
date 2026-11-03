@@ -158,10 +158,10 @@ test('PK 战局播报优先未点亮礼物，名字超过字数时整名跳过�
   assert.equal(exhibitionGiftNotice({updatedAt:h.time(),items:[{giftId:'1',name:'长'.repeat(60),lighted:false}]},h.time(),50),null);
 });
 
-test('本场礼物播报下播或切场即失效，预览队列也不会引用历史场次',()=>{
+test('遗留贡献榜播报无论当前开播、下播或切场都不可发送',()=>{
   const h=harness();let income={id:'A',anchorId:'123',endAt:0};h.engine.liveData=()=>({income});
-  const job={liveGiftSession:'A'};
-  assert.equal(h.engine.pkOperations.validJob(job),true);
+  const job={kind:'live-stats',liveGiftSession:'A',liveStatsVersion:2};
+  assert.equal(h.engine.pkOperations.validJob(job),false);
   income={...income,endAt:h.time()};assert.equal(h.engine.pkOperations.validJob(job),false);
   income={...income,id:'B',endAt:0};assert.equal(h.engine.pkOperations.validJob(job),false);
   income={...income,id:'A',anchorId:'other'};assert.equal(h.engine.pkOperations.validJob(job),false);

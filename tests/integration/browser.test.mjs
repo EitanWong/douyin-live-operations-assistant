@@ -75,6 +75,9 @@ test('主播数据移除贡献榜播报视图、设置和手动入口，保留�
     assert.ok(panel.node('[data-anchor-view="overview"]'));
     assert.ok(panel.node('[data-anchor-view="pk"]'));
     assert.equal(Object.hasOwn(panel.read(),'audienceBroadcast'),false);
+    panel.setAnchorView('pk');panel.setAnchorView('broadcast');
+    assert.equal(panel.anchorView,'pk','已移除视图不能让主播页进入空白状态');
+    assert.equal(panel.node('[data-anchor-content="pk"]').hidden,false);
   } finally {panel.destroy();dom.window.close();}
 });
 
