@@ -18,7 +18,6 @@ import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplat
 import { AnchorStats } from './anchor-stats.js';
 import { audienceReplyContext, giftReplyContext, isIntrusiveReply, liveReplyContext, observedReplyEvent } from './reply-context.js';
 import { SEARCH_DEFAULTS, validateSearchEndpoint } from '../services/search.js';
-import { currentGiftBroadcastMessages, GIFT_BROADCAST_VERSION } from './gift-analytics.js';
 import { REWARDS_DEFAULTS } from '../browser/rewards.js';
 import { MEMORY_DEFAULTS, validateMemory } from '../services/knowledge.js';
 import {AI_PIPELINE_DEFAULTS,validatePipeline,resolveMediaConfig} from '../services/ai-pipeline.js';
@@ -38,7 +37,6 @@ export const DEFAULTS = {
   identity: { autoAnchor: true, autoSelf: true },
   moderation: MODERATION_DEFAULTS,
   incomeEnabled: true,
-  audienceBroadcast: {enabled:true,intervalSec:300},
   pkOperations: PK_OPERATIONS_DEFAULTS,
   // 消息按优先级连续出队；发送控件本身仍串行确认每条消息。
   sending: { maxLength: 50, duplicateSec: 120, queueLimit: 200 },
@@ -124,9 +122,6 @@ export function validateConfig(c) {
   if (typeof c.rewards.entryXPath !== 'string' || c.rewards.entryXPath.length > 2000 || c.rewards.entryXPath && !c.rewards.entryXPath.startsWith('/')) throw new Error('福袋入口 XPath 应以 / 开头，最多 2000 字符');
   if (typeof c.automation.autoStart !== 'boolean' || typeof c.gift.batchEnabled !== 'boolean') throw new Error('自动开启或合并感谢开关无效');
   if (typeof c.timersEnabled !== 'boolean') throw new Error('定时消息开关无效');
-  if (typeof c.audienceBroadcast.enabled !== 'boolean') throw new Error('贡献榜主动播报开关无效');
-  range(c.audienceBroadcast.intervalSec,30,3600,'贡献榜播报间隔');
-  if (!Number.isSafeInteger(c.audienceBroadcast.intervalSec)) throw new Error('贡献榜播报间隔必须为整数秒');
   for (const key of ['enabled','announceLifecycle','reportEnabled','midnightEnabled','aiEnabled']) if (typeof c.pkOperations[key] !== 'boolean') throw new Error('PK 播报开关无效');
   for (const [key,min,max] of [['reportSec',30,86400],['durationSec',30,3600],['crossMidnightSec',1,120],['preparationSec',10,600],['aiIntervalSec',15,600]]) {
     range(c.pkOperations[key],min,max,'PK 时间设置');
@@ -285,7 +280,7 @@ export class Engine {
     this.inFlight = null;
     this.deliveries = new DeliveryTracker({now});
     this.backlogLimit = 2000;
-    this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity; this.lastLiveStatsSend = -Infinity;
+    this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity;
     this.pk = new PKTracker({ now });
     this.liveMetrics = new LiveMetrics({now});
     this.liveMode = new LiveModeTracker({now});
@@ -293,7 +288,6 @@ export class Engine {
     this.roomData = {stats:null,audience:null,activities:[]};this.localCalls=[];
     this.anchorStats = new AnchorStats({now});
     this.pkOperations = new PKOperations(this);
-    this.audienceBroadcast = {sessionKey:'',lastAt:null,retryAt:0};
     this.observationSignatures = new Map();
     this.stats = { events: 0, filtered: 0, previews: 0, submitted: 0, aiCalls: 0, retries: 0, expired: 0, overflow: 0, maxQueueWaitMs: 0 };
   }
@@ -305,7 +299,6 @@ export class Engine {
     if (!this.config.ai.enabled || !this.config.ai.chatEnabled || this.config.ai.replyFrequency==='off') this.chatAIBackground = null;
     if (!this.config.ai.enabled || !(this.config.ai.chatEnabled || this.config.bot.enabled) || this.config.ai.replyFrequency==='off') this.chatAIQueue = [];
     if (!this.config.moderation.enabled || !this.config.moderation.warningsEnabled) this.queue = this.queue.filter(job => job.kind !== 'moderation');
-    if (!this.config.audienceBroadcast.enabled || !this.config.incomeEnabled) this.queue=this.queue.filter(job=>!job.liveStatsAutomatic);
     this.rotation.clear();
     this.changed();
   }
@@ -322,7 +315,7 @@ export class Engine {
       seen: entries(this.seen), cooldowns: entries(this.cooldowns), duplicates: entries(this.duplicates),
       timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen), milestoneSession:this.milestoneSession,
       moderation:this.moderation.snapshot(), history: this.history.slice(-80), contextChat:this.contextChat.slice(-100),replyEvents:this.replyEvents.slice(-40),stats: this.stats, serial: this.serial,
-      lastInteraction: this.lastInteraction, lastChat: this.lastChat, audienceBroadcast:this.audienceBroadcast,
+      lastInteraction: this.lastInteraction, lastChat: this.lastChat,
       inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), liveMode:this.liveMode.snapshot(), audience:this.audience.snapshot()
       , pk: this.pk.export(), roomData:this.roomData, anchorStats:this.anchorStats.snapshot(), pkOperations:this.pkOperations.snapshot()
     });
@@ -364,9 +357,6 @@ export class Engine {
     this.pk.restore(snapshot.pk || {});
     this.anchorStats.restore(snapshot.anchorStats || {});
     this.pkOperations.restore(snapshot.pkOperations);
-    if (typeof snapshot.audienceBroadcast?.sessionKey==='string') this.audienceBroadcast={sessionKey:snapshot.audienceBroadcast.sessionKey,
-      lastAt:Number.isFinite(snapshot.audienceBroadcast.lastAt) ? snapshot.audienceBroadcast.lastAt : null,
-      retryAt:Number.isFinite(snapshot.audienceBroadcast.retryAt) ? snapshot.audienceBroadcast.retryAt : 0};
     this.liveMetrics.restore(snapshot.liveMetrics);
     this.liveMode.restore(snapshot.liveMode);
     if (snapshot.roomData && typeof snapshot.roomData === 'object') this.roomData = {
@@ -391,12 +381,8 @@ export class Engine {
     }
     for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
     this.queue = this.queue.filter(job=>!job.deliveryUncertain);
-    // An old saved round may contain scores or truncated names. Replace that
-    // whole round with the current formatter rather than resume obsolete text.
-    if (this.queue.some(job=>job.kind==='live-stats' && job.liveStatsVersion!==GIFT_BROADCAST_VERSION)) {
-      this.queue=this.queue.filter(job=>job.kind!=='live-stats');
-      this.audienceBroadcast={sessionKey:'',lastAt:null,retryAt:0};
-    }
+    // The removed leaderboard announcer must never resume queued or retried work.
+    this.queue=this.queue.filter(job=>job.kind!=='live-stats');
     // The page-owned HTTP request cannot survive a refresh. Keep an explicit
     // interruption reply instead of silently forgetting or repeating a paid call.
     for(const row of (Array.isArray(snapshot.pendingLookups) ? snapshot.pendingLookups : []).slice(0,2)){
@@ -585,9 +571,9 @@ export class Engine {
     if (!checked.ok) { this.filtered(`${kind}：${checked.reason}`); return false; }
     const now = this.now();
     const direct=kind==='ai' && extra.aiChat?.replyMode==='direct';
-    const eventReplies = direct || extra.aiChat?.lookup || kind === 'gift' || kind === 'like' || kind === 'bot' || kind === 'live-stats' && extra.liveStatsAutomatic;
+    const eventReplies = direct || extra.aiChat?.lookup || kind === 'gift' || kind === 'like' || kind === 'bot';
     if (!eventReplies && ((this.duplicates.get(checked.text) ?? -Infinity) + this.config.sending.duplicateSec * 1000 > now || this.queue.some(q => q.text === checked.text))) { this.filtered('重复话术已过滤'); return false; }
-    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, pk: 105, bot: 90, moderation: 110, milestone: 85, 'live-stats':85, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
+    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, pk: 105, bot: 90, moderation: 110, milestone: 85, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
     // 已接受的点名与查询回复、礼物事实不因普通互动积压而丢弃。
     // 普通互动仍受 queueLimit 约束，并优先淘汰低优先级、较旧的任务。
     const reserved = direct || extra.aiChat?.lookup || kind === 'gift' || extra.giftReply;
@@ -596,7 +582,7 @@ export class Engine {
       let lowest = null, lowestIndex = -1;
       for (let index = 0; index < this.queue.length; index++) {
         const q = this.queue[index];
-        if (q.giftReply || q.aiChat?.replyMode==='direct' || q.aiChat?.lookup || q.kind === 'bot' || q.kind==='giveaway' || q.liveStatsGroup) continue;
+        if (q.giftReply || q.aiChat?.replyMode==='direct' || q.aiChat?.lookup || q.kind === 'bot' || q.kind==='giveaway') continue;
         if (!lowest || q.priority < lowest.priority || q.priority === lowest.priority && q.created < lowest.created) { lowest = q; lowestIndex = index; }
       }
       if (!lowest || lowest.priority >= item.priority) { if (!extra.quietOverflow) { this.stats.overflow++; this.filtered('队列已满，本次互动未入队'); } return false; }
@@ -604,41 +590,6 @@ export class Engine {
     }
     this.queue.push(item); this.indexGiftJob(item);
     this.log('queue', `${kind}：${checked.text}`); this.changed(); return true;
-  }
-  queueLiveStats(messages, sessionId, {automatic=false} = {}) {
-    const extra={kind:'live-stats',liveGiftSession:sessionId,liveStatsVersion:GIFT_BROADCAST_VERSION,liveStatsAutomatic:automatic};
-    if (!this.running || !sessionId || !messages.length || !this.pkOperations.validJob(extra)) return false;
-    if (this.queue.some(job=>job.liveGiftSession===sessionId) || this.inFlight?.jobs.some(job=>job.liveGiftSession===sessionId)) return false;
-    // Reserve one accepted response, including all its platform-sized parts,
-    // just like a multi-part bot reply. Validate everything before reserving it.
-    const checked=messages.map(text=>cleanMessage(text,this.config)), now=this.now();
-    if (this.queue.length>=this.config.sending.queueLimit || this.queue.length+messages.length>this.backlogLimit || checked.some(row=>!row.ok)) return false;
-    const texts=checked.map(row=>row.text);
-    if (new Set(texts).size!==texts.length || texts.some(text=>!automatic && (this.duplicates.get(text) ?? -Infinity)+this.config.sending.duplicateSec*1000>now || this.queue.some(job=>job.text===text))) return false;
-    // Lifecycle validation cancels the whole round on pause/end/session change;
-    // short message expiry must not cut off a round during a slow send or retry.
-    if (!this.enqueue('live-stats',texts[0],{...extra,liveStatsGroup:this.serial+1,liveStatsPart:0,expires:Infinity})) return false;
-    const first=this.queue.at(-1);
-    for (const [index,text] of texts.slice(1).entries()) this.queue.push({...first,id:++this.serial,text,liveStatsPart:index+1});
-    this.audienceBroadcast={sessionKey:JSON.stringify([this.config.anchorId,sessionId]),lastAt:now,retryAt:0};
-    this.changed();
-    return true;
-  }
-  tickAudienceBroadcast(canSend) {
-    if (!canSend || !this.config.audienceBroadcast.enabled || !this.config.incomeEnabled) return false;
-    let income;
-    try { income=this.liveData()?.income; } catch { return false; }
-    if (!income || income.endAt || !income.id || income.anchorId!==this.config.anchorId) return false;
-    const now=this.now(), key=JSON.stringify([this.config.anchorId,income.id]);
-    if (this.audienceBroadcast.sessionKey!==key) this.audienceBroadcast={sessionKey:key,lastAt:null,retryAt:0};
-    const state=this.audienceBroadcast;
-    if (now<state.retryAt || state.lastAt!==null && now-state.lastAt<this.config.audienceBroadcast.intervalSec*1000) return false;
-    if (this.queue.some(job=>job.liveGiftSession===income.id) || this.inFlight?.jobs.some(job=>job.liveGiftSession===income.id)) return false;
-    const messages=currentGiftBroadcastMessages(income,this.config.sending.maxLength);
-    if (messages.length && this.queueLiveStats(messages,income.id,{automatic:true})) return true;
-    // Retry after data or queue capacity changes, without piling up missed rounds.
-    state.retryAt=now+5000;
-    return true;
   }
   ingest(event, {giveawayChat=false} = {}) {
     try { this.ingestEvent(event, {giveawayChat}); } finally { this.changed(); }
@@ -1121,7 +1072,7 @@ export class Engine {
   }
   giftReady(q, now) {
     if(q.kind==='giveaway' ? this.validGiveawayJob(q)!==true || now<(this.lastGiveawaySend+2000) : !this.running)return false;
-    return (!q.liveStatsGroup || !this.queue.some(job=>job.liveStatsGroup===q.liveStatsGroup && job.liveStatsPart<q.liveStatsPart)) && (!q.botGroup || !this.queue.some(job => job.botGroup === q.botGroup && job.botPart < q.botPart)) && (!q.afterBot || !this.queue.some(job => job.id === q.afterBot)) && (q.retryAt || 0) <= now && now >= (q.readyAt || 0) && (!q.giftReply || now >= Math.max(q.readyAt || 0, (this.giftSentAt.get(q.giftReply.userKey) ?? -Infinity) + this.config.gift.cooldownSec * 1000));
+    return (!q.botGroup || !this.queue.some(job => job.botGroup === q.botGroup && job.botPart < q.botPart)) && (!q.afterBot || !this.queue.some(job => job.id === q.afterBot)) && (q.retryAt || 0) <= now && now >= (q.readyAt || 0) && (!q.giftReply || now >= Math.max(q.readyAt || 0, (this.giftSentAt.get(q.giftReply.userKey) ?? -Infinity) + this.config.gift.cooldownSec * 1000));
   }
   giftBatch(first, now) {
     const jobs = [first]; let text = first.text;
@@ -1147,7 +1098,7 @@ export class Engine {
     return {jobs,text};
   }
   selectNextJob(queue, now) {
-    let best = null, oldestGift = null, waitingBot = null, waitingStats = null, waitingDirect = null;
+    let best = null, oldestGift = null, waitingBot = null, waitingDirect = null;
     const earlier = (a, b) => !b || a.created < b.created || a.created === b.created && a.id < b.id;
     const higherPriority = (a, b) => !b || a.priority > b.priority || a.priority === b.priority && earlier(a, b);
     for (const item of queue) {
@@ -1155,16 +1106,12 @@ export class Engine {
       if (higherPriority(item, best)) best = item;
       if (item.kind === 'gift' && earlier(item, oldestGift)) oldestGift = item;
       if ((item.kind === 'bot' || item.kind==='giveaway') && earlier(item, waitingBot)) waitingBot = item;
-      if (item.liveStatsGroup && earlier(item, waitingStats)) waitingStats = item;
       if ((item.aiChat?.replyMode==='direct' || item.aiChat?.lookup) && earlier(item,waitingDirect)) waitingDirect=item;
     }
     if (!best) return null;
     if(best.kind==='giveaway' && best.priority>=115)return best;
     const lastDirect=this.turnTaking.recent(this.chatContextKey(),now).findLast(row=>row.mode==='direct');
     if(waitingDirect && (!oldestGift || now-(lastDirect?.at ?? -Infinity)>=5000))return waitingDirect;
-    // A busy gift/game stream still gives an accepted leaderboard one sending
-    // slot every five seconds, preserving room for the other interactions.
-    if (waitingStats && now-waitingStats.created>=5000 && now-this.lastLiveStatsSend>=5000) return waitingStats;
     if (!oldestGift) return waitingBot || best;
 
     // 礼物感谢是事实型事件，等待过久后必须占用下一个发送槽。
@@ -1312,7 +1259,6 @@ export class Engine {
     let stateChanged=false;
     this.researchNotices();
     this.pkOperations.tick(canSend);
-    if (this.tickAudienceBroadcast(canSend)) stateChanged=true;
     this.drainChatAI();
     for (const job of this.queue) if (job.aiPending && now >= job.readyAt) { job.aiPending=false; job.needsGiftAI=false; stateChanged=true; }
     const sessionNotice = this.config.bot.enabled ? this.bot.expire(now) : null;
@@ -1419,7 +1365,6 @@ export class Engine {
       if (q.kind === 'giveaway') this.lastGiveawaySend=sentAt;
       if (q.kind === 'bot') this.lastBotSend = sentAt;
       if (q.kind === 'gift') this.lastGiftSend = sentAt;
-      if (q.liveStatsGroup) this.lastLiveStatsSend = sentAt;
       if (!['gift','like','bot'].includes(q.kind)) this.duplicates.set(q.text, sentAt);
       for (const job of batch.jobs) if (job.giftReply) this.giftSentAt.set(job.giftReply.userKey, sentAt);
     };

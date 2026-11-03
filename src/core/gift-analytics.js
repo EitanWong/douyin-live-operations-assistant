@@ -2,7 +2,6 @@ import { giftDate } from '../data/gifts.js';
 
 const ANALYTICS_DAY = 86400000, ANALYTICS_OFFSET = 8 * 3600000;
 export const CALENDAR_PERIODS = {day:'今日',week:'本周',month:'本月',quarter:'本季',year:'本年'};
-export const GIFT_BROADCAST_VERSION = 2;
 
 // Calendar boundaries never depend on the computer's timezone. Weeks start Monday.
 export function giftPeriodRange(period, date = giftDate()) {
@@ -57,53 +56,4 @@ export function giftAnalyticsTrend(sessions, period, date, now = Date.now()) {
     start=until;
   }
   return buckets;
-}
-
-// Only an open broadcast can produce a live announcement. Historical selections
-// are deliberately absent from this function's input contract.
-export function currentGiftBroadcast(session) {
-  return currentGiftBroadcastMessages(session).join('\n');
-}
-
-export function currentGiftBroadcastMessages(session, maxLength = 50) {
-  if (!session || session.endAt || !Number.isInteger(maxLength) || maxLength<10) return [];
-  const messages=[];
-  const append = text => {
-    // Keep clauses together where possible; count emoji as one code point.
-    let pending='';
-    for (const clause of text.match(/[^，。]+[，。]?/gu) || []) {
-      const points=[...clause];
-      if ([...pending].length+points.length>maxLength && pending) { messages.push(pending); pending=''; }
-      while (points.length>maxLength) messages.push(points.splice(0,maxLength).join(''));
-      pending+=points.join('');
-    }
-    if (pending) messages.push(pending);
-  };
-  // Repeated observations of one account must not inflate the thousand-point
-  // count. Nicknames never identify an account: equal names remain separate.
-  const users=new Map();
-  for (const user of session.audience || []) {
-    if (!/^(?:uid:\d+|sec:.+)$/.test(user.userId || '') || !Number.isFinite(user.totalDiamonds) || user.totalDiamonds<0) continue;
-    const previous=users.get(user.userId);
-    if (!previous || user.totalDiamonds>previous.totalDiamonds) users.set(user.userId,user);
-  }
-  const audience=[...users.values()].sort((a,b)=>b.totalDiamonds-a.totalDiamonds || a.userId.localeCompare(b.userId));
-  if (!audience.length) return [];
-  // Scores determine order and the thousand-point count, but are never read out.
-  // Continue long names with distinct rank/part labels instead of truncating them.
-  const compact=maxLength<24;
-  for (const [index,user] of audience.slice(0,3).entries()) {
-    const points=[...String(user.name || '昵称未采集').replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/gu,' ').replace(/\s+/gu,' ').trim() || '昵称未采集'];
-    let part=0;
-    while (points.length) {
-      const prefix=part ? `榜${index+1}续${part+1}：` : compact ? `榜${index+1}：` : `本场观众贡献榜第${index+1}名：`;
-      const name=points.splice(0,maxLength-[...prefix].length-1).join('');
-      // A suffix also protects spaces at a part boundary from send-time trim.
-      messages.push(`${prefix}${name}${points.length ? '，' : '。'}`);
-      part++;
-    }
-  }
-  const count=audience.filter(user=>user.totalDiamonds>=1000).length;
-  append(maxLength<16 ? `千票榜人数：${count}人。` : `本场千票贡献榜人数：${count} 人。`);
-  return messages;
 }

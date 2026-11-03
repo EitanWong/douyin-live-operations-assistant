@@ -203,7 +203,7 @@ test('没有场次边界的旧日账不用于当前收入，零礼物场次仍�
   } finally {view.close();}
 });
 
-test('周期汇总和观众分页导出一致；历史筛选不改变本场最高单价和本场播报',()=>{
+test('周期汇总和观众分页导出一致；历史筛选不改变本场最高单价',()=>{
   const view=setup();
   try {
     view.engine.running=true;
@@ -213,14 +213,6 @@ test('周期汇总和观众分页导出一致；历史筛选不改变本场最�
     }
     view.income.currentSession.highestGift={unitValue:100,tiedCount:1,gifts:[{giftId:'1',name:'<img src=x>城堡',senders:[{userId:'uid:1',name:'甲'}]}]};
     view.dashboard.render(view.engine,{income:view.income});
-    const currentText=view.text('[data-anchor-broadcast-preview]');
-    assert.doesNotMatch(currentText,/本场已统计|收到礼物/);
-    assert.match(currentText,/本场千票贡献榜人数：0 人/);
-    assert.match(view.text('[data-anchor-broadcast-status]'),/每 5 分钟自动播报/);
-    assert.match(currentText,/本场观众贡献榜第1名：<script>同名<\/script>。/);
-    assert.doesNotMatch(currentText,/钻/);
-    assert.match(currentText,/本场观众贡献榜第2名：/);assert.match(currentText,/本场观众贡献榜第3名：/);
-    assert.doesNotMatch(currentText,/第4名/);assert.equal(view.root.querySelector('[data-anchor-broadcast-preview] script'),null);
     assert.match(view.text('[data-anchor-highest-gift]'),/100.*城堡/s);
     assert.equal(view.root.querySelector('[data-anchor-highest-gift] img'),null);
     view.root.querySelector('[data-anchor-period=month]').click();
@@ -232,16 +224,12 @@ test('周期汇总和观众分页导出一致；历史筛选不改变本场最�
     view.root.querySelector('[data-anchor-audience-page="1"]').click();
     assert.equal(view.root.querySelectorAll('[data-anchor-audience] tr').length,5);
     assert.equal(view.dashboard.exportReport().gifts.audience.length,25);
-    assert.equal(view.text('[data-anchor-broadcast-preview]'),currentText);
     view.select('[data-anchor-audience-sort]','giftCount');
-    assert.equal(view.text('[data-anchor-broadcast-preview]'),currentText);
     const search=view.root.querySelector('[data-anchor-audience-search]');search.value='uid:25';search.dispatchEvent(new view.dom.window.Event('input',{bubbles:true}));
     assert.equal(view.root.querySelectorAll('[data-anchor-audience] tr').length,1);
     view.select('[data-anchor-date]','2026-08-01');
     assert.equal(view.text('[data-anchor-gift-stat=totalDiamonds]'),'0');
-    assert.equal(view.text('[data-anchor-broadcast-preview]'),currentText);
     view.dashboard.render(view.engine,{income:{...view.income,currentSession:{...view.income.currentSession,endAt:now}}});
-    assert.equal(view.root.querySelector('[data-action=broadcast-anchor]').disabled,true);
     assert.match(view.text('[data-anchor-highest-gift]'),/没有已确认正在直播/);
   } finally {view.close();}
 });

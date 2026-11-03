@@ -27,7 +27,6 @@ import {LiveMediaAnalyzer,createDisplayCapture} from './browser/live-media.js';
 import { Panel } from './ui/panel.js';
 import { IdentityReader, roomAdminStatus } from './browser/identity.js';
 import { GiftLedger, GiftStore, giftDate, contributionSnapshot } from './data/gifts.js';
-import { currentGiftBroadcastMessages } from './core/gift-analytics.js';
 import { JournalCommitter, RuntimeWriter } from './runtime/journal.js';
 import { failureCode } from './runtime/inbox.js';
 import { audienceAge } from './core/audience.js';
@@ -677,17 +676,6 @@ export function boot(options = {}) {
       income: () => loadIncome({profiles:true}),
       refreshAnchor: () => adapter.anchorData?.refresh(),
       exportAnchor: data => download(`douyin-anchor-${data.anchorId}-${data.period}-${giftDate()}.json`, JSON.stringify(data, null, 2)),
-      broadcastAnchor: async sessionId => {
-        if (persistenceDisabled) throw contextFailure();
-        if (!engine.running) throw new Error('请先开始场控');
-        const own=await repository.report(room,giftDate().slice(0,7));
-        const current=own.currentSession, messages=currentGiftBroadcastMessages(current,engine.config.sending.maxLength);
-        const live=engine.liveData()?.income;
-        if (!current || current.endAt || current.id!==sessionId || live?.id!==sessionId || live.endAt) throw new Error('直播场次已变化，请刷新本场贡献榜后重试');
-        if (!messages.length) throw new Error('本场观众贡献榜暂无数据，请等待采集后重试');
-        if (!engine.queueLiveStats(messages,current.id)) throw new Error('播报未加入队列，请检查场控状态、队列容量、屏蔽词或重复播报间隔');
-        wakeSender();
-      },
       exportIncome: async () => { const selection = panel.incomeSelection(); download(`douyin-income-${selection.room}-${selection.month}.json`, JSON.stringify(await repository.report(selection.room, selection.month), null, 2)); },
       addProfile: async input => {
         const url = new URL(input.trim());

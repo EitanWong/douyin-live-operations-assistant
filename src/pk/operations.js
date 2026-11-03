@@ -1,5 +1,4 @@
 import { summarizeAnchorBattles } from '../core/anchor-stats.js';
-import { GIFT_BROADCAST_VERSION } from '../core/gift-analytics.js';
 
 const DAY_MS = 86400000;
 const SHANGHAI_OFFSET_MS = 8 * 3600000;
@@ -219,13 +218,8 @@ export class PKOperations {
     return true;
   }
   validJob(job) {
-    if (job.kind==='live-stats' && job.liveStatsVersion!==GIFT_BROADCAST_VERSION) return false;
-    if (job.liveStatsAutomatic && (!this.engine.config.audienceBroadcast.enabled || !this.engine.config.incomeEnabled)) return false;
-    if (job.liveGiftSession) {
-      let income;
-      try { income=this.engine.liveData?.()?.income; } catch { return false; }
-      if (!income || income.endAt || income.id!==job.liveGiftSession || income.anchorId!==this.engine.config.anchorId) return false;
-    }
+    // Reject saved jobs from the removed audience leaderboard announcer.
+    if (job.kind==='live-stats') return false;
     if (!job.pkNotice) return true;
     const c = this.engine.config.pkOperations, pk = this.engine.pk.current();
     if (job.exhibitionGiftIds) {

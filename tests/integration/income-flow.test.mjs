@@ -18,66 +18,34 @@ const waitFor = async (predicate,timeout=2000) => {
   assert.ok(predicate(), '等待状态更新超时');
 };
 
-test('未打开主播数据页也主动播报本场榜单及千票人数，预览模式不调用发送',async()=>{
+test('采集本场观众贡献并开始场控后保留统计，但不产生播报或手动播报入口',async()=>{
   const dom=new JSDOM('<body></body>',{url:`https://live.douyin.com/${room}`,pretendToBeVisual:true});
   for (const name of ['document','window','location','MutationObserver','HTMLElement']) globalThis[name]=dom.window[name];
   globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};
   const ledger=new GiftLedger();let api;
   ledger.startSession(Date.now()-1000,'platform','current');
   for (const [id,name,count] of [['1','甲',1200],['2','乙',100]]) ledger.observe({id,groupId:id,giftId:'g',count,unitValue:1,final:true,user:{id,name}},room,`uid:${id}`);
-  const values=new Map([[`live-assistant:income:${room}`,ledger.serialize()],[`live-assistant:config:${room}`,{anchorId:'123',mode:'preview',automation:{autoStart:false}}]]);
+  const values=new Map([[`live-assistant:income:${room}`,ledger.serialize()],[`live-assistant:config:${room}`,{anchorId:'123',mode:'auto',automation:{autoStart:false},audienceBroadcast:{enabled:true,intervalSec:30}}]]);
   const get=(key,fallback)=>structuredClone(values.get(key) ?? fallback), set=async(key,value)=>values.set(key,structuredClone(value));
   const store=new GiftStore({get,set,all:async()=>Object.fromEntries(values)});
   const engine=boot({page:dom.window,get,set,del:key=>values.delete(key),repository:store,request:()=>{},
-    adapterFactory:()=>({status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>false,sync(){},send(){assert.fail('预览模式不应发送');}}),
+    adapterFactory:()=>({status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>false,sync(){},send(){assert.fail('不应发送贡献榜');}}),
     identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
   try {
     await api.panel.callbacks.income();
-    api.panel.tab('gift');assert.equal(api.panel.activeTab,'gift');engine.start();
-    await waitFor(()=>engine.stats.previews===3,5000);
-    assert.deepEqual(api.panel.entries.filter(row=>row.category==='preview').map(row=>row.message),[
-      '本场观众贡献榜第1名：甲。','本场观众贡献榜第2名：乙。','本场千票贡献榜人数：1 人。'
-    ]);
-    assert.equal(engine.queue.length,0);assert.equal(engine.stats.submitted,0);
-  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
-});
-
-test('本场播报预览与实际入队一致，统计历史、搜索和表格排序不影响前三名',async()=>{
-  const dom=new JSDOM('<body></body>',{url:`https://live.douyin.com/${room}`,pretendToBeVisual:true});
-  for (const name of ['document','window','location','MutationObserver','HTMLElement']) globalThis[name]=dom.window[name];
-  globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};
-  let time=Date.now()-10000, api;
-  const ledger=new GiftLedger({now:()=>time});
-  const gift=(id,name,count)=>({type:'gift',id,groupId:id,giftId:'g',giftName:'星星',count,unitValue:1,final:true,user:{id,name}});
-  ledger.startSession(time,'platform','old');ledger.observe(gift('9','历史榜首',99999),room,'uid:9');ledger.endSession(time+1000);
-  time+=2000;ledger.startSession(time,'platform','current');
-  for (const [i,count] of [100,300,200,50].entries()) ledger.observe(gift(String(i+1),`观众${i+1}`,count),room,`uid:${i+1}`);
-  const values=new Map([[`live-assistant:income:${room}`,ledger.serialize()],[`live-assistant:config:${room}`,{anchorId:'123',mode:'auto',automation:{autoStart:false}}]]);
-  const get=(key,fallback)=>structuredClone(values.get(key) ?? fallback), set=async(key,value)=>values.set(key,structuredClone(value));
-  const store=new GiftStore({get,set,all:async()=>Object.fromEntries(values)});
-  const engine=boot({page:dom.window,get,set,del:key=>values.delete(key),repository:store,request:()=>{},
-    adapterFactory:()=>({status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>false,sync(){}}),
-    identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
-  try {
+    await waitFor(()=>engine.liveData()?.income);
+    const income=engine.liveData().income;
+    assert.equal(income.totalDiamonds,1300);assert.equal(income.audience.length,2);
+    assert.equal(Object.hasOwn(engine.config,'audienceBroadcast'),false);
+    engine.start();await engine.tick();
+    const realNow=engine.now;engine.now=()=>realNow()+600000;await engine.tick();engine.now=realNow;
     api.panel.tab('anchor');
-    await api.panel.callbacks.income();
-    await waitFor(()=>api?.panel.anchorDashboard.broadcastSession && engine.liveData()?.income);
-    const dashboard=api.panel.anchorDashboard, sessionId=dashboard.broadcastSession;
-    engine.start();
-    api.panel.node('[data-anchor-period=all]').click();
-    const search=api.panel.node('[data-anchor-audience-search]');search.value='历史榜首';search.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
-    const sort=api.panel.node('[data-anchor-audience-sort]');sort.value='giftCount';sort.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
-    const preview=api.panel.node('[data-anchor-broadcast-preview]').textContent;
-    assert.match(preview,/第1名：观众2。/);assert.match(preview,/第2名：观众3。/);assert.match(preview,/第3名：观众1。/);
-    assert.doesNotMatch(preview,/钻|历史榜首|观众4/);
-    await api.panel.callbacks.broadcastAnchor(sessionId);
-    assert.deepEqual(engine.queue.map(job=>job.text),preview.split('\n'));
-    await assert.rejects(api.panel.callbacks.broadcastAnchor(sessionId),/重复播报/);
-    const queued=engine.queue.length;
-    await assert.rejects(api.panel.callbacks.broadcastAnchor('old'),/场次已变化/);
-    assert.equal(engine.queue.length,queued);
-    await store.recordSession({room,type:'end',roomId:'current',at:Date.now()});
-    await assert.rejects(api.panel.callbacks.broadcastAnchor(sessionId),/场次已变化/);
+    assert.equal(api.panel.node('[data-anchor-gift-stat="totalDiamonds"]').textContent,'1,300');
+    assert.equal(api.panel.node('[data-anchor-gift-stat="audienceCount"]').textContent,'2');
+    assert.equal(api.panel.node('[data-anchor-broadcast-preview]'),null);
+    assert.equal(api.panel.node('[data-action="broadcast-anchor"]'),null);
+    assert.equal(api.panel.callbacks.broadcastAnchor,undefined);
+    assert.equal(engine.queue.length,0);assert.equal(engine.stats.submitted,0);assert.equal(engine.stats.previews,0);
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 });
 

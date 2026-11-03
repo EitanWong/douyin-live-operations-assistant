@@ -63,19 +63,18 @@ test('福袋红包工具可导航、独立保存配置，立即停止同步关�
     assert.equal(stops,1);assert.equal(enabled.checked,false);assert.equal(panel.read().rewards.enabled,false);
   } finally {panel.destroy();dom.window.close();}
 });
-test('贡献榜主动播报默认五分钟，设置可读写且关闭后禁用间隔输入',()=>{
-  const dom=setup(), config=copy(DEFAULTS), panel=new Panel({config,room:'1',callbacks:{}});
+test('主播数据移除贡献榜播报视图、设置和手动入口，保留概览与PK预测',()=>{
+  const dom=setup(), panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
   try {
-    panel.node('[data-category=tools]').click();
-    const enabled=panel.node('[data-field="audienceBroadcast.enabled"]'), interval=panel.node('[data-field="audienceBroadcast.intervalSec"]');
-    assert.equal(enabled.checked,true);assert.equal(interval.value,'300');assert.equal(interval.disabled,false);
-    assert.deepEqual(panel.read().audienceBroadcast,{enabled:true,intervalSec:300});
-    enabled.click();assert.equal(interval.disabled,true);
-    assert.deepEqual(panel.read().audienceBroadcast,{enabled:false,intervalSec:300});
-    enabled.click();interval.value='600';interval.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
-    assert.deepEqual(panel.read().audienceBroadcast,{enabled:true,intervalSec:600});
-    assert.equal(config.audienceBroadcast.intervalSec,300,'保存前不改变运行中的设置');
-    assert.equal(panel.node('[data-action=broadcast-anchor]').textContent,'立即播报贡献榜');
+    panel.tab('anchor');
+    assert.equal(panel.node('[data-anchor-view="broadcast"]'),null);
+    assert.equal(panel.node('[data-anchor-content="broadcast"]'),null);
+    assert.equal(panel.node('[data-action="broadcast-anchor"]'),null);
+    assert.equal(panel.node('[data-field^="audienceBroadcast."]'),null);
+    assert.doesNotMatch(panel.node('[data-page="anchor"]').textContent,/本场贡献榜播报|主动播报贡献榜/);
+    assert.ok(panel.node('[data-anchor-view="overview"]'));
+    assert.ok(panel.node('[data-anchor-view="pk"]'));
+    assert.equal(Object.hasOwn(panel.read(),'audienceBroadcast'),false);
   } finally {panel.destroy();dom.window.close();}
 });
 

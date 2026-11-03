@@ -535,7 +535,6 @@ export class Panel {
     get('welcome.admin.minWealth').max = get('welcome.admin.minFanLevel').max = 100;
     get('anchorId').readOnly = get('identity.autoAnchor').checked && Boolean(this.identity?.anchor);
     get('selfId').readOnly = get('identity.autoSelf').checked && Boolean(this.identity?.self);
-    get('audienceBroadcast.intervalSec').disabled=!get('audienceBroadcast.enabled').checked;
     this.applyFeatureVisibility();
   }
   setBusy(action, value) { if (value) this.busyActions.add(action); else this.busyActions.delete(action); this.syncControls(); }
@@ -927,7 +926,6 @@ export class Panel {
         }
         if (action === 'export-income') { this.setBusy(action,true); await this.callbacks.exportIncome?.(); return; }
         if (action === 'export-anchor') { await this.callbacks.exportAnchor?.(this.anchorDashboard.exportReport()); return; }
-        if (action === 'broadcast-anchor') { this.setBusy(action,true); await this.callbacks.broadcastAnchor?.(this.anchorDashboard.broadcastSession); this.toast('本场贡献榜已加入弹幕队列'); return; }
         if (action === 'refresh-anchor') { this.setBusy(action,true); await this.callbacks.income?.(); const refreshed = await this.callbacks.refreshAnchor?.(); this.toast(refreshed ? '主播统计已刷新。' : '本地统计已刷新；展馆暂不可用，请确认已登录并打开直播间。', !refreshed); return; }
         if (action === 'add-profile') { this.setBusy(action,true); await this.callbacks.addProfile?.(this.node('[data-profile-url]').value); this.node('[data-profile-url]').value = ''; return; }
         if (action === 'close') return this.toggleOpen();

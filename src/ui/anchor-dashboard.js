@@ -1,7 +1,6 @@
 import { sessionTime, sessionStart, sessionEnd, sessionDuration } from './live-session-view.js';
 import { ANCHOR_PERIODS, selectAnchorPeriod } from './anchor-view-model.js';
 import { anchorEscape, anchorNumber, anchorMoney, anchorPercent, statBars, statDistribution, statProgress } from './stat-visuals.js';
-import { currentGiftBroadcastMessages } from '../core/gift-analytics.js';
 import { AnchorCharts } from './live-charts.js';
 import {matchingRows} from './product/collection.js';
 import { fanclubNumber, fanclubMemberRows, fanclubActivities } from './fanclub-view.js';
@@ -57,7 +56,7 @@ export class AnchorDashboard {
     // Version gating avoids aggregation and serialization for unrelated live events.
     const stats = engine.anchorStats;
     const date = new Date((stats.now?.() ?? Date.now()) + 8 * 3600000).toISOString().slice(0,10);
-    const signature = JSON.stringify([stats.revision,date,Math.floor((stats.now?.() ?? Date.now()) / 60000),configuredId,selectedId,identity?.anchor?.name,identity?.live?.status,identity?.live?.roomId,engine.running,engine.config.incomeEnabled,engine.config.sending?.maxLength,engine.config.audienceBroadcast,this.period,this.sessionId,this.fanclubPage,this.page,this.giftPage,this.giftFilter,this.date,this.search,this.audienceSort,this.audiencePage,this.memberQuery,this.giftQuery,this.battleQuery,this.resultFilter]);
+    const signature = JSON.stringify([stats.revision,date,Math.floor((stats.now?.() ?? Date.now()) / 60000),configuredId,selectedId,identity?.anchor?.name,identity?.live?.status,identity?.live?.roomId,engine.config.incomeEnabled,this.period,this.sessionId,this.fanclubPage,this.page,this.giftPage,this.giftFilter,this.date,this.search,this.audienceSort,this.audiencePage,this.memberQuery,this.giftQuery,this.battleQuery,this.resultFilter]);
     if (this.stats === stats && this.signature === signature && this.income === income) { if (this.charts.lastData) this.charts.render(this.charts.lastData); return; }
     this.stats = stats; this.signature = signature; this.income = income;
     const known = new Map((engine.anchorStats.anchors?.() || []).map(item => [String(item.anchorId),item]));
@@ -95,7 +94,7 @@ export class AnchorDashboard {
     const totals = matchingIncome && (selection.sessions.length || selection.calendar) ? selection.sessions.reduce((sum, row) => ({estimatedIncome:sum.estimatedIncome + row.estimatedIncome, unknownCount:sum.unknownCount + (row.unknownCount || 0)}),{estimatedIncome:0,unknownCount:0}) : null;
     this.text('[data-anchor-stat="income"]',totals ? anchorMoney(totals.estimatedIncome) : '未知');
     this.text('[data-anchor-income-note]', !engine.config.incomeEnabled ? '收入统计未启用，可在运行规则中开启。' : totals ? `${selection.label}收入按已采集礼物及榜单去重补差估算，不代表平台结算。${totals.unknownCount ? ` ${totals.unknownCount} 件礼物单价未知，未直接计入礼物金额。` : ''}` : '尚无与所选主播 UID 匹配的直播场次，收入保持未知；旧版日汇总可在收入账本查看。');
-    this.renderGiftAnalytics(selection,matchingIncome,engine,identity);
+    this.renderGiftAnalytics(selection,matchingIncome,identity);
     this.text('[data-anchor-stat="winRate"]',anchorPercent(summary.winRate));
     this.text('[data-anchor-stat="battles"]',summary.battles ? anchorNumber(summary.battles) : '未知');
     this.text('[data-anchor-stat="score"]',anchorNumber(summary.totalScore));
@@ -131,7 +130,7 @@ export class AnchorDashboard {
     this.text('[data-anchor-basis]','按直播开播至下播划分场次，PK 按开局时间归属，跨日不拆场。累计包含尚未关联直播场次的历史 PK，趋势最多显示最近 30 场。胜率=胜/(胜+负+平)，仅明确终局比分计入胜负和总分。时间不完整时按已观测边界统计。');
     this.root.querySelector('[data-action="export-anchor"]').disabled = !selectedId;
   }
-  renderGiftAnalytics(selection, income, engine, identity) {
+  renderGiftAnalytics(selection, income, identity) {
     const gifts=selection.gifts;
     for (const key of ['totalDiamonds','giftCount','audienceCount','sessions']) this.text(`[data-anchor-gift-stat="${key}"]`,income ? anchorNumber(gifts[key]) : '未知');
     const trend=income ? selection.giftTrend : [], audience=income ? gifts.audience : [];
@@ -145,12 +144,6 @@ export class AnchorDashboard {
     const live=current && !current.endAt && identity?.live?.status !== 'ended' && identity?.live?.status !== 'offline' && (!identity?.live?.roomId || current.roomId===identity.live.roomId) ? current : null;
     const highest=live?.highestGift;
     this.html('[data-anchor-highest-gift]',highest ? `<div class="anchor-highest-price"><b>${anchorNumber(highest.unitValue)}<small> 钻 / 件</small></b><span>${highest.tiedCount>1 ? `${highest.tiedCount} 款并列最高` : '本场最高单价'}</span></div><ul class="anchor-highest-list">${highest.gifts.map(gift=>`<li><strong>${anchorEscape(gift.name || gift.giftId)}</strong><span>${anchorEscape(gift.senders?.map(user=>user.name || user.userId).join('、') || '送礼观众未识别')}</span></li>`).join('')}</ul>${highest.tiedCount>highest.gifts.length ? '<p class="hint">并列礼物较多，此处展示前 20 款。</p>' : ''}` : `<p class="empty">${live ? '本场尚无已知单价的礼物。' : '当前没有已确认正在直播的场次。'}</p>`);
-    this.broadcastText=currentGiftBroadcastMessages(live,engine.config.sending?.maxLength ?? 50).join('\n');
-    this.broadcastSession=live?.id || '';
-    this.text('[data-anchor-broadcast-preview]',this.broadcastText || '等待本场观众贡献榜数据。');
-    const schedule=engine.config.audienceBroadcast || {enabled:true,intervalSec:300};
-    this.text('[data-anchor-broadcast-status]',!schedule.enabled ? '主动播报已关闭' : !engine.config.incomeEnabled ? '需开启收入统计' : !engine.running ? '开始场控后自动播报' : schedule.intervalSec%60===0 ? `每 ${schedule.intervalSec/60} 分钟自动播报` : `每 ${schedule.intervalSec} 秒自动播报`);
-    this.root.querySelector('[data-action="broadcast-anchor"]').disabled=!this.broadcastText || !engine.running;
     this.charts.render({trend,audience,sessions:income ? gifts.sessions : 0});
   }
   renderLikes(report,selection,sessionIncome,identity,selectedId,configuredId,stats) {

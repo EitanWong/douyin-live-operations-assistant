@@ -49,11 +49,6 @@ function organizeAnchor(page){
   for(const group of [...overview.querySelectorAll('.anchor-metrics')])metrics.append(group);
   filters.after(metrics);
   const incomeNote=page.querySelector('[data-anchor-income-note]');if(incomeNote)metrics.after(incomeNote);
-  const broadcast=page.querySelector('.anchor-broadcast-section');
-  if(broadcast){
-    const view=element(page,'div','','data-anchor-content');view.dataset.anchorContent='broadcast';view.id='anchor-broadcast';view.hidden=true;view.append(broadcast);page.append(view);
-    const button=element(page,'button');button.type='button';button.dataset.anchorView='broadcast';button.setAttribute('aria-pressed','false');button.setAttribute('aria-controls',view.id);button.textContent='播报设置';page.querySelector('.anchor-views').append(button);
-  }
   for(const shell of [...overview.querySelectorAll('.anchor-metric-workspace,.anchor-live-workspace,.anchor-workspace,.anchor-analytics')].reverse())unwrap(shell);
   const data=element(page,'div','workspace-grid','data-workspace-anchor-data');data.dataset.workspaceGrid='';
   const cards=[...overview.querySelectorAll(':scope>.anchor-section')].sort((a,b)=>Number(a.matches('.anchor-audience-section,.anchor-battles-section'))-Number(b.matches('.anchor-audience-section,.anchor-battles-section')));

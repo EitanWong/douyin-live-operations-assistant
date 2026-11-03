@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {GiftLedger, GiftStore} from '../../src/data/gifts.js';
-import {giftPeriodRange, summarizeGiftSessions, giftAnalyticsTrend, currentGiftBroadcast, currentGiftBroadcastMessages} from '../../src/core/gift-analytics.js';
+import {giftPeriodRange, summarizeGiftSessions, giftAnalyticsTrend} from '../../src/core/gift-analytics.js';
 import {selectAnchorPeriod} from '../../src/ui/anchor-view-model.js';
 
 const at=value=>Date.parse(`${value}+08:00`);
@@ -16,17 +16,13 @@ test('北京时间自然周跨年、闰月、季度和年界独立于宿主时�
   assert.equal(giftPeriodRange('month','2026-02-30'),null);
 });
 
-test('日周月季年按开播归属整场；同日两场分开，跨日不拆场，选择不改变正在直播的播报',()=>{
+test('日周月季年按开播归属整场；同日两场分开，跨日不拆场',()=>{
   const sessions=['2025-12-31T23:00:00','2026-01-01T00:00:00','2026-09-30T23:00:00','2026-10-01T00:00:00','2026-10-19T00:00:00','2026-10-25T08:00:00','2026-10-25T11:00:00'].map((value,i)=>({id:String(i),startAt:at(value),endAt:i===6 ? 0 : at(value)+7200000,totalDiamonds:100,giftCount:1})).reverse();
   const income={allSessions:sessions,currentSession:sessions[0]}, report={battles:[]};
   for (const [period,count] of [['day',2],['week',3],['month',4],['quarter',4],['year',6],['all',7]]) {
     const selected=selectAnchorPeriod(report,period,income,'','2026-10-25',now);
     assert.equal(selected.gifts.sessions,count,period);assert.equal(selected.gifts.totalDiamonds,count*100);
   }
-  income.currentSession.audience=[{userId:'uid:1',name:'本场观众',totalDiamonds:100}];
-  const text=currentGiftBroadcast(income.currentSession);
-  assert.match(text,/第1名：本场观众。/);assert.doesNotMatch(text,/钻|700|本场已统计|收到礼物/);
-  assert.equal(currentGiftBroadcast({...income.currentSession,endAt:now}), '');
 });
 
 test('逐用户统计不依赖已淘汰连击，重启与补价去重；同名账号独立，每场只计一次',()=>{
@@ -99,65 +95,4 @@ test('持久报表保存礼物名称与逐用户数据，不暴露内部计价�
   assert.equal(report.currentSession.highestGift.gifts[0].name,'城堡');
   assert.equal(report.currentSession.pricedGifts,undefined);
   assert.equal((await store.report('2','2026-10')).sessions.length,0);
-});
-
-test('本场播报按贡献钻石取前三名，榜单补差不重复计入且历史大额不混入',()=>{
-  const ledger=new GiftLedger({now:()=>now});
-  const gift=(id,name,count)=>({id,groupId:id,giftId:'g',giftName:'星星',count,unitValue:1,final:true,user:{id,name}});
-  ledger.startSession(now-10000,'platform','old');
-  ledger.observe(gift('9','历史榜首',99999),'1','uid:9');ledger.endSession(now-5000);
-  ledger.startSession(now-1000,'platform','current');
-  for (const [id,name,count] of [['1','同名',100],['2','同名',200],['3','第三位观众',50],['4','第四位观众',10]]) ledger.observe(gift(id,name,count),'1',`uid:${id}`);
-  for (const [id,score] of [['1',300],['3',250]]) ledger.observeContribution({userId:`uid:${id}`,name:'榜单昵称',score,capturedAt:now,roomId:'current',rate:0.05});
-  const session=ledger.calibratedSession(ledger.currentSession()), before=structuredClone(session);
-  const messages=currentGiftBroadcastMessages(session);
-  assert.deepEqual(messages,['本场观众贡献榜第1名：同名。','本场观众贡献榜第2名：第三位观众。','本场观众贡献榜第3名：同名。','本场千票贡献榜人数：0 人。']);
-  assert.doesNotMatch(messages.join(''),/钻|历史榜首|99,999|第四位观众|uid:/);
-  assert.deepEqual(session,before,'排序不修改账本观众顺序');
-  ledger.observe(gift('1','同名',300),'1','uid:1');
-  assert.deepEqual(currentGiftBroadcastMessages(ledger.calibratedSession(ledger.currentSession())),messages);
-});
-
-test('本场观众不足三人按实际人数，空榜和缺失昵称保持明确，已下播不生成消息',()=>{
-  const session={startAt:now,endAt:0,totalDiamonds:20,giftCount:2,audience:[]};
-  assert.deepEqual(currentGiftBroadcastMessages(session),[]);
-  session.audience=[{userId:'sec:a',name:'甲',totalDiamonds:10},{userId:'uid:2',name:'',totalDiamonds:10}];
-  const messages=currentGiftBroadcastMessages(session);
-  assert.equal(messages.length,3);assert.match(messages[0],/第1名：甲。/);assert.match(messages[1],/第2名：昵称未采集。/);
-  assert.equal(messages[2],'本场千票贡献榜人数：0 人。');
-  assert.doesNotMatch(messages.join(''),/第3名|sec:a|uid:2/);
-  assert.deepEqual(currentGiftBroadcastMessages({...session,endAt:now}),[]);
-  assert.deepEqual(currentGiftBroadcastMessages(null),[]);
-});
-
-test('本场播报按配置字数续报完整昵称，表情不拆编码，不播报钻石数量',()=>{
-  const session={startAt:now,endAt:0,totalDiamonds:9999,giftCount:999,unknownCount:12,calibrationDiamonds:100,audience:
-    [9999,2222,123].map((totalDiamonds,i)=>({userId:`uid:${i+1}`,name:'😄'.repeat(60),totalDiamonds}))};
-  for (const limit of [10,20,50]) {
-    const messages=currentGiftBroadcastMessages(session,limit);
-    assert.ok(messages.every(text=>[...text].length<=limit && !/[\uD800-\uDFFF]/u.test(text)));
-    for (let rank=1;rank<=3;rank++) {
-      const ranks=messages.filter(text=>new RegExp(`^(?:本场观众贡献榜第${rank}名|榜${rank}(?:续\\d+)?)：`).test(text));
-      assert.ok(ranks.length>1);
-      assert.equal(ranks.map(text=>text.slice(text.indexOf('：')+1,-1)).join(''),'😄'.repeat(60));
-    }
-    assert.equal(new Set(messages).size,messages.length,'续报标签区分同名与重复片段，不被重复过滤');
-    assert.doesNotMatch(messages.join(''),/钻|9999|9,999|2222|2,222|123|…|补差|件|单价|本场已统计|收到礼物/);
-    assert.match(messages.at(-1),/人数：2 ?人/);
-  }
-});
-
-test('本场千票贡献榜人数统计全榜，1000计入、999不计，同名账号分别计数且重复UID不重复',()=>{
-  const session={endAt:0,audience:[
-    ...[4000,3000,2000,1001,1000,999].map((totalDiamonds,i)=>({userId:`uid:${i+1}`,name:'同名',totalDiamonds})),
-    {userId:'uid:5',name:'重复记录',totalDiamonds:1200},
-    {userId:'sec:known',name:'仅安全UID',totalDiamonds:1000},
-    {userId:'name:unknown',name:'无账号',totalDiamonds:9000},
-    {userId:'uid:8',name:'未知单价',totalDiamonds:0,unknownCount:3},
-    {userId:'uid:9',name:'无效数据',totalDiamonds:NaN}
-  ]};
-  const messages=currentGiftBroadcastMessages(session);
-  assert.equal(messages.length,4);
-  assert.equal(messages[3],'本场千票贡献榜人数：6 人。');
-  assert.doesNotMatch(messages.join(''),/重复记录|无账号|未知单价|无效数据|第4名|9,000/);
 });

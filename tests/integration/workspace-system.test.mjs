@@ -54,14 +54,6 @@ test('AI 与主播二级导航共用位置，切换页面不会重建或重置�
   }finally{f.close();}
 });
 
-test('已有播报功能被移入独立视图，保留设置值、事件与唯一字段',()=>{
-  const dom=new JSDOM('<section data-page="anchor"><h2>主播数据</h2><div class="anchor-views"></div><div data-anchor-content="overview"><section class="anchor-section"><h3>数据</h3></section><section class="anchor-section anchor-broadcast-section"><h3>本场贡献榜播报</h3><label class="field"><input data-field="audienceBroadcast.intervalSec" value="420"></label><button>立即播报</button></section></div></section>');
-  try{
-    const page=dom.window.document.querySelector('section'),input=page.querySelector('input'),button=page.querySelector('button');let calls=0;button.addEventListener('click',()=>calls++);organizePage(page);
-    const view=page.querySelector('[data-anchor-content="broadcast"]');assert.ok(view);assert.equal(view.hidden,true);assert.equal(view.querySelector('input'),input);assert.equal(input.value,'420');assert.equal(page.querySelectorAll('input').length,1);assert.equal(page.querySelector('[data-anchor-view="broadcast"]').textContent,'播报设置');
-    view.hidden=false;button.click();assert.equal(calls,1);assert.equal(page.querySelector('[data-workspace-anchor-data] input'),null);
-  }finally{dom.window.close();}
-});
 
 test('自定义感知保留显隐边界并与模型卡片共享网格，避免独占整行',()=>{
   const f=fixture(),p=f.p;try{
