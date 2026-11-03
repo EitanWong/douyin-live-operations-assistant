@@ -1,7 +1,14 @@
+import {mountProductPanel} from './product/mount.js';
+import {WorkspaceLayout} from './workspace-layout.js';
+import {WORKSPACE_CSS} from './workspace-styles.js';
+import {AI_SETTINGS_CSS} from './ai-settings-styles.js';
+import {ModelPickers} from './model-picker.js';
+import {AI_SERVICE_PRESETS as presets,replyModelOptions} from './ai-model-options.js';
+import {resolveReplyConfig} from '../services/ai-pipeline.js';
 import { pkSettingsTemplate } from './pk-settings-template.js';
 import { PK_SETTINGS_CSS } from './pk-settings-styles.js';
 import { moderationTemplate } from './moderation-template.js';
-import { AUTO_LIKE_MIN_INTERVAL_SEC } from '../core/auto-like.js';
+import { bundledTools } from '../tools/bundled.js';
 import { calculateMidnightPKStart, strategyRegime } from '../pk/operations.js';
 import { MODERATION_LABELS } from '../core/moderation.js';
 import { uniqueAnchorProfiles } from '../data/gifts.js';
@@ -21,9 +28,12 @@ import { ANCHOR_DASHBOARD_CSS } from './anchor-styles.js';
 import { LiveCharts } from './live-charts.js';
 import { copy, mergeConfig, validateConfig } from '../core/engine.js';
 import { validateEndpoint } from '../services/ai.js';
+import { SEARCH_PROVIDERS, validateSearchEndpoint } from '../services/search.js';
 import { giftDate } from '../data/gifts.js';
 import { BOT_COMMANDS, RoomBot } from '../core/bot.js';
 import { hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
+import {AISettings} from './ai-settings.js';
+import {aiSettingsTemplate} from './ai-settings-template.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
@@ -32,12 +42,7 @@ const categories = { system: '运行', filter: '过滤', moderation: '内容提�
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const interactionPages = ['anchor','pk','gift','welcome','likes','keywords','bot','timers'];
 const money = value => new Intl.NumberFormat('zh-CN', {style:'currency',currency:'CNY',maximumFractionDigits:2}).format(value);
-const presets = {
-  deepseek: ['https://api.deepseek.com/chat/completions', 'deepseek-flash'],
-  qwen: ['https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', 'qwen-plus'],
-  doubao: ['https://ark.cn-beijing.volces.com/api/v3/chat/completions', '请填写你的接入点ID'],
-  local: ['http://localhost:11434/v1/chat/completions', 'qwen2.5:7b']
-};
+
 const CSS_TEXT = `
 :host{all:initial;color-scheme:var(--sg-scheme);font:14px/1.55 var(--sg-font);color:var(--sg-foreground);--ink:var(--sg-foreground);--muted:var(--sg-muted);--line:var(--sg-border);--accent:var(--sg-brand);--accent-strong:var(--sg-brand);--paper:var(--sg-background);--surface:var(--sg-solid);--wash:var(--sg-control);--signal:var(--sg-brand);--amber:var(--sg-warning);--danger:var(--sg-danger);-webkit-font-smoothing:antialiased}
 [hidden]{display:none!important}
@@ -116,12 +121,19 @@ summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-hei
 `;
 
 export class Panel {
-  constructor({ config, room, demo = false, callbacks }) {
+  constructor({ config, room, demo = false, callbacks, tools = bundledTools }) {
+    this.tools = tools; this.toolStates = new Map();
     this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
-    this.root.append(this.build()); decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); }); this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});
+    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}${WORKSPACE_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
+    this.root.append(this.build()); this.workspaceLayout=new WorkspaceLayout(this.root);decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onNavigate:key=>this.tab(key),onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), paletteSelect:this.root.querySelector('[data-theme-palette]'), materialSelect:this.root.querySelector('[data-theme-material]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
+    this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
+      start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
+      forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
+    this.modelPickers=new ModelPickers(this.root);
+    this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});this.workspaceLayout.show(this.activeTab);
+    this.productUI=mountProductPanel(this);
   }
   input(path, label, type = 'text', hint = '') {
     return `<label class="field"><span>${label}</span><input data-field="${path}" type="${type}" ${type === 'number' ? 'step="any"' : ''}>${hint ? `<small>${hint}</small>` : ''}</label>`;
@@ -132,10 +144,11 @@ export class Panel {
   phraseGenerator(kind) {
     return `<div class="actions" data-phrase-generator hidden><button type="button" data-generate-phrases="${kind}">AI 生成话术</button><small>替换当前话术，保存后生效。</small></div>`;
   }
+  readPipeline(){return Object.fromEntries([...this.root.querySelectorAll('[data-field^="ai.pipeline."]')].map(el=>[el.dataset.field.split('.').at(-1),el.type==='number' ? Number(el.value) : el.value.trim()]));}
   phraseServiceReady() {
     try {
-      const endpoint=validateEndpoint(this.node('[data-field="ai.endpoint"]').value.trim());
-      return Boolean(this.node('[data-field="ai.model"]').value.trim() && (['localhost','127.0.0.1','[::1]'].includes(new URL(endpoint).hostname) || this.node('[data-api-key]').value.trim() || this.callbacks.hasAIKey?.(endpoint)));
+      const pipeline=this.readPipeline(),reply=resolveReplyConfig({pipeline,endpoint:this.node('[data-field="ai.endpoint"]').value.trim(),model:this.node('[data-field="ai.model"]').value.trim()}),endpoint=validateEndpoint(reply.endpoint),omni=pipeline.mode==='omni-only';
+      return Boolean(reply.model && (['localhost','127.0.0.1','[::1]'].includes(new URL(endpoint).hostname) || this.node(omni ? '[data-media-key="pipeline"]' : '[data-api-key]').value.trim() || this.callbacks.hasAIKey?.(endpoint,omni)));
     } catch { return false; }
   }
   async fillPhrases(button) {
@@ -147,9 +160,10 @@ export class Panel {
     const before=field.value, version=this.config;
     const config=copy(this.config);
     for (const key of ['endpoint','model','persona','knowledge']) config.ai[key]=this.node(`[data-field="ai.${key}"]`).value.trim();
+    config.ai.memory=this.aiSettings.read();config.ai.assistant.skills=structuredClone(this.aiSettings.skills);config.ai.pipeline=this.readPipeline();
     try {
       this.setBusy('generate-phrases',true); button.textContent='正在生成…'; button.setAttribute('aria-busy','true');
-      const lines=await this.callbacks.generatePhrases(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,{kind,reference:before,keywords});
+      const lines=await this.callbacks.generatePhrases(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,{kind,reference:before,keywords},this.aiSettings.credentials());
       if (!field.isConnected || this.config!==version) return;
       if (field.value!==before || kind==='keyword' && row.querySelector('[data-item="keywords"]').value.split('\n').map(text=>text.trim()).filter(Boolean).join('\n')!==keywords.join('\n')) { this.toast('生成期间内容已修改，已保留你的编辑，请重新生成',true); return; }
       field.value=lines.join('\n'); field.removeAttribute('aria-invalid');
@@ -172,8 +186,9 @@ export class Panel {
         <div class="shell-status" aria-label="场控状态"><strong data-shell-state>已暂停</strong><span data-shell-network>等待直播数据</span></div>
         ${this.demo ? '<p class="banner">本地演示：弹幕和礼物均为模拟数据，消息不会发到抖音。</p>' : ''}
         <div class="banner" data-runtime-alert role="status" hidden><strong data-runtime-alert-text></strong> <button type="button" data-go="diagnostics" data-ack-runtime-alert>查看并处理</button></div>
+        <div class="banner" data-ai-alert role="status" hidden><strong data-ai-alert-text></strong> <button type="button" data-go="ai">检查 AI 设置</button></div>
         <div class="workspace">
-        ${navigationTemplate(this.activeTab)}
+        ${navigationTemplate(this.activeTab, this.tools)}
         <main class="workspace-content" aria-label="功能页面">
         <div class="toast" role="status" hidden></div>
         <div class="scroll"><form autocomplete="off">
@@ -238,7 +253,7 @@ export class Panel {
           </section>
           <section class="page" role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" data-page="appearance" hidden>
             <h2>外观</h2><p class="intro">选择适合当前环境的亮暗模式。</p>
-            <section class="settings-group"><h3>颜色模式</h3><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
+            <section class="settings-group"><h3>主题与配色</h3><p class="group-note">默认保留原始 Solid Glass 外观。可选 Radix Colors 配色，每套均支持亮色、暗色与跟随系统。</p><div class="grid"><label class="field"><span>主题配色</span><select data-theme-palette aria-label="主题配色"></select></label><label class="field"><span>表面材质</span><select data-theme-material aria-label="表面材质"></select></label></div><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
             <section class="settings-group"><h3>导航布局</h3><p class="group-note">宽窗口使用侧边栏，窄窗口自动切换为顶部导航。</p><label class="field"><span>侧边栏位置</span><select data-sidebar-side aria-label="侧边栏位置"><option value="left">左侧</option><option value="right">右侧</option></select><small>按操作习惯选择；右侧也适合左手操作。选择后自动保存到当前浏览器。</small></label></section>
           </section>
           <section class="page" role="tabpanel" id="page-features" aria-labelledby="tab-features" data-page="features" hidden>
@@ -311,25 +326,9 @@ export class Panel {
             <p class="hint">按列表顺序匹配；可用“上移 / 下移”调整优先级。每条规则支持包含关键词或完全一致。</p>
           </section>
           <section class="page" role="tabpanel" id="page-ai" aria-labelledby="tab-ai" data-page="ai" hidden>
-            <h2>AI 服务与问答</h2><p class="intro">连接模型服务，并配置 AI 如何回应直播间弹幕。</p>
+            <h2>AI 设置</h2><p class="intro">先连接模型，再按需开启直播感知、知识检索和联网搜索。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="ai"></p></div>
-            <div class="settings-workspace ai-workspace">
-
-            <section class="settings-column">
-<h3 class="subhead">服务连接</h3>
-              <label class="field"><span>服务预设</span><select data-preset><option value="custom">自定义兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问 / DashScope</option><option value="doubao">豆包 / 火山方舟</option><option value="local">本地 Ollama</option></select></label>
-            <details data-ai-connection><summary>接口与模型</summary>${this.input('ai.endpoint', 'API 接口地址')}${this.input('ai.model', '模型名称 / 接入点 ID')}</details>
-            <label class="field"><span>API Key</span><input type="password" data-api-key autocomplete="new-password" placeholder="留空保留此服务已有密钥"><small data-key-status>密钥按服务域名隔离，不随配置导出。</small></label>
-            <label class="toggle"><input type="checkbox" data-remember-key>记住新密钥（仅此设备）</label>
-            <div class="actions"><button type="button" data-action="test-ai">测试 AI 连接</button><button type="button" class="danger" data-action="forget-key">清除此服务密钥</button></div>
-</section>
-            <section class="settings-column">
-<h3 class="subhead">问答与场控资料</h3>
-<section class="settings-group"><h3>所有 AI 功能共用直播上下文</h3><p>问答、答谢、机器人、定时消息、PK 播报、内容检测和话术生成共用已采集的直播信息。</p><p class="hint">开启相应 AI 功能后，近期弹幕与回复、观众样本、活动趋势、钻石与收入估算、当前与历史 PK 比分、任务、展馆和段位会发送至你配置的 AI 服务。历史明细有界采样并保留汇总；未知和过期数据明确标记，不读取未接入的音视频。</p></section>
-              <div class="section"><div data-chat-controls><p class="hint">AI 结合最近聊天、直播数据和已回复内容判断是否需要接话；不必回复时保持安静。@当前账号可直接对话，菜单与游戏指令优先。</p><details><summary>AI 额度与弹幕窗口</summary><div class="grid">${this.input('ai.maxPerHour', '每小时最多调用 / 次', 'number')}${this.input('ai.contextSize', '最近弹幕条数', 'number')}${this.input('ai.contextAgeSec', '弹幕保留时长 / 秒', 'number')}</div></details>
-            </div><div data-ai-profile>${this.area('ai.persona', '场控风格', 'text')}${this.area('ai.knowledge', '主播与本场直播资料', 'text', '填写已核实的直播主题、开播时间和资料。')}</div>
-            <details data-idle-controls><summary>冷场互动</summary>${this.input('ai.idleSec', '没有新互动多久算冷场 / 秒', 'number')}</details>
-            <div class="notice">启用 AI 的模块才会显示 AI 生成选项。近期弹幕、昵称、直播统计、互动与 PK 摘要和你填写的资料会发往所配置的服务，不发送 Cookies 或观众 UID。预览模式仍会调用 AI。</div></div></section></div>
+            ${aiSettingsTemplate(this)}
           </section>
           <section class="page" role="tabpanel" id="page-bot" aria-labelledby="tab-bot" data-page="bot" hidden>
             <h2>@机器人</h2><p class="intro">开启房间游戏，让主播与观众一起接龙、猜数字、答题或挑战。启用 AI 服务后，@账号也能直接聊天；菜单和游戏指令优先。</p>
@@ -359,17 +358,9 @@ export class Panel {
             <p class="hint">每组独立循环，话术每行一条。时段留空表示全天，支持跨午夜。</p>
           </section>
           ${moderationTemplate(this)}
-          <section class="page" role="tabpanel" id="page-auto-like" aria-labelledby="tab-auto-like" data-page="auto-like" hidden>
-            <h2>自动点赞</h2><p class="intro">使用当前登录账号，为当前直播间批量点赞。点击开始后立即执行，独立于场控回复模式。</p>
-            <div class="grid">
-              <label class="field"><span>每批点赞数</span><input type="number" data-auto-like="batch" value="20" min="1" max="100" step="1"><small>1～100 次；平台接受后计入进度。</small></label>
-              <label class="field"><span>批次间隔 / 秒</span><input type="number" data-auto-like="intervalSec" value="2" min="${AUTO_LIKE_MIN_INTERVAL_SEC}" max="60" step="${AUTO_LIKE_MIN_INTERVAL_SEC}"><small>${AUTO_LIKE_MIN_INTERVAL_SEC}～60 秒，0.001 秒 = 1 毫秒；响应后等待，实际间隔受网络和浏览器影响。低于 2 秒为实验设置，遇拒绝即停。</small></label>
-              <label class="field"><span>本次目标点赞数</span><input type="number" data-auto-like="target" value="1000" min="1" max="1000000" step="1"><small>达到目标自动停止；刷新后需重新开始。</small></label>
-            </div>
-            <div class="actions"><button type="button" class="primary" data-action="auto-like-start">开始点赞</button><button type="button" class="danger" data-action="auto-like-stop" disabled>停止点赞</button></div>
-            <p role="status" aria-live="polite" data-auto-like-status>尚未开始</p><p class="hint" data-auto-like-progress>本次平台已接受 0 次 · 0 批</p>
-            <p class="hint">平台拒绝或结果未知时停止。切换房间、账号、下播或断线后需重新开始。停止后，已提交的批次仍可能生效；平台接受次数不代表直播间最终展示增量。</p>
-          </section>
+          ${this.tools.list().map(tool => tool.view.template().replace(/<\/section>\s*$/, `<details class="advanced"><summary>工具管理</summary><p data-tool-health="${tool.id}" role="status">正在准备工具</p><div class="actions"><button type="button" data-tool-control="restart" data-tool-id="${tool.id}">重新启用工具</button><button type="button" data-tool-control="disable" data-tool-id="${tool.id}">停用工具</button></div><p class="hint">只影响当前工具。本次手动任务需重新开始。</p></details></section>`)).join('')}
+
+
           <section class="page" role="tabpanel" id="page-diagnostics" aria-labelledby="tab-diagnostics" data-page="diagnostics" hidden>
             <h2>连接</h2><p class="intro">检查直播数据、账号识别与页面发送控件。</p>
             <div class="identity section"><strong data-anchor-name>正在识别主播…</strong><p data-self-name>正在识别登录账号…</p><p data-admin-status>管理员身份：未验证，管理操作不可用</p><p data-identity-warning hidden></p><details><summary>账号不对？</summary><div class="actions"><button type="button" data-action="identify">重新识别</button><button type="button" data-action="identity-settings">手动补充</button></div></details></div>
@@ -470,9 +461,12 @@ export class Panel {
     for (const item of config.keyword.rules) this.addRow('keywords',item,false);
     for (const item of config.welcome.listed) this.addRow('listed',item,false);
     for (const item of config.timers) this.addRow('timers',item,false);
+    this.aiSettings.populate(config.ai.memory,config.ai.assistant);
     this.node('[data-api-key]').value = '';
+    this.node('[data-search-key]').value = '';
     const preset = Object.entries(presets).find(([,values])=>values[0] === config.ai.endpoint)?.[0] || 'custom';
     this.node('[data-preset]').value = preset; this.node('[data-ai-connection]').open = ['custom','doubao','local'].includes(preset);
+    this.modelPickers.setChoices('ai.model',replyModelOptions(preset));this.modelPickers.populate();
     this.syncControls(); this.markDirty(false);
   }
   syncPKSettings(aiReady) {
@@ -527,7 +521,7 @@ export class Panel {
     this.text('[data-moderation-summary]',get('moderation.enabled').checked ? `${get('moderation.detector').value==='ai'?'AI 语境判定':'本地词库'} · ${get('moderation.windowSec').value} 秒内累计 ${get('moderation.threshold').value} 次处置${get('moderation.escalateBan').checked ? `，${get('moderation.banThreshold').value} 次升级封禁` : '，累计升级封禁已关闭'}。` : '内容治理已关闭。在功能开关启用后配置检测与自动处置。');
     this.hidden('[data-chat-controls]', !get('ai.chatEnabled').checked && !get('bot.enabled').checked);
     this.hidden('[data-idle-controls]', !get('ai.idleEnabled').checked);
-    this.hidden('[data-ai-profile]', !get('ai.chatEnabled').checked && !get('ai.idleEnabled').checked && !get('bot.enabled').checked);
+    this.hidden('[data-ai-profile]', false);
     const strategy = mode => mode === 'ai' ? (aiReady ? 'AI 优先，规则兜底' : '规则话术（AI 服务关闭）') : '预设话术';
     this.syncPKSettings(aiReady);
     this.text('[data-summary=gift]', !get('gift.enabled').checked ? '已关闭，不会生成礼物感谢。' : `${get('gift.basis').value === 'total' ? '连击总价' : '单个礼物'} ≥ ${get('gift.minValue').value || 0} 钻 · ${strategy(get('gift.responseMode').value)} · 即时感谢。`);
@@ -557,8 +551,8 @@ export class Panel {
     this.text('[data-summary=timers]', !get('timersEnabled').checked ? '定时消息已关闭。' : timers ? `已开启 ${timers} 组 · 间隔 ${intervals.map(value=>`${value} 秒`).join(' / ')} · ${activeTimerRows.some(row=>row.querySelector('[data-item=responseMode]')?.value === 'ai') ? '含 AI 生成组' : '预设话术'}。` : `${timerRows.length ? `共 ${timerRows.length} 组，` : ''}当前没有启用消息组。`);
     this.text('[data-feature-note=timers]', !get('timersEnabled').checked ? '已关闭' : timers ? `已启用 ${timers} 组消息` : '尚未配置消息组');
     this.text('[data-feature-note=ai-service]', aiReady ? 'AI 生成选项已开放' : '关闭时互动模块使用预设话术');
-    this.text('[data-feature-note=ai-chat]', get('ai.chatEnabled').checked ? (aiReady ? '按语境自动接话 · @账号直接对话' : '需先启用 AI 服务') : '不处理弹幕问答');
-    this.text('[data-feature-note=ai-idle]', get('ai.idleEnabled').checked ? `无互动 ${get('ai.idleSec').value} 秒后邀请` : '已关闭');
+    this.text('[data-feature-note=ai-chat]', get('ai.chatEnabled').checked ? (aiReady ? '按语境择机回应 · 发言节奏见 AI 设置' : '需先启用 AI 服务') : '不处理弹幕问答');
+    this.text('[data-feature-note=ai-idle]', get('ai.idleEnabled').checked ? `无互动 ${get('ai.idleSec').value} 秒后依据现场线索接话` : '已关闭');
     this.text('[data-feature-note=moderation]', get('moderation.enabled').checked ? '敏感话题、辱骂与恶意言论分级处置' : '已关闭');
     this.text('[data-mode-note]', {preview:'仅预览，不会发送到直播间。AI 开启后仍会调用模型。',auto:'符合规则的回复会自动发送。'}[get('mode').value]);
     const fan = get('welcome.requireFan').checked;
@@ -573,7 +567,7 @@ export class Panel {
     this.applyFeatureVisibility();
   }
   setBusy(action, value) { if (value) this.busyActions.add(action); else this.busyActions.delete(action); this.syncControls(); }
-  revealError(el, page = el.closest('[data-page]')?.dataset.page) { el.setAttribute('aria-invalid','true'); if (page) this.tab(page); for (let parent=el.parentElement;parent;parent=parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; el.focus(); }
+  revealError(el, page = el.closest('[data-page]')?.dataset.page) { el.setAttribute('aria-invalid','true'); if (page) this.tab(page); this.aiSettings.reveal(el); for (let parent=el.parentElement;parent;parent=parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; el.focus(); }
   read() {
     for (const el of this.root.querySelectorAll('[aria-invalid]')) el.removeAttribute('aria-invalid');
     const result = copy(this.config);
@@ -588,6 +582,7 @@ export class Panel {
     if (new Set(prices.map(p=>p.key)).size !== prices.length) throw new Error('礼物价格有重复名称或 ID，请合并');
     result.gift.prices = Object.fromEntries(prices.map(p=>[p.key,p.value]));
     result.keyword.rules = this.readList('keywords'); result.welcome.listed = [...new Set(this.readList('listed'))]; result.timers = this.readList('timers');
+    result.ai.memory=this.aiSettings.read();result.ai.assistant.skills=structuredClone(this.aiSettings.skills);
     if (result.welcome.admin.enabled) {
       for (const [admin, basic, label] of [['minWealth','minWealth','荣誉'], ['minFanLevel','minFanLevel','灯牌']]) {
         if (result.welcome.admin[admin] < result.welcome[basic]) {
@@ -596,7 +591,8 @@ export class Panel {
         }
       }
     }
-    const validated = validateConfig(mergeConfig(result)); if (validated.ai.enabled || this.node('[data-api-key]').value.trim()) validateEndpoint(validated.ai.endpoint);
+    const validated = validateConfig(mergeConfig(result)); if (validated.ai.enabled || this.node('[data-api-key]').value.trim()) validateEndpoint(resolveReplyConfig(validated.ai).endpoint);
+    if(validated.ai.search.enabled || this.node('[data-search-key]').value.trim())validateSearchEndpoint(validated.ai.search.endpoint,validated.ai.search.provider);
     for (const [key, selector] of Object.entries(validated.adapter)) if (selector) { try { document.querySelector(selector); } catch { throw new Error(`${key} 选择器无效`); } }
     return validated;
   }
@@ -701,20 +697,19 @@ export class Panel {
     const node = this.root.querySelector('.toast'); node.textContent = message; node.classList.toggle('error', error); node.hidden = false;
     clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { node.hidden = true; }, 8000);
   }
-  updateAutoLike(state) {
-    this.autoLikeState = state;
-    const active = ['starting','running','stopping'].includes(state.phase);
-    this.disabled('[data-action=auto-like-start]',active);
-    this.disabled('[data-action=auto-like-stop]',!active || state.phase === 'stopping');
-    for (const input of this.root.querySelectorAll('[data-auto-like]')) input.disabled = active;
-    this.text('[data-auto-like-status]',`${this.demo ? '模拟演练 · ' : ''}${state.reason}`);
-    this.text('[data-auto-like-progress]',`本次${this.demo ? '模拟接受' : '平台已接受'} ${state.accepted} 次 · ${state.batches} 批`);
+  updateToolState(id, state) {
+    this.toolStates.set(id, {...state});
+    this.tools.get(id)?.view.update(this, state);
+    const enabled = state.hostPhase === 'active';
+    this.text(`[data-tool-health="${id}"]`, enabled ? '工具已就绪' : state.reason || '工具已停用');
+    for (const button of this.root.querySelectorAll(`[data-tool-id="${id}"]`)) button.disabled = button.dataset.toolControl === 'disable' && !enabled;
+    if (state.hostPhase && !enabled) for (const button of this.root.querySelectorAll(`[data-page="${id}"] [data-action]`)) button.disabled = true;
   }
   syncLauncher() {
     const launcher = this.node('.launcher'), running = Boolean(this.latest?.[0].running);
     const status = running ? (this.latest[0].config.mode === 'preview' ? '仅预览' : '自动发送') : '已暂停';
-    launcher.classList.toggle('running', running); this.text('.launcher span', status);
-    const attributes = { 'aria-expanded':String(this.open), 'aria-label':`${this.open ? '收起' : '展开'}场控面板，当前${status}`, title:`点击${this.open ? '收起' : '展开'} · 拖动调整位置` };
+    launcher.classList.toggle('running', running); this.text('.launcher span', this.aiServiceError ? 'AI 异常' : status);
+    const attributes = { 'aria-expanded':String(this.open), 'aria-label':`${this.open ? '收起' : '展开'}场控面板，当前${status}${this.aiServiceError ? '，AI 服务异常' : ''}`, title:`点击${this.open ? '收起' : '展开'} · 拖动调整位置` };
     for (const [key, value] of Object.entries(attributes)) if (launcher.getAttribute(key) !== value) launcher.setAttribute(key, value);
   }
   toggleOpen() { this.open = !this.open; this.floating.setOpen(this.open); this.syncLauncher(); if (this.open) { if (this.latest) this.refresh(...this.latest); this.renderLogs(); this.charts.resize(); } }
@@ -849,7 +844,7 @@ export class Panel {
     this.node('[data-pk-rates]').innerHTML = [rate('3 倍加成', data.multiplierStats), rate('卡片 / 宝箱命中', data.cardStats)].join('');
   }
   setAnchorView(view) {
-    if (!['overview','income'].includes(view)) return;
+    if (!['overview','income','broadcast'].includes(view)) return;
     this.anchorView = view;
     for (const button of this.root.querySelectorAll('[data-anchor-view]')) button.setAttribute('aria-pressed', String(button.dataset.anchorView === view));
     for (const content of this.root.querySelectorAll('[data-anchor-content]')) content.hidden = content.dataset.anchorContent !== view;
@@ -859,7 +854,7 @@ export class Panel {
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
     if (['anchor','profiles'].includes(key)) void this.callbacks.income?.();
-    const category = interactionPages.includes(key) ? 'interaction' : key === 'auto-like' ? 'tools' : 'settings';
+    const category = this.tools.get(key) ? 'tools' : interactionPages.includes(key) ? 'interaction' : 'settings';
     this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
@@ -870,6 +865,7 @@ export class Panel {
       const disabled = feature && !this.root.querySelector(`[data-field="${feature === 'timersEnabled' ? feature : `${feature}.enabled`}"]`)?.checked;
       node.hidden = node.dataset.page !== key || Boolean(disabled);
     }
+    this.workspaceLayout.show(key);
     if(key==='pk' && this.latest) this.renderPK(this.latest[0]);
     if(key==='anchor' && this.latest) this.renderAnchor(this.latest[0]);
   }
@@ -923,16 +919,23 @@ export class Panel {
       }
       const anchorView = e.target.closest('[data-anchor-view]'); if (anchorView) { this.setAnchorView(anchorView.dataset.anchorView); return; }
       const tab = e.target.closest('[data-tab]'); if (tab) this.tab(tab.dataset.tab);
+      const control = e.target.closest('[data-tool-control]');
+      if (control && !control.disabled) {
+        control.disabled = true;
+        try { await this.callbacks.toolControl?.(control.dataset.toolId, control.dataset.toolControl); }
+        catch (error) { this.toast(error.message,true); }
+        finally { const state=this.toolStates.get(control.dataset.toolId); if (state) this.updateToolState(control.dataset.toolId,state); }
+        return;
+      }
       const button = e.target.closest('[data-action]'); if (!button || button.disabled || button.hidden) return;
       const action = button.dataset.action;
       try {
-        if (action === 'auto-like-start') {
-          this.disabled('[data-action=auto-like-start]',true);
-          try { await this.callbacks.startAutoLike?.(Object.fromEntries([...this.root.querySelectorAll('[data-auto-like]')].map(input=>[input.dataset.autoLike,Number(input.value)]))); }
-          finally { this.updateAutoLike(this.autoLikeState || {phase:'idle',accepted:0,batches:0,reason:'尚未开始'}); }
+        const tool = this.tools.list().find(definition => Object.keys(definition.view.actions || {}).some(name => `${definition.id}-${name}` === action));
+        if (tool) {
+          const name = action.slice(tool.id.length + 1);
+          await tool.view.actions[name](this, (command, value) => this.callbacks.toolAction?.(tool.id, command, value));
           return;
         }
-        if (action === 'auto-like-stop') { this.callbacks.stopAutoLike?.(); return; }
         if (action === 'export-income') { this.setBusy(action,true); await this.callbacks.exportIncome?.(); return; }
         if (action === 'export-anchor') { await this.callbacks.exportAnchor?.(this.anchorDashboard.exportReport()); return; }
         if (action === 'refresh-anchor') { this.setBusy(action,true); await this.callbacks.income?.(); const refreshed = await this.callbacks.refreshAnchor?.(); this.toast(refreshed ? '主播统计已刷新。' : '本地统计已刷新；展馆暂不可用，请确认已登录并打开直播间。', !refreshed); return; }
@@ -961,22 +964,28 @@ export class Panel {
           const config = this.read(); const key = this.root.querySelector('[data-api-key]').value.trim();
           const remember = this.root.querySelector('[data-remember-key]').checked;
           this.setBusy(action, true);
-          await this.callbacks[action === 'save' ? 'save' : 'testAI'](config, key, remember);
+          await this.callbacks[action === 'save' ? 'save' : 'testAI'](config, key, remember, this.searchCredentials(),this.aiSettings.credentials());
           if (action === 'save') this.populate(config);
         } else if (action === 'export') this.callbacks.exportConfig();
         else if (action === 'export-log') this.callbacks.exportLog(copy(this.entries));
         else if (action === 'forget-key') await this.callbacks.forgetKey(this.root.querySelector('[data-field="ai.endpoint"]').value);
+        else if(action==='test-search'){this.setBusy(action,true);await this.callbacks.testSearch(this.read(),this.searchCredentials());}
+        else if(action==='forget-search-key')await this.callbacks.forgetSearchKey(this.node('[data-field="ai.search.endpoint"]').value);
         else if (action === 'pick-input' || action === 'pick-send') this.callbacks.pick(action === 'pick-input' ? 'input' : 'send');
         else if (action === 'start') {
           this.setBusy(action, true);
-          if (this.dirty) { const config = this.read(); await this.callbacks.save(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked); this.populate(config); }
+          if (this.dirty) { const config = this.read(); await this.callbacks.save(config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,this.searchCredentials(),this.aiSettings.credentials()); this.populate(config); }
           await this.callbacks.start();
         }
         else if (action === 'stop') this.callbacks.stop();
         else if (action === 'debug-send' || action === 'debug-send-admin') { this.setBusy(action, true); const channel = action === 'debug-send-admin' ? 'admin' : 'chat'; await this.callbacks.debugSend?.(channel); this.toast(`${channel === 'admin' ? '管理员' : '普通'}弹幕测试消息已加入发送队列`); }
         else if (action === 'lab') this.callbacks.lab();
         else if (action === 'diagnose') { this.setBusy(action, true); this.showDiagnostics(await this.callbacks.diagnose()); }
-      } catch (error) { this.toast(error.message, true); }
+      } catch (error) {
+        const field=error.field && [...this.root.querySelectorAll('[data-field]')].find(node=>node.dataset.field===error.field);
+        if(field)this.revealError(field);
+        this.toast(error.message, true);
+      }
       finally { if (action) this.setBusy(action, false); }
     });
     this.root.querySelector('[data-log-filter]').addEventListener('change', () => this.renderLogs());
@@ -995,11 +1004,35 @@ export class Panel {
     });
     const clearKey = () => { this.root.querySelector('[data-api-key]').value = ''; this.root.querySelector('[data-key-status]').textContent = '接口已改变。新服务需单独填写密钥，不会沿用其他域名的密钥。'; };
     this.root.querySelector('[data-field="ai.endpoint"]').addEventListener('input', clearKey);
+    this.node('[data-field="ai.search.endpoint"]').addEventListener('input',()=>{this.node('[data-search-key]').value='';});
+    this.node('[data-field="ai.search.provider"]').addEventListener('change',event=>{
+      this.node('[data-field="ai.search.endpoint"]').value=SEARCH_PROVIDERS[event.target.value].endpoint;
+      this.node('[data-search-key]').value='';
+    });
     this.root.querySelector('[data-preset]').addEventListener('change', e => {
       this.node('[data-ai-connection]').open = ['custom','doubao','local'].includes(e.target.value);
-      const preset = presets[e.target.value]; if (!preset) return;
-      this.root.querySelector('[data-field="ai.endpoint"]').value = preset[0]; this.root.querySelector('[data-field="ai.model"]').value = preset[1]; clearKey();
+      const preset = presets[e.target.value];
+      if (!preset) {this.modelPickers.setChoices('ai.model',replyModelOptions(e.target.value));return;}
+      this.root.querySelector('[data-field="ai.endpoint"]').value = preset[0]; this.root.querySelector('[data-field="ai.model"]').value = preset[1];this.modelPickers.setChoices('ai.model',replyModelOptions(e.target.value)); clearKey();
     });
+  }
+  searchCredentials() {return {key:this.node('[data-search-key]').value.trim(),remember:this.node('[data-remember-search-key]').checked};}
+  recordSearch(record) {
+    this.searchRecords=[record,...(this.searchRecords || [])].slice(0,8);
+    this.node('[data-search-history]').innerHTML=this.searchRecords.map(row=>{
+      const sources=(row.results || []).slice(0,5).map((source,index)=>{
+        let url;try{url=new URL(source.url);}catch{return '';}
+        if(!['https:','http:'].includes(url.protocol) || url.username || url.password)return '';
+        return `<li><a href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">[${index+1}] ${esc(source.title || url.hostname)}</a></li>`;
+      }).join('');
+      return `<section class="section"><p>${esc(String(row.question || row.query || '').slice(0,160))}</p><p class="hint">${esc(row.error || row.answer || '搜索连接通过')}${row.searchedAt ? ` · ${esc(timeFormat.format(row.searchedAt))}` : ''}</p>${sources ? `<ol>${sources}</ol>` : ''}</section>`;
+    }).join('');
+  }
+  setAIServiceStatus(message) {
+    this.aiServiceError = message;
+    this.text('[data-ai-alert-text]', message);
+    this.hidden('[data-ai-alert]', !message);
+    this.syncLauncher();
   }
   log(category, message) {
     this.entries.push({ at: new Date().toISOString(), category, message, time: timeFormat.format(new Date()) });
@@ -1119,7 +1152,8 @@ export class Panel {
     this.text('[data-bot-session]', engine.bot?.sessionSummary?.() || '当前没有进行中的游戏。');
     this.renderBotScores(engine.bot);
     this.syncFooter(); this.renderLastReply(); this.renderOverview(engine);
+    this.productUI?.refresh();
     for (const action of ['identify','test-ai','diagnose','refresh-anchor']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
+  destroy() { this.productUI?.destroy();this.workspaceLayout.destroy();this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
 }

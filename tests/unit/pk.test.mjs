@@ -183,6 +183,18 @@ test('主播可从参与者房间匹配，终局不重复结算且不被迟到�
   assert.ok(Number.isFinite(tracker.current().selfVelocity60));
 });
 
+test('PK 终局后迟到的参战名单和主播元数据不能改写已结算结果',()=>{
+  const tracker=new PKTracker({now:()=>8_000_000});
+  tracker.ingest({type:'pk-start',battleId:'finished',roomId:'r',anchorId:'self',participants:[{anchorId:'self',roomId:'r',name:'主播'},{anchorId:'rival',roomId:'r2',name:'对手'}]});
+  tracker.ingest({type:'pk-end',battleId:'finished',scores:[{anchorId:'self',score:20},{anchorId:'rival',score:10}]});
+  const settled=structuredClone(tracker.export());
+  tracker.ingest({type:'pk-score',battleId:'finished',roomId:'r',anchorId:'rival',participants:[{anchorId:'third',roomId:'r3'}],scores:[{anchorId:'third',score:999}]});
+  assert.deepEqual(tracker.export(),settled);
+  assert.equal(tracker.current().prediction.status,'final');
+  assert.equal(tracker.current().selfScore,20);
+  assert.equal(tracker.current().opponentScore,10);
+});
+
 test('三人及四人 PK 分别追踪各主播比分并输出总和为 100% 的夺冠概率', () => {
   let now=8_500_000;
   const tracker=new PKTracker({now:()=>now});

@@ -75,3 +75,41 @@ test('实时缓冲满后仍为持久日志保留恢复槽位，分步恢复不�
   assert.equal(inbox.status().gaps,1);
   inbox.held=false;await inbox.drain();assert.equal(inbox.status().pending,0);
 });
+
+
+test('关闭后的事件立即拒绝，不保留无法再处理的队列或等待者',async()=>{
+  let handled=0;const inbox=new EventInbox({handle:()=>{handled++;}});inbox.close();
+  let result='pending';void inbox.admit({type:'chat',id:'late'}).then(value=>{result=value;});
+  await new Promise(setImmediate);
+  assert.equal(result,false);assert.equal(inbox.status().pending,0);assert.equal(inbox.status().bytes,0);assert.equal(handled,0);
+});
+
+test('处理器拒绝 null 等非 Error 值时仍按有限重试隔离，不悬挂调用方',async()=>{
+  for(const error of [null,undefined,'storage unavailable']) {
+    let calls=0;const inbox=new EventInbox({handle:async()=>{calls++;throw error;},wait:async()=>{}});
+    let outcome='pending';const task=inbox.admit({type:'chat',id:'bad-rejection'}).then(value=>{outcome=value;});
+    try {
+      await new Promise(setImmediate);assert.equal(outcome,false);assert.equal(calls,3);
+      assert.equal(inbox.status().quarantined,1);assert.equal(inbox.status().pending,0);
+    }finally{inbox.close();await task;}
+  }
+});
+
+
+test('后台接收端短暂缺失后自动重试同一事件，不永久阻塞采集',async()=>{
+  const handled=[];let calls=0;
+  const inbox=new EventInbox({wait:async()=>{},handle:async event=>{
+    if(++calls===1)throw new Error('Could not establish connection. Receiving end does not exist.');
+    handled.push(event.id);
+  }});
+  const result=inbox.admit({type:'gift',id:'reconnected'});
+  try {
+    await inbox.whenIdle();
+    assert.equal(inbox.status().blocked,false);
+    assert.equal(await result,true);
+    assert.deepEqual(handled,['reconnected']);
+    assert.equal(calls,2);
+    assert.equal(inbox.status().quarantined,0);
+    assert.equal(inbox.status().state,'healthy');
+  } finally {inbox.close();}
+});

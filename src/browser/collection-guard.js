@@ -1,18 +1,18 @@
+import { RoomContext, roomMatchesStore } from './room-context.js';
 // Douyin's PausePop listens for document mousemove and pauses BOTH playback
 // and live IM after background inactivity. See docs/research/idle-collection.zh-CN.md.
 export class CollectionGuard {
   constructor({page, onStatus = () => {}, now = () => Date.now()}) {
     this.page = page; this.doc = page.document; this.onStatus = onStatus; this.now = now;
-    this.path = page.location.pathname; this.search = page.location.search;
-    this.room = this.path.match(/^\/(\d+)\/?$/)?.[1] || new URLSearchParams(this.search).get('room_id');
+    this.roomContext = new RoomContext(page);
+    this.room = this.roomContext.room;
     this.status = {active:false, state:'waiting', pulses:0, recoveries:0, lastPulse:0, maxDelayMs:0, errors:0};
     this.suspended = false; this.closed = false; this.lastAttempt = null; this.lastRecovery = null;
   }
   context() {
-    if (!this.room || this.page.location.pathname !== this.path || this.page.location.search !== this.search) return 'left';
+    if (!this.room || !this.roomContext.current()) return 'left';
     const store = this.page.__STORE__, info = store?.roomStore?.roomInfo;
-    const webRid = String(info?.room?.web_rid || info?.web_rid || info?.webRid || '');
-    if (webRid !== this.room || !/^\d+$/.test(String(info?.roomId || info?.room?.id_str || ''))) return 'waiting';
+    if (!roomMatchesStore(info,this.page.location) || !/^\d+$/.test(String(info?.roomId || info?.room?.id_str || ''))) return 'waiting';
     if (Number(info.room?.status) === 4) return 'ended';
     if (Number(info.room?.status) !== 2 || store.roomStore.isAppOnly || store.feedStore?.isActive === false) return 'waiting';
     if (this.page.navigator?.onLine === false) return 'offline';

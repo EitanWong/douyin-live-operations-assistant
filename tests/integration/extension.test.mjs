@@ -1,3 +1,6 @@
+import {RoomContext,roomFromURL} from '../../src/browser/room-context.js';
+import { ProtocolCache } from '../../extension/protocol-cache.js';
+import { fanclubFrameContext, cleanFanclubSnapshot } from '../../src/data/fanclub.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, access } from 'node:fs/promises';
@@ -7,29 +10,49 @@ import { JSDOM } from 'jsdom';
 import { build } from 'esbuild';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { validateEndpoint } from '../../src/services/ai.js';
+import {validateSearchEndpoint,validateSearchBody} from '../../src/services/search.js';
 import { GiftStore } from '../../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from '../../extension/durable-storage.js';
-import { EventInbox } from '../../src/runtime/inbox.js';
+import { EventInbox, failureCode } from '../../src/runtime/inbox.js';
 import { installCollectionKeeper } from '../../extension/collection-keeper.js';
 import { RequestBridgeClient } from '../../src/browser/request-sender.js';
 import { webLocks } from '../helpers/web-locks.mjs';
+import {createGiveaway,enterGiveaway,drawGiveaway} from '../../src/core/giveaway.js';
 import { buildFixture } from '../helpers/build.mjs';
 const {dist:testDist, cleanup} = await buildFixture();
 after(cleanup);
 const file=name=>join(testDist,'chrome-extension',name);
-test('构建后的 MAIN 与隔离点赞桥完成三批，重复批次只发一次，停止票据立即失效',async()=>{
+const nativeQueues=new WeakMap();
+function connectNative(page) {
+  if(nativeQueues.has(page))return;
+  const events=[],captures=[];nativeQueues.set(page,{events,captures});
+  const original=page.chrome.runtime.sendMessage.bind(page.chrome.runtime);
+  page.chrome.runtime.sendMessage=async request=>{
+    if(request.type!=='page-command')return original(request);
+    if(page.__douyinAssistantPageV2)return {ok:true,value:await page.__douyinAssistantPageV2.call(request.command)};
+    if(request.command.type==='drain')return {ok:true,value:{events:events.splice(0),captures:captures.splice(0),status:{}}};
+    return {ok:true,value:false};
+  };
+}
+function nativeEvent(page,event) {nativeQueues.get(page).events.push(event);}
+async function rawEntry(entry) {
+  let source=(await readFile(new URL(`../../extension/${entry}.js`,import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
+  if(entry==='content')source=`const failureCode = ${failureCode.toString()};\n`+source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
+  return source;
+}
+async function evalPage(page) {page.RoomContext=RoomContext;page.eval(await rawEntry('page'));}
+async function evalContent(page) {page.structuredClone=structuredClone;connectNative(page);page.eval(await readFile(file('content.js'),'utf8'));}
+function pageTransport(page) {return async request=>({ok:true,value:await page.__douyinAssistantPageV2.call(request.command)});}
+test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，重复批次只发一次，停止票据立即失效',async()=>{
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,requests=[];
   try {
     Object.assign(page,{TextDecoder,TextEncoder});
     page.__STORE__={roomStore:{roomInfo:{roomId:'7700231539170609947',room:{web_rid:'1',status:2,room_auth:{Digg:true}}}},userStore:{userInfo:{id_str:'987654321'}}};
-    const source=await readFile(file('page.js'),'utf8'),bootstrap=await readFile(new URL('../../extension/page.js',import.meta.url),'utf8');
-    page.eval(source.replace(bootstrap,'window.likeSender=new PageRequestSender(window);'));
-    page.likeSender.client=()=>({request:async request=>{requests.push(request);return {data:{status_code:0}};}});
-    page.DouyinAdapter=class{constructor(){this.requestSender=page.likeSender;}hook(){}emitStatus(){}};
-    page.DEFAULTS={};page.copy=value=>value;
-    page.postMessage=data=>queueMicrotask(()=>page.dispatchEvent(new page.MessageEvent('message',{source:page,origin:page.location.origin,data})));
-    page.eval(bootstrap);
-    const bridge=new RequestBridgeClient(page),prepared=await bridge.prepareLike();
+    const client={defaults:{baseURL:page.location.origin,withCredentials:true},request:async request=>{requests.push(request);return {data:{status_code:0,data:{}}};}};
+    const require=()=>({ZP:client});require.m={request:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
+    page.webpackChunkdouyin_live_v2=[];page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
+    page.eval(await readFile(file('page.js'),'utf8'));
+    const bridge=new RequestBridgeClient(page,pageTransport(page)),prepared=await bridge.prepareLike();
     assert.equal(prepared.available,true);
     let now=page.Date.now();page.Date.now=()=>now;
     for(const [i,count] of [3,3,1].entries()){
@@ -44,25 +67,57 @@ test('构建后的 MAIN 与隔离点赞桥完成三批，重复批次只发一�
     assert.equal(requests.length,3);
   }finally{page.close();}
 });
-async function worker(values = {}, indexedDB = new IDBFactory()) {
+async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{"choices":[]}') {
   let usedBytes = 0, listener,changed; const sent=[], requests=[]; let allowed=true;
   const WorkerDurableStorage = class extends DurableStorage {
     constructor(options = {}) { super({...options, indexedDB: options.indexedDB || indexedDB, IDBKeyRange}); }
   };
-  const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>sent.push([id,m])}};
-  const code=(await readFile(file('background.js'),'utf8')).replace(/^import .*;\n/gm,'');
-  vm.runInNewContext(code,{chrome,installCollectionKeeper,validateEndpoint,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,AbortController,setTimeout,clearTimeout,URL,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>'{"choices":[]}'};}});
+  const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
+  const code=(await readFile(file('background.js'),'utf8'));
+  vm.runInNewContext(code,{atob,btoa,queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};}});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
-  return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,r)),deny:()=>allowed=false};
+  return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
 }
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
-  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
+  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
   for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
   const main=await readFile(file('page.js'),'utf8'); assert.doesNotMatch(main,/chrome\.storage|GM_getValue|api-key:|GM_xmlhttpRequest/);
-  assert.match(main,/class AnchorStats\b/); assert.match(main,/new AnchorStats\(/);
+  assert.doesNotMatch(main,/window\.postMessage/);
+});
+
+test('粉丝团跨域快照只转交同标签主页，拒绝错误来源、UID、过量成员并持久化回放',async()=>{
+  const w=await worker(),frameURL='https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html?anchor_id=123&room_id=456&user_id=321&fans_level=6&light_status=1';
+  const sender={frameId:2,url:frameURL,tab:{id:1,url:'https://live.douyin.com/1'}};
+  const event={type:'anchor-fanclub',source:'native-fanclub',anchorId:'123',roomId:'456',fansCount:'14343',lightedCount:'88',members:[],receivedAt:Date.now()-10000};
+  assert.equal((await w.send({type:'fanclub-frame',event},sender)).ok,true);
+  assert.equal(w.sent.length,1);assert.equal(w.sent[0][0],1);
+  assert.equal(w.sent[0][1].event.viewer.level,6);
+  assert.equal(w.sent[0][1].event.receivedAt,event.receivedAt);
+  for(const invalid of [{...sender,url:frameURL.replace('bytegecko.com','evil.test')},{...sender,frameId:0}]) assert.equal((await w.send({type:'fanclub-frame',event},invalid)).ok,false);
+  assert.equal((await w.send({type:'fanclub-frame',event:{...event,anchorId:'999'}},sender)).ok,false);
+  assert.equal((await w.send({type:'fanclub-frame',event:{...event,members:Array(11).fill({})}},sender)).ok,false);
+  const saved=await w.send({type:'event-append',id:'fansclub-event-00000001',event:w.sent[0][1].event});
+  assert.equal(saved.ok,true);
+  const restarted=await worker(w.values,w.indexedDB);
+  assert.equal((await restarted.send({type:'event-list'})).value[0].event.fansCount,'14343');
+});
+
+test('生成的粉丝团 iframe 脚本读取原生字段并分块发送，未加载字段不伪造',async()=>{
+  const rows=Array.from({length:21},(_,i)=>`<div class="item"><span class="fansclub-list-item-nickname">成员${i}</span><span class="fmlchlci-right">0</span></div>`).join('');
+  const dom=new JSDOM(`<div class="title-bar-text">主播粉丝团</div><div class="fmlc-hasfans-header-left">共14343位"粉丝"，88位勋章点亮中</div><div class="list-scroll">${rows}</div>`,{url:'https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html?anchor_id=123&room_id=456',runScripts:'outside-only'});
+  const calls=[],page=dom.window;
+  try {
+    const source=(await readFile(file('fanclub-frame.js'),'utf8')).replace(/window\s*!==\s*window\.top/g,'true');
+    page.chrome={runtime:{id:'test',sendMessage:async message=>{calls.push(message);return {ok:true};}}};
+    page.eval(source);await new Promise(setImmediate);
+    assert.deepEqual(calls.map(row=>row.event.members.length),[10,10,1]);
+    assert.equal(calls[2].event.totalRows,21);assert.equal(calls[2].event.members[0].position,21);
+    assert.equal(calls[2].event.members[0].level,null);
+    page.dispatchEvent(new page.Event('pagehide'));
+  } finally {page.close();}
 });
 
 test('展馆 iframe 保级消息仅可从已知指标页转交同标签主页，错误来源与 UID 被拒绝',async()=>{
@@ -107,16 +162,14 @@ test('后台与弹窗的完整模块依赖均可从扩展产物内解析', async
     assert.deepEqual(output.imports,[],'所有模块依赖必须包含在扩展产物中');
   }
 });
-test('油猴、隔离脚本和 MAIN 产物均包含并可执行礼物与观众回复上下文', async () => {
-  for (const entry of ['userscript','content','page']) {
+test('油猴与隔离脚本产物均可执行礼物与观众回复上下文', async () => {
+  for (const entry of ['userscript','content']) {
     const path = entry === 'userscript' ? join(testDist,'douyin-live-assistant.user.js') : file(`${entry}.js`);
     const source = await readFile(path,'utf8');
-    const bootstrap = entry === 'userscript' ? '\nboot();\n' : await readFile(new URL(`../../extension/${entry}.js`,import.meta.url),'utf8');
-    assert.ok(source.includes(bootstrap));
     const dom = new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
     try {
-      Object.assign(dom.window,{TextDecoder,TextEncoder});
-      dom.window.eval(source.replace(bootstrap,'\nglobalThis.replyTest = {Engine, copy, DEFAULTS};\n'));
+      Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone});
+      dom.window.eval(source.replace(/(?:boot|startContent)\(\);\s*}\)\(\);\s*$/, 'globalThis.replyTest = {Engine, copy, DEFAULTS};})();'));
       const {Engine,copy,DEFAULTS} = dom.window.replyTest;
       assert.equal(DEFAULTS.pkOperations.durationSec,300,entry);
       const config=copy(DEFAULTS);config.ai.enabled=true;config.gift.responseMode='ai';config.mode='preview';config.anchorId='1234567890';
@@ -135,6 +188,31 @@ test('油猴、隔离脚本和 MAIN 产物均包含并可执行礼物与观众�
   }
 });
 
+test('油猴与隔离产物内置 Cordis，浏览器无 Node 全局也能注入服务、回收与重建工具',async()=>{
+  for (const entry of ['userscript','content']) {
+    const path=entry==='userscript'?join(testDist,'douyin-live-assistant.user.js'):file('content.js');
+    const source=await readFile(path,'utf8');
+    const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
+    let host;
+    try {
+      Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone});
+      dom.window.eval(source.replace(/(?:boot|startContent)\(\);\s*}\)\(\);\s*$/, 'globalThis.toolTest = {ToolRuntime, ToolRegistry};})();'));
+      assert.equal(dom.window.process,undefined);assert.equal(dom.window.require,undefined);
+      const {ToolRuntime,ToolRegistry}=dom.window.toolTest;let mounts=0,disposed=0;
+      host=new ToolRuntime({room:'1',services:{page:dom.window},createLock:()=>({release(){}}),registry:new ToolRegistry([{
+        id:'sample',label:'样例',icon:'heart',version:'1.0.0',apiVersion:1,capabilities:[],view:{template:()=>'',update(){}},
+        mount:ctx=>{mounts++;assert.equal(ctx.services.page,dom.window);ctx.scope.listen(dom.window,'probe',()=>assert.fail('卸载后不能回调'));return {dispose:()=>{disposed++;}};}
+      }])});
+      await host.start();assert.equal(host.diagnostics().backend,'cordis');assert.equal(host.diagnostics().plugins,1);
+      await host.restart('sample');assert.equal(mounts,2);assert.equal(disposed,1);
+      await host.close();dom.window.dispatchEvent(new dom.window.Event('probe'));
+      assert.equal(disposed,2);assert.equal(host.diagnostics().plugins,0);assert.equal(host.diagnostics().scopes,0);
+      assert.match(source,/Copyright \(c\) 2021-present Shigma/);
+    } finally {await host?.close();dom.window.close();}
+  }
+  assert.doesNotMatch(await readFile(file('page.js'),'utf8'),/CordisToolAdapter/,'MAIN 桥不加载工具宿主');
+});
+
 test('room_id 查询链接的 MAIN 观察器和后台均识别同一直播间',async()=>{
   const w=await worker(),sender={frameId:0,tab:{url:'https://live.douyin.com/?room_id=1'}};
   assert.equal((await w.send({type:'init'},sender)).ok,true);
@@ -143,33 +221,30 @@ test('room_id 查询链接的 MAIN 观察器和后台均识别同一直播间',a
   const dom=new JSDOM('<body></body>',{url:sender.tab.url,runScripts:'outside-only'});
   dom.window.DouyinAdapter=class {constructor(options){captured=options;}hook(){}emitStatus(){}};
   dom.window.DEFAULTS={};dom.window.copy=value=>value;
-  try {dom.window.eval(await readFile(new URL('../../extension/page.js',import.meta.url),'utf8'));assert.equal(typeof captured.onEvent,'function');}
+  try {await evalPage(dom.window);assert.equal(typeof captured.onEvent,'function');}
   finally {dom.window.close();}
 });
 
-test('MAIN 观察器在 content 握手之前完整缓存事件，握手只回放一次', async () => {
+test('MAIN 观察器在隔离脚本读取前完整缓存事件，分页读取只交付一次', async () => {
   let captured;
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only'});
   const received = [];
   dom.window.DouyinAdapter = class { constructor(options) {captured=options;} hook() {} emitStatus() {} };
   dom.window.DEFAULTS = {}; dom.window.copy = value => value;
-  dom.window.addEventListener('message', e => {if(e.data?.source==='live-assistant-page-v1' && e.data.type==='event')received.push(e.data.event);});
+
   try {
-    dom.window.eval(await readFile(new URL('../../extension/page.js',import.meta.url),'utf8'));
+    await evalPage(dom.window);
     for(let n=0;n<160;n++)captured.onEvent({type:n % 2 ? 'chat' : 'gift',id:String(n),text:`消息${n}`});
     assert.equal(received.length,0);
-    const hello=()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-content-v1',type:'hello'}}));
-    hello(); hello();
-    // The bridge yields between batches; concurrent test workers can exceed a fixed 20 ms.
-    const deadline=Date.now()+2000;
-    while(received.length<160 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
+    const drain=()=>received.push(...dom.window.__douyinAssistantPageV2.call({type:'drain'}).events);
+    drain();drain();drain();
     assert.equal(received.length,160); assert.equal(received[159].id,'159'); assert.equal(received.filter(e=>e.type==='chat').length,80);
   } finally {dom.window.close();}
 });
 test('隔离脚本把 MAIN 原始协议帧送入独立持久化通道', async () => {
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
   const saved=[];
-  Object.assign(dom.window,{TextDecoder,TextEncoder,chrome:{runtime:{
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{
     sendMessage:async request=>{
       if(request.type==='init')return {ok:true,value:{}};
       if(request.type==='protocol-append'){saved.push(request);return {ok:true,value:{key:'stored'}};}
@@ -178,10 +253,12 @@ test('隔离脚本把 MAIN 原始协议帧送入独立持久化通道', async ()
     },onMessage:{addListener(){}}
   }}});
   try {
-    dom.window.eval(await readFile(file('content.js'),'utf8'));
+    await evalContent(dom.window);
     await new Promise(resolve=>setTimeout(resolve,100));
     const record={protocolVersion:1,transport:'socket',receivedAt:Date.now(),rawBytes:2,rawBase64:'CAI=',messages:[{method:'WebcastMysteryMessage',messageId:'2',decodedTypes:[]}]};
     dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-page-v1',room:'1',type:'protocol-frame',record}}));
+    await new Promise(resolve=>setTimeout(resolve,250));assert.equal(saved.length,0,'公开消息不得写入协议存储');
+    nativeQueues.get(dom.window).captures.push(record);
     const deadline=Date.now()+1000;
     while(Date.now()<deadline&&!saved.length)await new Promise(resolve=>setTimeout(resolve,10));
     assert.equal(saved.length,1);assert.deepEqual(saved[0].record.messages[0],record.messages[0]);
@@ -197,16 +274,16 @@ test('MAIN 桥接遇到不可 JSON 序列化事件时记录缺口，不中断后
     emitStatus() { captured.onStatus({hook:true}); }
   };
   dom.window.DEFAULTS = {}; dom.window.copy = value => value;
-  dom.window.addEventListener('message', e => { if (e.data?.source === 'live-assistant-page-v1' && e.data.type === 'status') status = e.data.status; });
+
   try {
-    dom.window.eval(await readFile(new URL('../../extension/page.js',import.meta.url),'utf8'));
+    await evalPage(dom.window);
     const cycle = {type:'gift',id:'cycle'}; cycle.self = cycle;
     captured.onEvent(cycle);
     await new Promise(resolve => setTimeout(resolve,0));
-    assert.equal(status.bridgeGaps,1);
+    status=dom.window.__douyinAssistantPageV2.call({type:'drain'}).status;assert.equal(status.bridgeGaps,1);
     const valid = {type:'chat',id:'ok',text:'正常'};
     captured.onEvent(valid);
-    dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-content-v1',type:'hello'}}));
+    assert.equal(dom.window.__douyinAssistantPageV2.call({type:'drain'}).events[0].id,'ok');
     await new Promise(resolve => setTimeout(resolve,10));
   } finally { dom.window.close(); }
 });
@@ -271,6 +348,17 @@ test('后台日志和配置拒绝不可 JSON 序列化输入并返回明确错�
   const giftResult=await w.send({type:'gift-record',event:{type:'gift',unitValue:1n}});
   assert.equal(giftResult.ok,false); assert.equal(giftResult.code,'INVALID_EVENT');
 });
+test('原生点赞快照可以通过扩展后台持久化并在重启后回放',async()=>{
+  const w=await worker();
+  const event={type:'room-likes',source:'native-room',anchorId:'4007055676415213',roomId:'7701733692930411306',total:15000,display:'1.5万',approximate:true,receivedAt:1800000000000};
+  const saved=await w.send({type:'event-append',id:'likes-event-00000001',event});
+  assert.equal(saved.ok,true);
+  const restarted=await worker(w.values,w.indexedDB);
+  const pending=await restarted.send({type:'event-list'});
+  assert.equal(pending.value.length,1);
+  assert.equal(pending.value[0].event.display,'1.5万');
+  assert.equal(pending.value[0].event.roomId,event.roomId);
+});
 test('事件日志先持久化、后台重启后可回放，并严格隔离主播房间', async()=>{
   const w=await worker(), other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
   const event={type:'gift',id:'gift-event-1',roomId:'stream-1',giftId:'rose',groupId:'combo-1',count:3,final:true,user:{id:'viewer-1',name:'观众'}};
@@ -297,6 +385,43 @@ test('AI网络需指定域名权限且不携带Cookies、不跟随跳转', async
   const w=await worker(); const m={type:'ai',url:'https://ai.example/v1/chat/completions',data:JSON.stringify({model:'model',messages:[]}),headers:{Authorization:'Bearer dummy',Cookie:'not-forwarded'}};
   assert.equal((await w.send(m)).ok,true); assert.equal(w.requests[0].opts.credentials,'omit'); assert.equal(w.requests[0].opts.redirect,'error'); assert.equal(w.requests[0].opts.headers.Cookie,undefined);
   w.deny(); assert.equal((await w.send(m)).ok,false); assert.equal(w.requests.length,1);
+});
+test('音视频后台接收有界媒体包，拒绝网页伪造、远程图片与权限缺失，并持久保存独立密钥',async()=>{
+  const w=await worker(),body={model:'vision-test',stream:false,temperature:0,max_tokens:500,messages:[{role:'system',content:'描述画面'},{role:'user',content:[{type:'text',text:'这一帧'},{type:'image_url',image_url:{url:`data:image/jpeg;base64,${'A'.repeat(120000)}`}}]}]};
+  const message={type:'media',url:'https://vision.test/v1/chat/completions',data:JSON.stringify(body),headers:{Authorization:'Bearer media-test',Cookie:'secret'}};
+  assert.equal((await w.send(message)).ok,true);assert.equal(w.requests.length,1);
+  assert.equal(w.requests[0].opts.credentials,'omit');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.headers.Cookie,undefined);
+  assert.equal((await w.send(message,{frameId:1,tab:{url:'https://live.douyin.com/1'}})).ok,false);
+  const remote=structuredClone(body);remote.messages[1].content[1].image_url.url='https://private.test/img.jpg';
+  assert.equal((await w.send({...message,data:JSON.stringify(remote)})).ok,false);
+  assert.equal((await w.send({...message,type:'ai'})).ok,false,'普通文字AI仍保留原请求大小上限');
+  const key='live-assistant:media-key:https://vision.test';
+  assert.equal((await w.send({type:'set',key,value:'media-key'})).ok,true);
+  const restarted=await worker(w.values,w.indexedDB);assert.equal((await restarted.send({type:'init'})).value[key],'media-key');
+  w.deny();assert.equal((await w.send(message)).ok,false);assert.equal(w.requests.length,1);
+});
+
+test('博查与Tavily搜索经过后台协议校验和域名授权，搜索密钥独立持久化',async()=>{
+  const w=await worker();
+  const messages=[{type:'search',url:'https://api.bochaai.com/v1/web-search',headers:{Authorization:'Bearer bocha-test',Cookie:'omit'},data:JSON.stringify({query:'上海天气',count:3,summary:true,freshness:'noLimit'})},
+    {type:'search',url:'https://api.tavily.com/search',headers:{Authorization:'Bearer tavily-test'},data:JSON.stringify({query:'上海天气',max_results:3,search_depth:'basic',include_answer:false,include_raw_content:false})}];
+  for(const message of messages)assert.equal((await w.send(message)).ok,true);
+  assert.equal(w.requests.length,2);assert.equal(w.requests[0].opts.credentials,'omit');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.headers.Cookie,undefined);
+  assert.equal((await w.send({...messages[0],data:JSON.stringify({query:'q',url:'https://x.test'})})).ok,false);
+  assert.equal((await w.send({...messages[0],url:'https://x.test/fetch'})).ok,false);
+  const key='live-assistant:search-key:https://api.bochaai.com';
+  assert.equal((await w.send({type:'set',key,value:'search-only-test'})).ok,true);
+  assert.equal((await w.send({type:'init'})).value[key],'search-only-test');
+  assert.equal((await w.send({type:'init'})).value['live-assistant:api-key:https://api.bochaai.com'],undefined);
+  w.deny();assert.equal((await w.send(messages[0])).ok,false);assert.equal(w.requests.length,2);
+});
+
+test('自建SearXNG由后台以表单发送，仅允许有界JSON搜索参数',async()=>{
+  const w=await worker(),data=new URLSearchParams({q:'开源搜索',format:'json',pageno:'1'}).toString();
+  const request={type:'search',provider:'searxng',url:'http://localhost:8080/search',data,headers:{}};
+  assert.equal((await w.send(request)).ok,true);assert.equal(w.requests[0].opts.headers['Content-Type'],'application/x-www-form-urlencoded');assert.equal(w.requests[0].opts.body,data);
+  assert.equal((await w.send({...request,data:data+'&url=https://x.test'})).ok,false);
+  assert.equal((await w.send({...request,provider:'unknown'})).ok,false);assert.equal(w.requests.length,1);
 });
 
 test('日志追加幂等、80%用量停止新日志并保留确认和恢复空间',async()=>{
@@ -372,7 +497,7 @@ test('内容脚本持续突发按序交接并回收已消费槽位，回放不�
   const gate = new Promise(resolve => { release = resolve; });
   const replayGate = new Promise(resolve => { replayRelease = resolve; });
   Object.assign(dom.window, {
-    EventInbox,
+    EventInbox,roomFromURL,
     RequestBridgeClient,
     DouyinAdapter:class { constructor(options) { Object.assign(this, options); } emitStatus() {} },
     IdentityReader:class {},
@@ -386,7 +511,7 @@ test('内容脚本持续突发按序交接并回收已消费槽位，回放不�
     }
   });
   try {
-    await dom.window.eval(`(async () => {${await readFile(new URL('../../extension/content.js',import.meta.url),'utf8')}})()`);
+    await dom.window.eval(`(async () => {${await rawEntry('content')}})()`);
     const tasks = [];
     for (let i = 0; i < 2400; i++) tasks.push(adapter.dispatch({type:'chat',id:String(i)}));
     const replay = adapter.replayJournal();
@@ -414,7 +539,7 @@ test('存储水位阻塞的新事件不会挡住持久日志恢复与释放容�
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter,recovered=false;const handled=[];
   Object.assign(dom.window,{
-    EventInbox,
+    EventInbox,roomFromURL,
     RequestBridgeClient,
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     IdentityReader:class {},
@@ -426,7 +551,7 @@ test('存储水位阻塞的新事件不会挡住持久日志恢复与释放容�
     }});adapter.hook();}
   });
   try {
-    await dom.window.eval(`(async()=>{${await readFile(new URL('../../extension/content.js',import.meta.url),'utf8')}})()`);
+    await dom.window.eval(`(async()=>{${await rawEntry('content')}})()`);
     const live=adapter.dispatch({type:'gift',id:'live'});await adapter.inbox.whenIdle();assert.equal(adapter.inbox.blocked,true);
     await adapter.recoverEvents();await live;await adapter.inbox.whenIdle();
     assert.deepEqual(handled,['durable','live']);assert.equal(adapter.inbox.blocked,false);assert.equal(adapter.inbox.status().gaps,0);
@@ -439,8 +564,8 @@ test('同步只送当前房间配置/租约，不广播AI密钥',async()=>{
 test('实际扩展content产物通过Chrome接口启动；保存失败显示且保持未保存',async()=>{
   const listeners=[];
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/?room_id=1',runScripts:'outside-only',pretendToBeVisual:true});
-  Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>m.type==='init'?{ok:true,value:{}}:{ok:false,error:'测试存储失败'},onMessage:{addListener:f=>listeners.push(f)}}}});
-  dom.window.eval(await readFile(file('content.js'),'utf8')); await new Promise(r=>setTimeout(r,100));
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>m.type==='init'?{ok:true,value:{}}:{ok:false,error:'测试存储失败'},onMessage:{addListener:f=>listeners.push(f)}}}});
+  await evalContent(dom.window); await new Promise(r=>setTimeout(r,100));
   const root=dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot; assert.ok(root);
   assert.equal(root.querySelector('.launcher').hidden,false);
   assert.equal(dom.window.document.querySelector('#douyin-live-assistant').style.zIndex,'2147483000');
@@ -453,7 +578,7 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
   const anchorId = '9007199254740993999';
   const values = {'live-assistant:config:1':{anchorId,identity:{autoAnchor:false,autoSelf:false}}};
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
-  Object.assign(dom.window, {TextDecoder,TextEncoder,chrome:{runtime:{
+  Object.assign(dom.window, {TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{
     sendMessage:async request => {
       if (request.type === 'init') return {ok:true,value:values};
       if (request.type === 'event-list' || request.type === 'income-profiles') return {ok:true,value:[]};
@@ -462,11 +587,11 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
     },onMessage:{addListener:()=>{}}
   }}});
   try {
-    dom.window.eval(await readFile(file('content.js'),'utf8'));
+    await evalContent(dom.window);
     await new Promise(resolve=>setTimeout(resolve,100));
     const root = dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot;
     assert.ok(root);
-    const emit = event => dom.window.dispatchEvent(new dom.window.MessageEvent('message', {source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-page-v1',room:'1',type:'event',event}}));
+    const emit = event => nativeEvent(dom.window,event);
     emit({type:'pk-score',id:'pk-score-1',battleId:'two-battle',roomId:'server-room',scores:[{anchorId:'12345',score:0},{anchorId,score:65249}]});
     const deadline = Date.now()+2000;
     while (Date.now()<deadline && root.querySelector('[data-pk-self-score]').textContent !== '65,249') await new Promise(resolve=>setTimeout(resolve,25));
@@ -497,7 +622,7 @@ test('实际扩展接收点赞和礼物，本人礼物入账但不自发感谢�
   const values={'live-assistant:config:1':{mode:'preview',selfId,identity:{autoSelf:false},like:{enabled:true}}};
   const journal=new Map();let journalId=0,failAppendOnce=true;
   const giftStore = new GiftStore({get:async(key,fallback)=>values[key] ?? fallback,set:async(key,value)=>{values[key]=JSON.parse(JSON.stringify(value));},all:async()=>values});
-  Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>{
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:async m=>{
     if(m.type==='init')return {ok:true,value:values};
     if(m.type==='event-append'&&m.event?.id==='other-gift')return new Promise(()=>{});
     if(m.type==='event-append'&&failAppendOnce){failAppendOnce=false;return {ok:false,error:'模拟后台存储短暂失败'};}
@@ -514,15 +639,16 @@ test('实际扩展接收点赞和礼物，本人礼物入账但不自发感谢�
     return {ok:true};
   },onMessage:{addListener:()=>{}}}}});
   try {
-    dom.window.eval(await readFile(file('content.js'),'utf8'));await new Promise(r=>setTimeout(r,100));
+    await evalContent(dom.window);await new Promise(r=>setTimeout(r,100));
     const root=dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot;assert.ok(root);
     root.querySelector('[data-action="start"]').click();await new Promise(r=>setTimeout(r,30));
     root.querySelector('[data-tab="diagnostics"]').click();root.querySelector('[data-log-details]').open=true;
-    const emit=event=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-page-v1',room:'1',type:'event',event}}));
+    const emit=event=>nativeEvent(dom.window,event);
     const user={id:selfId,name:'同名账号'};
     emit({type:'like',id:'self-like',user,count:30});
     emit({type:'gift',id:'self-gift',user,giftId:'1',giftName:'本人的礼物',unitValue:500,count:1,groupId:'self',final:true});
-    await new Promise(r=>setTimeout(r,550));
+    const selfGiftDeadline=Date.now()+3000;
+    while(Date.now()<selfGiftDeadline && root.querySelector('[data-gift-diamonds]').textContent!=='500')await new Promise(r=>setTimeout(r,25));
     assert.equal(root.querySelector('[data-gift-diamonds]').textContent,'500');
     assert.match(root.querySelector('[data-recent-gifts]').textContent,/本人的礼物/);
     assert.doesNotMatch(root.querySelector('[data-logs]').textContent,/like：|gift：/);
@@ -578,8 +704,8 @@ test('页面刷新及扩展后台重启后自动读回礼物收入和榜单估�
   const launch=async()=>{
     const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
     Object.defineProperty(dom.window.navigator,'locks',{value:webLocks()});
-    Object.assign(dom.window,{TextDecoder,TextEncoder,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:message=>backend.send(message),onMessage:{addListener(){}}}}});
-    dom.window.eval(code);
+    Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{sendMessage:message=>backend.send(message),onMessage:{addListener(){}}}}});
+    connectNative(dom.window);dom.window.eval(code);
     await waitFor(()=>dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot);
     const root=dom.window.document.querySelector('#douyin-live-assistant').shadowRoot;
     return {dom,root};
@@ -589,7 +715,7 @@ test('页面刷新及扩展后台重启后自动读回礼物收入和榜单估�
   try {
     const receivedAt=Date.now();
     const event={type:'gift',id:'refresh-kiss',user:{id:'30',name:'送礼观众'},giftId:'kiss',giftName:'亲吻',groupId:'refresh-combo',count:2,unitValue:99,final:true,at:receivedAt,receivedAt};
-    const emit=()=>page.dom.window.dispatchEvent(new page.dom.window.MessageEvent('message',{source:page.dom.window,origin:page.dom.window.location.origin,data:{source:'live-assistant-page-v1',room:'1',type:'event',event}}));
+    const emit=()=>nativeEvent(page.dom.window,event);
     emit();
     await waitFor(async()=> (await backend.durable().get('live-assistant:income:1'))?.days?.[0]?.[1]?.totalDiamonds===198);
     const date=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(receivedAt));
@@ -626,7 +752,7 @@ test('扩展后台把在线榜单观测隔离到来源房间并允许同UID重�
 });
 
 test('场次后台接口绑定来源房间，支持零礼物场次和后台重启', async () => {
-  const w=await worker(),at=Date.now()-60000;
+  const w=await worker(),at=Date.parse('2026-10-15T12:00:00+08:00');
   const start=await w.send({type:'income-session',boundaryType:'start',room:'2',roomId:'broadcast-A',at,source:'platform'});
   assert.equal(start.ok,true);
   const restarted=await worker(w.values,w.indexedDB);
@@ -658,7 +784,7 @@ test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保�
   // jsdom's postMessage omits source/origin; model the browser's same-window bridge.
   dom.window.postMessage=(data,origin)=>dom.window.setTimeout(()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{data,origin,source:dom.window})),0);
   const listeners=[];let moves=0;const leases=[];
-  Object.assign(dom.window,{TextDecoder,TextEncoder,chrome:{runtime:{sendMessage:async request=>{
+  Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{sendMessage:async request=>{
     if(request.type==='init')return {ok:true,value:{}};
     if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
     if(request.type==='collection-state'){leases.push(request.active);return {ok:true,value:{awake:request.active}};}
@@ -669,7 +795,7 @@ test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保�
   const wake=()=>new Promise(resolve=>{for(const listener of listeners)listener({type:'collection-wake'},{},resolve);});
   try {
     dom.window.eval(await readFile(file('page.js'),'utf8'));
-    dom.window.eval(await readFile(file('content.js'),'utf8'));
+    await evalContent(dom.window);
     await new Promise(resolve=>setTimeout(resolve,120));
     assert.equal((await wake()).active,true);assert.ok(moves>0);assert.ok(leases.includes(true));
     const panel=dom.window.document.querySelector('#douyin-live-assistant').shadowRoot;
@@ -723,7 +849,7 @@ test('MAIN 管理桥只提交当前房间白名单动作，票据重复投递不
     page.webpackChunkdouyin_live_v2=[];page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
     page.postMessage=data=>page.setTimeout(()=>page.dispatchEvent(new page.MessageEvent('message',{source:page,origin:page.location.origin,data})),0);
     page.eval(await readFile(file('page.js'),'utf8'));
-    const bridge=new RequestBridgeClient(page),target={id:'999',secUid:'sec-viewer'};
+    const bridge=new RequestBridgeClient(page,pageTransport(page)),target={id:'999',secUid:'sec-viewer'};
     const prepared=await bridge.prepareModeration('mute',target);assert.equal(prepared.available,true);
     assert.equal((await bridge.commitModeration(prepared.token)).submitted,true);
     assert.equal((await bridge.commitModeration(prepared.token)).submitted,true);
@@ -732,4 +858,150 @@ test('MAIN 管理桥只提交当前房间白名单动作，票据重复投递不
     const ban=await bridge.prepareModeration('ban',target);page.__STORE__.roomStore.roomInfo.room.admin_user_ids_str=[];
     assert.equal((await bridge.commitModeration(ban.token)).submitted,false);assert.equal(requests.length,1);
   }finally{page.close();}
+});
+
+test('MAIN 忽略页面伪造的发送命令和事件，提前取消也不会迟到提交',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window;
+  let options,prepares=0;
+  Object.assign(page,{RoomContext,DEFAULTS:{},copy:value=>value,DouyinAdapter:class {
+    constructor(input){options=input;this.status={};this.requestSender={prepareLike:()=>{prepares++;return {available:true};}};}
+    hook(){}
+  }});
+  try {
+    await evalPage(page);options.onEvent({type:'gift',id:'real'});
+    for(const data of [{source:'live-assistant-content-v1',room:'1',type:'send-api',operation:'prepare-like',id:'fake'},
+      {source:'live-assistant-page-v1',room:'1',type:'event',event:{type:'gift',id:'forged'}}])page.dispatchEvent(new page.MessageEvent('message',{source:page,origin:page.location.origin,data}));
+    const bridge=page.__douyinAssistantPageV2;assert.equal(Object.getOwnPropertyDescriptor(page,'__douyinAssistantPageV2').writable,false);
+    assert.deepEqual(Array.from(bridge.call({type:'drain'}).events,row=>row.id),['real']);assert.equal(prepares,0);
+    bridge.call({type:'cancel',id:'canceled'});
+    assert.equal((await bridge.call({type:'send-api',id:'canceled',operation:'prepare-like'})).available,false);assert.equal(prepares,0);
+  } finally {page.close();}
+});
+
+test('福袋记录按来源房间和账号持久化，后台重启后接管者可读且不能越房写入',async()=>{
+  const w=await worker(),key='live-assistant:rewards:1:789',records=[{kind:'luckyBag',key:'luckyBag:activity',status:'unknown',at:Date.now()}];
+  assert.equal((await w.send({type:'rewards-write',key,records})).ok,true);
+  const restored=await worker(w.values,w.indexedDB);
+  assert.deepEqual((await restored.send({type:'rewards-read',key})).value,records);
+  assert.deepEqual((await restored.send({type:'rewards-read',key:'live-assistant:rewards:1:456'})).value,[]);
+  assert.equal((await restored.send({type:'rewards-write',key:'live-assistant:rewards:2:789',records})).ok,false);
+});
+
+test('抽奖结果持久保存在后台数据库，重启可恢复，拒绝越房和非法记录',async()=>{
+  const w=await worker(),key='live-assistant:giveaway:1';
+  let round=createGiveaway({prize:'礼盒',winners:1,durationSec:2,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false},{id:'round-1',room:'1',now:1000});
+  round=enterGiveaway(round,{type:'chat',text:'参与抽奖',at:1500,user:{id:'9999999999999999999',name:'小雨'}},1500);
+  const state={version:2,rounds:[drawGiveaway(round,3000,()=>0)]};
+  assert.equal((await w.send({type:'giveaway-write',key,value:state})).ok,true);
+  const restored=await worker(w.values,w.indexedDB);
+  assert.deepEqual((await restored.send({type:'giveaway-read',key})).value,state);
+  assert.equal((await restored.send({type:'giveaway-read',key:'live-assistant:giveaway:2'})).ok,false);
+  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:2,rounds:[{...round,room:'2'}]}})).ok,false);
+  assert.equal((await restored.send({type:'giveaway-write',key,value:{version:2,rounds:[{...round,awards:[{userId:'stranger',prizeIndex:0}]}]}})).ok,false);
+  assert.deepEqual((await restored.send({type:'giveaway-read',key})).value,state);
+  assert.equal(w.values[key],undefined,'完整记录不落在 chrome.storage.local 配额内');
+});
+
+test('上下文同步失效时更新诊断并停止重试，取消保活失败不覆盖恢复提示',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});let adapter,failedCalls=0;
+  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+    DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
+    chrome:{runtime:{sendMessage:message=>{
+      if(message.type==='init')return Promise.resolve({ok:true,value:{}});
+      failedCalls++;throw Error('Extension context invalidated');
+    },onMessage:{addListener(){}}}},
+    boot:options=>{adapter=options.adapterFactory({onEvent(){}});}
+  });
+  try {
+    await dom.window.eval(`(async()=>{${await rawEntry('content')}})()`);
+    await assert.rejects(adapter.checkStorage(),error=>error.code==='CONTEXT_INVALID' && /刷新/.test(error.message));
+    assert.equal(adapter.status.contextInvalidated,true);
+    await assert.rejects(adapter.checkStorage(),error=>error.code==='CONTEXT_INVALID');
+    assert.equal(failedCalls,2,'仅尝试原操作和一次保活撤销，不重复调用失效扩展');
+    assert.match((await adapter.exportEvents()).error,/导出恢复数据/);
+  }finally{dom.window.close();}
+});
+
+
+test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不因等待超时被移除',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),listeners=[],saved={};
+  const tab={id:1,url:dom.window.location.href};let keeper;
+  const chrome={storage:{session:{get:async key=>({[key]:saved[key]}),set:async values=>Object.assign(saved,values)}},
+    alarms:{create(){},onAlarm:{addListener(){}}},power:{requestKeepAwake(){},releaseKeepAwake(){}},
+    tabs:{query:async()=>keeper?[tab]:[],sendMessage:()=>new Promise(resolve=>listeners[0]({type:'collection-wake'},{},resolve))}};
+  keeper=installCollectionKeeper(chrome,{wakeTimeoutMs:50});await keeper.refresh();
+  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+    DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},boot:()=>{},
+    chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async message=>{
+      if(message.type==='init')return {ok:true,value:{}};
+      if(message.type==='page-command')return {ok:true,value:true};
+      if(message.type==='collection-state')return {ok:true,value:await keeper.update({frameId:0,tab},message.active)};
+      return {ok:true};
+    }}}});
+  try {
+    await dom.window.eval(`(async()=>{${await rawEntry('content')}})()`);
+    assert.equal((await keeper.refresh()).awake,true);
+    assert.equal(saved['live-assistant:collection-leases']['1'],tab.url);
+  }finally{dom.window.close();}
+});
+
+
+test('事件桥短暂失联时暂停发送资格，后台恢复后继续接收，无需刷新',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
+  let adapter,drains=0;const timers=[],handled=[];
+  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+    DouyinAdapter:class {
+      constructor(options){Object.assign(this,options);}
+      emitStatus(){}
+      healthy(){return Boolean(this.status.connected || this.status.lastPoll);}
+    },
+    setTimeout:callback=>{timers.push(callback);return timers.length;},clearTimeout(){},
+    chrome:{runtime:{sendMessage:async message=>{
+      if(message.type==='init')return {ok:true,value:{}};
+      if(message.type==='page-command' && message.command.type==='drain'){
+        if(++drains===2)throw new Error('Could not establish connection. Receiving end does not exist.');
+        return {ok:true,value:{events:drains===3?[{type:'gift',id:'after-reconnect'}]:[],captures:[],status:{hook:true,connected:true,lastPoll:Date.now(),frames:drains}}};
+      }
+      return {ok:true,value:{}};
+    },onMessage:{addListener(){}}}},
+    boot:options=>{adapter=options.adapterFactory({onEvent:async event=>handled.push(event.id)});adapter.hook();}
+  });
+  try {
+    await dom.window.eval(`(async()=>{${await rawEntry('content')}})()`);
+    await new Promise(setImmediate);
+    assert.equal(adapter.healthy(),true);
+    await timers.shift()();await new Promise(setImmediate);
+    assert.equal(adapter.persistenceUnavailable(),false);
+    assert.equal(adapter.healthy(),false);
+    assert.match(adapter.status.bridgeError,/Receiving end/);
+    assert.equal(timers.length,1);
+    await timers.shift()();await new Promise(setImmediate);await adapter.inbox.whenIdle();
+    assert.equal(adapter.healthy(),true);
+    assert.equal(adapter.status.contextInvalidated,false);
+    assert.equal(adapter.status.bridgeError,undefined);
+    assert.equal(drains,3);
+    assert.deepEqual(handled,['after-reconnect']);
+  }finally{adapter?.closeEvents();dom.window.close();}
+});
+
+
+test('构建后台独立交换百炼 WebRTC SDP，要求直播页、服务授权和有效数据',async()=>{
+  const sdp='v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n',w=await worker({},new IDBFactory(),sdp);
+  const message={type:'media-sdp',url:'https://ws.cn-beijing.maas.aliyuncs.com/api/v1/webrtc/realtime?model=qwen3.8-omni-flash-realtime',headers:{Authorization:'Bearer private'},data:sdp};
+  assert.equal((await w.send(message)).ok,true);assert.equal(w.requests[0].opts.headers['Content-Type'],'application/sdp');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.credentials,'omit');
+  for(const invalid of [{...message,url:'https://evil.com/api/v1/webrtc/realtime?model=x'},{...message,data:'{}'},{...message,headers:{}}])assert.equal((await w.send(invalid)).ok,false);
+  assert.equal((await w.send(message,{frameId:1,tab:{url:'https://live.douyin.com/1'}})).ok,false);assert.equal(w.requests.length,1);
+  w.deny();assert.match((await w.send(message)).error,/授权/u);
+});
+
+test('配色与材质经同一后台白名单保存，直播页和弹窗共享，拒绝任意键和值',async()=>{
+ const w=await worker(),popup={url:'chrome-extension://test/popup.html'};
+ for(const [kind,initial,next] of [['palette','original','teal'],['material','glass','liquid']]){
+  assert.equal((await w.send({type:'appearance-get',kind})).value,initial);
+  assert.equal((await w.send({type:'appearance-set',kind,value:next},popup)).ok,true);
+  assert.equal((await w.send({type:'appearance-get',kind})).value,next);
+  assert.equal((await w.send({type:'appearance-set',kind,value:'bad'})).ok,false);
+ }
+ assert.equal((await w.send({type:'appearance-get',kind:'api-key'})).ok,false);
+ assert.equal((await w.send({type:'appearance-set',kind:'palette',value:'blue'},{frameId:0,tab:{url:'https://evil.example/'}})).ok,false);
 });

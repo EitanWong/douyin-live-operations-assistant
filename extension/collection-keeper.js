@@ -1,3 +1,4 @@
+import { roomFromURL } from '../src/browser/room-context.js';
 // Alarms wake throttled content scripts; live leases prevent automatic OS sleep.
 // Session storage survives MV3 worker termination and stays in trusted contexts.
 export function installCollectionKeeper(chrome, {wakeTimeoutMs = 5000} = {}) {
@@ -12,7 +13,7 @@ export function installCollectionKeeper(chrome, {wakeTimeoutMs = 5000} = {}) {
     tail = task; void task.catch(()=>{}); return task;
   };
   const eligible = url => {
-    try { const u = new URL(url); return u.origin === 'https://live.douyin.com' && (/^\/\d+\/?$/.test(u.pathname) || /^\d+$/.test(u.searchParams.get('room_id') || '')); }
+    try { const u = new URL(url); return u.origin === 'https://live.douyin.com' && Boolean(roomFromURL(u)); }
     catch { return false; }
   };
   const apply = async leases => {

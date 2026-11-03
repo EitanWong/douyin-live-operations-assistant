@@ -58,6 +58,22 @@ test('缺失密钥、HTTP 错误、坏 JSON、跳转、超时明确失败', asyn
   const timeout = createAIClient({ getKey: () => 'key', request: d => d.ontimeout() }); await assert.rejects(timeout(prompt, config), /超时/);
 });
 
+test('AI 服务错误分类并报告状态，恢复后清除故障，不暴露上游正文', async () => {
+  for (const [status, body, expected] of [
+    [401, '{}', /API Key/],
+    [402, '{}', /余额|配额/],
+    [429, '{"error":{"code":"insufficient_quota","message":"secret-key"}}', /余额|配额/],
+    [429, '{}', /频率/],
+    [403, '{}', /权限/]
+  ]) {
+    const reports=[];let fail=true;
+    const client=createAIClient({getKey:()=> 'key',onStatus:value=>reports.push(value),request:details=>details.onload(fail ? {status,responseText:body} : {status:200,responseText:'{"choices":[{"message":{"content":"你好"}}]}'})});
+    await assert.rejects(client({...prompt,target:null},config),expected);
+    assert.match(reports[0].error,expected);assert.doesNotMatch(reports[0].error,/secret-key/);
+    fail=false;assert.equal(await client({...prompt,target:null},config),'你好');assert.equal(reports.at(-1).error,'');
+  }
+});
+
 test('话术批量生成使用独立 JSON 输出约束、当前服务和自然表达要求', async () => {
   let request;
   const c=copy(DEFAULTS);

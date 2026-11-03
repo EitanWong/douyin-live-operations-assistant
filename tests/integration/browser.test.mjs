@@ -24,9 +24,25 @@ function setup(body = '') {
   for (const el of dom.window.document.querySelectorAll('*')) el.getClientRects = () => [{ width: 100, height: 30 }];
   return dom;
 }
+test('福袋红包工具可导航、独立保存配置，立即停止同步关闭开关并显示确认进度',async()=>{
+  const dom=setup();let saved,stops=0;
+  const panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{save:async c=>{saved=c;},toolAction:async(id,action)=>{assert.equal(id,'rewards');assert.equal(action,'stop');stops++;}}});
+  try {
+    panel.tab('rewards');assert.equal(panel.activeCategory,'tools');assert.equal(panel.node('[data-page=rewards]').hidden,false);
+    const enabled=panel.node('[data-field="rewards.enabled"]'),bag=panel.node('[data-field="rewards.luckyBag"]');
+    assert.equal(enabled.checked,false);assert.equal(bag.checked,true);enabled.click();bag.click();
+    panel.node('[data-action=save]').click();await new Promise(setImmediate);
+    assert.equal(saved.rewards.enabled,true);assert.equal(saved.rewards.luckyBag,false);assert.equal(saved.rewards.redPacket,true);
+    assert.equal(saved.rewards.entryXPath,DEFAULTS.rewards.entryXPath);
+    panel.updateToolState('rewards',{reason:'福袋参与结果未确认，本轮不会重复提交',submitted:1,confirmed:0});
+    assert.match(panel.node('[data-rewards-progress]').textContent,/提交参与 1 次 · 页面确认 0 次/);
+    panel.node('[data-action=rewards-stop]').click();await new Promise(setImmediate);
+    assert.equal(stops,1);assert.equal(enabled.checked,false);assert.equal(panel.read().rewards.enabled,false);
+  } finally {panel.destroy();dom.window.close();}
+});
 test('扩展工具自动点赞独立于回复模式：输入不会污染配置，状态和停止按钮可用',async()=>{
   const dom=setup(),config=copy(DEFAULTS),calls=[];
-  const panel=new Panel({config,room:'1',callbacks:{startAutoLike:async options=>calls.push(options),stopAutoLike:()=>calls.push('stop')}});
+  const panel=new Panel({config,room:'1',callbacks:{toolAction:(id,action,value)=>{assert.equal(id,'auto-like');calls.push(action==='start'?value:action);}}});
   try {
     panel.node('[data-category=tools]').click();
     assert.equal(panel.activeTab,'auto-like');assert.equal(panel.node('[data-page=auto-like]').hidden,false);
@@ -39,12 +55,12 @@ test('扩展工具自动点赞独立于回复模式：输入不会污染配置�
     panel.node('[data-auto-like=target]').value='65';
     panel.node('[data-action=auto-like-start]').click();await new Promise(setImmediate);
     assert.deepEqual(calls[0],{batch:30,intervalSec:0.001,target:65});assert.deepEqual(panel.read(),config);assert.equal(panel.dirty,false);
-    panel.updateAutoLike({phase:'running',accepted:30,batches:1,reason:'正在自动点赞'});
+    panel.updateToolState('auto-like',{phase:'running',accepted:30,batches:1,reason:'正在自动点赞'});
     assert.equal(panel.node('[data-action=auto-like-start]').disabled,true);
     assert.equal(panel.node('[data-auto-like=batch]').disabled,true);
     assert.match(panel.node('[data-auto-like-progress]').textContent,/30 次 · 1 批/);
-    panel.node('[data-action=auto-like-stop]').click();assert.equal(calls.at(-1),'stop');
-    panel.updateAutoLike({phase:'stopped',accepted:30,batches:1,reason:'已停止'});
+    panel.node('[data-action=auto-like-stop]').click();await new Promise(setImmediate);assert.equal(calls.at(-1),'stop');
+    panel.updateToolState('auto-like',{phase:'stopped',accepted:30,batches:1,reason:'已停止'});
     assert.equal(panel.node('[data-action=auto-like-start]').disabled,false);
     assert.equal(panel.node('[data-action=auto-like-stop]').disabled,true);
   } finally {panel.destroy();dom.window.close();}
@@ -113,7 +129,7 @@ test('旧配置升级后只展示四种房间游戏，开关同步菜单并只�
   try {
     panel.tab('bot');
     const page=panel.node('[data-page="bot"]');
-    assert.deepEqual([...page.querySelectorAll('[role="switch"]')].map(node=>node.getAttribute('aria-label')),['成语接龙','猜数字','真心话','大冒险']);
+    assert.deepEqual([...page.querySelectorAll('.feature-row [role="switch"]')].map(node=>node.getAttribute('aria-label')),['成语接龙','猜数字','真心话','大冒险']);
     assert.match(page.textContent,/开始接龙.*开始猜数字.*开始真心话.*开始大冒险/su);
     assert.doesNotMatch(page.textContent,/骰子|硬币|猜拳|帮我选择/u);
     assert.match(panel.node('[data-bot-menu]').textContent,/接龙.*猜数字.*真心话.*大冒险/u);
@@ -354,7 +370,7 @@ test('生成的单文件油猴脚本在加载前可启动，无外部依赖且�
   const source = await readFile(join(fixture.dist, 'douyin-live-assistant.user.js'), 'utf8');
   const values = new Map();
   const dom = new JSDOM('<body></body>', { url: 'https://live.douyin.com/1234567890?anchor_id=1234567890', runScripts: 'outside-only', pretendToBeVisual: true });
-  Object.assign(dom.window, { unsafeWindow: dom.window, TextDecoder, TextEncoder, GM_getValue: (k, fallback) => values.get(k) ?? fallback, GM_setValue: (k, v) => values.set(k, v), GM_deleteValue: k => values.delete(k), GM_xmlhttpRequest: () => assert.fail('默认不应请求 AI'), GM_registerMenuCommand: () => {} });
+  Object.assign(dom.window, { unsafeWindow: dom.window, structuredClone, TextDecoder, TextEncoder, GM_getValue: (k, fallback) => values.get(k) ?? fallback, GM_setValue: (k, v) => values.set(k, v), GM_deleteValue: k => values.delete(k), GM_xmlhttpRequest: () => assert.fail('默认不应请求 AI'), GM_registerMenuCommand: () => {} });
   dom.window.eval(source); const host = dom.window.document.getElementById('douyin-live-assistant'); assert.ok(host); assert.equal(host.shadowRoot.querySelector('[data-state]').textContent, '已暂停');
   assert.equal(host.shadowRoot.querySelector('[data-field="anchorId"]').value, '1234567890'); assert.equal(source.includes('@require'), false); dom.window.close();
 });

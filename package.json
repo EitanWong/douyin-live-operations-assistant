@@ -9,6 +9,8 @@
     "benchmark:runtime": "node --expose-gc scripts/benchmark-runtime.mjs",
     "check": "node scripts/check.mjs",
     "demo": "node scripts/serve.mjs",
+    "native:install": "node scripts/install-native.mjs",
+    "test:native": "python3 -m unittest discover -s native",
     "test:unit": "node --test tests/unit",
     "test:integration": "node --test tests/integration"
   },
@@ -21,6 +23,24 @@
     "jsdom": "^26.1.0"
   },
   "dependencies": {
-    "echarts": "^6.1.0"
+    "@mantine/core": "9.7.4",
+    "@mantine/hooks": "9.7.4",
+    "@mozilla/readability": "0.6.0",
+    "@radix-ui/colors": "3.0.0",
+    "@tanstack/react-table": "9.3.1",
+    "cordis": "4.0.0-rc.12",
+    "dexie": "4.4.7",
+    "echarts": "^6.1.0",
+    "eventsource-parser": "3.0.6",
+    "hls.js": "1.7.4",
+    "jsonrepair": "^3.15.0",
+    "linkedom": "0.18.15",
+    "lru-cache": "11.5.3",
+    "minisearch": "7.2.0",
+    "mpegts.js": "1.8.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "xstate": "5.33.3",
+    "zod": "4.6.7"
   }
 }

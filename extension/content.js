@@ -1,21 +1,28 @@
+import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
+import { boot } from '../src/app.js';
+import { DouyinAdapter } from '../src/browser/adapter.js';
+import { RequestBridgeClient } from '../src/browser/request-sender.js';
+import { IdentityReader } from '../src/browser/identity.js';
+import { EventInbox, failureCode } from '../src/runtime/inbox.js';
+import { roomFromURL } from '../src/browser/room-context.js';
+
+async function startContent() {
 const jsonBytes = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length * 2 : null; }
   catch { return null; }
 };
-const room = location.pathname.match(/^\/(\d+)\/?$/)?.[1] || new URLSearchParams(location.search).get('room_id')?.match(/^\d+$/)?.[0];
+const room = roomFromURL(location);
 if (room) {
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
   const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint, activeAdapter;
-  const collectionPulses = new Map(); let lastCollectionActive, collectionPower = {awake:false};
+  let lastCollectionActive, collectionPower = {awake:false};
   let captureWrites = Promise.resolve(), capturePending = 0, capturePendingBytes = 0, captureSaved = 0, captureGaps = 0, captureErrors = 0;
   // 事件桥不传递密钥；发送桥只允许本房弹幕及经权限核对的禁言/拉黑票据。
-  window.addEventListener('message', e => {
-    const data = e.data;
-    if (e.source !== window || e.origin !== location.origin || data?.source !== 'live-assistant-page-v1' || data.room !== room) return;
+  const receivePacket = data => {
     if (data.type === 'event') {
       const event = data.event;
       let valid = true;
-      try { valid = Boolean(event) && ['gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','anchor-exhibition-retention','pk-rank-season'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
+      try { valid = Boolean(event) && ['anchor-fanclub','room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','anchor-exhibition-retention','pk-rank-season'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
       catch { valid = false; }
       if (!valid) return;
       if (receive) receive(event);
@@ -42,15 +49,14 @@ if (room) {
       liveStatus = { ...data.status };
       void updateCollectionLease(liveStatus.collection?.active === true && !contextInvalidated);
     }
-    if (data.type === 'collection-result') collectionPulses.get(data.id)?.(data.active === true);
-  });
+  };
   let liveStatus = { hook:false, sockets:0, frames:0, events:0, errors:0, connected:false, lastFrame:0 };
   let contextInvalidated = false;
-  const isContextError = error => error?.code === 'CONTEXT_INVALID' || /context invalidated|扩展上下文|receiving end does not exist/i.test(String(error?.message || error));
+  const isContextError = error => failureCode(error) === 'CONTEXT_INVALID';
   const contextFailure = () => Object.assign(new Error('扩展上下文已失效，请先导出恢复数据，再刷新直播页'), {code:'CONTEXT_INVALID'});
   const invalidateContext = () => {
     contextInvalidated = true;
-    window.postMessage({source:'live-assistant-content-v1',room,type:'collection-stop'},location.origin);
+    void (async()=>{try {await chrome.runtime.sendMessage({type:'page-command',command:{type:'collection-stop'}});}catch {}})();
     activeAdapter?.sync();
     return contextFailure();
   };
@@ -101,7 +107,7 @@ if (room) {
     ackMany: keys => message({type:'event-ack-many',keys})
   };
   chrome.runtime.onMessage.addListener((request,sender,reply) => {
-    if (request.type === 'exhibition-indicator') {
+    if (request.type === 'exhibition-indicator' || request.type === 'fanclub-frame') {
       const event = request.event;
       const frame = [...document.querySelectorAll('iframe')].find(el => el.src === request.frameURL);
       if (!frame || !activeAdapter || event?.anchorId !== panel?.config.anchorId || contextInvalidated) {reply({ok:false});return;}
@@ -110,11 +116,10 @@ if (room) {
     }
     if (request.type === 'collection-wake') {
       if (contextInvalidated) { reply({active:false}); return; }
-      const id = crypto.randomUUID();
-      const timer = window.setTimeout(()=>finish(false),8000);
-      const finish = active => { window.clearTimeout(timer); collectionPulses.delete(id); reply({active}); };
-      collectionPulses.set(id,finish);
-      window.postMessage({source:'live-assistant-content-v1',room,type:'collection-pulse',id},location.origin);
+      void (async()=>{
+        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}});reply({active:active===true});void updateCollectionLease(active===true).catch(()=>{});}
+        catch {reply({active:false});}
+      })();
       return true;
     }
     if (request.type === 'prepare-reload') {
@@ -129,8 +134,27 @@ if (room) {
     if (request.type === 'storage') { for (const [key,change] of Object.entries(request.changes)) { if (change.newValue === undefined) values.delete(key); else values.set(key,change.newValue); } }
     if (request.type === 'income-updated') incomeChanged?.();
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
-    if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', ready:Boolean(panel) });
+    if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
   });
+  let bridgeTimer,bridgePending=false,bridgeStopped=false;
+  const drainBridge=async()=>{
+    if(bridgeStopped || bridgePending || contextInvalidated)return;
+    bridgePending=true;let more=false;
+    try {
+      const batch=await message({type:'page-command',command:{type:'drain',paused:Boolean(activeAdapter?.flowPaused)}});
+      if(bridgeStopped || !batch || typeof batch!=='object')return;
+      for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
+      for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
+      receivePacket({type:'status',status:batch.status});activeAdapter?.sync();more=batch.more===true;
+    } catch(error) {
+      if(!contextInvalidated)liveStatus={...liveStatus,connected:false,bridgeError:error.message};
+      activeAdapter?.sync();
+    }
+    finally {bridgePending=false;if(!bridgeStopped && !contextInvalidated)bridgeTimer=window.setTimeout(drainBridge,more?0:200);}
+  };
+  const startBridge=()=>{bridgeStopped=false;window.clearTimeout(bridgeTimer);void drainBridge();};
+  window.addEventListener('pagehide',()=>{bridgeStopped=true;window.clearTimeout(bridgeTimer);});
+  window.addEventListener('pageshow',event=>{if(event.persisted)startBridge();});
   class ExtensionAdapter extends DouyinAdapter {
     constructor(options) {
       super(options); this.replayPromise = null; activeAdapter = this;
@@ -138,7 +162,7 @@ if (room) {
       this.inbox = new EventInbox({handle:event=>this.onEvent(event),onStatus:health=>{
         this.ingestion = health; this.sync();
         const paused = Boolean(this.replayPromise) || health.blocked || health.state === 'buffering';
-        if (paused !== this.flowPaused) { this.flowPaused = paused; window.postMessage({source:'live-assistant-content-v1',room,type:'flow',paused},location.origin); }
+        this.flowPaused = paused;
       }});
     }
     get eventQueue() { return this.inbox.queue; }
@@ -213,6 +237,7 @@ if (room) {
       const storage = await message({type:'storage-clear-cache'});
       this.storage = storage; this.sync(); return storage;
     }
+    healthy() { return !contextInvalidated && !this.status.bridgeError && super.healthy(); }
     persistenceUnavailable() { return contextInvalidated; }
     closeEvents() { this.inbox.close(); void updateCollectionLease(false); }
     hook() {
@@ -223,19 +248,22 @@ if (room) {
       if (initialGaps) { this.inbox.health.gaps += initialGaps; this.inbox.health.reason = '初始化缓冲已满，存在采集缺口'; }
       this.sync();
       for (const event of events.splice(0)) receive(event); eventsBytes = 0;
-      window.postMessage({source:'live-assistant-content-v1',type:'hello'},location.origin);
+      startBridge();
     }
     sync() { this.status = {...liveStatus,collectionPower,contextInvalidated,bridgeGaps:(this.priorBridgeGaps || 0)+(liveStatus.bridgeGaps || 0),frameGaps:(this.priorFrameGaps || 0)+(liveStatus.frameGaps || 0),capture:{saved:captureSaved,pending:capturePending,gaps:(this.priorCaptureGaps || 0)+captureGaps+(liveStatus.captureBridgeGaps || 0),errors:captureErrors},ingestion:this.inbox.status(),storage:this.storage}; this.emitStatus(); }
   }
 
   const request = details => {
+    const requestId=crypto.randomUUID();let aborted=false;
     void (async()=>{
       try {
         await writes;
-        const response = await message({type:'ai',url:details.url,headers:details.headers,data:details.data});
-        details.onload(response);
-      } catch (e) { details.onload({status:0,responseText:'',error:e.message}); }
+        if(aborted)return;
+        const response = await message({requestId,type:details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
+        if(!aborted)details.onload(response);
+      } catch (e) { if(!aborted)details.onload({status:0,responseText:'',error:e.message}); }
     })();
+    return {abort(){if(aborted)return;aborted=true;details.onabort?.();void message({type:'ai-request-cancel',id:requestId}).catch(()=>{});}};
   };
   const repository = {
     profile: profile => message({ type:'income-profile', profile }),
@@ -246,5 +274,8 @@ if (room) {
     recordContributionSnapshot: snapshot => message({type:'contribution-snapshot',...snapshot}),
     report: (room, month, {includeAllSessions = false} = {}) => message({ type:'income-report', room, month, includeAllSessions })
   };
-  boot({ page:window, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>panel.root.querySelector('[data-field="ai.endpoint"]').value;} });
+  boot({ page:window, nativeConnect:()=>chrome.runtime.connect({name:'native-perception'}), nativeExtensionId:chrome.runtime.id, agentTasks:{submit:job=>message({type:'agent-submit',...job}),list:()=>message({type:'agent-list'}),cancel:id=>message({type:'agent-cancel',id})}, giveawayStorage:{get:key=>message({type:'giveaway-read',key}),set:(key,value)=>message({type:'giveaway-write',key,value})}, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>{try{return resolveReplyConfig({...panel.config.ai,endpoint:panel.root.querySelector('[data-field="ai.endpoint"]').value,pipeline:panel.readPipeline()}).endpoint;}catch{return panel.root.querySelector('[data-field="ai.endpoint"]').value;}};} });
 }
+
+}
+startContent();

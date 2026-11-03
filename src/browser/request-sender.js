@@ -1,12 +1,24 @@
+import { RoomContext, roomMatchesStore, roomFromURL } from './room-context.js';
 import { ModerationRequests } from './moderation-requests.js';
 import { LikeRequests } from './like-requests.js';
+import { LotteryRequests } from './lottery-requests.js';
+import { GiftRequests } from './gift-requests.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
-// remain in charge. No cookies, signatures, remote code, or paid endpoints cross
-// the extension bridge.
+// remain in charge. Cookies, signatures and remote code never cross the bridge;
+// paid gifts use fixed, budget-bound preparation and commit operations.
 export class PageRequestSender {
-  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); }
-  prepareLike() { return this.likes.prepare(); }
-  commitLike(token,count,sequence) { return this.likes.commit(token,count,sequence); }
+  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); this.gifts = new GiftRequests(this); }
+  giftSnapshot(options) { return this.gifts.snapshot(options); }
+  giftCatalog(options) { return this.gifts.catalog(options); }
+  prepareGift(config,options) { return this.gifts.prepare(config,options); }
+  commitGift(token,count,sequence,options) { return this.gifts.commit(token,count,sequence,options); }
+  stopGift(token) { return this.gifts.stop(token); }
+  acknowledgeGift(id) { return this.gifts.acknowledge(id); }
+  prepareLottery(lotteryId,options) { return this.lotteries.prepare(lotteryId,options); }
+  commitLottery(token,options) { return this.lotteries.commit(token,options); }
+  stopLottery(token) { return this.lotteries.stop(token); }
+  prepareLike({signal} = {}) { return signal?.aborted ? {available:false} : this.likes.prepare(); }
+  commitLike(token,count,sequence,{signal} = {}) { return this.likes.commit(token,count,sequence,signal); }
   stopLike(token) { return this.likes.stop(token); }
   prepareModeration(action,target) { return this.moderation.prepare(action,target); }
   commitModeration(token) { return this.moderation.commit(token); }
@@ -31,17 +43,27 @@ export class PageRequestSender {
     if (!clients.includes(client)) return null;
     try { if (new URL(client.defaults.baseURL, this.page.location.href).origin !== this.page.location.origin) return null; }
     catch { return null; }
-    this.loadedChunks = chunks; this.loadedClient = client;
+    this.loadedChunks = chunks; this.loadedClient = client; this.loadedRequire = require;
     return client;
+  }
+  nativeGiftApi() {
+    if (!this.client()) return null;
+    const require=this.loadedRequire;
+    const candidates=Object.entries(require.m).filter(([,factory])=>{
+      const source=Function.prototype.toString.call(factory);
+      return ['/webcast/gift/list/','/webcast/gift/send/','/webcast/wallet/info/'].every(path=>source.includes(path));
+    });
+    if (candidates.length!==1) return null;
+    const api=require(candidates[0][0]);
+    return ['Xq','hF','sb'].every(key=>typeof api?.[key]==='function') ? api : null;
   }
   context() {
     const info = this.page.__STORE__?.roomStore?.roomInfo;
     const room = info?.room;
-    const webRid = String(room?.web_rid || info?.web_rid || info?.webRid || '');
     const id = info?.roomId || room?.id_str;
-    if (!/^\d+$/.test(id || '') || typeof id !== 'string' || webRid !== this.page.location.pathname.match(/^\/(\d+)\/?$/)?.[1]) return null;
+    if (!/^\d+$/.test(id || '') || typeof id !== 'string' || !roomMatchesStore(info,this.page.location)) return null;
     const user = this.page.__STORE__?.userStore?.userInfo;
-    return {roomId:id, path:this.page.location.pathname, userId:user?.id_str, admin:[true,1].includes(user?.user_attr?.is_admin)};
+    return {roomId:id, path:roomFromURL(this.page.location), userId:user?.id_str, admin:[true,1].includes(user?.user_attr?.is_admin)};
   }
   chatDisplay() {
     const messages = this.page.__STORE__?.singletonStore?.message;
@@ -60,9 +82,13 @@ export class PageRequestSender {
       payload:{content, common:{msg_id:msg_id_str}, user, rtf_content_v2}, show_identity, identity_label});
     return true;
   }
+  pruneTickets(now = Date.now()) {
+    for (const [id,ticket] of this.tickets) if (now-ticket.at > 300000) this.tickets.delete(id);
+  }
   available(channel = 'chat') {
     if (!['chat','admin'].includes(channel)) return false;
     try {
+      this.pruneTickets();
       const context = this.context();
       return Boolean(context && typeof context.userId === 'string' && /^\d+$/.test(context.userId)
         && this.client() && (channel === 'admin' ? context.admin : this.chatDisplay()) && this.tickets.size < 128);
@@ -78,7 +104,7 @@ export class PageRequestSender {
       // flow. Otherwise the server echo is deliberately hidden on this page.
       if (channel === 'chat' && !this.chatDisplay()) return {available:false};
       const now = Date.now();
-      for (const [id,ticket] of this.tickets) if (now-ticket.at > 300000) this.tickets.delete(id);
+      this.pruneTickets(now);
       if (this.tickets.size >= 128) return {available:false};
       const token = this.page.crypto.randomUUID();
       this.tickets.set(token, {context,client,channel,at:now});
@@ -89,7 +115,8 @@ export class PageRequestSender {
     const ticket = this.tickets.get(token);
     if (!ticket) return Promise.resolve({submitted:false,reason:'请求准备已失效'});
     if (ticket.result) return ticket.result; // A duplicate bridge delivery never sends twice.
-    ticket.result = this.perform(ticket,text);
+    // Publish the receipt before page code can synchronously re-enter commit.
+    ticket.result = Promise.resolve().then(()=>this.perform(ticket,text));
     return ticket.result;
   }
   async perform(ticket,text) {
@@ -127,25 +154,46 @@ export class PageRequestSender {
 }
 
 export class RequestBridgeClient {
-  constructor(page) { this.page=page; this.room=page.location.pathname.match(/^\/(\d+)\/?$/)?.[1]; }
-  call(operation, payload, timeout) {
-    return new Promise(resolve=>{
-      const id=this.page.crypto.randomUUID();
-      const finish = result => { this.page.clearTimeout(timer); this.page.removeEventListener('message',receive); resolve(result); };
-      const receive = event => {
-        const data=event.data;
-        if(event.source===this.page && event.origin===this.page.location.origin && data?.source==='live-assistant-page-v1' && data.type==='send-api-result' && data.room===this.room && data.id===id) finish(data.result);
-      };
-      const timer=this.page.setTimeout(()=>finish(operation.startsWith('prepare')?{available:false}:operation==='commit-like'?{submitted:false,unknown:true,reason:'点赞响应超时，已停止，不自动重试'}:operation==='commit-moderation'?{submitted:false,unknown:true,reason:'管理响应超时，不自动重试'}:{submitted:false,clicked:true,transport:'request',reason:'请求响应超时，等待公屏回显，不自动重发'}),timeout);
-      this.page.addEventListener('message',receive);
-      this.page.postMessage({source:'live-assistant-content-v1',type:'send-api',room:this.room,id,operation,...payload},this.page.location.origin);
-    });
+  constructor(page,send=payload=>page.chrome.runtime.sendMessage(payload)) { this.page=page;this.send=send;this.context=new RoomContext(page);this.room=this.context.room; }
+  async call(operation,payload,timeout,{signal}={}) {
+    const read=['gift-snapshot','gift-catalog','acknowledge-gift'].includes(operation);
+    const unavailable=()=>operation.startsWith('prepare') || read ? {available:false,reason:'页面请求未完成，请刷新数据后重试'}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
+    if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
+    const id=this.page.crypto.randomUUID();
+    let canceled=false;
+    const cancel=async()=>{canceled=true;try {await this.send({type:'page-command',command:{type:'cancel',id}});}catch {}};
+    signal?.addEventListener('abort',cancel,{once:true});
+    const timer=this.page.setTimeout(cancel,timeout);
+    try {
+      // Await the actual injected request, including after cancellation. Unknown
+      // in-flight work continues to block unsafe replacement in the tool host.
+      const result=await this.send({type:'page-command',command:{type:'send-api',id,operation,...payload}});
+      if(canceled && operation.startsWith('prepare')) {
+        // MAIN may have completed preparation before its reply was canceled.
+        // Revoke that session before allowing another attempt.
+        if(operation==='prepare-like' && result?.ok && typeof result.value?.token==='string')await this.stopLike(result.value.token);
+        if(operation==='prepare-lottery' && result?.ok && typeof result.value?.token==='string')await this.stopLottery(result.value.token);
+        if(operation==='prepare-gift' && result?.ok && typeof result.value?.token==='string')await this.stopGift(result.value.token);
+        return unavailable();
+      }
+      return result?.ok && this.context.current() ? result.value : unavailable();
+    } catch { return unavailable(); }
+    finally {this.page.clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
   }
-  prepareModeration(action,target) { return this.call('prepare-moderation',{action,target},800); }
-  prepareLike() { return this.call('prepare-like',{},10000); }
-  commitLike(token,count,sequence) { return this.call('commit-like',{token,count,sequence},10000); }
-  stopLike(token) { return this.call('stop-like',{token},800); }
-  commitModeration(token) { return this.call('commit-moderation',{token},10000); }
-  prepare(channel) { return this.call('prepare',{channel},800); }
-  commit(token,text) { return this.call('commit',{token,text},10000); }
+  prepareModeration(action,target) {return this.call('prepare-moderation',{action,target},800);}
+  giftSnapshot(options) {return this.call('gift-snapshot',{},20000,options);}
+  giftCatalog(options) {return this.call('gift-catalog',{},20000,options);}
+  prepareGift(config,options) {return this.call('prepare-gift',{config},20000,options);}
+  commitGift(token,count,sequence,options) {return this.call('commit-gift',{token,count,sequence},30000,options);}
+  stopGift(token) {return this.call('stop-gift',{token},800);}
+  acknowledgeGift(recordId) {return this.call('acknowledge-gift',{recordId},20000);}
+  prepareLike(options) {return this.call('prepare-like',{},10000,options);}
+  prepareLottery(lotteryId,{allowPassword=false,signal}={}) {return this.call('prepare-lottery',{lotteryId,allowPassword},10000,{signal});}
+  commitLottery(token,options) {return this.call('commit-lottery',{token},20000,options);}
+  stopLottery(token) {return this.call('stop-lottery',{token},800);}
+  commitLike(token,count,sequence,options) {return this.call('commit-like',{token,count,sequence},10000,options);}
+  stopLike(token) {return this.call('stop-like',{token},800);}
+  commitModeration(token) {return this.call('commit-moderation',{token},10000);}
+  prepare(channel) {return this.call('prepare',{channel},800);}
+  commit(token,text) {return this.call('commit',{token,text},10000);}
 }

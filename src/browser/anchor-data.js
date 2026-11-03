@@ -1,4 +1,6 @@
+import { RoomContext } from './room-context.js';
 import { parseExhibitionRetention, readExhibitionRetention, retentionFromIndicatorResponse } from './exhibition-retention.js';
+import { readRoomLikes } from './room-likes.js';
 
 // Fields verified against the live web exhibition response. Keep request
 // credentials, presentation schemas and unrelated response fields out of events.
@@ -105,10 +107,10 @@ export function readPKTasks(document) {
 export class AnchorDataCollector {
   constructor({page,sender,onEvent,onStatus = () => {}}) {
     this.page = page; this.sender = sender; this.onEvent = onEvent; this.onStatus = onStatus;
-    this.path = page.location.pathname; this.stopped = false; this.serial = 0;
+    this.roomContext = new RoomContext(page); this.stopped = false; this.serial = 0;
   }
   context() {
-    if (this.stopped || this.page.location.pathname !== this.path) return null;
+    if (this.stopped || !this.roomContext.current()) return null;
     const current = this.sender.context();
     if (!current) return null;
     const info = this.page.__STORE__?.roomStore?.roomInfo;
@@ -129,6 +131,14 @@ export class AnchorDataCollector {
       id:`pk-tasks:${snapshotId}`,at:capturedAt,receivedAt:capturedAt,
       ...(tasks || {valid:null,target:null,firstWin:null,validWins:null,winTarget:null})});
   }
+  async collectLikes() {
+    const context=this.context(),likes=context && readRoomLikes(this.page.document),now=Date.now();
+    if (!likes) return;
+    const key=JSON.stringify([context,likes]);
+    if (key===this.likesKey && now-this.likesAt<30000) return;
+    await this.onEvent({type:'room-likes',source:'native-room',...context,...likes,id:`room-likes:${now}:${++this.serial}`,receivedAt:now,at:now});
+    this.likesKey=key;this.likesAt=now;
+  }
   async refresh() {
     if (this.busy) return false;
     const context = this.context(), client = context && this.sender.client();
@@ -136,6 +146,7 @@ export class AnchorDataCollector {
     this.busy = true;
     const snapshotId = `${Date.now()}-${++this.serial}`;
     try {
+      await this.collectLikes();
       await this.collectTasks(snapshotId);
       const capturedAt = Date.now();
       const retention = readExhibitionRetention(this.page.document);
@@ -173,12 +184,12 @@ export class AnchorDataCollector {
     if (this.started) return;
     this.started = true;
     // Task/profile popovers can close before the slower exhibition HTTP poll.
-    this.taskTimer = this.page.setInterval(()=>{void this.collectTasks().catch(()=>{});},3000);
+    this.taskTimer = this.page.setInterval(()=>{void this.collectTasks().catch(()=>{});void this.collectLikes().catch(()=>{});},3000);
     const tick = async () => {
-      if (this.stopped || this.page.location.pathname !== this.path) return;
+      if (this.stopped || !this.roomContext.current()) return;
       let ready = false;
       try { ready = await this.refresh(); } catch {}
-      if (!this.stopped && this.page.location.pathname === this.path) this.timer = this.page.setTimeout(tick,ready ? 60000 : 5000);
+      if (!this.stopped && this.roomContext.current()) this.timer = this.page.setTimeout(tick,ready ? 60000 : 5000);
     };
     this.timer = this.page.setTimeout(tick,1000);
   }

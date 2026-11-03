@@ -1,30 +1,42 @@
 // Appearance is global to the tool, independent of a room's automation config.
-export const THEME_KEY = 'douyin-live-assistant:theme';
-const normalizeTheme = value => ['light', 'dark'].includes(value) ? value : 'system';
+import {APPEARANCE_PREFERENCES,PALETTES,MATERIALS,normalizeAppearance} from './appearance.js';
+export {THEME_KEY} from './appearance.js';
 
-export function installTheme({ target, select, onError = () => {} }) {
+export function installTheme({target,select,paletteSelect,materialSelect,onError=()=>{}}) {
+  const controllers=[installPreference({target,select,kind:'theme',onError})];
+  for(const [kind,control,choices] of [['palette',paletteSelect,PALETTES],['material',materialSelect,MATERIALS]]){
+    target.dataset[kind]=APPEARANCE_PREFERENCES[kind].fallback;
+    if(!control)continue;
+    control.replaceChildren(...choices.map(([value,label])=>new target.ownerDocument.defaultView.Option(label,value)));
+    controllers.push(installPreference({target,select:control,kind,onError}));
+  }
+  return {ready:Promise.all(controllers.map(c=>c.ready)),destroy:()=>controllers.forEach(c=>c.destroy())};
+}
+function installPreference({ target, select, kind, onError }) {
   const view = target.ownerDocument.defaultView;
   const extensionStorage = view.chrome?.storage;
   const storage = extensionStorage?.local;
   const runtime = view.chrome?.runtime;
-  let theme = 'system', revision = 0, destroyed = false;
+  const {key:preferenceKey,fallback}=APPEARANCE_PREFERENCES[kind];
+  const messageType=kind==='theme' ? 'theme' : 'appearance';
+  let theme = fallback, revision = 0, destroyed = false;
   const apply = value => {
-    theme = normalizeTheme(value);
-    target.dataset.theme = theme;
+    theme = normalizeAppearance(kind,value);
+    target.dataset[kind] = theme;
     select.value = theme;
   };
   apply(theme);
 
   const onStorage = (changes, area) => {
-    if (area !== 'local' || !Object.hasOwn(changes, THEME_KEY) || destroyed) return;
-    revision++; apply(changes[THEME_KEY].newValue);
+    if (area !== 'local' || !Object.hasOwn(changes, preferenceKey) || destroyed) return;
+    revision++; apply(changes[preferenceKey].newValue);
   };
   const onRuntimeMessage = message => {
-    if (message?.type !== 'theme-changed' || destroyed) return;
+    if ((message?.type !== `${messageType}-changed` || messageType==='appearance' && message.kind!==kind) || destroyed) return;
     revision++; apply(message.value);
   };
   const onLocalStorage = event => {
-    if ((event.key === THEME_KEY || event.key === null) && !destroyed) {
+    if ((event.key === preferenceKey || event.key === null) && !destroyed) {
       revision++; apply(event.newValue);
     }
   };
@@ -36,8 +48,8 @@ export function installTheme({ target, select, onError = () => {} }) {
     const initialRevision = revision;
     try {
       const saved = runtime?.sendMessage
-        ? await sendThemeMessage(runtime,{type:'theme-get'})
-        : storage ? (await storage.get(THEME_KEY))[THEME_KEY] : view.localStorage.getItem(THEME_KEY);
+        ? await sendThemeMessage(runtime,{type:`${messageType}-get`,kind})
+        : storage ? (await storage.get(preferenceKey))[preferenceKey] : view.localStorage.getItem(preferenceKey);
       if (!destroyed && revision === initialRevision) apply(saved);
     } catch { if (!destroyed) onError('无法读取外观偏好，暂时跟随系统。'); }
   })();
@@ -45,9 +57,9 @@ export function installTheme({ target, select, onError = () => {} }) {
     const previous = theme, currentRevision = ++revision;
     apply(select.value);
     try {
-      if (runtime?.sendMessage) await sendThemeMessage(runtime,{type:'theme-set',value:theme});
-      else if (storage) await storage.set({ [THEME_KEY]: theme });
-      else view.localStorage.setItem(THEME_KEY, theme);
+      if (runtime?.sendMessage) await sendThemeMessage(runtime,{type:`${messageType}-set`,kind,value:theme});
+      else if (storage) await storage.set({ [preferenceKey]: theme });
+      else view.localStorage.setItem(preferenceKey, theme);
     } catch {
       if (!destroyed && revision === currentRevision) {
         apply(previous);

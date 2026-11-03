@@ -1,6 +1,7 @@
 import { sessionTime, sessionStart, sessionEnd, sessionDuration } from './live-session-view.js';
 import { ANCHOR_PERIODS, selectAnchorPeriod } from './anchor-view-model.js';
 import { anchorEscape, anchorNumber, anchorMoney, anchorPercent, statBars, statDistribution, statProgress } from './stat-visuals.js';
+import { fanclubNumber, fanclubMemberRows, fanclubActivities } from './fanclub-view.js';
 
 const anchorDateTime = new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
 const anchorWhen = value => Number.isFinite(value) && value > 0 ? anchorDateTime.format(new Date(value)) : '未采集';
@@ -9,15 +10,16 @@ const anchorRankCount = value => value != null && /^\d+$/.test(String(value)) &&
 export class AnchorDashboard {
   constructor(root, changed) {
     this.root = root; this.changed = changed; this.anchorId = ''; this.period = 'session'; this.sessionId = ''; this.page = 0; this.giftPage = 0; this.giftFilter = 'all';
+    this.fanclubPage=0;
     this.onChange = event => {
-      if (event.target.matches('[data-anchor-picker]')) { this.anchorId = event.target.value; this.sessionId = ''; this.page = this.giftPage = 0; this.changed(); }
+      if (event.target.matches('[data-anchor-picker]')) { this.anchorId = event.target.value; this.fanclubPage=0; this.sessionId = ''; this.page = this.giftPage = 0; this.changed(); }
       if (event.target.matches('[data-anchor-session-picker]')) { this.sessionId = event.target.value; this.period = 'session'; this.page = 0; this.changed(); }
       if (event.target.matches('[data-anchor-gift-filter]')) { this.giftFilter = event.target.value; this.giftPage = 0; this.changed(); }
     };
     this.onClick = event => {
       const period = event.target.closest('[data-anchor-period]');
       if (period && Object.hasOwn(ANCHOR_PERIODS, period.dataset.anchorPeriod)) { this.period = period.dataset.anchorPeriod; if (this.period === 'session') this.sessionId = ''; this.page = 0; this.changed(); }
-      for (const [attribute, property] of [['data-anchor-page','page'],['data-anchor-gift-page','giftPage']]) {
+      for (const [attribute, property] of [['data-anchor-page','page'],['data-anchor-gift-page','giftPage'],['data-anchor-fanclub-page','fanclubPage']]) {
         const button = event.target.closest(`[${attribute}]`);
         if (button && !button.disabled) { this[property] = Math.max(0, this[property] + Number(button.getAttribute(attribute))); this.changed(); }
       }
@@ -39,7 +41,7 @@ export class AnchorDashboard {
     // Version gating avoids aggregation and serialization for unrelated live events.
     const stats = engine.anchorStats;
     const date = new Date((stats.now?.() ?? Date.now()) + 8 * 3600000).toISOString().slice(0,10);
-    const signature = JSON.stringify([stats.revision,date,Math.floor((stats.now?.() ?? Date.now()) / 60000),configuredId,selectedId,identity?.anchor?.name,engine.config.incomeEnabled,this.period,this.sessionId,this.page,this.giftPage,this.giftFilter]);
+    const signature = JSON.stringify([stats.revision,date,Math.floor((stats.now?.() ?? Date.now()) / 60000),configuredId,selectedId,identity?.anchor?.name,engine.config.incomeEnabled,this.period,this.sessionId,this.fanclubPage,this.page,this.giftPage,this.giftFilter]);
     if (this.stats === stats && this.signature === signature && this.income === income) return;
     this.stats = stats; this.signature = signature; this.income = income;
     const known = new Map((engine.anchorStats.anchors?.() || []).map(item => [String(item.anchorId),item]));
@@ -70,6 +72,8 @@ export class AnchorDashboard {
     this.text('[data-anchor-start]',sessionStart(session));
     this.text('[data-anchor-end]',sessionEnd(session));
     this.text('[data-anchor-duration]',sessionDuration(session,stats.now?.() ?? Date.now()));
+    this.renderLikes(report,selection,sessionIncome,identity,selectedId,configuredId,stats);
+    this.renderFanclub(report,stats);
     const totals = matchingIncome && selection.sessions.length ? selection.sessions.reduce((sum, row) => ({estimatedIncome:sum.estimatedIncome + row.estimatedIncome, unknownCount:sum.unknownCount + (row.unknownCount || 0)}),{estimatedIncome:0,unknownCount:0}) : null;
     this.text('[data-anchor-stat="income"]',totals ? anchorMoney(totals.estimatedIncome) : '未知');
     this.text('[data-anchor-income-note]', !engine.config.incomeEnabled ? '收入统计未启用，可在运行规则中开启。' : totals ? `${selection.label}收入按已采集礼物及榜单去重补差估算，不代表平台结算。${totals.unknownCount ? ` ${totals.unknownCount} 件礼物单价未知，未直接计入礼物金额。` : ''}` : '尚无与所选主播 UID 匹配的直播场次，收入保持未知；旧版日汇总可在收入账本查看。');
@@ -106,6 +110,28 @@ export class AnchorDashboard {
     this.html('[data-anchor-battles]',battles.length ? battles.map(row=>`<tr><td>${anchorEscape(anchorWhen(row.endedAt || row.startedAt))}</td><td>${anchorEscape(row.opponents?.map(item=>item.name || item.anchorId).join(' / ') || '未知')}</td><td>${anchorNumber(row.score)}${row.score != null && !row.scoreFinal ? '（赛中）' : ''}</td><td>${{win:'胜',loss:'负',draw:'平',active:'进行中',pending:'待确认'}[row.outcome || row.status] || '未知'}</td></tr>`).join('') : '<tr><td colspan="4">所选范围暂无场次</td></tr>');
     this.text('[data-anchor-basis]','按直播开播至下播划分场次，PK 按开局时间归属，跨日不拆场。累计包含尚未关联直播场次的历史 PK，趋势最多显示最近 30 场。胜率=胜/(胜+负+平)，仅明确终局比分计入胜负和总分。时间不完整时按已观测边界统计。');
     this.root.querySelector('[data-action="export-anchor"]').disabled = !selectedId;
+  }
+  renderLikes(report,selection,sessionIncome,identity,selectedId,configuredId,stats) {
+    const likeSession=this.period==='session' ? selection.selectedSession : sessionIncome?.currentSession;
+    const likeRoom=likeSession?.roomId || (selectedId===configuredId ? identity?.live?.roomId : '');
+    const likes=likeRoom ? report.likes?.find(row=>row.roomId===likeRoom) : !likeSession ? report.likes?.[0] : null;
+    this.text('[data-anchor-likes]',likes ? likes.approximate ? likes.display : anchorNumber(likes.total) : '未知');
+    this.text('[data-anchor-likes-at]',anchorWhen(likes?.observedAt));
+    this.text('[data-anchor-likes-scope]',this.period==='session' ? '所选场次累计点赞' : '最近观测场次累计点赞');
+    this.text('[data-anchor-likes-note]',likes ? `${likes.approximate ? '原生页面缩略值，非精确计数' : likes.source==='websocket' ? '平台点赞推送累计值' : '原生页面累计值'} · 直播 ID ${likes.roomId}${(stats.now?.() ?? Date.now())-likes.observedAt>120000 ? ' · 超过 2 分钟未更新' : ''}。单场观测不按日、周或月累加。` : '等待所选直播场次的点赞数据；未采集的场次保持未知。');
+  }
+  renderFanclub(report,stats) {
+    const club=report.fanclub,now=stats.now?.() ?? Date.now();
+    this.text('[data-anchor-fanclub-title]',club?.title || club?.name || '等待粉丝团数据');
+    this.text('[data-anchor-fanclub-count]',fanclubNumber(club?.fansCount));
+    this.text('[data-anchor-fanclub-lighted]',fanclubNumber(club?.lightedCount));
+    this.text('[data-anchor-fanclub-loaded]',club?.members?.length || 0);
+    this.text('[data-anchor-fanclub-level]',club?.viewer?.level ?? '未知');
+    this.text('[data-anchor-fanclub-at]',anchorWhen(club?.observedAt));
+    this.text('[data-anchor-fanclub-viewer]',club?.viewer ? `打开成员页时账号 ${club.viewer.userId || '未知'} · 勋章${club.viewer.lighted===true ? '已点亮' : club.viewer.lighted===false ? '未点亮' : '状态未知'}${club.clubId ? ` · 粉丝团 ID ${club.clubId}` : ''}` : '账号等级和点亮状态在打开原生成员页时采集，独立于主播的粉丝团人数。');
+    this.text('[data-anchor-fanclub-note]',club?.membersAt ? `${club.hiddenInactive ? '原生页提示不活跃成员已隐藏；' : ''}当前保存 ${club.members.length} 位已加载成员${club.truncated ? '，名单达到采集上限' : ''}。名单更新 ${anchorWhen(club.membersAt)}${now-club.membersAt>120000 ? '（超过 2 分钟未更新）' : ''}；亲密度带万/亿时保留原生缩略值。人数是最近观测总量，不按所选日期累加。` : '打开直播间的原生粉丝团成员页后自动保存人数和成员明细；尚未采集的字段显示未知。');
+    this.html('[data-anchor-fanclub-members]',fanclubMemberRows(this.paginate(club?.members || [],'fanclubPage',20,'data-anchor-fanclub-page')));
+    this.html('[data-anchor-fanclub-activities]',fanclubActivities(club?.activities));
   }
   exportReport() {
     if (!this.report?.anchorId) throw new Error('请先识别或选择主播');

@@ -1,3 +1,8 @@
+import {REPLY_FREQUENCIES,TurnTaking,conversational,jobTurn,turnViewerKey} from '../ai/turn-taking.js';
+import {hostSpeechInstruction,EVERY_TURN_INSTRUCTION} from '../ai/conversation-policy.js';
+import {freshObservations,liveMoment,awaitingVisual,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
+import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
+import {liveFactFingerprint} from '../services/ai-context.js';
 import { IDIOM_GAME_DEFAULTS } from './idiom-game.js';
 import { Moderation, MODERATION_DEFAULTS } from './moderation.js';
 import { addressedToSelf, RoomBot } from './bot.js';
@@ -5,12 +10,18 @@ import { DEFAULT_PHRASES, DEFAULT_TIMER_PHRASES, DEFAULT_KEYWORD_RULES, choosePh
 import { LEGACY_PHRASES, LEGACY_TIMER_PHRASES, PREVIOUS_DEFAULT_PHRASES } from './legacy-phrases.js';
 import { DeliveryTracker } from '../runtime/delivery.js';
 import { LiveMetrics } from '../runtime/live-metrics.js';
+import { REWARDS_DEFAULTS } from '../browser/rewards.js';
+import { SEARCH_DEFAULTS, validateSearchEndpoint } from '../services/search.js';
+import { MEMORY_DEFAULTS, validateMemory } from '../services/knowledge.js';
+import { MEDIA_DEFAULTS, validateMediaConfig } from '../services/media.js';
+import { LiveModeTracker, isLiveModeEvent } from '../runtime/live-mode.js';
 import { PKTracker, PK_EVENT_TYPES } from '../pk/model.js';
 import { PKOperations, PK_OPERATIONS_DEFAULTS, buildPKStrategyContext, strategyRegime } from '../pk/operations.js';
 import { milestoneThankYou, recognizeMilestone } from './milestones.js';
 import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplate, validAudienceAI } from './audience.js';
 import { AnchorStats } from './anchor-stats.js';
 import { audienceReplyContext, giftReplyContext, isIntrusiveReply, liveReplyContext, observedReplyEvent } from './reply-context.js';
+import {AI_PIPELINE_DEFAULTS,validatePipeline,resolveMediaConfig} from '../services/ai-pipeline.js';
 
 export { recognizeMilestone };
 
@@ -18,6 +29,7 @@ export const DEFAULTS = {
   version: 2,
   mode: 'auto',
   automation: { autoStart: false },
+  rewards: REWARDS_DEFAULTS,
   anchorId: '', selfId: '', ignored: [], blockedWords: [],
   identity: { autoAnchor: true, autoSelf: true },
   moderation: MODERATION_DEFAULTS,
@@ -45,9 +57,9 @@ export const DEFAULTS = {
   ai: {
     enabled: false, chatEnabled: false, endpoint: 'https://api.deepseek.com/chat/completions', model: 'deepseek-flash',
     intervalSec: 0, userCooldownSec: 0,
-    contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180,
-    persona: '你在直播间帮忙做简单招呼。说话简短、平常，欢迎或谢谢一句就够。把注意力留给主播，不主动找话题，不自称主持，不说帮忙转达或安排，没有必要就不插话。',
-    knowledge: '', temperature: 0.7
+    assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180, proactiveEnabled:false, proactiveIntervalSec:300, replyFrequency:'quiet',
+    persona: '你是直播间里会聊天的场控。先听懂对方的意思，接着现场的话自然回应，有常识、有分寸，直接说重点，不端着、不用客服套话。轻松时可以有一点幽默，认真时说实在的；欢迎和答谢简短，聊天不机械套模板。不冒充主播，不编造经历或承诺，不抢话。',
+    knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS
   },
   timers: [{ id: 'welcome', enabled: false, responseMode: 'rules', intervalSec: 300, start: '', end: '', quietSec: 15, messages: DEFAULT_TIMER_PHRASES }],
   adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', startSelector: '', endSelector: '' }
@@ -82,7 +94,7 @@ export function mergeConfig(input = {}, base = DEFAULTS) {
     for (const timer of result.timers) {
       if (LEGACY_TIMER_PHRASES.some(messages => same(timer.messages, messages))) timer.messages = copy(DEFAULT_TIMER_PHRASES);
     }
-    if (['你是直播间场控。用语自然、稍正式，简洁有礼、平和克制，直接回应具体内容。不冒充主播，不装熟，不煽情、不奉承，不夸大承诺。', '你是直播间的温和场控，语气自然、简短，不冒充主播，不夸大承诺。', '你是直播间帮忙招呼观众的场控。像平常聊天一样说话，短句为主，接着对方的话聊。不冒充主播，不装熟，不夸大承诺。'].includes(input.ai?.persona)) result.ai.persona = DEFAULTS.ai.persona;
+    if (['你在直播间帮忙做简单招呼。说话简短、平常，欢迎或谢谢一句就够。把注意力留给主播，不主动找话题，不自称主持，不说帮忙转达或安排，没有必要就不插话。', '你是直播间场控。用语自然、稍正式，简洁有礼、平和克制，直接回应具体内容。不冒充主播，不装熟，不煽情、不奉承，不夸大承诺。', '你是直播间的温和场控，语气自然、简短，不冒充主播，不夸大承诺。', '你是直播间帮忙招呼观众的场控。像平常聊天一样说话，短句为主，接着对方的话聊。不冒充主播，不装熟，不夸大承诺。'].includes(input.ai?.persona)) result.ai.persona = DEFAULTS.ai.persona;
   }
   // 为旧版仅含荣誉门槛的配置补齐灯牌条件，保留原有配置与基础欢迎下限。
   if (base === DEFAULTS && input.welcome?.admin?.minFanLevel === undefined) {
@@ -103,6 +115,8 @@ export function validateConfig(c) {
   const choice = (v, values, name) => { if (!values.includes(v)) throw new Error(`${name}无效`); };
   const strings = (v, name) => { if (!Array.isArray(v) || v.length > 200 || v.some(x => typeof x !== 'string' || x.length > 4000)) throw new Error(`${name}必须是文本数组（最多 200 条）`); };
   choice(c.mode, ['preview', 'auto'], '发送模式');
+  for (const key of ['enabled','luckyBag','redPacket','nativePassword']) if (typeof c.rewards[key] !== 'boolean') throw new Error('福袋红包自动参与开关无效');
+  if (typeof c.rewards.entryXPath !== 'string' || c.rewards.entryXPath.length > 2000 || c.rewards.entryXPath && !c.rewards.entryXPath.startsWith('/')) throw new Error('福袋入口 XPath 应以 / 开头，最多 2000 字符');
   if (typeof c.automation.autoStart !== 'boolean' || typeof c.gift.batchEnabled !== 'boolean') throw new Error('自动开启或合并感谢开关无效');
   if (typeof c.timersEnabled !== 'boolean') throw new Error('定时消息开关无效');
   for (const key of ['enabled','announceLifecycle','reportEnabled','midnightEnabled','aiEnabled']) if (typeof c.pkOperations[key] !== 'boolean') throw new Error('PK 播报开关无效');
@@ -145,7 +159,21 @@ export function validateConfig(c) {
   range(c.ai.intervalSec, 0, 3600, 'AI 间隔'); range(c.ai.userCooldownSec, 0, 86400, 'AI 用户冷却');
   range(c.ai.contextSize, 1, 100, '上下文条数'); range(c.ai.contextAgeSec, 10, 600, '上下文有效秒数');
   range(c.ai.maxPerHour, 1, 36000, 'AI 每小时调用上限'); range(c.ai.idleSec, 60, 3600, '冷场秒数');
+  choice(c.ai.replyFrequency,REPLY_FREQUENCIES.map(([key])=>key),'AI 接话频率');
+  if(typeof c.ai.proactiveEnabled!=='boolean')throw new Error('主动互动开关无效');
+  range(c.ai.proactiveIntervalSec,30,3600,'主动互动间隔');
   range(c.ai.temperature, 0, 2, 'AI 温度');
+  validateMemory(c.ai.memory);validateAssistant(c.ai.assistant);
+  validateMediaConfig(c.ai.media);
+  validatePipeline(c.ai);
+  if(typeof c.ai.knowledge!=='string' || c.ai.knowledge.length>12000)throw new Error('主播与本场资料最多12000字');
+  if (typeof c.ai.search.enabled!=='boolean') throw new Error('联网搜索开关无效');
+  choice(c.ai.search.provider,['bocha','tavily','searxng'],'搜索服务');
+  for(const [key,min,max] of [['maxResults',1,5],['maxPerHour',1,3600]]) {
+    range(c.ai.search[key],min,max,'联网搜索设置');
+    if(!Number.isInteger(c.ai.search[key]))throw new Error('联网搜索设置必须为整数');
+  }
+  if(c.ai.search.enabled)validateSearchEndpoint(c.ai.search.endpoint,c.ai.search.provider);
   if (c.anchorId && !/^\d+$/.test(c.anchorId)) throw new Error('主播 UID 应为纯数字');
   if (c.selfId && !/^\d+$/.test(c.selfId)) throw new Error('发送账号 UID 应为纯数字');
   for (const [list, name] of [[c.ignored, '忽略用户'], [c.blockedWords, '屏蔽词'], [c.moderation.terms, '辱骂识别词'], [c.welcome.listed, '指定欢迎用户'], [c.gift.templates, '礼物话术'], [c.welcome.templates, '欢迎话术'], [c.like.templates, '点赞感谢话术']]) strings(list, name);
@@ -219,13 +247,15 @@ function cloneRuntime(value) {
 const keyFor = u => u.id || u.secUid || `name:${u.name}`;
 
 export class Engine {
-  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}) } = {}) {
+  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
+    this.viewerMemory=viewerMemory;
     this.config = validateConfig(mergeConfig(config)); this.now = now; this.send = send; this.ai = ai; this.log = log; this.changed = changed; this.checkpoint = checkpoint; this.onStop = onStop;
     this.queue = []; this.giftJobs = new Map(); this.history = []; this.seen = new Map(); this.cooldowns = new Map(); this.gifts = new Map(); this.duplicates = new Map();
+    this.claimGiveaway=claimGiveaway;this.giveawayInstance=crypto.randomUUID();this.giveawayCurrent=giveawayCurrent;this.giveawayReceipts=new Map();this.lastGiveawaySend=-Infinity;
     this.calls = []; this.running = false; this.epoch = 0; this.serial = 0;
     this.chatAIQueue = []; this.chatAIBackground = null; this.replyEvents = [];
-    this.contextChat = []; this.liveData = liveData;
-    this.lastChat = now(); this.lastInteraction = now(); this.lastAI = -Infinity; this.aiBusy = false; this.busy = false;
+    this.contextChat = []; this.liveData = liveData;this.mediaContext=mediaContext;
+    this.lastChat = now(); this.lastInteraction = now(); this.lastAI = -Infinity; this.turnTaking=new TurnTaking(); this.lastProactiveAt=-Infinity; this.lastProactiveScene=''; this.interactionRevision=0; this.aiBusy = false; this.busy = false;
     this.timerDue = new Map(); this.rotation = new Map(); this.selfTexts = new Map(); this.selfIdentity = null; this.giftStyleSerial = 0;
     this.moderation = new Moderation(this, manage);
     this.lastMaintenance = -Infinity;
@@ -239,6 +269,7 @@ export class Engine {
     this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity;
     this.pk = new PKTracker({ now });
     this.liveMetrics = new LiveMetrics({now});
+    this.liveMode = new LiveModeTracker({now});
     this.pkSeen = new Map();
     this.roomData = {stats:null,audience:null,activities:[]};
     this.anchorStats = new AnchorStats({now});
@@ -249,8 +280,8 @@ export class Engine {
   update(config) {
     // 配置保存不会中断正在运行的场控；新规则从下一条事件开始生效。
     this.config = validateConfig(mergeConfig(config));
-    if (!this.config.ai.enabled || !this.config.ai.chatEnabled) this.chatAIBackground = null;
-    if (!this.config.ai.enabled || !(this.config.ai.chatEnabled || this.config.bot.enabled)) this.chatAIQueue = [];
+    if (!this.config.ai.enabled || !this.config.ai.chatEnabled || this.config.ai.replyFrequency==='off') this.chatAIBackground = null;
+    if (!this.config.ai.enabled || !(this.config.ai.chatEnabled || this.config.bot.enabled) || this.config.ai.replyFrequency==='off') this.chatAIQueue = [];
     if (!this.config.moderation.enabled || !this.config.moderation.warningsEnabled) this.queue = this.queue.filter(job => job.kind !== 'moderation');
     this.rotation.clear();
     this.changed();
@@ -260,22 +291,26 @@ export class Engine {
     const entries = map => [...map.entries()].slice(-5000);
     const bot = this.bot.session ? { ...this.bot.session, used: this.bot.session.used ? [...this.bot.session.used] : undefined } : null;
     return cloneRuntime({
+      turnTaking:this.turnTaking.snapshot(),
       version: 1, savedAt: this.now(), running: this.running || Boolean(this.resumeRequested),
+      giveawayReceipts:[...this.giveawayReceipts],lastGiveawaySend:Number.isFinite(this.lastGiveawaySend) ? this.lastGiveawaySend : null,
       queue: this.queue, gifts: [...this.gifts.entries()], bot, botIdiomResult:this.bot.lastIdiomResult, botQuestions:this.bot.questionHistory,
       seen: entries(this.seen), cooldowns: entries(this.cooldowns), duplicates: entries(this.duplicates),
       timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen), milestoneSession:this.milestoneSession,
       moderation:this.moderation.snapshot(), history: this.history.slice(-80), contextChat:this.contextChat.slice(-100),replyEvents:this.replyEvents.slice(-40),stats: this.stats, serial: this.serial,
       lastInteraction: this.lastInteraction, lastChat: this.lastChat,
-      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), audience:this.audience.snapshot()
+      inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), liveMode:this.liveMode.snapshot(), audience:this.audience.snapshot()
       , pk: this.pk.export(), roomData:this.roomData, anchorStats:this.anchorStats.snapshot(), pkOperations:this.pkOperations.snapshot()
     });
   }
   restore(snapshot) {
     if (!snapshot || snapshot.version !== 1 || !Number.isFinite(snapshot.savedAt)) return false;
     snapshot = cloneRuntime(snapshot);
+    this.turnTaking.restore(snapshot.turnTaking,this.now());
     this.moderation.restore(snapshot.moderation);
     const map = value => new Map(Array.isArray(value) ? value.filter(pair => Array.isArray(pair) && pair.length === 2) : []);
     this.queue = Array.isArray(snapshot.queue) ? snapshot.queue.filter(job => job && typeof job.text === 'string' && Number.isFinite(job.created)) : [];
+    this.giveawayReceipts=map(snapshot.giveawayReceipts);this.lastGiveawaySend=Number.isFinite(snapshot.lastGiveawaySend) ? snapshot.lastGiveawaySend : -Infinity;
     this.gifts = map(snapshot.gifts);
     this.bot.reset();
     this.bot.lastIdiomResult = snapshot.botIdiomResult || null;
@@ -306,6 +341,7 @@ export class Engine {
     this.anchorStats.restore(snapshot.anchorStats || {});
     this.pkOperations.restore(snapshot.pkOperations);
     this.liveMetrics.restore(snapshot.liveMetrics);
+    this.liveMode.restore(snapshot.liveMode);
     if (snapshot.roomData && typeof snapshot.roomData === 'object') this.roomData = {
       stats:snapshot.roomData.stats && typeof snapshot.roomData.stats === 'object' ? snapshot.roomData.stats : null,
       audience:snapshot.roomData.audience && typeof snapshot.roomData.audience === 'object' ? snapshot.roomData.audience : null,
@@ -358,7 +394,7 @@ export class Engine {
     const canonical = profile ? {...milestone,name:profile.name} : milestone;
     if (!this.acceptMilestone(canonical)) return;
     const text = milestoneThankYou(canonical,profile ? audienceAddress(profile,this.now()) : canonical.name);
-    this.lastInteraction = this.now(); this.enqueue('milestone',text);
+    this.lastInteraction = this.now(); this.interactionRevision++; this.enqueue('milestone',text);
   }
   observeMilestoneSession(event) {
     const roomId = event.source === 'socket' && ['chat','gift','start'].includes(event.type) ? String(event.roomId || '') : '';
@@ -401,7 +437,7 @@ export class Engine {
       const job = cloneRuntime(source); delete job.deliveryUncertain;
       job.attempts = Math.max(job.attempts || 0, record.attempts || 0) + 1;
       job.created = this.now();
-      if (!job.pkNotice) job.expires = Infinity;
+      if (!job.pkNotice && job.kind!=='giveaway') job.expires = Infinity;
       job.retryAt = this.now() + delay;
       this.queue.push(job); this.indexGiftJob(job); queued.add(job.id);
     }
@@ -426,7 +462,7 @@ export class Engine {
     const resuming = Boolean(this.resumeRequested);
     this.running = true; this.resumeRequested = false; this.epoch++;
     for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
-    if (!resuming) { this.lastChat = this.now(); this.lastInteraction = this.now(); this.timerDue.clear(); }
+    if (!resuming) { this.lastChat = this.now(); this.lastInteraction = this.now(); this.interactionRevision++; this.timerDue.clear(); }
     this.log('system', resuming ? '场控已从上次状态恢复' : '场控已开始'); this.changed();
   }
   stop(reason = '已暂停', { preserveWork = false } = {}) {
@@ -434,7 +470,7 @@ export class Engine {
     this.chatAIQueue = []; this.chatAIBackground = null;
     // 人工暂停、切房间和配置变更继续清空现场任务；发送异常则由调用方保留 outbox，
     // 让管理员修复控件后可以继续发送，避免“已入队但未确认”变成静默丢失。
-    if (!preserveWork) { this.queue = []; this.giftJobs.clear(); this.gifts.clear(); this.bot.reset(); this.timerDue.clear(); this.history = []; }
+    if (!preserveWork) { this.queue = this.queue.filter(job=>job.kind==='giveaway'); this.giftJobs.clear(); this.gifts.clear(); this.bot.reset(); this.timerDue.clear(); this.history = []; }
     else if (this.inFlight?.jobs?.length && !this.inFlight.deliveryId) {
       const known = new Set(this.queue.map(job => job.id));
       for (const job of this.inFlight.jobs) if (!known.has(job.id)) this.queue.unshift({ ...job, deliveryUncertain:true });
@@ -484,6 +520,26 @@ export class Engine {
     this.giftJobs.clear();
     for (const job of this.queue) this.indexGiftJob(job);
   }
+  senderEnabled() { return this.running || this.queue.some(job=>job.kind==='giveaway'); }
+  validGiveawayJob(job) { return job.kind!=='giveaway' || this.giveawayCurrent(job.giveaway); }
+  async enqueueGiveaway(message) {
+    const now=this.now();
+    if(message.expiresAt<=now)return true;
+    for(const [key,expires] of this.giveawayReceipts)if(expires<=now)this.giveawayReceipts.delete(key);
+    if(message.queued && !message.attemptedBy && !this.queue.some(job=>job.giveaway?.key===message.key) && !this.inFlight?.jobs.some(job=>job.giveaway?.key===message.key))this.giveawayReceipts.delete(message.key);
+    if(!this.giveawayReceipts.has(message.key)) {
+      const checked=cleanMessage(message.text,this.config);
+      if(!checked.ok)throw new Error(`抽奖弹幕未入队：${checked.reason}`);
+      if(this.queue.length>=this.backlogLimit)throw new Error('发送队列积压，抽奖弹幕保留待重试');
+      this.giveawayReceipts.set(message.key,message.expiresAt);
+      this.queue.push({id:++this.serial,kind:'giveaway',text:checked.text,created:now,expires:message.expiresAt,
+        priority:({countdown:130,result:120,start:115,cancelled:115,reminder:96,entry:95})[message.kind],
+        giveaway:{key:message.key,roundId:message.roundId,kind:message.kind,endsAt:message.endsAt}});
+      this.log('queue',`抽奖：${checked.text}`);this.changed();
+    }
+    // Persist the receipt and job together before acknowledging the round outbox.
+    await this.checkpoint();return true;
+  }
   enqueue(kind, text, extra = {}) {
     const checked = cleanMessage(text, this.config);
     if (!checked.ok) { this.filtered(`${kind}：${checked.reason}`); return false; }
@@ -499,7 +555,7 @@ export class Engine {
       let lowest = null, lowestIndex = -1;
       for (let index = 0; index < this.queue.length; index++) {
         const q = this.queue[index];
-        if (q.giftReply || q.kind === 'bot') continue;
+        if (q.giftReply || q.kind === 'bot' || q.kind==='giveaway') continue;
         if (!lowest || q.priority < lowest.priority || q.priority === lowest.priority && q.created < lowest.created) { lowest = q; lowestIndex = index; }
       }
       if (!lowest || lowest.priority >= item.priority) { if (!extra.quietOverflow) { this.stats.overflow++; this.filtered('队列已满，本次互动未入队'); } return false; }
@@ -508,10 +564,14 @@ export class Engine {
     this.queue.push(item); this.indexGiftJob(item);
     this.log('queue', `${kind}：${checked.text}`); this.changed(); return true;
   }
-  ingest(event) {
-    try { this.ingestEvent(event); } finally { this.changed(); }
+  ingest(event, {giveawayChat=false} = {}) {
+    try { this.ingestEvent(event, {giveawayChat}); } finally { this.changed(); }
   }
   ingestPK(event) {
+    if (isLiveModeEvent(event)) {
+      this.liveMode.ingest(event, {anchorId:this.config.anchorId});
+      if (event.type !== 'room-state') return true;
+    }
     if (!PK_EVENT_TYPES.has(event?.type) && !['room-state','gift','chat'].includes(event?.type)) return false;
     // The read-only PK path runs before the durable interaction inbox. Use an
     // independent bounded identity map so journal replay cannot count it twice.
@@ -533,11 +593,12 @@ export class Engine {
       for (const side of ['self','opponent']) if (Number.isFinite(normalized[`${side}Score`])) normalized[`${side}ScoreMeta`] = {...normalized[`${side}ScoreMeta`],final:true};
     }
     const state = this.pk.ingest(normalized);
+    this.liveMode.ingest(normalized, {anchorId:this.config.anchorId,pk:state});
     if (state?.key) this.anchorStats.ingestBattle(state);
     this.pkOperations.lifecycle(normalized, state);
     return true;
   }
-  ingestEvent(event) {
+  ingestEvent(event, {giveawayChat=false} = {}) {
     this.assertCapacity(event);
     const now = this.now(); this.stats.events++;
     // PK 事件是只读分析数据，允许在场控暂停时继续进入统计；发送规则仍只处理运行中的互动事件。
@@ -551,7 +612,7 @@ export class Engine {
     if (event.type === 'start') this.pkOperations.observeBroadcast(event);
     this.ingestPK(event);
     if (event.type === 'anchor-pk-tasks') this.pkOperations.ingestTasks(event);
-    if (['anchor-exhibition','pk-rank-season','anchor-exhibition-retention','room-indicator'].includes(event.type)) this.anchorStats.ingest(event, {anchorId:this.config.anchorId,roomId:event.roomId});
+    if (['anchor-fanclub','fansclub-statistics','fansclub','fansclub-push','room-likes','like','anchor-exhibition','pk-rank-season','anchor-exhibition-retention','room-indicator'].includes(event.type)) this.anchorStats.ingest(event, {anchorId:this.config.anchorId,roomId:event.roomId});
     // 按帧实际到达时间区分历史补推；主线程解码积压不能让实时消息变成历史消息。
     const hasReceipt = Number.isFinite(event.receivedAt) && event.receivedAt <= now;
     const hasRecentReceipt = hasReceipt && now - event.receivedAt < 600000;
@@ -626,13 +687,13 @@ export class Engine {
     if ((!u.name && event.type !== 'gift') || matchesUser(u, this.config.ignored)) return;
     if (event.type === 'chat') {
       if (!event.text || (this.selfTexts.get(event.text) || 0) > now) return;
-      if (this.config.moderation.enabled && !isSelf) this.moderation.inspect(event, () => this.handleChat(event, now));
-      else this.handleChat(event, now);
+      if (this.config.moderation.enabled && !isSelf) this.moderation.inspect(event, () => this.handleChat(event, now, giveawayChat));
+      else this.handleChat(event, now, giveawayChat);
     } else if (event.type === 'enter' && this.config.welcome.enabled) {
       const decision = welcomeDecision(u, this.config);
       if (!decision.pass) this.filtered(`${u.name}：${decision.reason}`);
       else {
-        this.lastInteraction = now;
+        this.lastInteraction = now; this.interactionRevision++;
         const club = (u.fanClubs || []).find(c => c.anchorId === this.config.anchorId);
         const fallback = renderAudienceTemplate(this.choose('welcome', this.config.welcome.templates), u, { level: u.wealthLevel ?? '?', fanLevel: club?.level ?? '?' }, now);
         const extra = { channel: this.welcomeChannel(u), welcomeUser: copy(u) };
@@ -700,17 +761,18 @@ export class Engine {
     this.queue=this.queue.filter(job=>!job.idiomHintToken || job.idiomHintToken===token);
     return this.queue.length!==before;
   }
-  handleChat(event, now) {
+  handleChat(event, now, giveawayChat=false) {
     const u = event.user || {}, isSelf = this.isSelfUser(u);
       const milestone = recognizeMilestone(event.text);
       if (milestone) {
         this.queueMilestone(milestone);
         return;
       }
-      this.lastChat = now; this.lastInteraction = now;
+      this.lastChat = now; this.lastInteraction = now; this.interactionRevision++;
       this.history.push({ name: u.name.slice(0, 40), text: String(event.text).slice(0, 300), at: now });
       const contextAge = this.config.ai.contextAgeSec * 1000;
       while (this.history.length && (now - this.history[0].at > contextAge || this.history.length > this.config.ai.contextSize)) this.history.shift();
+      if (giveawayChat) return;
       const a = this.config.ai;
       const command = addressedToSelf(event, this.selfIdentity, this.config.selfId);
       if (command !== null) {
@@ -741,9 +803,55 @@ export class Engine {
       }
       if (a.enabled && a.chatEnabled) this.requestChatAI(event, false);
   }
+  chatContextKey() {
+    const broadcast=this.pkOperations.broadcast;
+    return JSON.stringify([this.config.anchorId,broadcast?.anchorId===this.config.anchorId ? broadcast.roomId : this.liveMode.roomId,this.liveMode.endedAt]);
+  }
+  roomChatCount(now=this.now()) { return this.contextChat.filter(row=>now-row.at>=0 && now-row.at<=30000).length; }
+  turnInput(mode,now=this.now()) {return {mode,scope:this.chatContextKey(),now,ai:this.config.ai,roomMessages:this.roomChatCount(now)};}
+  conversationReady(job,now=this.now()) {return !conversational(job) || this.turnTaking.canSpeak(this.turnInput(jobTurn(job).mode,now));}
+  validChatReply(job) {
+    if(job.aiProactive && !this.validProactive(job.aiProactive))return false;
+    const reply=job.aiChat, ai=this.config.ai;
+    return !reply || (!reply.facts || reply.facts===liveFactFingerprint(this.aiContext().liveContext)) && reply.contextKey===this.chatContextKey() && this.now()-reply.observedAt<45000 && ai.enabled
+      && (reply.replyMode==='direct' ? ai.chatEnabled || this.config.bot.enabled : ai.chatEnabled);
+  }
+  validProactive(reply) {
+    const now=this.now(),ai=this.config.ai,speech=reply.mode==='speech';
+    const enabled=(reply.mode==='idle' ? ai.idleEnabled && ai.chatEnabled : ai.proactiveEnabled) && this.turnTaking.canSpeak(this.turnInput(speech ? 'speech' : 'proactive',now));
+    const media=this.mediaContext(this.config),currentSpeech=liveMoment(media,now).speech;
+    return this.running && ai.enabled && enabled && reply.epoch===this.epoch && reply.contextKey===this.chatContextKey()
+      && now-reply.created>=0 && now-reply.created<=30000 && reply.lastChat===this.lastChat && reply.lastInteraction===this.lastInteraction && reply.interactionRevision===this.interactionRevision
+      && (!speech || currentSpeech && sceneKey(currentSpeech)===reply.speechKey)
+      && freshObservations(media,now).some(row=>observationKey(row)===reply.evidenceKey);
+  }
+  proactiveCandidate(now) {
+    const ai=this.config.ai,moment=liveMoment(this.mediaContext(this.config),now),speech=moment.speech;
+    if(ai.proactiveEnabled && awaitingVisual(moment,now,resolveMediaConfig(ai).videoEnabled))return null;
+    if(ai.proactiveEnabled && speech && this.turnTaking.canAssess({...this.turnInput('speech',now),key:ai.replyFrequency==='every' ? observationKey(speech) : sceneKey(speech)}))return {mode:'speech',row:speech};
+    const mode=proactiveMode(ai,now-Math.max(this.lastChat,this.lastInteraction));
+    if(!mode || !this.turnTaking.canSpeak(this.turnInput('proactive',now)) || now-this.lastProactiveAt<ai.proactiveIntervalSec*1000)return null;
+    const row=moment.visual || (mode==='idle' ? speech : null);
+    return row && sceneKey(row)!==this.lastProactiveScene ? {mode,row} : null;
+  }
+  requestProactive(now) {
+    const ai=this.config.ai;
+    if(!ai.enabled || this.aiBusy || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
+      || now-this.lastAI<ai.intervalSec*1000 || this.calls.filter(at=>now-at<3600000).length>=ai.maxPerHour)return false;
+    const candidate=this.proactiveCandidate(now);if(!candidate)return false;
+    const {mode,row}=candidate,speech=mode==='speech',pacingMode=speech ? 'speech' : 'proactive';
+    const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row),...(speech ? {speechKey:sceneKey(row)} : {})};
+    if(speech)this.turnTaking.assessed(reply.contextKey,now,'speech',ai.replyFrequency==='every' ? observationKey(row) : reply.speechKey);
+    else {this.lastProactiveAt=now;this.lastProactiveScene=sceneKey(row);}
+    void this.requestAI(speech ? {type:'speech',text:row.text} : null,{kind:'ai',data:{proactive:true,interactionMode:mode,engagement:this.turnTaking.context(this.turnInput(pacingMode,now))},extra:{aiProactive:reply},
+      instruction:speech ? hostSpeechInstruction(ai.replyFrequency) : '这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。默认旁听，不因看见一个动作或每段识别就起话题。主播在讲解、唱歌、回应别人、关键PK或严肃表达时不打断。只有主播向公屏抛出问题或确有值得回应的新变化，才选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
+    return true;
+  }
   requestChatAI(event, addressed) {
-    const pending = {event:copy(event), addressed, at:this.now(), epoch:this.epoch};
-    if (addressed) {
+    if(this.config.ai.replyFrequency==='off')return;
+    if(!addressed && (event.mentions?.length || /^\s*@/u.test(event.text)))return;
+    const pending = {event:copy(event), addressed, at:this.now(), epoch:this.epoch, contextKey:this.chatContextKey()};
+    if (addressed || this.config.ai.replyFrequency==='every') {
       if (this.chatAIQueue.length >= 20) { this.filtered('AI 对话等待已满，本条不再排队'); return; }
       this.chatAIQueue.push(pending);
     } else {
@@ -754,24 +862,31 @@ export class Engine {
   }
   drainChatAI() {
     const a = this.config.ai, now = this.now();
-    const valid = item => item.epoch === this.epoch && now - item.at < 45000;
+    const valid = item => item.epoch === this.epoch && item.contextKey===this.chatContextKey() && now - item.at < 45000;
     this.chatAIQueue = this.chatAIQueue.filter(valid);
     if (this.chatAIBackground && !valid(this.chatAIBackground)) this.chatAIBackground = null;
-    if (!this.running || !a.enabled || this.aiBusy || now - this.lastAI < a.intervalSec * 1000 || this.calls.filter(at => now - at < 3600000).length >= a.maxPerHour) return;
-    const pending = this.chatAIQueue.shift() || this.chatAIBackground;
+    if (!this.running || !a.enabled || a.replyFrequency==='off' || this.aiBusy || now - this.lastAI < a.intervalSec * 1000 || this.calls.filter(at => now - at < 3600000).length >= a.maxPerHour) return;
+    const pending = this.chatAIQueue[0] || this.chatAIBackground;
     if (!pending) return;
+    const userKey=turnViewerKey(pending.event.user),scope=this.chatContextKey();
+    const pacingMode=pending.addressed ? 'direct' : this.turnTaking.mode(userKey,scope,now);
+    if(!pending.addressed && !this.turnTaking.canAssess(this.turnInput(pacingMode,now)))return;
+    if(pending===this.chatAIQueue[0])this.chatAIQueue.shift();
+    if(pacingMode==='contextual')this.turnTaking.assessed(scope,now);
+    const engagement=this.turnTaking.context({...this.turnInput(pacingMode,now),userKey});
     if (pending === this.chatAIBackground) this.chatAIBackground = null;
     if (pending.addressed ? !(a.chatEnabled || this.config.bot.enabled) : !a.chatEnabled) return;
     void this.requestAI(pending.event, {
-      kind:'ai', data:{replyMode:pending.addressed ? 'direct' : 'contextual', addressedToOther:!pending.addressed && (Boolean(pending.event.mentions?.length) || /^\s*@/u.test(pending.event.text))},
-      instruction:pending.addressed
+      kind:'ai', data:{pacingMode,engagement,replyMode:pending.addressed ? 'direct' : 'contextual', addressedToOther:!pending.addressed && (Boolean(pending.event.mentions?.length) || /^\s*@/u.test(pending.event.text))},
+      instruction:(a.replyFrequency==='every' ? EVERY_TURN_INSTRUCTION : pending.addressed
         ? '观众明确 @ 了当前登录场控账号，希望与你直接对话。结合目标弹幕、最近直播间聊天记录和 live_context 简短回应，不要求问句或呼叫词；普通招呼和闲聊也可回答。涉及主播安排等事实只用已核实资料，缺少资料时坦诚说明；仍跳过挑衅、不安全内容和完全相同的已回答请求。不要把普通聊天变成游戏或菜单。'
-        : '先根据目标弹幕、最近直播间聊天记录、recent_replies 和 live_context 判断此时是否有必要由场控接话，再决定回复。问句不代表需要回复；观众彼此聊天、反问、起哄、随口感叹、重复已答问题、等待主播回应或资料不足以提供帮助时，输出 [SKIP]。data.addressedToOther=true 表示提及了其他账号，优先视为对他人的话而保持安静。结合当前游戏、PK和互动节奏避免打断；有明确求助且能提供有用信息、或承接场控对话时才简短回复。非问句也可以需要回复。判断与回复在本次请求完成，只输出回复正文或 [SKIP]，不输出判断过程。'
+        : '先判断接话资格：综合目标弹幕、engagement.recentTurns、最近聊天、音画和 live_context，分清对话归属，再决定是否开口。未点名时默认旁听，只有明确向场控求助、清楚延续刚才与场控的对话，或尚无人回答且可用常识或已核实资料简短解答的公共问题，现场又适合补充时，才简短回复。问句不代表需要回复，反问、玩笑、感叹本身不是跳过理由；向场控接话、自然延续当前对话或能给出贴切帮助时可以简短回应，不能只因缺少主播资料就跳过常识或日常交流。观众彼此私聊、等待主播亲自回应、完全重复已答问题或接话没有帮助时输出 [SKIP]。data.addressedToOther=true 表示提及了其他账号，优先视为对他人的话而保持安静。结合当前游戏、PK和互动节奏避免打断，不为接话而硬接。判断与回复在本次请求完成，只输出回复正文或 [SKIP]，不输出判断过程。')
+        + ' 观众询问主播直播数据时属于可回答的问题，按问题的本场、昨日、今日、本周、本月、本季、本年或累计范围读取 live_context，简短给出已采集的统计。明确查询但数据缺失或过期时说明尚未采集或当前无法确认，不编造数字；数据或统计范围变化后可以再次回答。'
     });
   }
   recordLike(event) {
     const user = event.user, config = this.config.like;
-    this.lastInteraction = this.now();
+    this.lastInteraction = this.now(); this.interactionRevision++;
     const fallback = renderAudienceTemplate(this.choose('like', config.templates), user, {count:event.count || 1},this.now());
     if (config.responseMode === 'ai') {
       void this.requestAI({ type: 'like', user }, {
@@ -830,7 +945,7 @@ export class Engine {
       const maxWindowMs = Math.min(g.mergeSec * 1000, 3000);
       state.due = state.ended ? now : Math.min(now + quietMs, state.pendingSince + maxWindowMs);
     }
-    this.gifts.set(key, state); this.lastInteraction = now;
+    this.gifts.set(key, state); this.lastInteraction = now; this.interactionRevision++;
     // 内存回收只能移除已入队的结算记录，不能删掉队列满时仍在等待感谢的礼物。
     if (this.gifts.size > 5000) {
       for (const [oldKey, old] of this.gifts) {
@@ -920,6 +1035,7 @@ export class Engine {
     });
   }
   giftReady(q, now) {
+    if(q.kind==='giveaway' ? this.validGiveawayJob(q)!==true || now<(this.lastGiveawaySend+2000) : !this.running)return false;
     return (!q.botGroup || !this.queue.some(job => job.botGroup === q.botGroup && job.botPart < q.botPart)) && (!q.afterBot || !this.queue.some(job => job.id === q.afterBot)) && (q.retryAt || 0) <= now && now >= (q.readyAt || 0) && (!q.giftReply || now >= Math.max(q.readyAt || 0, (this.giftSentAt.get(q.giftReply.userKey) ?? -Infinity) + this.config.gift.cooldownSec * 1000));
   }
   giftBatch(first, now) {
@@ -950,12 +1066,13 @@ export class Engine {
     const earlier = (a, b) => !b || a.created < b.created || a.created === b.created && a.id < b.id;
     const higherPriority = (a, b) => !b || a.priority > b.priority || a.priority === b.priority && earlier(a, b);
     for (const item of queue) {
-      if (!this.giftReady(item, now)) continue;
+      if (!this.giftReady(item, now) || !this.conversationReady(item,now)) continue;
       if (higherPriority(item, best)) best = item;
       if (item.kind === 'gift' && earlier(item, oldestGift)) oldestGift = item;
-      if (item.kind === 'bot' && earlier(item, waitingBot)) waitingBot = item;
+      if ((item.kind === 'bot' || item.kind==='giveaway') && earlier(item, waitingBot)) waitingBot = item;
     }
     if (!best) return null;
+    if(best.kind==='giveaway' && best.priority>=115)return best;
     if (!oldestGift) return waitingBot || best;
 
     // 礼物感谢是事实型事件，等待过久后必须占用下一个发送槽。
@@ -965,11 +1082,16 @@ export class Engine {
     return oldestGift;
   }
   aiContext(config=this.config) {
-    const liveContext=liveReplyContext(this,this.now(),config);
-    return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8)};
+    const read=()=>{
+      const liveContext=liveReplyContext(this,this.now(),config);
+      return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8),mediaContext:this.mediaContext(config)};
+    };
+    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now()};
   }
   async requestAI(event = null, task = { kind: 'ai', instruction: '只简短回答目标弹幕中需要回答的问题，没有必要回复时输出 [SKIP]，不主动发起话题。' }) {
     const a = this.config.ai, now = this.now(), epoch = this.epoch;
+    const proactiveCurrent=()=>!task.data?.proactive || Boolean(task.extra?.aiProactive && this.validProactive(task.extra.aiProactive));
+    const chatContext=task.kind==='ai' && task.data?.replyMode ? this.chatContextKey() : null;
     const currentJob = () => task.targetJob && this.queue.includes(task.targetJob) && task.targetJob.revision === task.revision && task.targetJob.aiPending;
     const fallback = reason => {
       if (this.running && epoch === this.epoch && task.kind !== 'ai' && task.fallback) {
@@ -989,9 +1111,20 @@ export class Engine {
     this.aiBusy = true; this.lastAI = now; this.calls.push(now); this.stats.aiCalls++;
     const prompt = {
       persona: a.persona, knowledge: a.knowledge, ...this.aiContext(),
-      target: event ? { type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
+      target: event?.type==='speech' ? {type:'speech',text:event.text,source:'live-audio',speaker:'unverified'} : event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user) : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
+    let replyFacts=null;prompt.onLiveFacts=value=>{replyFacts=value;};
+    prompt.reserveFollowup=()=>{
+      if(!this.running || epoch!==this.epoch || !proactiveCurrent() || chatContext!==null && chatContext!==this.chatContextKey())return false;
+      this.calls=this.calls.filter(at=>this.now()-at<3600000);
+      if(this.calls.length>=this.config.ai.maxPerHour)return false;
+      this.lastAI=this.now();this.calls.push(this.lastAI);this.stats.aiCalls++;return true;
+    };
+    prompt.isCurrent=()=>this.running && epoch===this.epoch && this.config.ai.enabled && proactiveCurrent()
+      && (!a.search.enabled || this.config.ai.search.enabled)
+      && (chatContext===null || chatContext===this.chatContextKey() && (task.data.replyMode==='direct' ? this.config.ai.chatEnabled || this.config.bot.enabled : this.config.ai.chatEnabled));
+    prompt.canFollowup=()=>this.calls.filter(at=>this.now()-at<3600000).length<this.config.ai.maxPerHour;
     let aiTimer;
     try {
       const request = this.ai(prompt, a);
@@ -1004,7 +1137,8 @@ export class Engine {
       for (const name of [audienceAddress(event?.user,now),event?.user?.name].filter(Boolean)) wording = wording.split(name).join('');
       if (task.kind !== 'bot' && isIntrusiveReply(wording)) { fallback('AI 回复主动代主持或劝留'); return; }
       if (['gift','like','welcome'].includes(task.kind) && !validAudienceAI(output,event?.user,now)) { fallback('AI 称呼与公开资料不符'); return; }
-      if (this.running && epoch === this.epoch && this.now() - now < 45000) {
+      if (this.running && epoch === this.epoch && this.now() - now < 45000 && proactiveCurrent()) {
+        if (chatContext!==null && (chatContext!==this.chatContextKey() || replyFacts && replyFacts!==liveFactFingerprint(this.aiContext().liveContext))) return;
         if (task.kind === 'ai' && task.data?.replyMode && (!this.config.ai.enabled || (task.data.replyMode === 'direct' ? !(this.config.ai.chatEnabled || this.config.bot.enabled) : !this.config.ai.chatEnabled))) return;
         if (task.targetJob) {
           if (currentJob() && this.now() <= task.deadline) {
@@ -1018,7 +1152,7 @@ export class Engine {
           return;
         }
         if (output.trim() === '[SKIP]') { this.log('ai', 'AI 判断无需回复'); if (task.kind !== 'timer') fallback('AI 未生成回复'); }
-        else if (!this.enqueue(task.kind, output, task.extra)) fallback('AI 回复未通过检查');
+        else if (!this.enqueue(task.kind, output, {...task.extra,...(chatContext!==null ? {aiChat:{contextKey:chatContext,observedAt:now,replyMode:task.data.replyMode,pacingMode:task.data.pacingMode || (task.data.replyMode==='direct' ? 'direct' : 'contextual'),userKey:turnViewerKey(event?.user),facts:replyFacts}} : {})})) fallback('AI 回复未通过检查');
       }
     } catch (error) { this.log('error', `AI 调用失败：${error.message}`); fallback('AI 调用失败'); }
     finally { clearTimeout(aiTimer); this.aiBusy = false; this.changed(); this.drainChatAI(); }
@@ -1042,14 +1176,8 @@ export class Engine {
       }});
   }
 
-  async tick(canSend = true) {
-    const expiredDeliveries = this.deliveries.expire();
-    if (expiredDeliveries.length) {
-      for (const record of expiredDeliveries) this.log('system',`未收到公屏回显，不自动重发：${record.text}`);
-      this.changed();
-    }
-    if (!this.running || this.busy) return;
-    const now = this.now(); let stateChanged = false;
+  produceJobs(canSend,now) {
+    let stateChanged=false;
     this.pkOperations.tick(canSend);
     this.drainChatAI();
     for (const job of this.queue) if (job.aiPending && now >= job.readyAt) { job.aiPending=false; job.needsGiftAI=false; stateChanged=true; }
@@ -1096,9 +1224,21 @@ export class Engine {
       if (t.responseMode === 'ai') void this.requestAI(null, { kind: 'timer', instruction: '保留本次参考话术的原意，只写一句简短提醒。默认只欢迎大家、轻轻提醒喜欢可以关注，不发起话题，不征集问题或点歌，不说替大家转达。现场正在聊天、近期已有类似招呼或没有必要插话时输出 [SKIP]。', data: { intervalSec: t.intervalSec, reference: fallback }, fallback });
       else this.enqueue('timer', fallback);
     }
-    if (this.config.ai.enabled && this.config.ai.chatEnabled && this.config.ai.idleEnabled && now - this.lastChat >= this.config.ai.idleSec * 1000 && now - this.lastInteraction >= this.config.ai.idleSec * 1000) {
-      this.lastInteraction = now; stateChanged = true; void this.requestAI(null, { kind: 'ai', instruction: '直播间暂时没有新弹幕，这不表示主播需要救场。没有明确需要补充的已核实信息时输出 [SKIP]；不为了冷场主动征集话题、点歌、提问或劝观众留下，不声称帮忙转达。' });
+    stateChanged=this.requestProactive(now) || stateChanged;
+    return stateChanged;
+  }
+
+  async tick(canSend = true) {
+    const expiredDeliveries = this.deliveries.expire();
+    if (expiredDeliveries.length) {
+      for (const record of expiredDeliveries) this.log('system',`未收到公屏回显，不自动重发：${record.text}`);
+      this.changed();
     }
+    if (!this.senderEnabled() || this.busy) return;
+    const now = this.now(); let stateChanged = false;
+    const currentReplies=this.queue.filter(job=>this.validChatReply(job) && this.validGiveawayJob(job)!==false);
+    if (currentReplies.length!==this.queue.length) {this.queue=currentReplies;stateChanged=true;}
+    if(this.running)stateChanged=this.produceJobs(canSend,now) || stateChanged;
     // 礼物感谢已经完成了连击结算，发送失败/断线时必须保留；普通互动仍按短时效清理。
     // 否则高峰期遇到长连接重连，120 秒后会静默丢掉已统计的感谢任务。
     let expiredCount = 0;
@@ -1114,6 +1254,7 @@ export class Engine {
     }
     const q = canSend ? this.selectNextJob(this.queue, now) : null;
     if (!q) { if (stateChanged) this.changed(); return; }
+    if(q.giveaway?.kind==='countdown')q.text=`抽奖剩余${Math.max(1,Math.ceil((q.giveaway.endsAt-now)/1000))}秒`;
     const batch = q.kind === 'gift' ? this.giftBatch(q, now) : {jobs:[q],text:q.text};
     const checked = cleanMessage(batch.text, this.config);
     const selectedJobs = new Set(batch.jobs); let write = 0;
@@ -1135,9 +1276,13 @@ export class Engine {
     const delivery = this.config.mode === 'preview' ? null : this.deliveries.create(batch.text,batch.jobs,{id:this.config.selfId || this.selfIdentity?.id,secUid:this.selfIdentity?.secUid});
     if (delivery) this.inFlight.deliveryId = delivery.id;
     this.changed();
+    const sendScope=this.chatContextKey();let turnRecorded=false;
+    const recordTurn=()=>{if(!turnRecorded){this.turnTaking.record(q,sendScope,this.now());turnRecorded=true;}};
     const submitted = () => {
       const sentAt = this.now();
+      recordTurn();
       this.stats.maxQueueWaitMs = Math.max(this.stats.maxQueueWaitMs || 0, sentAt - Math.min(...batch.jobs.map(job => job.created)));
+      if (q.kind === 'giveaway') this.lastGiveawaySend=sentAt;
       if (q.kind === 'bot') this.lastBotSend = sentAt;
       if (q.kind === 'gift') this.lastGiftSend = sentAt;
       if (!['gift','like','bot'].includes(q.kind)) this.duplicates.set(q.text, sentAt);
@@ -1168,15 +1313,21 @@ export class Engine {
       } finally { clearTimeout(timer); }
     };
     try {
-      if (this.config.mode === 'preview') { submitted(); this.stats.previews++; this.log('preview', batch.text); }
+      if (this.config.mode === 'preview') {
+        if(q.giveaway && !await this.claimGiveaway(q.giveaway,this.giveawayInstance))return;
+        submitted(); this.stats.previews++; this.log('preview', batch.text);
+      }
       else {
         void checkpointForSend();
         if (this.epoch !== epoch) return;
         this.selfTexts.set(batch.text, now + 120000);
-        const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.channel || 'chat';
-        const result = await this.send(batch.text, () => this.running && this.epoch === epoch && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
+        const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.kind === 'giveaway' ? 'admin' : q.channel || 'chat';
+        const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.conversationReady(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
           this.deliveries.clicked(delivery);
-          try { await checkpointForSend(true); }
+          try {
+            await checkpointForSend(true);
+            if(q.giveaway && !await this.claimGiveaway(q.giveaway,this.giveawayInstance))throw Object.assign(new Error('此抽奖弹幕已由其他页面提交，跳过重复发送'),{giveawayClaimed:true});
+          }
           catch (error) { this.deliveries.finish(delivery,'prepared','点击意图未保存，尚未点击'); delete delivery.clickedAt; throw error; }
         }});
         if (this.epoch !== epoch) return;
@@ -1197,17 +1348,20 @@ export class Engine {
       }
     } catch (error) {
       if (this.epoch === epoch) {
-        if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
+        if(error.giveawayClaimed) {this.deliveries.finish(delivery,'cancelled',error.message);delivery.jobs=[];this.log('system',error.message);}
+        else if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
+          recordTurn();
           this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知；不自动重发');
         } else {
           if (delivery) { this.deliveries.finish(delivery,'cancelled',error.message); delivery.jobs = []; }
           retry(error.message || '发送异常');
         }
         if (error.retryable) this.log('system', `发送暂不可用：${error.message}；消息保留，稍后继续发送`);
-        else this.log('error', `发送失败，场控保持运行：${error.message}`);
+        else if(!error.giveawayClaimed)this.log('error', `发送失败，场控保持运行：${error.message}`);
       }
     }
     finally {
+      if(delivery?.clickedAt && delivery.state!=='cancelled')recordTurn();
       if (delivery && this.epoch !== epoch && ['prepared','clicked'].includes(delivery.state)) {
         if (delivery.state === 'prepared') { this.deliveries.finish(delivery,'cancelled','点击前任务已取消'); delivery.jobs = []; }
         else this.deliveries.finish(delivery,'unknown','点击后运行中断；不自动重发');

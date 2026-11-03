@@ -30,7 +30,7 @@ export class ModerationRequests {
   commit(token) {
     const ticket=this.tickets.get(token);
     if (!ticket) return Promise.resolve({submitted:false,reason:'管理准备已失效'});
-    if (!ticket.result) ticket.result=this.perform(ticket);
+    if (!ticket.result) ticket.result=Promise.resolve().then(()=>this.perform(ticket));
     return ticket.result;
   }
   async perform(ticket) {

@@ -16,7 +16,6 @@ export const ADAPTIVE_LAYOUT_CSS = `
 .pk-gap-visual>summary,.pk-activity-visual>summary{margin-bottom:8px}
 .pk-analysis .pk-table{min-width:280px}.pk-analysis .adaptive-detail-body{overflow-x:auto}
 .settings-workspace>.hint{grid-column:1/-1}.settings-column>.subhead{margin:14px 0}
-.ai-workspace .settings-column>.section{margin:0;padding:0;border:0}
 .pk-overview-main .status{margin-bottom:10px}.pk-overview-main .pk-verdict{padding-bottom:16px}
 .anchor-workspace .anchor-section{min-width:0}.anchor-workspace>.pk-note{grid-column:1/-1}
 .income-records .income-toolbar{margin-top:4px}

@@ -15,6 +15,30 @@ function fixture() {
   page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
   return {dom,page,client,require,requests,displayed,sender:new PageRequestSender(page)};
 }
+test('网页请求拦截器同步重入同一票据时，聊天和管理操作都只提交一次',async t=>{
+  for(const kind of ['chat','admin','mute','ban'])await t.test(kind,async()=>{
+    const f=fixture();
+    try {
+      const room=f.page.__STORE__.roomStore.roomInfo.room;
+      room.owner={id_str:'456'};room.admin_user_ids_str=['789'];
+      const moderation=['mute','ban'].includes(kind);
+      const prepared=moderation ? f.sender.prepareModeration(kind,{id:'999',secUid:'target'}) : f.sender.prepare(kind);
+      assert.equal(prepared.available,true);
+      const commit=()=>moderation ? f.sender.commitModeration(prepared.token) : f.sender.commit(prepared.token,'欢迎朋友');
+      const request=f.client.request;let nested,calls=0;
+      f.client.request=value=>{
+        if(++calls===1)nested=commit();
+        return request(value);
+      };
+      const first=commit();
+      assert.equal((await first).submitted,true,kind);
+      assert.equal(calls,1,kind);
+      assert.equal(f.requests.length,1,kind);
+      assert.equal(nested,first,kind+' 必须共享同一提交回执');
+      assert.equal((await nested).submitted,true);
+    } finally {f.dom.window.close();}
+  });
+});
 test('普通感谢走网页原生本地队列显示一次，本地显示不充当结构化投递回执',async()=>{
   const f=fixture();
   try {
@@ -95,15 +119,33 @@ test('请求拒绝和网络结果未知分开报告，不因异常执行第二�
     const denied=f.sender.prepare('admin'); assert.equal((await f.sender.commit(denied.token,'欢迎')).failed,true);
   } finally {f.dom.window.close();}
 });
-test('请求桥只接受同页面同房间同请求ID的结果',async()=>{
-  const f=fixture();
+test('请求桥忽略页面伪造的成功响应，只消费扩展调用结果',async()=>{
+  const f=fixture();let complete,outbound;
   try {
-    const bridge=new RequestBridgeClient(f.page); let outbound;
     f.page.postMessage=data=>{outbound=data;};
+    const bridge=new RequestBridgeClient(f.page,()=>new Promise(resolve=>{complete=resolve;}));
     const pending=bridge.prepare('admin');
-    const reply=(changes={},source=f.page)=>f.page.dispatchEvent(new f.page.MessageEvent('message',{source,origin:f.page.location.origin,data:{source:'live-assistant-page-v1',type:'send-api-result',room:'123',id:outbound.id,result:{available:true,token:'ok'},...changes}}));
-    reply({room:'other'}); reply({id:'other'}); reply({},null); reply();
-    assert.deepEqual(await pending,{available:true,token:'ok'});
+    f.page.dispatchEvent(new f.page.MessageEvent('message',{source:f.page,origin:f.page.location.origin,
+      data:{source:'live-assistant-page-v1',type:'send-api-result',room:'123',id:outbound?.id,result:{available:true,token:'forged'}}}));
+    complete?.({ok:true,value:{available:true,token:'trusted'}});
+    assert.deepEqual(await pending,{available:true,token:'trusted'});
+  } finally {f.dom.window.close();}
+});
+
+test('扩展上下文失效导致取消同步抛错时，仍等待实际请求结算',async()=>{
+  const f=fixture();let cancel,complete,settled=false;
+  try {
+    f.page.setTimeout=callback=>{cancel=callback;return 1;};
+    f.page.clearTimeout=()=>{};
+    const bridge=new RequestBridgeClient(f.page,message=>{
+      if(message.command.type==='cancel')throw Error('Extension context invalidated');
+      return new Promise(resolve=>{complete=resolve;});
+    });
+    const pending=bridge.commitLike('ticket',1,1).then(result=>{settled=true;return result;});
+    assert.doesNotThrow(()=>cancel());
+    await Promise.resolve();assert.equal(settled,false);
+    complete({ok:true,value:{submitted:true}});
+    assert.equal((await pending).submitted,true);
   } finally {f.dom.window.close();}
 });
 
@@ -143,4 +185,39 @@ test('管理提交前重新核对权限、账号和房间；服务端拒绝与�
       assert.equal(result.submitted,false);assert.equal(Boolean(result.unknown),fail);assert.equal(calls,1);
     }
   }finally{f.dom.window.close();}
+});
+
+test('达到票据容量后，五分钟过期使能力恢复且旧票据不能重发',async t=>{
+  let now=1800000000000;t.mock.method(Date,'now',()=>now);const f=fixture();
+  try {
+    let first;
+    for(let i=0;i<128;i++){const ticket=f.sender.prepare('chat');assert.equal(ticket.available,true);first ||= ticket.token;}
+    assert.equal(f.sender.available('chat'),false);
+    now+=300001;
+    assert.equal(f.sender.available('chat'),true);
+    assert.equal((await f.sender.commit(first,'过期消息')).submitted,false);
+    const next=f.sender.prepare('chat');assert.equal(next.available,true);
+    assert.equal((await f.sender.commit(next.token,'正常消息')).submitted,true);assert.equal(f.requests.length,1);
+  }finally{f.page.close();}
+});
+
+test('点赞准备响应迟到时取消或超时都不返回可用会话，并注销已创建票据',async()=>{
+  for(const mode of ['abort','timeout']) {
+    const f=fixture(),controller=new AbortController();let complete,cancel;
+    f.page.__STORE__.roomStore.roomInfo.room.status=2;f.page.__STORE__.roomStore.roomInfo.room.room_auth={Digg:true};
+    f.page.setTimeout=callback=>{cancel=callback;return 1;};f.page.clearTimeout=()=>{};
+    const bridge=new RequestBridgeClient(f.page,message=>{
+      const command=message.command;
+      if(command.type==='cancel')return Promise.resolve({ok:true});
+      if(command.operation==='stop-like')return Promise.resolve({ok:true,value:f.sender.stopLike(command.token)});
+      const prepared=f.sender.prepareLike();assert.equal(prepared.available,true);
+      return new Promise(resolve=>{complete=()=>resolve({ok:true,value:prepared});});
+    });
+    try {
+      const pending=bridge.prepareLike({signal:controller.signal});
+      if(mode==='abort')controller.abort();else await cancel();
+      complete();assert.equal((await pending).available,false,mode);
+      assert.equal(f.sender.prepareLike().available,true,mode+' 必须注销迟到会话');assert.equal(f.requests.length,0);
+    }finally{f.page.close();}
+  }
 });

@@ -1,10 +1,35 @@
+import { RoomContext } from './room-context.js';
 import { decodeFrame } from './protocol.js';
 import { recognizeMilestone } from '../core/milestones.js';
 import { PageRequestSender } from './request-sender.js';
 import { AnchorDataCollector } from './anchor-data.js';
 import { CollectionGuard } from './collection-guard.js';
+import { readRoomLikes } from './room-likes.js';
 
 const MAX_CAPTURE_FRAME_BYTES = 512 * 1024;
+function chatRowIdentity(row,nickname) {
+  const ids=new Set(),secUids=new Set();
+  // Only the sender's label and row attributes identify this message. Never
+  // borrow an ID from another chat row, a mentioned user, or the message body.
+  const elements=new Set([row,nickname,...nickname.querySelectorAll('[data-user-id],[data-uid],[data-sec-uid],a[href]')]);
+  const link=nickname.closest('a[href]');if(link && row.contains(link))elements.add(link);
+  for(const element of elements) {
+    for(const attr of ['data-user-id','data-uid']) {
+      const id=element.getAttribute(attr);if(/^[1-9]\d{0,24}$/.test(id || ''))ids.add(id);
+    }
+    const secUid=element.getAttribute('data-sec-uid');if(/^[\w-]{1,196}$/.test(secUid || ''))secUids.add(secUid);
+    const href=element.getAttribute('href');
+    if(href)try {
+      const url=new URL(href,row.ownerDocument.location.href);
+      if(['www.douyin.com','live.douyin.com','douyin.com'].includes(url.hostname)) {
+        const id=url.pathname.match(/^\/user\/([\w-]+)\/?$/)?.[1];
+        if(/^[1-9]\d{0,24}$/.test(id || ''))ids.add(id);
+        else if(/^MS4[\w-]{1,193}$/.test(id || ''))secUids.add(id);
+      }
+    } catch {}
+  }
+  return ids.size>1 || secUids.size>1 ? {id:''} : {id:[...ids][0] || '',...(secUids.size ? {secUid:[...secUids][0]} : {})};
+}
 function base64(bytes, page) {
   let binary = '';
   for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -93,11 +118,7 @@ function readLabeledCount(root, label, before = false) {
 export function readRoomSnapshot(doc = document) {
   const chatroom = doc.querySelector('#chatroom');
   if (!chatroom) return null;
-  const likeMatches = [...doc.querySelectorAll('*')]
-    .filter(node => node.children.length === 0)
-    .map(node => node.textContent.trim().match(/^(\d[\d,，]*(?:\.\d+)?(?:万|亿)?)\s*本场点赞$/)?.[1])
-    .filter(Boolean).map(parseDisplayCount).filter(value => value !== null);
-  const likeTotal = likeMatches.length && likeMatches.every(value => value === likeMatches[0]) ? likeMatches[0] : null;
+  const likeTotal = readRoomLikes(doc)?.total ?? null;
   return {
     capturedAt: Date.now(), source: 'dom',
     onlineCount: readLabeledCount(chatroom, '在线观众'),
@@ -219,7 +240,7 @@ export class DouyinAdapter {
     this.page = page; this.getConfig = getConfig; this.shouldReadChat = shouldReadChat; this.shouldReadMilestones = shouldReadMilestones; this.onEvent = onEvent; this.onLog = onLog; this.onStatus = onStatus;
     this.onEcho = onEcho; this.onPK = onPK; this.onCapture = onCapture;
     this.status = { hook: false, sockets: 0, frames: 0, events: 0, errors: 0, lastFrame: 0, connected: false };
-    this.pending = 0; this.pendingBytes = 0; this.decodedCacheBytes = 0; this.chain = Promise.resolve(); this.decodeChain = Promise.resolve(); this.roomPath = location.pathname;
+    this.pending = 0; this.pendingBytes = 0; this.decodedCacheBytes = 0; this.chain = Promise.resolve(); this.decodeChain = Promise.resolve(); this.roomContext = new RoomContext(page);
     this.activeSockets = new Set(); this.domSeen = new WeakMap(); this.domActive = false; this.lastSocketChat = 0;
     this.seenProtocolEvents = new Map();
     this.ownedDraft = null;
@@ -270,11 +291,11 @@ export class DouyinAdapter {
     };
     proto.send = function(...args) {
       const request = this.__liveAssistantPoll;
-      if (request?.method === 'GET' && location.pathname === adapter.roomPath) {
+      if (request?.method === 'GET' && adapter.roomContext.current()) {
         const xhr = this;
         adapter.status.pollRequests = (adapter.status.pollRequests || 0) + 1;
         xhr.addEventListener('load', () => {
-          if (location.pathname !== adapter.roomPath) return;
+          if (!adapter.roomContext.current()) return;
           if (xhr.status < 200 || xhr.status >= 300) { adapter.status.pollFailed = (adapter.status.pollFailed || 0) + 1; adapter.emitStatus(); return; }
           let response, responseType = '';
           try { response = xhr.response; responseType = xhr.responseType || ''; }
@@ -297,7 +318,7 @@ export class DouyinAdapter {
     this.status.pollHook = true;
   }
   acceptFrame(data, transport = 'socket') {
-    if (location.pathname !== this.roomPath) return;
+    if (!this.roomContext.current()) return;
     const frameBytes = typeof data === 'string' ? data.length * 2 : data?.byteLength || data?.size || 0;
     if (this.pending >= 256 || this.pendingBytes + frameBytes > 16 * 1024 * 1024) {
       this.status.frameGaps = (this.status.frameGaps || 0) + 1; this.emitStatus(); return;
@@ -558,10 +579,10 @@ export class DouyinAdapter {
     }
   }
   async moderate(action, user, isCurrent) {
-    if (!isCurrent() || location.pathname !== this.roomPath) return {submitted:false,reason:'场控已暂停或直播间已变更'};
+    if (!isCurrent() || !this.roomContext.current()) return {submitted:false,reason:'场控已暂停或直播间已变更'};
     const prepared=await this.requestSender.prepareModeration(action,{id:user.id,secUid:user.secUid});
     if (!prepared?.available) return {submitted:false,reason:prepared?.reason || '网页管理接口不可用'};
-    if (!isCurrent() || location.pathname !== this.roomPath) return {submitted:false,reason:'管理操作已取消'};
+    if (!isCurrent() || !this.roomContext.current()) return {submitted:false,reason:'管理操作已取消'};
     return this.requestSender.commitModeration(prepared.token);
   }
   async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat' } = {}) {
@@ -765,7 +786,7 @@ export class DouyinAdapter {
       if (allowMilestone && milestone && this.shouldReadMilestones()) pending.push({ type:'milestone', milestone, text, source:'dom', receivedAt });
       if (!nameEl || !contentEl) return;
       const name = nameEl.textContent.trim().replace(/[:：]$/, '');
-      if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,id:'',fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
+      if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,...chatRowIdentity(row,nameEl),fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
     };
     const report = error => { if (Date.now() - lastError > 10000) { lastError = Date.now(); this.onLog('error', `页面弹幕采集异常：${error.message}`); } };
     const detectLiveBoundary = () => {

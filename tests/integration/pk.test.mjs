@@ -1,3 +1,4 @@
+import {RoomContext} from '../../src/browser/room-context.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
@@ -91,15 +92,13 @@ test('扩展 MAIN 桥接在普通背压期间只发布一份 PK，普通消息�
   dom.window.DEFAULTS = {}; dom.window.copy = value => ({...value});
   dom.window.postMessage = value => published.push(value);
   try {
-    dom.window.eval(source);
-    const control = data => dom.window.dispatchEvent(new dom.window.MessageEvent('message', {source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-content-v1',room:'1234567890',...data}}));
-    control({type:'hello'}); control({type:'flow',paused:true});
-    options.onEvent({id:'chat-1',type:'chat'});
+    dom.window.RoomContext=RoomContext;dom.window.eval(source.replace(/^import .*;\n/gm,''));
     const pk = {id:'pk-1',type:'pk-score',scores:[{anchorId:self,score:1000}]};
-    options.onPK(pk); options.onEvent(pk);
-    assert.deepEqual(published.filter(item=>item.type==='event').map(item=>item.event.id), ['pk-1']);
-    control({type:'flow',paused:false});
-    assert.deepEqual(published.filter(item=>item.type==='event').map(item=>item.event.id), ['pk-1','chat-1']);
+    options.onEvent({id:'chat-1',type:'chat'});options.onPK(pk);options.onEvent(pk);
+    const paused=dom.window.__douyinAssistantPageV2.call({type:'drain',paused:true});
+    assert.deepEqual(Array.from(paused.priority,event=>event.id),['pk-1']);assert.equal(paused.events.length,0);
+    const resumed=dom.window.__douyinAssistantPageV2.call({type:'drain'});
+    assert.deepEqual(Array.from(resumed.events,event=>event.id),['chat-1']);assert.equal(resumed.priority.length,0);
   } finally { dom.window.close(); }
 });
 
@@ -134,7 +133,7 @@ test('压缩高峰只缓存预算内的解码事件，超限重解码保留交�
   } finally {unblock();await adapter.chain;dom.window.close();if(previousLocation)Object.defineProperty(globalThis,'location',previousLocation);else delete globalThis.location;}
 });
 
-test('MAIN 初始化积压的旧 PK 开始被新结束超越后，迟到事件不会复活战局', async () => {
+test('MAIN 积压 PK 按序交接，结束后迟到旧开始不会复活战局', async () => {
   const { readFile } = await import('node:fs/promises'); const { JSDOM } = await import('jsdom');
   const source = await readFile(new URL('../../extension/page.js',import.meta.url),'utf8');
   const dom = new JSDOM('<body></body>',{url:'https://live.douyin.com/1234567890',runScripts:'outside-only'});
@@ -145,13 +144,14 @@ test('MAIN 初始化积压的旧 PK 开始被新结束超越后，迟到事件�
   dom.window.DEFAULTS={};dom.window.copy=value=>({...value});
   dom.window.postMessage=value=>{if(value.type==='event'){published.push(value.event);engine.ingest(value.event);}};
   try {
-    dom.window.eval(source);
+    dom.window.RoomContext=RoomContext;dom.window.eval(source.replace(/^import .*;\n/gm,''));
     for(let index=0;index<130;index++)options.onEvent({id:`chat-${index}`,type:'chat',text:'积压',user:{id:`u-${index}`}});
     options.onPK({id:'old-start',type:'pk-start',battleId:'42',roomId:room,at:now-30000,startedAt:now-30000,durationMs:300000});
-    dom.window.dispatchEvent(new dom.window.MessageEvent('message',{source:dom.window,origin:dom.window.location.origin,data:{source:'live-assistant-content-v1',type:'hello'}}));
     options.onPK({id:'new-end',type:'pk-end',battleId:'42',roomId:room,at:now,scores:[{anchorId:self,score:100},{anchorId:rival,score:50}]});
-    for(let attempt=0;published.length<132&&attempt<10;attempt++)await new Promise(resolve=>setTimeout(resolve,5));
-    assert.ok(published.findIndex(event=>event.id==='new-end')<published.findIndex(event=>event.id==='old-start'));
+    const drain=()=>{const data=dom.window.__douyinAssistantPageV2.call({type:'drain'});for(const event of [...data.priority,...data.events]){published.push(event);engine.ingest(event);}};
+    drain();drain();
+    assert.equal(published.length,132);assert.ok(published.findIndex(event=>event.id==='old-start')<published.findIndex(event=>event.id==='new-end'));
+    options.onPK({id:'late-start',type:'pk-start',battleId:'42',roomId:room,at:now-30000,startedAt:now-30000,durationMs:300000});drain();
     assert.equal(engine.pk.current().phase,'ended');assert.equal(engine.pk.current().remainingMs,0);
     assert.equal(engine.pk.current().selfScore,100);assert.equal(engine.pk.results.length,1);
   } finally {dom.window.close();}

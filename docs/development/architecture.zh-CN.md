@@ -52,7 +52,7 @@ examples/                 可导入的示例配置
 
 ## 消息流
 
-1. `extension/page.js` 在 MAIN 世界观察直播页已有连接，把归一化事件交给隔离世界。初始化握手之前的事件先缓存。
+1. `extension/page.js` 在 MAIN 世界观察直播页已有连接，把归一化事件交给隔离世界。隔离脚本读取前，事件先进入有界缓冲。后台通过 `chrome.scripting.executeScript` 绑定来源主框架的 `documentId` 读取 MAIN 闭包队列；公开窗口消息不承载事件、命令或结果。MAIN 仍与网页共享环境，不能作为敌对网页沙箱或可信平台回执。
 2. `extension/content.js` 串行交接事件。运行期间和独立礼物记账均先经后台写入事件日志，再交给应用层。追加使用稳定 ID，重试不会生成重复日志；回放每页最多 256 条。
 3. 应用层更新观众资料与账本任务，引擎执行互动规则、礼物连击合并和游戏逻辑。
 4. 调度器优先处理礼物，并为等待中的机器人回复提供调度机会。发送控件串行处理，暂时失败的任务退避重试。
@@ -72,7 +72,7 @@ examples/                 可导入的示例配置
 
 ## 构建
 
-`scripts/build.mjs` 按模块依赖顺序生成单文件用户脚本和扩展 bundle，并复制后台依赖、弹窗和图标。源码目录分类不改变产物入口：Chrome 仍加载 `dist/chrome-extension`。
+`scripts/build.mjs` 使用 esbuild 从真实 ESM 入口生成单文件用户脚本、MAIN、隔离脚本和后台 bundle，保留导入别名、模块作用域和副作用；静态资源单独复制。源码目录分类不改变产物入口：Chrome 仍加载 `dist/chrome-extension`。
 
 本地模拟器从源码模块启动；`npm run demo` 将根地址映射到 `demo/index.html`。开发更新由 `scripts/dev.mjs` 监听 `src/`、`extension/` 和 `scripts/`，构建成功后才发布新标识。
 
@@ -81,3 +81,55 @@ examples/                 可导入的示例配置
 内容脚本交接和 MAIN 桥接各有 4,096 条 / 8 MiB 缓冲，解码最多排队 256 帧 / 16 MiB。瞬时故障最多重试三次，之后隔离；配额、80% 存储水位和业务背压立即打开断路。原始持久日志保留，恢复入口重新处理；不能写入或缓冲耗尽后的新增数据计为缺口。内存缓冲不是持久化保证。
 
 礼物日志、待入账事实和感谢任务分别保留。待入账事实保存原采集时间，持久化快照中的事实可跨长时间故障继续入账；新到的历史补推仍按原时间规则过滤。未确认发送最多 100 条，普通待发送与礼物结算有独立容量边界。配额不足时不自动删除未完成业务数据，提供恢复导出并明确显示降级状态。
+
+
+## 房间与诊断缓存边界
+
+`src/browser/room-context.js` 统一解析数字路径和 `room_id` 查询参数。发送、采集、保活和应用生命周期共用房间键；无关查询参数变化不停止采集。房间地址键与实际开播 `roomId` 分开，异步身份返回后重新检查页面是否仍在原房间。
+
+`extension/protocol-cache.js` 在每次后台启动时重建一次轻量索引，此后分页只读取选中原帧；写入、清理和导出由独立队列管理，不占用礼物账本事务队列。缓存仍受过期时间、条数、配额和水位限制。
+
+请求桥超时或收到取消信号时通知 MAIN 中止；原生点赞客户端收到同一取消信号。调用仍等待真实请求结算，避免把未知在途工作当作已经停止。
+
+
+## AI 组合与实时观察（2026-11-02）
+
+- `services/ai-pipeline.js` 集中组合、百炼地域与业务空间、感知/回复配置投影；预设不覆盖原有文字连接。
+- `browser/omni-realtime.js` 用官方 WebRTC 持续传输共享音频与 1 FPS 缩小画面；扩展后台独立交换 SDP，配置确认后才发送媒体。仅稳定完成的识别结果进入有界证据窗口；停止与旧代数隔离。
+- `services/media.js` 继续支持独立视觉、官方 Qwen ASR 格式和自定义 Omni 分段识别。`LiveMediaAnalyzer` 统一两类采集的生命周期。
+- `services/ai-context.js` 组织 RAG 与共享现场资料，按完整记录裁减并披露遗漏；`ai.js` 保护 JSON 整包上限，所有任务可由现有文字模型或 Omni 文本模型执行。
+- 模型识别为直播数据查询后携带结构化汇总事实版本；入队、排队及实际发送前复核，数值或状态变化后不再发送旧答案。
+
+协议依据、预算与验收边界见 [实施记录](../research/ai-realtime-implementation-2026-11-02.zh-CN.md)。WebRTC 结果由 VAD 触发，不代表固定窗口全覆盖；真实百炼与长时直播尚未验收。
+
+## 产品界面基础（2026-11-02）
+
+`ui/product` 使用 React 19、Mantine 9 和 TanStack Table 9。`bridge.js` 是渐进迁移边界：原 Panel/AISettings/AnchorDashboard 仍拥有唯一草稿、校验、领域数据和操作；桥只投影当前页的不可变视图快照，React 独占嵌套 Shadow Root 的 DOM。编辑派发一次原事件，操作调用一次原控件，筛选和导出继续走原领域数据。源控件在成功挂载后不可见且 inert，保留可测尺寸供旧图表控制器使用；加载/渲染失败恢复兼容界面。销毁释放订阅、React root 与图表。
+
+这是一层兼容迁移，并未删除字符串模板、WorkspaceLayout 或旧控制器，也未将全部配置交给 React/useForm。后续应按页面把视图模型从领域控制器直接输出，再删除对应 DOM 投影和旧布局代码；不再添加第三份状态。TanStack 当前承担表格列/行模型，源分页和排序仍按领域语义执行，没有启用全库排序或虚拟化。ECharts 接收原图表选项，在可见区拥有独立可交互实例；会增加少量图表实例开销。
+
+外观由 `appearance.js` 定义模式、配色和材质白名单；`theme.js` 统一读写、跨窗口同步和失败回滚。配色基于 Radix Colors 的 12 阶亮暗色板，原 Solid Glass 仍为默认。`theme-palette.js` 统一生成宿主和组件主题变量，不修改直播网页 document 的主题；Select 弹层限定在本 Shadow Root。布局使用浮动窗口的容器查询，不使用默认视口定位 AppShell。Liquid Glass 是 CSS 模糊、高光和半透明表面的可选材质，不声称复刻苹果系统渲染；支持减少透明度、强制颜色与不支持 backdrop-filter 的退化。
+
+AI pipeline 的 Zod schema 在配置边界解析一次并保留扩展字段，中文错误和字段路径供原表单与新界面共用。本轮没有替换音视频传输、RAG 检索、权限网关、发送队列或存储，没有凭普通模型 SDK 推定支持 Omni 实时。
+
+### 成熟底层适配（2026-11-02）
+
+本地检索由 MiniSearch 管理倒排索引与 BM25+；`retrieval.js` 只保留中文切词、原文分块与证据预算。索引是本次查询的派生数据，不与其他房间共享可变状态，配置仍是唯一持久资料来源。`completion-stream.js` 用 eventsource-parser 解析协议事件，并用 Zod 校验文本；`intent.js` 用判别联合限定意图负载。
+
+Chrome 后台的 DurableStorage 使用 Dexie 事务，保持原生数据库版本 1 与 journalOrder 索引，记录与用量计数同时提交。仅后台拥有写入职责；原迁移“先校验已提交副本，再删除旧副本”规则不变。感知每个实例有独立 XState actor，active 范围持有采集资源和取消令牌；停止/结束/启动失败均退出 active，在途采样请求收到 AbortSignal。
+
+可见字段网格与设置页卡片分别使用 Mantine SimpleGrid / Stack。新界面接管时暂停旧 WorkspaceGrid 的观察和测量，失败回退时恢复。原控制器与 UI 桥仍在，不能据此认为旧模板与兼容开销已全部消失。选型、版本、许可和验证见[接入记录](../research/mature-foundation-integration-2026-11-02.zh-CN.md)。
+
+### 受限 Agent、观众记忆与缓存（2026-11-02）
+
+`ai/harness.js` 用 XState actor 执行独立任务；`extension/ai-background.js` 是 Chrome 后台宿主，`ai/task-store.js` 用独立 Dexie 数据库保存任务及调用额度。前台只提交、查询、取消；研究不持有公屏发送器，使用提交时快照、执行时已保存模型设置和独立密钥。旧在途任务重启后标为中断，不自动重复付费步骤；排队任务可由 alarm 唤醒。油猴和演示版使用依赖页面存活的本地宿主。
+
+`ai/audience-memory.js` 管理主播范围内、30天/100位观众的有界事实；同名不合并，礼物累计去重，删除水位阻止旧事件恢复。目标记忆以不含UID/secUID的形式注入回复，用户可查看、纠正和删除。`ai/skills.js` 仅解析声明式提示包，不执行代码。公开网页提取使用linkedom worker + Readability，只读取明确链接的已授权文字，不分析主页视频或进行跨平台身份匹配。
+
+`services/retrieval.js` 的lru-cache缓存MiniSearch派生索引，完整资料元数据变化会失效；实时答案不缓存。媒体上下文区分最新语音、顺序视觉采样和音画联合观察，显示覆盖与年龄。冷场任务要求新鲜现场线索，出现新弹幕或关闭开关后丢弃迟到结果。详见[实施记录](../research/agent-harness-memory-2026-11-02.zh-CN.md)。
+
+## 2026-11-02 布局契约补充
+
+可见工作台的结构决策集中在 `src/ui/product/layout.js`：cards / fields / metrics 使用 Mantine 容器 SimpleGrid，stack / row 使用 Stack / Group；卡片表面和跨行语义独立。兼容桥先过滤不可见节点、展开纯布局包装，再生成快照。可见层不再以源类名重复声明网格或 display:contents。只有一个布局控制者，新界面就绪时暂停 WorkspaceGrid 与 AdaptiveLayout，失败回退时恢复。
+
+分类统一使用 Mantine Tabs；折叠状态由桥接源唯一持有，跳转到隐藏分区会先展开其祖先。工具栏显示操作，保存状态与运行状态进入底部状态区。详细决策、术语和边界见 [统一布局研究](../research/layout-foundation-2026-11-02.zh-CN.md)。

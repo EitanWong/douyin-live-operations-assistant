@@ -16,6 +16,26 @@ function fixture(change = () => {}) {
     chat:(text, extra={})=>engine.ingest({type:'chat',id:String(++serial),user:viewer,text,...extra})};
 }
 
+test('抽奖口令不会触发进行中的猜数字，普通猜测仍可正常参与',()=>{
+  const f=fixture();f.chat('@小明 开始猜数字');
+  const target=f.engine.bot.session.target, before=f.engine.queue.length;
+  f.engine.ingest({type:'chat',id:'lottery',user:viewer,text:String(target)},{giveawayChat:true});
+  assert.equal(f.engine.bot.session.type,'guess');assert.equal(f.engine.queue.length,before);
+  f.chat(String(target));assert.equal(f.engine.bot.session,null);assert.match(f.engine.queue.at(-1).text,/猜中啦/);
+});
+
+test('抽奖口令不触发关键词或 AI，其他弹幕仍可触发各自回复',()=>{
+  const f=fixture(c=>{c.bot.enabled=false;c.keyword.enabled=true;c.keyword.rules=[{keywords:['抽奖'],exact:false,reply:'关键词回复'}];c.ai.enabled=true;c.ai.chatEnabled=true;});
+  const prompts=[];f.engine.ai=prompt=>{prompts.push(prompt);return new Promise(()=>{});};
+  f.engine.ingest({type:'chat',id:'lottery-keyword',user:viewer,text:'参与抽奖'},{giveawayChat:true});
+  assert.equal(f.engine.queue.length,0);assert.equal(prompts.length,0);
+  f.chat('询问抽奖');assert.equal(f.engine.queue.at(-1).kind,'keyword');
+  f.engine.config.keyword.enabled=false;
+  f.engine.ingest({type:'chat',id:'lottery-ai',user:viewer,text:'参与抽奖'},{giveawayChat:true});
+  assert.equal(prompts.length,0);
+  f.chat('今天直播什么');assert.equal(prompts.length,1);
+});
+
 test('@ 文本完整匹配，UID 优先，不误回同名前缀或其他被 @ 账号', () => {
   for (const text of ['@小明 菜单','@小明\u2005菜单','@小明：菜单']) assert.equal(addressedToSelf({text},self),'菜单');
   assert.equal(addressedToSelf({text:'@小明同学 菜单'},self),null);
