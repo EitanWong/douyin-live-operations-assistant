@@ -17,14 +17,17 @@ test('用户添加背景、来源与到期时间，保存后刷新仍能编辑�
     const input=name=>panel.node(`[data-memory-field="${name}"]`);
     input('title').value='开播安排';input('content').value='主播每周六晚上八点开播';input('source').value='主播11月1日确认';input('expiresOn').value='2026-12-01';
     input('content').dispatchEvent(new dom.window.Event('input',{bubbles:true}));
-    assert.equal(panel.dirty,true);assert.deepEqual(panel.config.ai.memory.entries,[]);
+    assert.equal(panel.dirty,false);assert.deepEqual(panel.config.ai.memory.entries,[]);
+    panel.node('[data-memory-confirm]').click();assert.equal(panel.dirty,true);
     panel.node('[data-action=save]').click();await new Promise(setImmediate);
     assert.equal(saved.ai.memory.entries[0].content,'主播每周六晚上八点开播');
     assert.equal(saved.ai.memory.entries[0].expiresOn,'2026-12-01');assert.equal(saved.ai.knowledge,'');
     panel.destroy();panel=new Panel({room:'1',config:saved,callbacks:{}});
+    panel.tab('knowledge');panel.root.querySelector('[data-memory-edit]').click();
     assert.equal(panel.node('[data-memory-field="content"]').value,'主播每周六晚上八点开播');
-    panel.node('[data-memory-field="content"]').dispatchEvent(new dom.window.Event('input',{bubbles:true}));assert.equal(panel.dirty,true);
-    panel.node('[data-memory-remove]').click();assert.equal(panel.read().ai.memory.entries.length,0);
+    panel.node('[data-memory-field="content"]').value='修改后的开播安排';
+    panel.node('[data-memory-confirm]').click();assert.equal(panel.dirty,true);
+    panel.root.querySelector('[data-memory-remove]').click();assert.equal(panel.read().ai.memory.entries.length,0);
     assert.equal(panel.node('[data-memory-empty]').hidden,false);
   } finally {panel.destroy();dom.window.close();}
 });

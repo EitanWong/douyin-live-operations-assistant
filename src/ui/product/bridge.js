@@ -24,7 +24,7 @@ export function createWorkspaceBridge(panel) {
     const name=input.getAttribute('aria-label') || labelText || wrapper.getAttribute('aria-label') || textNodes || input.name || input.type;
     return {kind:'field',id:id(input),label:name,labelHidden:wrapper===input && input.hasAttribute('aria-label') || wrapper.matches('.switch') && !labelText && !textNodes,description:cleanText(wrapper.querySelector('small')),type:input.tagName==='SELECT' ? 'select' : input.tagName==='TEXTAREA' ? 'textarea' : input.type,
       value:input.type==='checkbox' ? input.checked : input.value,disabled:input.disabled,invalid:input.getAttribute('aria-invalid')==='true',placeholder:input.placeholder,appearance:input.hasAttribute('data-theme-palette') ? 'palette' : undefined,
-      min:input.min,max:input.max,step:input.step,valueText:input.getAttribute('aria-valuetext'),maxLength:input.maxLength>0 ? input.maxLength : undefined,readOnly:input.readOnly,
+      min:input.min,max:input.max,step:input.step,valueText:input.getAttribute('aria-valuetext'),autofocus:input.autofocus,maxLength:input.maxLength>0 ? input.maxLength : undefined,readOnly:input.readOnly,
       options:input.tagName==='SELECT' ? [...input.options].filter(o=>!o.hidden).map(o=>({value:o.value,label:o.text,disabled:o.disabled})) : undefined};
   }
   function table(node) {
@@ -38,7 +38,7 @@ export function createWorkspaceBridge(panel) {
   function project(node) {
     if(!node)return null;
     if(node.nodeType===3)return node.textContent.trim() ? {kind:'text',text:node.textContent} : null;
-    if(node.nodeType!==1 || !shown(node) || ignored.includes(node.tagName) || node.matches('.workspace-source-title,h2'))return null;
+    if(node.nodeType!==1 || !shown(node) || ignored.includes(node.tagName) || node.matches('.workspace-source-title,h2,[data-knowledge-dialog]'))return null;
     if(node.matches('.feature-row')){const input=node.querySelector('input[type=checkbox]');if(input)return field(input,node);}
     if(node.matches('label') && node.querySelector('input,textarea,select'))return field(node.querySelector('input,textarea,select'),node);
     if(node.matches('input,textarea,select'))return field(node);
@@ -68,7 +68,9 @@ export function createWorkspaceBridge(panel) {
     const nav=[...root.querySelectorAll('[data-tab]')].filter(n=>!n.hidden).map(n=>({key:n.dataset.tab,label:n.getAttribute('aria-label') || cleanText(n),group:cleanText(n.closest('[data-nav-group]')?.querySelector('.nav-group-title')),icon:n.querySelector('svg')?.outerHTML}));
     const toolbar=[...(root.querySelector('[data-workspace-toolbar] .foot')?.children || [])].filter(shown).flatMap(n=>n.matches('button,small') ? [project(n)] : children(n)).filter(Boolean);
     const subviews=[...root.querySelectorAll('[data-workspace-views] button')].filter(n=>available(n)).map(project);
+    const dialog=page?.querySelector('[data-knowledge-dialog]:not([hidden])');
     return {key,title:nav.find(n=>n.key===key)?.label || cleanText(page?.querySelector('h2')),nav,toolbar,subviews,sidebar:{side:panel.navigation?.side || 'left',collapsed:Boolean(panel.navigation?.collapsed),toggle:project(root.querySelector('[data-sidebar-toggle]'))},
+      dialog:dialog ? {id:id(dialog),title:cleanText(dialog.querySelector('[data-memory-dialog-title]')),cancelId:id(dialog.querySelector('[data-memory-cancel]')),children:children(dialog.querySelector('[data-knowledge-dialog-body]'))} : null,
       content:page ? {kind:'group',id:id(page),layout:'stack',tag:'div',classes:'product-page',children:children(page)} : null,
       messages:[...(root.querySelector('.workspace-message-list')?.children || [])].filter(shown).map(node=>({...project(node),error:node.classList.contains('error')})).filter(Boolean),status:[...(root.querySelector('.shell-status')?.children || [])].map(cleanText).join(' · '),theme:panel.host.dataset.theme || APPEARANCE_PREFERENCES.theme.fallback,palette:panel.host.dataset.palette || APPEARANCE_PREFERENCES.palette.fallback,material:panel.host.dataset.material || APPEARANCE_PREFERENCES.material.fallback,focus};
   }

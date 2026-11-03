@@ -98,6 +98,19 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   assert.equal(recordBrowser.querySelectorAll('.product-record-scroll button').length,1);recordBrowser.querySelector('.product-record-scroll button').click();assert.equal(profileAction,44);
   const drafts=document.createElement('div');drafts.dataset.list='keywords';drafts.innerHTML=Array.from({length:30},(_,i)=>`<div class="editor-row"><label><span>规则 ${i}</span><textarea>草稿 ${i}</textarea></label></div>`).join('');root.querySelector('[data-page=ai]').append(drafts);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
   assert.equal(ui.querySelector('.product-edit-scroll').querySelectorAll('textarea').length,30,'编辑集合用内部滚动保留全部草稿');
+  // Dialogs render through Mantine in this shadow root and edit the original controls.
+  const dialog=document.createElement('div');dialog.dataset.knowledgeDialog='';dialog.hidden=true;
+  dialog.innerHTML='<h3 data-memory-dialog-title>添加知识</h3><div data-knowledge-dialog-body><label class="field"><span>资料标题</span><input autofocus value="初稿"></label><button data-memory-cancel>取消</button><button data-confirm>确定</button></div>';
+  const add=document.createElement('button');add.textContent='添加知识';add.onclick=()=>{dialog.hidden=false;};
+  let committed='';dialog.querySelector('[data-memory-cancel]').onclick=()=>{dialog.hidden=true;};dialog.querySelector('[data-confirm]').onclick=()=>{committed=dialog.querySelector('input').value;dialog.hidden=true;};
+  root.querySelector('[data-page=ai]').append(add,dialog);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  [...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识').click();await new Promise(resolve=>setTimeout(resolve,40));
+  const popup=ui.querySelector('[role="dialog"]');assert.ok(popup);assert.match(popup.textContent,/添加知识/);
+  const popupInput=popup.querySelector('input');setter.call(popupInput,'已核对的资料');popupInput.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(dialog.querySelector('input').value,'已核对的资料');
+  [...popup.querySelectorAll('button')].find(b=>b.textContent==='确定').click();await new Promise(resolve=>setTimeout(resolve,30));assert.equal(committed,'已核对的资料');assert.equal(ui.querySelector('[role="dialog"]'),null);
+  [...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识').click();await new Promise(resolve=>setTimeout(resolve,30));
+  [...ui.querySelector('[role="dialog"]').querySelectorAll('button')].find(b=>b.textContent==='取消').click();await new Promise(resolve=>setTimeout(resolve,30));assert.equal(ui.querySelector('[role="dialog"]'),null);
   assert.equal(document.documentElement.getAttribute('data-mantine-color-scheme'),null);assert.equal(document.body.querySelector('[data-portal]'),null);
   runtime.destroy();runtime=null;assert.equal(container.shadowRoot.childNodes.length,0);
  }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);if(navigatorDescriptor)Object.defineProperty(globalThis,'navigator',navigatorDescriptor);else delete globalThis.navigator;dom.window.close();await rm(dir,{recursive:true,force:true});}

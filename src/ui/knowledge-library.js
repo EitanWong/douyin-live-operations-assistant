@@ -11,7 +11,11 @@ export class KnowledgeLibrary {
   this.root=root;this.document=root.ownerDocument;this.dirty=dirty;this.error=error;this.reveal=reveal;this.webKnowledge=webKnowledge;this.serial=0;
   this.list=root.querySelector('[data-memory-list]');this.webList=root.querySelector('[data-web-knowledge-list]');
   const on=(selector,event,fn)=>root.querySelector(selector).addEventListener(event,fn);
+  this.dialog=root.querySelector('[data-knowledge-dialog]');this.buildEditor();
   on('[data-memory-add]','click',()=>this.createDraft());
+  on('[data-memory-confirm]','click',()=>this.confirmEditor());
+  for(const selector of ['[data-memory-cancel]','[data-memory-close]'])on(selector,'click',()=>this.closeEditor());
+  this.dialog.addEventListener('keydown',event=>this.editorKey(event));
   on('[data-memory-search]','click',()=>this.preview());
   on('[data-memory-filter-query]','input',()=>this.filter());
   for(const key of ['kind','status','sort'])on(`[data-knowledge-${key}]`,'change',()=>this.filter());
@@ -22,29 +26,65 @@ export class KnowledgeLibrary {
   on('[data-web-knowledge-clear]','click',()=>{root.querySelector('[data-web-knowledge-confirm]').hidden=false;});
   on('[data-web-knowledge-cancel-clear]','click',()=>{root.querySelector('[data-web-knowledge-confirm]').hidden=true;});
   on('[data-web-knowledge-confirm-clear]','click',()=>{void this.refresh('clear');});
-  const edited=event=>{if(!event.target.matches('[data-memory-field]'))return;const row=event.target.closest('details');this.summary(row);this.metrics();this.dirty();event.target.removeAttribute('aria-invalid');};
-  root.addEventListener('input',edited);root.addEventListener('change',edited);
+  const edited=event=>{if(!event.target.matches('[data-memory-field]'))return;event.target.removeAttribute('aria-invalid');this.root.querySelector('[data-memory-dialog-error]').hidden=true;this.editorCount();};
+  this.dialog.addEventListener('input',edited);this.dialog.addEventListener('change',edited);
  }
  rows(){return [...this.list.children,...this.webList.children].filter(row=>row.tagName==='DETAILS');}
- value(row){const result={...row.record};for(const input of row.querySelectorAll('[data-memory-field]'))result[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();return result;}
+ value(row){return {...row.record};}
  createDraft(record={title:'',content:'',source:'用户填写',expiresOn:'',enabled:true}){
   if(this.list.children.length>=MEMORY_LIMITS.entries){this.error(new Error(`背景记忆最多${MEMORY_LIMITS.entries}条`));return;}
-  this.reset();const row=this.add({...record,id:crypto.randomUUID(),updatedAt:Date.now()});row.open=true;this.metrics();this.filter();this.dirty();row.querySelector('input').focus();return row;
+  this.openEditor({...record,id:crypto.randomUUID(),updatedAt:Date.now()});return this.dialog;
  }
- add(record){
-  const row=this.document.createElement('details');row.className='editor-row knowledge-record';row.record=structuredClone(record);
-  const summary=this.document.createElement('summary');row.append(summary);
-  const body=this.document.createElement('div');body.className='knowledge-editor';row.append(body);
+ buildEditor(){
+  const body=this.root.querySelector('[data-memory-editor]');
   for(const [name,title,type,max] of fields){
    const label=this.document.createElement('label');label.className='field';const span=this.document.createElement('span');span.textContent=title;
    const control=this.document.createElement(type==='textarea' ? 'textarea' : 'input');if(type!=='textarea')control.type=type;
-   control.dataset.memoryField=name;control.value=record[name];if(max)control.maxLength=max;label.append(span,control);body.append(label);
+   control.dataset.memoryField=name;if(max)control.maxLength=max;if(name==='title')control.autofocus=true;label.append(span,control);body.append(label);
   }
-  const label=this.document.createElement('label');label.className='toggle';const enabled=this.document.createElement('input');enabled.type='checkbox';enabled.dataset.memoryField='enabled';enabled.checked=record.enabled;label.append(enabled,'使用这条资料');body.append(label);
-  const checked=this.document.createElement('small');checked.textContent=`核对时间：${time(record.updatedAt)}`;body.append(checked);
+  const label=this.document.createElement('label');label.className='toggle';const enabled=this.document.createElement('input');enabled.type='checkbox';enabled.dataset.memoryField='enabled';label.append(enabled,'使用这条资料');body.append(label);
+ }
+ openEditor(record,row=null){
+  this.editing={record:structuredClone(record),row};this.returnFocus=row?.querySelector('[data-memory-edit]') || this.root.querySelector('[data-memory-add]');
+  this.dialog.querySelector('[data-memory-source-note]')?.remove();
+  for(const input of this.dialog.querySelectorAll('[data-memory-field]')){if(input.type==='checkbox')input.checked=record[input.dataset.memoryField];else input.value=record[input.dataset.memoryField];input.removeAttribute('aria-invalid');}
+  this.root.querySelector('[data-memory-dialog-title]').textContent=row ? '编辑知识' : '添加知识';
+  this.root.querySelector('[data-memory-dialog-error]').hidden=true;
+  this.dialog.hidden=false;this.editorCount();this.dialog.querySelector('input').focus();
+ }
+ editorValue(){const record={...this.editing.record};for(const input of this.dialog.querySelectorAll('[data-memory-field]'))record[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();return record;}
+ editorCount(){const content=this.dialog.querySelector('[data-memory-field="content"]');if(content)this.root.querySelector('[data-memory-dialog-count]').textContent=`正文 ${content.value.length} / ${MEMORY_LIMITS.content} 字`;}
+ confirmEditor(){
+  if(!this.editing)return;
+  let invalid=this.dialog.querySelector('[data-memory-field="content"]');
+  try{
+   const value=this.editorValue(),{row,record}=this.editing;
+   for(const name of ['title','content'])if(!value[name]){invalid=this.dialog.querySelector(`[data-memory-field="${name}"]`);throw new Error(`请填写${name==='title' ? '资料标题' : '背景正文'}`);}
+   if(!row || Object.keys(value).some(key=>value[key]!==record[key]))value.updatedAt=Date.now();
+   const entries=[...this.list.children].filter(item=>item!==row).map(item=>this.value(item));entries.push(value);validateMemory({enabled:true,entries});
+   if(row){row.record=value;this.renderRow(row);}else this.add(value);
+   this.closeEditor();if(!row)this.reset();this.metrics();this.filter();this.dirty();
+  }catch(reason){const message=this.root.querySelector('[data-memory-dialog-error]');message.textContent=reason.message;message.hidden=false;this.reveal(invalid);}
+ }
+ closeEditor(){this.dialog.hidden=true;this.editing=null;this.returnFocus?.focus();}
+ editorKey(event){
+  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();this.closeEditor();return;}
+  if(event.key!=='Tab')return;
+  const controls=[...this.dialog.querySelectorAll('button,input,textarea')].filter(node=>!node.disabled),index=controls.indexOf(this.root.activeElement);
+  if(event.shiftKey && index===0 || !event.shiftKey && index===controls.length-1){event.preventDefault();controls[event.shiftKey ? controls.length-1 : 0].focus();}
+ }
+ add(record){
+  const row=this.document.createElement('details');row.className='editor-row knowledge-record';row.record=structuredClone(record);row.append(this.document.createElement('summary'));
+  this.list.append(row);this.renderRow(row);return row;
+ }
+ renderRow(row){
+  row.querySelector('.knowledge-reader')?.remove();const record=row.record,body=this.document.createElement('div');body.className='knowledge-reader';row.append(body);
+  const paragraph=text=>{const p=this.document.createElement('p');p.textContent=text;body.append(p);};
+  paragraph(record.content);paragraph(`资料来源：${record.source || '未填写来源'}`);paragraph(`核对时间：${time(record.updatedAt)} · 到期日期：${record.expiresOn || '长期有效'}`);
   const validity=this.document.createElement('small');validity.dataset.memoryValidity='';body.append(validity);
-  const button=this.document.createElement('button');button.type='button';button.dataset.memoryRemove='';button.textContent='删除这条记忆';button.className='danger';
-  button.addEventListener('click',()=>this.remove(row));body.append(button);this.list.append(row);this.summary(row);return row;
+  const actions=this.document.createElement('div');actions.className='actions';body.append(actions);
+  const edit=this.document.createElement('button');edit.type='button';edit.dataset.memoryEdit='';edit.textContent='编辑知识';edit.addEventListener('click',()=>this.openEditor(row.record,row));actions.append(edit);
+  const remove=this.document.createElement('button');remove.type='button';remove.dataset.memoryRemove='';remove.textContent='删除这条记忆';remove.className='danger';remove.addEventListener('click',()=>this.remove(row));actions.append(remove);this.summary(row);
  }
  remove(row){
   const next=row.nextSibling;row.remove();this.metrics();this.filter();this.dirty();
@@ -82,15 +122,8 @@ export class KnowledgeLibrary {
   this.root.querySelector('[data-knowledge-no-results]').hidden=count>0 || !rows.length;
   this.root.querySelector('[data-knowledge-manual]').hidden=kind==='web';this.root.querySelector('[data-knowledge-web]').hidden=kind==='manual';
  }
- populate(memory){this.list.replaceChildren();this.root.querySelector('[data-memory-undo]')?.remove();for(const record of memory.entries)this.add(record);this.metrics();this.filter();}
- read(){
-  const entries=[...this.list.children].map(row=>{
-   const result=this.value(row);
-   for(const name of ['title','content'])if(!result[name]){this.reset();this.reveal(row.querySelector(`[data-memory-field="${name}"]`));throw new Error(`请填写${name==='title' ? '资料标题' : '背景正文'}`);}
-   if(Object.keys(result).some(key=>result[key]!==row.record[key]))result.updatedAt=Date.now();return result;
-  });
-  return validateMemory({enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries});
- }
+ populate(memory){this.closeEditor();this.list.replaceChildren();this.root.querySelector('[data-memory-undo]')?.remove();for(const record of memory.entries)this.add(record);this.metrics();this.filter();}
+ read(){return validateMemory({enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>this.value(row))});}
  preview(){
   try{
    const query=this.root.querySelector('[data-memory-query]').value.trim();if(!query)throw new Error('请先输入要检索的问题');
@@ -131,6 +164,6 @@ export class KnowledgeLibrary {
  copyWeb(record){
   const source=record.results[0],content=record.results.map(row=>`${row.title}\n${row.url}\n${row.content}`).join('\n\n');
   const draft=this.createDraft({title:record.query.slice(0,80),content:content.slice(0,MEMORY_LIMITS.content),source:source.url.length<=200 ? source.url : source.title.slice(0,200),expiresOn:beijingDate(record.expiresAt),enabled:false});
-  if(draft && content.length>MEMORY_LIMITS.content){const note=this.document.createElement('p');note.className='hint';note.textContent=`来源内容较长，已截取前${MEMORY_LIMITS.content}字；请打开原文核对并整理后启用。`;draft.querySelector('.knowledge-editor').prepend(note);}
+  if(draft && content.length>MEMORY_LIMITS.content){const note=this.document.createElement('p');note.className='hint';note.dataset.memorySourceNote='';note.textContent=`来源内容较长，已截取前${MEMORY_LIMITS.content}字；请打开原文核对并整理后启用。`;draft.querySelector('[data-memory-editor]').prepend(note);}
  }
 }
