@@ -1354,3 +1354,6 @@ AI 对话改进最终回执：实现 `a7f1daf` 已推送 `origin/dev`。首次�
 
 
 整合验收结果：`npm ci`、正式 build/check、最终 JavaScript **1171/1171**（无失败/跳过）及 diff 检查通过。Chromium 最新单入口产物开合及组件挂载正常，`data-product-status=ready`；整合后导航为 15 个图标（PK 已由上游合入主播数据子页），折叠状态所有中心 X 实测均为 41.5px。最新截图 `final-ui.png`、测量 `final-alignment.json` 与 `integration-*.log` 已保存至本轮 output。相对上游仅保留本轮 19 个 UI/测试/日志文件；重复演示入口已移除，最终不增加第二套构建方案。当前工作树及4179预览仍供交付查看，保留；其他工作树与服务未清理。
+
+
+侧栏与材料统一交付回执：UI 实现 `2ec4905`、演示中间修复 `e128eee` 及最终整合 `f39da6d` 已成功快进推送 `origin/dev`（`7d639bb → f39da6d`），没有强推或修改 main/版本。最终整合树 npm ci/build/check、1171/1171 JavaScript 和 Chromium 视觉/几何检查通过；crapper/dryer/mutator 不可用、未执行。重复演示实现已在整合中收敛到上游唯一入口；临时验收标签页已关闭，最终4179预览和截图/原始日志保留。此次推送产生的远端 CI 尚未验收，不记作通过。本回执作为独立文档提交推送 dev，不重复未变化代码的全量检查；实际回执提交号在完成报告列出。
