@@ -52,10 +52,10 @@ export class PageRequestSender {
     const candidates=Object.entries(require.m).filter(([,factory])=>{
       const source=Function.prototype.toString.call(factory);
       return ['/webcast/gift/list/','/webcast/gift/send/','/webcast/wallet/info/'].every(path=>source.includes(path));
-    });
-    if (candidates.length!==1) return null;
-    const api=require(candidates[0][0]);
-    return ['Xq','hF','sb'].every(key=>typeof api?.[key]==='function') ? api : null;
+    }).map(([id])=>require(id)).filter(api=>['Xq','hF','sb'].every(key=>typeof api?.[key]==='function'));
+    // Error-reporting metadata contains the same endpoint literals. Only
+    // modules exporting the native operations participate in uniqueness.
+    return candidates.length===1 ? candidates[0] : null;
   }
   context() {
     const info = this.page.__STORE__?.roomStore?.roomInfo;

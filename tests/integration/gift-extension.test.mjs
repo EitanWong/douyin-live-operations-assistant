@@ -10,7 +10,7 @@ import {webLocks} from '../helpers/web-locks.mjs';
 const {dist,cleanup}=await buildFixture();after(cleanup);
 const source=await readFile(join(dist,'chrome-extension/page.js'),'utf8');
 const roomId='7702839019851270938',anchorId='3804784440654216';
-function fixture() {
+function fixture({metadata=false,duplicate=false}={}) {
   const page=new JSDOM('<body></body>',{url:'https://live.douyin.com/361690799431',runScripts:'outside-only'}).window,calls=[];
   Object.assign(page,{TextDecoder,TextEncoder});Object.defineProperty(page.navigator,'locks',{value:webLocks()});
   page.__STORE__={roomStore:{roomInfo:{roomId,anchor:{id_str:anchorId},room:{web_rid:'361690799431',status:2,room_auth:{Gift:true}}}},userStore:{userInfo:{id_str:'987654321'}}};
@@ -20,13 +20,29 @@ function fixture() {
     sb:async()=>({data:{status_code:0,data:{diamond_x10:1000000,user_id:'987654321'}}}),
     hF:async(payload,options)=>{calls.push({payload,options});return {data:{status_code:0,data:{gift_id:payload.gift_id,gift_struct:{diamond_count:payload.price}}}};}};
   const client={defaults:{baseURL:page.location.origin,withCredentials:true},request:()=>assert.fail('不手写付费请求')};
-  const require=id=>id==='gift'?api:{ZP:client};
+  const require=id=>id==='metadata'?{k8:{}}:id==='gift' || id==='duplicate'?api:{ZP:client};
   require.m={client:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];},
     gift:function(){return ['/webcast/gift/list/','/webcast/gift/send/','/webcast/wallet/info/'];}};
+  // The live page's error-reporting table also contains all three endpoint
+  // literals. Endpoint matches alone do not identify the native gift API.
+  if(metadata)require.m.metadata=function(){return {k8:{'/webcast/gift/list/':{},'/webcast/gift/send/':{},'/webcast/wallet/info/':{}}};};
+  if(duplicate)require.m.duplicate=require.m.gift;
   page.webpackChunkdouyin_live_v2=[];page.webpackChunkdouyin_live_v2.push=value=>value[2](require);page.eval(source);
   const send=async request=>({ok:true,value:await page.__douyinAssistantPageV2.call(request.command)});
   return {page,api,raw,calls,send,bridge:new RequestBridgeClient(page,send),close:()=>page.close()};
 }
+test('正式 MAIN 桥区分含相同接口路径的错误元数据表，正确读取余额且不送礼',async()=>{
+  const f=fixture({metadata:true});try {
+    const result=await f.bridge.giftSnapshot();
+    assert.equal(result.available,true,result.reason);assert.equal(result.balanceUnits,1000000);
+    assert.equal(result.gifts.length,4);assert.equal(f.calls.length,0);
+  }finally{f.close();}
+});
+test('存在多个符合导出契约的礼物模块时仍拒绝选择，不能任意启用付费流程',async()=>{
+  const f=fixture({metadata:true,duplicate:true});try {
+    assert.equal((await f.bridge.giftSnapshot()).available,false);assert.equal(f.calls.length,0);
+  }finally{f.close();}
+});
 test('正式 MAIN 构建发现原生礼物模块，多种礼物共用受限流程并读取十分之一钻余额',async()=>{
   const f=fixture();try {
     const snapshot=await f.bridge.giftSnapshot();assert.equal(snapshot.available,true,snapshot.reason);assert.equal(snapshot.gifts.length,4);assert.equal(snapshot.balanceUnits,1000000);
