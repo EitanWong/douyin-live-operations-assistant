@@ -115,7 +115,8 @@ export class PageRequestSender {
     const ticket = this.tickets.get(token);
     if (!ticket) return Promise.resolve({submitted:false,reason:'请求准备已失效'});
     if (ticket.result) return ticket.result; // A duplicate bridge delivery never sends twice.
-    ticket.result = this.perform(ticket,text);
+    // Publish the receipt before page code can synchronously re-enter commit.
+    ticket.result = Promise.resolve().then(()=>this.perform(ticket,text));
     return ticket.result;
   }
   async perform(ticket,text) {

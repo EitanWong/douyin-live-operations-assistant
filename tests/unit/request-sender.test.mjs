@@ -15,6 +15,30 @@ function fixture() {
   page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
   return {dom,page,client,require,requests,displayed,sender:new PageRequestSender(page)};
 }
+test('网页请求拦截器同步重入同一票据时，聊天和管理操作都只提交一次',async t=>{
+  for(const kind of ['chat','admin','mute','ban'])await t.test(kind,async()=>{
+    const f=fixture();
+    try {
+      const room=f.page.__STORE__.roomStore.roomInfo.room;
+      room.owner={id_str:'456'};room.admin_user_ids_str=['789'];
+      const moderation=['mute','ban'].includes(kind);
+      const prepared=moderation ? f.sender.prepareModeration(kind,{id:'999',secUid:'target'}) : f.sender.prepare(kind);
+      assert.equal(prepared.available,true);
+      const commit=()=>moderation ? f.sender.commitModeration(prepared.token) : f.sender.commit(prepared.token,'欢迎朋友');
+      const request=f.client.request;let nested,calls=0;
+      f.client.request=value=>{
+        if(++calls===1)nested=commit();
+        return request(value);
+      };
+      const first=commit();
+      assert.equal((await first).submitted,true,kind);
+      assert.equal(calls,1,kind);
+      assert.equal(f.requests.length,1,kind);
+      assert.equal(nested,first,kind+' 必须共享同一提交回执');
+      assert.equal((await nested).submitted,true);
+    } finally {f.dom.window.close();}
+  });
+});
 test('普通感谢走网页原生本地队列显示一次，本地显示不充当结构化投递回执',async()=>{
   const f=fixture();
   try {
