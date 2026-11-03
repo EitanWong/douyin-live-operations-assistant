@@ -38,6 +38,17 @@ test('正式 MAIN 桥区分含相同接口路径的错误元数据表，正确�
     assert.equal(result.gifts.length,4);assert.equal(f.calls.length,0);
   }finally{f.close();}
 });
+test('正式 MAIN 桥的钱包自动查询仅返回当前账号余额，不加载目录或送礼',async()=>{
+  const f=fixture({metadata:true});try {
+    f.api.Xq=()=>assert.fail('余额刷新不能加载目录');
+    const result=await f.bridge.giftBalance();
+    assert.equal(result.available,true,result.reason);assert.equal(result.balanceUnits,1000000);
+    assert.equal(result.accountId,'987654321');assert.equal(result.roomId,roomId);
+    assert.equal(result.gifts,undefined);assert.equal(f.calls.length,0);
+    f.api.sb=async()=>({data:{status_code:0,data:{diamond_x10:0,user_id:'987654321'}}});
+    assert.equal((await f.bridge.giftBalance()).balanceUnits,0);
+  }finally{f.close();}
+});
 test('存在多个符合导出契约的礼物模块时仍拒绝选择，不能任意启用付费流程',async()=>{
   const f=fixture({metadata:true,duplicate:true});try {
     assert.equal((await f.bridge.giftSnapshot()).available,false);assert.equal(f.calls.length,0);

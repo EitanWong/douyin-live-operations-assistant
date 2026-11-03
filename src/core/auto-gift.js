@@ -57,22 +57,64 @@ export function validateAutoGift(value) {
 }
 
 export class AutoGift {
-  constructor({transport,lock,guard=()=>'',changed=()=>{},schedule=(fn,ms)=>setTimeout(fn,ms),cancel=clearTimeout}) {
-    Object.assign(this,{transport,lock,guard,changed,schedule,cancel});this.generation=0;
-    this.state={phase:'idle',reason:'请先读取礼物与余额',accepted:0,spentUnits:0,batches:0,balanceUnits:null,gifts:[],pending:null};
+  constructor({transport,lock,guard=()=>'',changed=()=>{},schedule=(fn,ms)=>setTimeout(fn,ms),cancel=clearTimeout,now=Date.now}) {
+    Object.assign(this,{transport,lock,guard,changed,schedule,cancel,now});this.generation=0;
+    this.state={phase:'idle',reason:'请先读取礼物与余额',accepted:0,spentUnits:0,batches:0,balanceUnits:null,gifts:[],pending:null,balanceAt:0,balanceError:''};
   }
   update(values) {Object.assign(this.state,values);this.changed({...this.state});}
   whenIdle() {return this.busy ? new Promise(resolve=>(this.waiters ||= []).push(resolve)) : Promise.resolve();}
+  balanceState(balanceUnits) {
+    return {balanceUnits,balanceAt:balanceUnits==null ? 0 : this.now(),balanceError:''};
+  }
+  pollBalance(visible=true) {
+    if(this.disposed)return;
+    if(!visible){this.balanceVisible=false;this.nextBalanceAt=0;return;}
+    this.balanceVisible=true;
+    const reason=this.guard();
+    if(reason){
+      this.nextBalanceAt=0;
+      if(this.state.balanceUnits!==null || this.state.balanceError!==reason)this.update({balanceUnits:null,balanceAt:0,balanceError:reason});
+      return;
+    }
+    if(this.balanceTask || this.busy || this.loading || this.state.phase==='stopping' || this.now()<(this.nextBalanceAt || 0))return;
+    const generation=this.generation,sequence=this.sequence;
+    this.balanceTask=this.readBalance(generation,sequence).finally(()=>{
+      this.balanceTask=null;this.nextBalanceAt=this.balanceVisible ? this.now()+5000 : 0;
+    });
+    return this.balanceTask;
+  }
+  async readBalance(generation,sequence) {
+    try {
+      const data=await this.transport.giftBalance();
+      if(!this.balanceCurrent(generation,sequence))return;
+      if(!data?.available)throw new Error(data?.reason || '余额读取失败');
+      const switched=['accountId','roomId'].some(key=>this.state[key] && data[key]!==this.state[key]);
+      this.update({...this.balanceState(data.balanceUnits),accountId:data.accountId,roomId:data.roomId,
+        ...(switched ? {gifts:[],pending:null,reason:'账号或直播间已变化，请重新读取礼物目录'} : {})});
+    } catch(error) {
+      if(this.balanceCurrent(generation,sequence))this.update({balanceUnits:null,balanceAt:0,balanceError:error.message});
+    }
+  }
+  balanceCurrent(generation,sequence) {
+    return !this.disposed && this.balanceVisible && generation===this.generation && sequence===this.sequence && !this.loading && !this.guard();
+  }
+  dispose() {
+    this.disposed=true;this.stop('工具已停用，已停止送礼');return this.whenIdle();
+  }
   async refresh() {
-    if (this.busy || this.loading || this.state.phase==='running') return;
+    if (this.disposed || this.busy || this.loading || this.state.phase==='running') return;
+    const generation=++this.generation;
     this.loading=true;this.update({loading:true});
     try {
+      await this.balanceTask;
+      if(this.disposed || generation!==this.generation)return;
       const data=await this.transport.giftSnapshot();
+      if(this.disposed || generation!==this.generation)return;
       if (!data?.available) throw new Error(data?.reason || '礼物与余额读取失败，请先打开网页礼物面板');
-      this.update({gifts:data.gifts,balanceUnits:data.balanceUnits,accountId:data.accountId,roomId:data.roomId,pending:data.pending || null,at:data.at,
+      this.update({gifts:data.gifts,...this.balanceState(data.balanceUnits),accountId:data.accountId,roomId:data.roomId,pending:data.pending || null,at:data.at,
         reason:data.pending ? '上次送礼结果待核对，请检查余额和消费记录' : `已读取 ${data.gifts.length} 种礼物，请选择并设置本次消费上限`});
-    } catch(error) {this.update({gifts:[],balanceUnits:null,reason:error.message});}
-    finally {this.loading=false;this.update({loading:false});}
+    } catch(error) {if(!this.disposed && generation===this.generation)this.update({gifts:[],balanceUnits:null,balanceAt:0,balanceError:error.message,reason:error.message});}
+    finally {this.loading=false;if(!this.disposed)this.update({loading:false});}
   }
   async acknowledge() {
     if (!this.state.pending || this.busy || this.state.phase==='running') return;
@@ -93,7 +135,7 @@ export class AutoGift {
       if (generation!==this.generation) {if(prepared?.token)await this.transport.stopGift(prepared.token);return;}
       if (!prepared?.available || typeof prepared.token!=='string') throw new Error(prepared?.reason || '送礼能力不可用');
       this.token=prepared.token;this.sequence=0;
-      this.update({phase:'running',balanceUnits:prepared.balanceUnits,pending:null,reason:'正在自动送礼'});
+      this.update({phase:'running',...this.balanceState(prepared.balanceUnits),pending:null,reason:'正在自动送礼'});
     } catch(error) {if(generation===this.generation){this.stop(error.message);throw error;}}
     finally {this.settle(generation);}
     if (generation===this.generation && this.state.phase==='running') await this.tick();
@@ -121,8 +163,8 @@ export class AutoGift {
     try {
       const result=await this.transport.commitGift(this.token,count,++this.sequence);
       if(result?.submitted===true && result.count===count && Number.isSafeInteger(result.costUnits))this.update({accepted:this.state.accepted+count,
-        spentUnits:this.state.spentUnits+result.costUnits,batches:this.state.batches+1,balanceUnits:result.balanceUnits ?? null});
-      if(result?.unknown)this.update({pending:result.pending || null,balanceUnits:null});
+        spentUnits:this.state.spentUnits+result.costUnits,batches:this.state.batches+1,...this.balanceState(result.balanceUnits ?? null)});
+      if(result?.unknown)this.update({pending:result.pending || null,...this.balanceState(null)});
       if(generation!==this.generation)return;
       if(result?.submitted!==true || result.count!==count || result.costUnits!==count*config.priceUnits || result.priceChanged) {
         this.stop(result?.reason || '送礼结果或价格无法确认，已停止，请核对余额');return;
@@ -132,7 +174,7 @@ export class AutoGift {
         this.stop(this.state.accepted>=config.target?'已达到本次目标':'已达到本次消费上限');this.update({phase:'completed'});return;
       }
       this.timer=this.schedule(()=>{this.timer=null;return this.tick();},config.intervalSec*1000);
-    } catch {if(generation===this.generation){this.update({balanceUnits:null});this.stop('送礼请求异常，已停止；请刷新并核对消费记录');}}
+    } catch {if(generation===this.generation){this.update(this.balanceState(null));this.stop('送礼请求异常，已停止；请刷新并核对消费记录');}}
     finally {this.settle(generation);}
   }
 }

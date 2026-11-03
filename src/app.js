@@ -432,6 +432,7 @@ export function boot(options = {}) {
     }
   });
   tools = createPageTools({page:window,room,engine,adapter,demo,log,
+    isToolVisible:id=>Boolean(panel?.open && panel.activeTab===id && document.visibilityState!=='hidden'),
     predictions,predictionAI:(samples,signal)=>analyzeSamples(edge,samples,signal),
     getRoomId:()=>identity.live?.roomId || engine.liveMode?.roomId || '',
     current:()=>!closed && !suspended && roomContext.current(),unavailable:()=>persistenceDisabled,liveStatus:()=>identity.live?.status,

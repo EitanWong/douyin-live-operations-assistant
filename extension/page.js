@@ -32,6 +32,7 @@ if(room && !Object.hasOwn(window,'__douyinAssistantPageV2')) {
     if(canceled.delete(id))return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const controller=new AbortController();jobs.set(id,controller);
     try {
+      if(operation==='gift-balance')return await sender.giftBalance({signal:controller.signal});
       if(operation==='gift-snapshot')return await sender.giftSnapshot({signal:controller.signal});
       if(operation==='gift-catalog')return await sender.giftCatalog({signal:controller.signal});
       if(operation==='prepare-gift')return await sender.prepareGift(config,{signal:controller.signal});

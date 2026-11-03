@@ -31,3 +31,38 @@ test('未知响应与价格异常立即停止，不重试、不从旧状态恢�
     if(result.unknown)assert.equal(f.runner.state.pending.id,'unknown');
   }
 });
+test('余额自动读取、五秒刷新且请求串行；隐藏时停止，恢复后立即读，失败不展示旧值',async()=>{
+  const f=fixture();let now=1000,reads=0,complete;
+  f.runner.now=()=>now;
+  f.transport.giftBalance=()=>{reads++;return new Promise(resolve=>{complete=resolve;});};
+  const first=f.runner.pollBalance();f.runner.pollBalance();assert.equal(reads,1);
+  complete({available:true,balanceUnits:80,accountId:'789',roomId:'123',at:now});await first;
+  assert.equal(f.runner.state.balanceUnits,80);assert.equal(f.calls.length,0);
+  now+=4999;await f.runner.pollBalance();assert.equal(reads,1);
+  now++;const second=f.runner.pollBalance();assert.equal(reads,2);
+  complete({available:false,reason:'钱包网络失败'});await second;
+  assert.equal(f.runner.state.balanceUnits,null);assert.match(f.runner.state.balanceError,/网络失败/);
+  now+=5000;await f.runner.pollBalance(false);assert.equal(reads,2);
+  const third=f.runner.pollBalance();assert.equal(reads,3);
+  complete({available:true,balanceUnits:0,accountId:'789',roomId:'123',at:now});await third;
+  assert.equal(f.runner.state.balanceUnits,0);assert.equal(f.runner.state.balanceError,'');
+});
+test('自动余额不覆盖手动读取、发送回执或停用后的状态，账号切换清除旧礼物报价',async()=>{
+  const f=fixture();let now=1000,complete;
+  f.runner.now=()=>now;
+  f.transport.giftBalance=()=>new Promise(resolve=>{complete=resolve;});
+  const poll=f.runner.pollBalance();
+  const refresh=f.runner.refresh();assert.equal(f.runner.state.loading,true);
+  complete({available:true,balanceUnits:999,at:now});await poll;await refresh;
+  assert.equal(f.runner.state.balanceUnits,100);
+  now+=5000;const late=f.runner.pollBalance();await f.runner.start(config);
+  complete({available:true,balanceUnits:999,at:now});await late;
+  assert.equal(f.runner.state.balanceUnits,80);assert.equal(f.calls.length,1);
+  f.runner.stop();f.runner.state.accountId='789';f.runner.state.roomId='123';
+  now+=5000;const switched=f.runner.pollBalance();
+  complete({available:true,balanceUnits:40,accountId:'999',roomId:'123',at:now});await switched;
+  assert.equal(f.runner.state.balanceUnits,40);assert.deepEqual(f.runner.state.gifts,[]);
+  now+=5000;const closing=f.runner.pollBalance();await f.runner.dispose();
+  complete({available:true,balanceUnits:777,at:now});await closing;
+  assert.equal(f.runner.state.balanceUnits,40);now+=5000;await f.runner.pollBalance();
+});

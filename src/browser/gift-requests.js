@@ -66,6 +66,19 @@ export class GiftRequests {
       return {available:true,...await this.read(context,api,signal)};
     } catch (error) {return {available:false,balanceUnits:null,gifts:[],reason:error.message};}
   }
+  async balance({signal}={}) {
+    try {
+      if(signal?.aborted)throw new Error('余额读取已取消');
+      const context=this.context(false),api=this.sender.nativeGiftApi();
+      const client=api ? null : this.sender.client?.();
+      if(!api && !client)throw new Error('网页请求模块尚未就绪，请等待直播页加载完成后重试');
+      const response=await (api ? api.sb() : client.request({url:'/webcast/wallet/info/',method:'get',params:{},timeout:8000,signal}));
+      if(signal?.aborted || !same(context,this.context(false)))throw new Error('账号或直播间已变化，请重新读取余额');
+      const data=responseData(response);
+      if(data?.user_id!=null && String(data.user_id)!==context.userId)throw new Error('余额所属账号已变化');
+      return {available:true,balanceUnits:walletUnits(data),accountId:context.userId,roomId:context.roomId,at:Date.now()};
+    } catch(error) {return {available:false,balanceUnits:null,reason:error.message};}
+  }
   async catalog({signal}={}) {
     try {
       if(signal?.aborted)throw new Error('礼物目录读取已取消');
