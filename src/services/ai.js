@@ -254,7 +254,7 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
     try{parsed=searchAnswer(await complete({...prompt,searchResults:found}),found);}
     catch(error){notify(onSearch,{...found,question:prompt.target.text,error:found.error || error.message});throw error;}
     const unsupportedCurrent=!found.results.length && requiresCurrentSources(`${prompt.target.text} ${plan.query}`,plan.freshness);
-    const answer=unsupportedCurrent ? unavailableCurrentAnswer(found,prompt.maxLength) : parsed.answer,grounded=!unsupportedCurrent && parsed.grounded;
+    const answer=unsupportedCurrent ? unavailableCurrentAnswer({...found,query:found.query || plan.query},prompt.maxLength) : parsed.answer,grounded=!unsupportedCurrent && parsed.grounded;
     if(current() && grounded && !found.error && !found.cached && revision!==null)await cached('remember',found,config.search,{freshness:plan.freshness,question:prompt.target.text,revision});
     notify(onSearch,{...found,question:prompt.target.text,answer,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});
     return answer;

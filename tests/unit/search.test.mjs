@@ -93,9 +93,9 @@ test('未启用搜索、服务失败、零结果、额度与取消都不会伪�
     const ai=createAIClient({getKey:()=> 'key',search,request:details=>{count++;response(details,count===1 ? plan('web-search','','上海天气') : '上海实时天气暂未查到，请问你要查实时还是全天预报？');}});
     const result=await ai({...prompt,...extra},settings);assert.equal(count,extra.reserveFollowup || extra.isCurrent ? 1 : 2);return result;
   };
-  assert.match(await run({settings:{...config,search:{...config.search,enabled:false}},search:()=>assert.fail()}),/上海实时天气/);
-  assert.match(await run({search:async()=>{throw new Error('HTTP 429');}}),/上海实时天气/);
-  assert.match(await run({search:async()=>({results:[]})}),/上海实时天气/);
+  assert.match(await run({settings:{...config,search:{...config.search,enabled:false}},search:()=>assert.fail()}),/上海天气.*实时资料/u);
+  assert.match(await run({search:async()=>{throw new Error('HTTP 429');}}),/上海天气.*实时资料/u);
+  assert.match(await run({search:async()=>({results:[]})}),/上海天气.*实时资料/u);
   assert.match(await run({search:async()=>({results:[{index:1,url:'https://x.test'}]}),extra:{reserveFollowup:()=>false}}),/额度/);
   let valid=true;
   assert.equal(await run({search:async()=>{valid=false;return {results:[{}]};},extra:{isCurrent:()=>valid}}),'[SKIP]');
