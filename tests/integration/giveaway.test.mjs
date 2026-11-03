@@ -177,7 +177,8 @@ test('配置多个奖品，搜索多选礼物与手动规则同步，开轮后�
     p.node('[data-prize-remove]').click();await until(()=>p.root.querySelectorAll('[data-giveaway-prize]').length===1);
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });
-test('观众权重和主播必中通过工具入口锁定，主播使用当前房间 UID 且结果可恢复',async()=>{
+test('观众权重和主播必中通过工具入口锁定，主播使用当前房间 UID 且结果可恢复',async t=>{
+  let clock=Date.now();t.mock.method(Date,'now',()=>clock);
   const dom=page(),values=new Map();let api;
   boot({page:dom.window,demo:true,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),onReady:value=>{api=value;}});
   try {
@@ -188,6 +189,8 @@ test('观众权重和主播必中通过工具入口锁定，主播使用当前�
     p.node('[data-action=giveaway-start]').click();await until(()=>api.tools.state('giveaway').phase==='running');
     const at=Date.now();for(const id of ['2','1234567890'])await api.tools.dispatch('event',{type:'chat',id:`c-${id}`,at,source:'socket',text:'参与抽奖',user:{id,name:id}});
     assert.equal(p.root.querySelector('[data-weight=weight]').disabled,true);
+    assert.deepEqual(api.tools.state('giveaway').rounds[0].entrants.map(row=>row.userId),['2','1234567890']);
+    clock+=1100;
     await until(()=>api.tools.state('giveaway').rounds[0].status==='drawn');
     const report=await api.tools.invoke('giveaway','export'),round=report.rounds[0];
     assert.deepEqual(round.config.weights,[{userId:'2',weight:3}]);assert.equal(round.anchorId,'1234567890');
