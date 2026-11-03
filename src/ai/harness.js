@@ -31,7 +31,7 @@ export class AgentHarness {
  async run(job){
   const checkpoint=async(step,detail='')=>{if(job.status!=='running')return;job.trace.push({step,detail:String(detail).slice(0,120),at:this.now()});job.trace=job.trace.slice(-20);job.updatedAt=this.now();await this.save(job);};
   let timeout;const actor=createActor(fromPromise(async({signal})=>{
-   await this.save(job);return this.execute(structuredClone(job),{signal,checkpoint});
+   await this.save(job);signal.throwIfAborted();return this.execute(structuredClone(job),{signal,checkpoint});
   }));job.status='running';job.updatedAt=this.now();
   const finish=async(status,value)=>{
    if(job.status==='running'){job.status=status;job.updatedAt=this.now();if(status==='succeeded')job.result=value;else job.error=String(value?.message || value).slice(0,300);try{await this.save(job);}catch{job.status='failed';job.error='任务结果保存失败';}}

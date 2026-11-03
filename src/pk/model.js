@@ -440,9 +440,9 @@ export class PKTracker {
     if (event.type === 'pk-card') { this.cards.push({ ...event, observedAt: now }); this.cards = this.cards.slice(-1000); return this.snapshot(); }
     const state = this.stateFor(event);
     if (!state) return this.snapshot();
+    if (state.phase === 'ended') return this.snapshot(state.key);
     ensureState(state, event); event = orientScores(state, event);
     for (const board of Object.values(state.contributionBoards)) mergeContributors(state, board, board.observedAt);
-    if (state.phase === 'ended') return this.snapshot(state.key);
     state.lastEventAt = Math.max(state.lastEventAt, now); state.dataQuality.events += 1; state.dataQuality.lastAt = now;
     if (event.type === 'chat') {
       ingestChat(state, event, now);
