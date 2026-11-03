@@ -1845,3 +1845,5 @@ Promptfoo接入首轮完整保留：评分脚本单行返回被框架按表达�
 最终冻结树验收：JavaScript **1359/1359**，0失败/取消/跳过（agent-final-test-11.log）；构建（agent-final-build-9.log）、check（agent-final-check-9.log）和git diff --check通过；原生16/16、0跳过。Promptfoo最终90/90与定向30/30保持，报告docs/research/ai-agent-evaluation-2026-11-04.zh-CN.md包含每项成绩和限制。src/tests/scripts/docs与最终报告扫描未发现本轮API密钥格式；密钥已从REPL清除。当前dist已重新构建，不触碰实播页。crapper/dryer/mutator不可用、未执行，未把测试成绩冒充这三项检查。
 
 代码分5个有序提交69c5e43、943c898、cc98af1、62f8261、98c326a。本日志和报告完成后仅推送origin/dev，回执随后追加；main、0.1.2和标签不变。未完成项：实际搜索服务与用户实播环境验收、任意开放问题的事实正确性保证不属于本轮固定资料自动测试结论；用户需重新加载扩展使用新构建。
+
+交付回执：代码与完整报告已推送origin/dev（e7a2b4a → **4a2755842b61abbf85fbe968b266237d8539e244**），git ls-remote核对远端与本地逐字一致。本段回执再以独立文档提交推送；最终提交号见完成报告。所有临时评测进程已结束，真实模型密钥内存已清除，无新增工作树；既有他人工作树保留。
