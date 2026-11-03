@@ -20,6 +20,7 @@ import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engi
 import { matchesGiveawayChat } from './core/giveaway.js';
 import { DouyinAdapter, RoomLock, pickElement, watchAudienceContributions } from './browser/adapter.js';
 import { createAIClient, validateEndpoint, generatePhrases } from './services/ai.js';
+import {createWebKnowledge} from './services/web-knowledge.js';
 import { createSearchClient, validateSearchEndpoint } from './services/search.js';
 import {createMediaClient,MediaEvidence,validateMediaConfig} from './services/media.js';
 import {LiveMediaAnalyzer,createDisplayCapture} from './browser/live-media.js';
@@ -278,15 +279,16 @@ export function boot(options = {}) {
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
   });
   const searchSecretKey = endpoint => `live-assistant:search-key:${new URL(validateSearchEndpoint(endpoint)).origin}`;
+  const webKnowledge=createWebKnowledge();
   const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
-  const recordSearch=record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `联网搜索：${record.query} · ${record.results.length} 条来源`);};
+  const recordSearch=record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `${record.cached ? '知识缓存' : '联网搜索'}：${record.query} · ${record.results.length} 条来源`);};
   let aiStatusSequence=0;
-  const cloudClient = createAIClient({ request, getKey: (endpoint,ai) => pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,
+  const cloudClient = createAIClient({ request, getKey: (endpoint,ai) => pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,knowledge:webKnowledge,
     onStatus:status=>{if (engine && resolveReplyConfig(engine.config.ai).endpoint===status.endpoint && resolveReplyConfig(engine.config.ai).model===status.model && status.sequence>aiStatusSequence) {aiStatusSequence=status.sequence;panel?.setAIServiceStatus(status.error);}},
-    onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
+    onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',knowledge:'复用知识',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:recordSearch
   });
-  const client=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,search:searchClient,onSearch:recordSearch})},onTrace:r=>{
+  const client=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,search:searchClient,knowledge:webKnowledge,onSearch:recordSearch})},onTrace:r=>{
     foundationSettings?.trace(r);if(r.provider==='edge'){panel?.setAIServiceStatus('');log('ai',`端侧兜底完成 · ${r.elapsedMs}ms`);}
   }});
   const lock = options.lock || new RoomLock({ room });
@@ -617,6 +619,7 @@ export function boot(options = {}) {
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
       },
+      webKnowledge,
       startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
       stopMedia:()=>{mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
@@ -784,7 +787,7 @@ export function boot(options = {}) {
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { accountRefresh.close();predictions.close();workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
+      if (closed) { webKnowledge.close();accountRefresh.close();predictions.close();workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();

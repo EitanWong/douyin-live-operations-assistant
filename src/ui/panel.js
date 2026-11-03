@@ -132,6 +132,7 @@ export class Panel {
     const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}${WORKSPACE_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style,createLiquidGlassFilter(document));
     this.root.append(this.build()); this.workspaceLayout=new WorkspaceLayout(this.root);decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onNavigate:key=>this.tab(key),onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), paletteSelect:this.root.querySelector('[data-theme-palette]'), materialSelect:this.root.querySelector('[data-theme-material]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.predictionCharts=new PredictionCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
+      webKnowledge:this.callbacks.webKnowledge,
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
       forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
     this.modelPickers=new ModelPickers(this.root);
@@ -1009,7 +1010,7 @@ export class Panel {
         if(!['https:','http:'].includes(url.protocol) || url.username || url.password)return '';
         return `<li><a href="${esc(url.href)}" target="_blank" rel="noopener noreferrer">[${index+1}] ${esc(source.title || url.hostname)}</a></li>`;
       }).join('');
-      return `<section class="section"><p>${esc(String(row.question || row.query || '').slice(0,160))}</p><p class="hint">${esc(row.error || row.answer || '搜索连接通过')}${row.searchedAt ? ` · ${esc(timeFormat.format(row.searchedAt))}` : ''}</p>${sources ? `<ol>${sources}</ol>` : ''}</section>`;
+      return `<section class="section"><p>${esc(String(row.question || row.query || '').slice(0,160))}</p><p class="hint">${row.cached ? '知识缓存 · ' : ''}${esc(row.error || row.answer || '搜索连接通过')}${row.searchedAt ? ` · ${esc(timeFormat.format(row.searchedAt))}` : ''}</p>${sources ? `<ol>${sources}</ol>` : ''}</section>`;
     }).join('');
   }
   setAIServiceStatus(message) {

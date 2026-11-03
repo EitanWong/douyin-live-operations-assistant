@@ -71,14 +71,14 @@ test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，�
     assert.equal(requests.length,3);
   }finally{page.close();}
 });
-async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{"choices":[]}') {
+async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{"choices":[]}',overrides={}) {
   let usedBytes = 0, listener,changed; const sent=[], requests=[]; let allowed=true;
   const WorkerDurableStorage = class extends DurableStorage {
     constructor(options = {}) { super({...options, indexedDB: options.indexedDB || indexedDB, IDBKeyRange}); }
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
   const code=(await readFile(file('background.js'),'utf8'));
-  vm.runInNewContext(code,{atob,btoa,queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};}});
+  vm.runInNewContext(code,{atob,btoa,queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};},...overrides});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
@@ -1029,4 +1029,13 @@ test('配色与材质经同一后台白名单保存，直播页和弹窗共享�
  }
  assert.equal((await w.send({type:'appearance-get',kind:'api-key'})).ok,false);
  assert.equal((await w.send({type:'appearance-set',kind:'palette',value:'blue'},{frameId:0,tab:{url:'https://evil.example/'}})).ok,false);
+});
+
+
+test('扩展搜索超过8秒仍等待结果，与服务30秒查证预算一致',async()=>{
+ const timers=[];let release,signal;
+ const w=await worker({},new IDBFactory(),'',{setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout:()=>{},fetch:async(url,options)=>{signal=options.signal;await new Promise(resolve=>{release=resolve;});return {status:200,url,text:async()=>'{}'};}});
+ const pending=w.send({type:'search',url:'https://api.bochaai.com/v1/web-search',data:JSON.stringify({query:'抖音PK规则',count:3,summary:true,freshness:'noLimit'})});
+ await new Promise(setImmediate);
+ try{for(const timer of timers)if(timer.ms<=8000)timer.fn();assert.equal(signal.aborted,false);assert.ok(timers.some(t=>t.ms===30000));}finally{release();await pending;}
 });

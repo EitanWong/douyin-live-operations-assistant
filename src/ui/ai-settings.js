@@ -6,8 +6,10 @@ import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
 
 const fields=[['title','资料标题','text'],['content','背景正文','textarea'],['source','资料来源 / 确认人','text'],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 export class AISettings {
-  constructor(root,{dirty,start,stop,clear,forget,error,checkNative,diagnose}) {
+  constructor(root,{dirty,start,stop,clear,forget,error,checkNative,diagnose,webKnowledge}) {
     this.root=root;this.dirty=dirty;this.error=error;this.skills=[];
+    this.webKnowledge=webKnowledge;this.knowledgeSerial=0;
+    for(const action of ['refresh','clear'])root.querySelector(`[data-web-knowledge-${action}]`).addEventListener('click',()=>{void this.updateWebKnowledge(action);});
     root.querySelector('[data-skill-install]').addEventListener('click',()=>{try{const skill=validateSkillPack(JSON.parse(root.querySelector('[data-skill-json]').value));if(this.skills.length>=8 && !this.skills.some(s=>s.id===skill.id))throw new Error('自定义技能最多8个');this.skills=this.skills.filter(s=>s.id!==skill.id).concat(skill);this.showSkills();dirty();}catch(reason){error(reason);}});
     const slider=root.querySelector('[data-reply-slider]');
     const changeFrequency=()=>{root.querySelector('[data-field="ai.replyFrequency"]').value=REPLY_FREQUENCIES[Number(slider.value)][0];this.syncReplyFrequency();dirty();};
@@ -69,6 +71,29 @@ export class AISettings {
     }
     for(const section of this.root.querySelectorAll('[data-ai-section]'))section.hidden=section.dataset.aiSection!==key;
     this.root.querySelector('.ai-section-tabs').scrollIntoView?.({block:'start',behavior:'instant'});
+    if(key==='knowledge' && this.webKnowledge)void this.updateWebKnowledge('refresh');
+  }
+  async updateWebKnowledge(action,id){
+    const serial=++this.knowledgeSerial,status=this.root.querySelector('[data-web-knowledge-status]');
+    if(!this.webKnowledge){status.textContent='当前环境没有可用的联网知识存储。';return;}
+    try{
+      if(action==='clear')await this.webKnowledge.clear();
+      if(action==='remove')await this.webKnowledge.remove(id);
+      const rows=await this.webKnowledge.list();if(serial!==this.knowledgeSerial)return;
+      status.textContent=`${this.webKnowledge.persistent ? '本机已保存' : '当前环境仅临时保存，刷新后丢失'} · ${rows.length}/100条有效资料；停用后停止保存与复用。`;
+      const target=this.root.querySelector('[data-web-knowledge-list]'),doc=target.ownerDocument;target.replaceChildren();
+      if(!rows.length){const p=doc.createElement('p');p.textContent='没有有效的自动联网知识。';target.append(p);}
+      for(const row of rows){
+        const details=doc.createElement('details'),summary=doc.createElement('summary');summary.textContent=row.query;details.append(summary);
+        const time=doc.createElement('p');time.textContent=`采集 ${new Date(row.searchedAt).toLocaleString('zh-CN')} · 到期 ${new Date(row.expiresAt).toLocaleString('zh-CN')}`;details.append(time);
+        for(const source of row.results){
+          const p=doc.createElement('p');p.textContent=source.content;details.append(p);
+          let url;try{url=new URL(source.url);}catch{continue;}if(!['https:','http:'].includes(url.protocol) || url.username || url.password)continue;
+          const a=doc.createElement('a');a.href=url.href;a.target='_blank';a.rel='noopener noreferrer';a.textContent=`[${source.index}] ${source.title}`;details.append(a);
+        }
+        const button=doc.createElement('button');button.type='button';button.dataset.webKnowledgeRemove='';button.textContent='删除这条联网知识';button.addEventListener('click',()=>{void this.updateWebKnowledge('remove',row.id);});details.append(button);target.append(details);
+      }
+    }catch(reason){if(serial===this.knowledgeSerial)status.textContent=`知识存储不可用：${reason.message}`;}
   }
   navigate(event){
     const tab=event.target.closest('[data-ai-section-tab]');

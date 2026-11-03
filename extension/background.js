@@ -297,7 +297,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const form=searching && provider==='searxng';
         const body = form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
         if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!Array.isArray(body.messages) || typeof body.model !== 'string') throw new Error('AI请求无效');
-        const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 8000 : 25000);
+        const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 30000 : 25000);
         const requestKey=typeof message.requestId==='string' && /^[a-z\d-]{16,80}$/iu.test(message.requestId) ? `${sender.tab.id}:${message.requestId}` : null;
         if(requestKey){activeAIRequests.set(requestKey,controller);if(cancelledAIRequests.delete(requestKey))controller.abort();}
         try {

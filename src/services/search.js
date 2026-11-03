@@ -1,7 +1,7 @@
 import {parseCompletionStream} from './completion-stream.js';
 
 export const SEARCH_PROVIDERS = {bocha:{label:'博查',endpoint:'https://api.bochaai.com/v1/web-search'},tavily:{label:'Tavily',endpoint:'https://api.tavily.com/search'},searxng:{label:'SearXNG（自建）',endpoint:'http://localhost:8080/search'}};
-export const SEARCH_DEFAULTS = {enabled:false,provider:'bocha',endpoint:SEARCH_PROVIDERS.bocha.endpoint,maxResults:3,maxPerHour:60};
+export const SEARCH_DEFAULTS = {enabled:false,rememberKnowledge:true,provider:'bocha',endpoint:SEARCH_PROVIDERS.bocha.endpoint,maxResults:3,maxPerHour:60};
 
 export function validateSearchEndpoint(value, provider) {
   let url; try {url=new URL(value);} catch {throw new Error('搜索接口地址无效');}

@@ -88,3 +88,17 @@ test('直播感知默认直接拉流，显式切换标签页共享后更新操�
     assert.match(panel.node('[data-source-help]').textContent,/分享标签页音频/);
   }finally{panel.destroy();dom.window.close();}
 });
+
+test('自动联网知识独立展示来源和时效，可停用、删除、清空；不修改手工记忆也不执行网页HTML',async()=>{
+ const dom=setup(),config=copy(DEFAULTS);config.ai.memory.entries=[{id:'manual',title:'手工资料',content:'主播安排',source:'本人',updatedAt:Date.now(),expiresOn:'',enabled:true}];
+ let rows=[{id:'learned',query:'<img src=x onerror=alert(1)> PK规则',searchedAt:Date.now(),expiresAt:Date.now()+86400000,results:[{index:1,title:'<script>bad()</script>',url:'https://www.douyin.com/rules',content:'规则原文摘要'}]}],removed=[],cleared=0;
+ const panel=new Panel({room:'1',config,callbacks:{webKnowledge:{persistent:true,list:async()=>rows,remove:async id=>{removed.push(id);rows=[];},clear:async()=>{cleared++;rows=[];}}}});
+ try{
+  panel.tab('ai');panel.aiSettings.showSection('knowledge');panel.node('[data-web-knowledge-refresh]').click();await new Promise(setImmediate);
+  const list=panel.node('[data-web-knowledge-list]');assert.match(list.textContent,/规则原文摘要/);assert.match(list.textContent,/到期/);assert.equal(list.querySelector('img,script'),null);assert.equal(list.querySelector('a').href,'https://www.douyin.com/rules');
+  assert.equal(panel.node('[data-field="ai.search.rememberKnowledge"]').checked,true);panel.node('[data-field="ai.search.rememberKnowledge"]').click();assert.equal(panel.read().ai.search.rememberKnowledge,false);
+  panel.node('[data-web-knowledge-remove]').click();await new Promise(setImmediate);assert.deepEqual(removed,['learned']);assert.match(list.textContent,/没有/);
+  panel.node('[data-web-knowledge-clear]').click();await new Promise(setImmediate);assert.equal(cleared,1);assert.equal(panel.read().ai.memory.entries[0].content,'主播安排');
+  assert.equal(panel.node('[data-search-config]').hidden,true);assert.equal(panel.node('[data-web-knowledge-refresh]').closest('[hidden]'),null);
+ }finally{panel.destroy();dom.window.close();}
+});

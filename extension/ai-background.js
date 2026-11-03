@@ -16,7 +16,7 @@ export function createBackgroundAI({chrome,readRecord,fetch:fetcher=globalThis.f
    if(controller.signal.aborted)throw new Error('请求已取消');
    if(typeof details.data!=='string' || details.data.length>100000)throw new Error('后台请求超过容量');
    if(searching)validateSearchBody(provider==='searxng' ? Object.fromEntries(new URLSearchParams(details.data)) : JSON.parse(details.data),provider);
-   timeout=setTimeout(()=>controller.abort(),Math.min(details.timeout || 25000,25000));
+   timeout=setTimeout(()=>controller.abort(),Math.min(details.timeout || 25000,searching ? 30000 : 25000));
    const response=await fetcher(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:details.headers,body:details.data});
    const text=await response.text();if(text.length>200000)throw new Error('后台模型响应超过容量');details.onload({status:response.status,responseText:text,finalUrl:response.url});
   }catch(error){details.onerror?.(error);}finally{clearTimeout(timeout);}})();

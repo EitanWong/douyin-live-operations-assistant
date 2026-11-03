@@ -186,6 +186,7 @@ export function validateConfig(c) {
   c.ai.accountCollection=validateAccountCollection(c.ai.accountCollection);
   if(typeof c.ai.knowledge!=='string' || c.ai.knowledge.length>12000)throw new Error('主播与本场资料最多12000字');
   if (typeof c.ai.search.enabled!=='boolean') throw new Error('联网搜索开关无效');
+  if (typeof c.ai.search.rememberKnowledge!=='boolean') throw new Error('联网知识缓存开关无效');
   choice(c.ai.search.provider,['bocha','tavily','searxng'],'搜索服务');
   for(const [key,min,max] of [['maxResults',1,5],['maxPerHour',1,3600]]) {
     range(c.ai.search[key],min,max,'联网搜索设置');

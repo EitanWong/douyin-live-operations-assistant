@@ -11,7 +11,7 @@ test('普通问答、后台研究及直接回复共用常识与个人事实边�
     for(const intentRouting of [false,true]){
       const request=makeAIRequest({...prompt,task,intentRouting,target:{text:'主播睡觉吗？'}},config.ai);
       const system=request.messages[0].content;
-      assert.match(system,/稳定常识可以直接回答/);
+      assert.match(system,/日常打趣中的显然常识可以直接回答/);
       assert.match(system,/常识不能证明个人的具体情况/);
       assert.doesNotMatch(system,/事实仅使用提供的主播资料和事件数据|资料不足时自然引导询问主播|未命中不等于不存在，也不表示可用常识补造/);
       assert.match(system,/具体作息、当前状态、健康、经历和安排/);
@@ -20,11 +20,14 @@ test('普通问答、后台研究及直接回复共用常识与个人事实边�
   }
 });
 
-test('问答指令先答能确定的部分，常识走chat，含糊指代和真正缺失的个人事实仍保留边界',()=>{
+test('问答指令先答能确定的部分，闲聊走chat，知识自动查证且保留个人事实边界',()=>{
   const request=makeAIRequest({...prompt,task:{kind:'ai'},intentRouting:true,target:{text:'主播睡觉吗？一般几点睡？'}},config.ai);
   const system=request.messages[0].content;
-  assert.match(system,/常识、日常寒暄和无害玩笑使用 chat/);
+  assert.match(system,/日常寒暄、显然的生活打趣和无害玩笑使用 chat/);
   assert.match(system,/先回答能确定的部分/);
+  assert.match(system,/实质性的常识问答和外部知识问题/);
+  assert.match(system,/应主动查证/);
+  assert.doesNotMatch(system,/常识可直接简答|稳定常识可以直接回答/);
   assert.match(system,/不因缺少具体资料而把整句都推回主播/);
   assert.match(system,/对象不明且确实影响答案时才澄清/);
   assert.match(system,/不嘲讽、不训人/);
@@ -39,7 +42,7 @@ test('关键词话术生成也复用同一事实边界，不把常识问题交�
   },config,{kind:'keyword',keywords:['睡觉']});
   assert.deepEqual(phrases,['当然睡呀，主播也得休息。']);
   const system=request.messages[0].content;
-  assert.match(system,/稳定常识可以直接回答/);
+  assert.match(system,/日常打趣中的显然常识可以直接回答/);
   assert.doesNotMatch(system,/事实只取主播资料|就引导询问主播/);
   assert.match(system,/具体作息、当前状态、健康、经历和安排/);
 });
