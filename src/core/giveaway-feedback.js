@@ -1,6 +1,6 @@
 import {giveawaySlots,giveawayPrizes} from './giveaway.js';
+import {giveawayCountdownStage} from './giveaway-countdown.js';
 
-export const GIVEAWAY_COUNTDOWNS = [300,60,30,10];
 const text=value=>String(value).replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,' ').replace(/\s+/g,' ').trim();
 const clip=(value,length)=>[...text(value)].slice(0,length).join('');
 const size=value=>[...value].length;
@@ -8,6 +8,15 @@ const size=value=>[...value].length;
 function lines(label,value,limit) {
   const chars=[...text(value)],width=limit-size(label),result=[];
   while(chars.length)result.push(label+chars.splice(0,width).join(''));
+  return result;
+}
+function packLines(messages,limit) {
+  const result=[];
+  for(const message of messages) {
+    const previous=result.at(-1);
+    if(previous && size(`${previous}；${message}`)<=limit)result[result.length-1]=`${previous}；${message}`;
+    else result.push(message);
+  }
   return result;
 }
 function groups(rows,label,limit,mention=false) {
@@ -59,7 +68,7 @@ export function prepareGiveawayFeedback(round,now,limit=50,{start=false}={}) {
     if(round.config.announcePrizeNames)messages.push(...lines('奖品：',giveawayPrizes(round.config),limit));
     if(round.config.chatEnabled)messages.push(...lines('发送弹幕：',`${round.config.keyword} 即可参抽奖`,limit));
     if(round.config.giftEnabled)messages.push(...lines('参与礼物：',`${round.config.gifts}，累计${round.config.giftMin}个`,limit));
-    append('start',messages.map(text=>({text})),liveExpiry);
+    append('start',packLines(messages,limit).map(text=>({text})),liveExpiry);
   }
   if(round.status==='running') {
     const reminder=Math.floor((now-round.startedAt)/60000);
@@ -68,11 +77,10 @@ export function prepareGiveawayFeedback(round,now,limit=50,{start=false}={}) {
     }
     const confirmed=new Set(next.filter(row=>row.kind==='entry').flatMap(row=>row.userIds));
     append('entry',groups(round.entrants.filter(row=>!confirmed.has(row.userId)),'报名成功：',limit,true),round.endsAt);
-    for(const seconds of GIVEAWAY_COUNTDOWNS) {
-      const at=round.endsAt-seconds*1000;
-      if(round.config.durationSec>seconds && now>=at && now<at+1500 && !next.some(row=>row.kind==='countdown' && row.seconds===seconds)) {
-        append('countdown',[{text:`抽奖剩余${seconds}秒`}],Math.min(round.endsAt,at+5000),{seconds});
-      }
+    const remaining=Math.ceil((round.endsAt-now)/1000),seconds=giveawayCountdownStage(remaining);
+    const at=round.endsAt-seconds*1000;
+    if(seconds && round.config.durationSec>seconds && now>=at && now<at+5000 && !next.some(row=>row.kind==='countdown' && row.seconds===seconds)) {
+      append('countdown',[{text:`抽奖剩余${remaining}秒`}],Math.min(round.endsAt,at+5000),{seconds});
     }
   } else if(round.status==='drawn' && !has('result')) {
     append('result',resultLines(round,limit),now+86400000);

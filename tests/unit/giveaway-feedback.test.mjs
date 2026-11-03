@@ -11,7 +11,7 @@ const enter=(r,id)=>enterGiveaway(r,{type:'chat',text:'参与抽奖',at:2000,use
 test('开始、合并报名与多奖品结果生成有界公屏消息，重复参与和重放不重复确认',()=>{
   let round=prepareGiveawayFeedback(make(),1000,50,{start:true});
   assert.match(round.feedback.map(row=>row.text).join(''),/抽奖开始.*参与抽奖/);
-  assert.ok(round.feedback.some(row=>row.text==='发送弹幕：参与抽奖 即可参抽奖'));
+  assert.ok(round.feedback.some(row=>row.text.includes('发送弹幕：参与抽奖 即可参抽奖')));
   for(const id of ['1','2','3'])round=enter(round,id);
   round=prepareGiveawayFeedback(round,2000,50);
   const entries=round.feedback.filter(row=>row.kind==='entry');assert.equal(entries.length,1);
@@ -40,6 +40,25 @@ test('抽奖反馈优先请求管理员弹幕',async()=>{
   await f.engine.enqueueGiveaway(f.message('start','抽奖开始',{kind:'start'}));await f.engine.tick();
   assert.equal(channel,'admin');
 });
+test('短轮次合并开场信息，为报名确认与倒计时留出发送时段',async()=>{
+  const f=sender();
+  let round=createGiveaway({...config,prizes:[{name:'礼盒',count:2}],durationSec:12,giftEnabled:false},{id:'r',room:'123',now:1000});
+  round=prepareGiveawayFeedback(round,1000,50,{start:true});
+  const starts=round.feedback.filter(row=>row.kind==='start');
+  assert.ok(starts.length<=2);assert.match(starts.map(row=>row.text).join(''),/12秒后开奖.*礼盒.*参与抽奖/);
+  const handedOff=new Set();
+  for(let now=1000;now<round.endsAt;now+=500){
+    f.time(now);if(now===1500)round=enter(enter(round,'1'),'2');
+    round=prepareGiveawayFeedback(round,now,50);
+    for(const message of round.feedback){
+      if(handedOff.has(message.id))continue;
+      await f.engine.enqueueGiveaway({...message,key:`r:${message.id}`,roundId:'r',endsAt:round.endsAt});handedOff.add(message.id);
+    }
+    await f.engine.tick();
+  }
+  assert.match(f.sent.join(''),/报名成功.*@观众1.*@观众2/);
+  assert.equal(f.sent.filter(text=>text.startsWith('抽奖剩余')).length,2);
+});
 test('关键节点只提醒一次，短轮次和后台恢复不补发过时节点',()=>{
   let round=make();
   for(const remaining of [300,60,30,10]){
@@ -51,6 +70,43 @@ test('关键节点只提醒一次，短轮次和后台恢复不补发过时节�
   assert.equal(restored.feedback.filter(row=>row.kind==='countdown').length,0);
   const short=createGiveaway({...config,durationSec:30},{id:'short',room:'123',now:1000});
   assert.equal(prepareGiveawayFeedback(short,1000,50).feedback.length,0);
+});
+test('300秒抽奖全程分阶段提示剩余时间，越接近开奖反馈越密集且刷新不重复',()=>{
+  let round=createGiveaway({...config,durationSec:300},{id:'five-minutes',room:'123',now:1000});
+  round=prepareGiveawayFeedback(round,1000,50,{start:true});
+  assert.match(round.feedback.find(row=>row.kind==='start').text,/300秒后开奖/);
+  for(let now=1500;now<round.endsAt;now+=500){
+    round=prepareGiveawayFeedback(round,now,50);
+    round=parseGiveawayState({version:2,rounds:[round]},'123').rounds[0];
+    assert.deepEqual(prepareGiveawayFeedback(round,now,50).feedback,round.feedback);
+  }
+  const countdowns=round.feedback.filter(row=>row.kind==='countdown');
+  assert.deepEqual(countdowns.map(row=>row.seconds),[240,180,120,90,60,30,10,5]);
+  assert.deepEqual(countdowns.map(row=>row.text),[240,180,120,90,60,30,10,5].map(seconds=>`抽奖剩余${seconds}秒`));
+});
+test('长于五分钟的轮次同样每分钟提示，短轮次只播报适用节点',()=>{
+  for(const [durationSec,expected] of [[900,[840,780,720,660,600,540,480,420,360,300,240,180,120,90,60,30,10,5]],[100,[90,60,30,10,5]],[8,[5]],[5,[]]]){
+    let round=createGiveaway({...config,durationSec},{id:`duration-${durationSec}`,room:'123',now:1000});
+    for(let now=1000;now<round.endsAt;now+=1000)round=prepareGiveawayFeedback(round,now,50);
+    assert.deepEqual(round.feedback.filter(row=>row.kind==='countdown').map(row=>row.seconds),expected);
+    assert.deepEqual(parseGiveawayState({version:2,rounds:[round]},'123').rounds[0].feedback,round.feedback);
+  }
+});
+test('定时回调延迟数秒仍及时播报当前余时，过期节点不追发且不能保存非法节点',()=>{
+  let round=make(),now=round.endsAt-240000+3100;
+  round=prepareGiveawayFeedback(round,now,50);
+  const countdown=round.feedback.find(row=>row.kind==='countdown');
+  assert.equal(countdown?.text,'抽奖剩余237秒');assert.equal(countdown.seconds,240);
+  assert.equal(countdown.expiresAt,round.endsAt-235000);
+  assert.deepEqual(prepareGiveawayFeedback(round,now+500,50).feedback,round.feedback);
+  assert.equal(prepareGiveawayFeedback(make(),make().endsAt-235000,50).feedback.filter(row=>row.kind==='countdown').length,0);
+  for(const seconds of [0,7,91,121,240.5,86460]){
+    const corrupt=structuredClone(round);corrupt.feedback.find(row=>row.kind==='countdown').seconds=seconds;
+    assert.throws(()=>parseGiveawayState({version:2,rounds:[corrupt]},'123'),/反馈/);
+  }
+  for(const status of ['drawn','cancelled']){
+    assert.equal(prepareGiveawayFeedback({...round,status},round.endsAt-5000,50).feedback.filter(row=>row.kind==='countdown').length,1);
+  }
 });
 test('全部消息支持最小长度、长昵称和长奖品，关闭反馈及旧记录不自动发弹幕',()=>{
   let round=createGiveaway({...config,prizes:[{name:'奖'.repeat(100),count:1}]},{id:'long',room:'123',now:1000});

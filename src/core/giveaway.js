@@ -1,3 +1,5 @@
+import {validGiveawayCountdown} from './giveaway-countdown.js';
+
 export const GIVEAWAY_VERSION = 2;
 export const GIVEAWAY_DEFAULTS = Object.freeze({prizes:Object.freeze([Object.freeze({name:'直播周边',count:1})]),weights:Object.freeze([]),anchorGuaranteed:false,feedbackEnabled:true,announcePrizeNames:true,durationSec:300,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false,gifts:'小心心',giftMin:1});
 
@@ -165,7 +167,7 @@ function validateFeedback(round) {
     || typeof row.text!=='string' || !row.text.trim() || [...row.text].length>50 || typeof row.queued!=='boolean'
     || !Number.isFinite(row.createdAt) || !Number.isFinite(row.expiresAt) || row.expiresAt<=row.createdAt
     || row.attemptedBy!==undefined && !boundedText(row.attemptedBy,100)
-    || row.kind==='countdown' && ![300,60,30,10].includes(row.seconds)
+    || row.kind==='countdown' && !validGiveawayCountdown(row.seconds)
     || row.kind==='entry' && (!Array.isArray(row.userIds) || !row.userIds.length || row.userIds.some(id=>!round.entrants.some(entrant=>entrant.userId===id))))
     || new Set(round.feedback.map(row=>row.id)).size!==round.feedback.length)throw new Error('抽奖反馈记录无效');
 }

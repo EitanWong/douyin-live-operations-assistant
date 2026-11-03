@@ -119,7 +119,7 @@ test('报名或开奖保存失败不会发成功公告，发送失败保留待�
 
 test('跨页面发送同一公告先持久认领，其他页面不能重复点击；未认领的排队消息可接管',async()=>{
   const f=fixture(),firstMessages=[],secondMessages=[];
-  const first=f.create({feedback:async row=>firstMessages.push(row)});await first.ready();await first.start(config);
+  const first=f.create({feedback:async row=>firstMessages.push(row)});await first.ready();await first.start({...config,prize:'礼'.repeat(100)});
   const message=firstMessages[0];assert.equal(await first.claimFeedback({key:message.key,owner:'page-one'}),true);
   await first.dispose();const second=f.create({feedback:async row=>secondMessages.push(row)});await second.ready();
   assert.equal(await second.claimFeedback({key:message.key,owner:'page-two'}),false);
