@@ -37,7 +37,7 @@ export function applyContextBudget(input,limit){
   const candidates=(value,path=[],out=[])=>{
     if(!value || typeof value!=='object')return out;
     for(const [key,child] of Object.entries(value)){
-      const next=[...path,key];if(next[0]==='target' || next[0]==='data' || next.join('.')==='context_meta.budget')continue;
+      const next=[...path,key];if(['target','data','web_search'].includes(next[0]) || next.join('.')==='context_meta.budget')continue;
       if(Array.isArray(child) && child.length){
         const removable=next.join('.')==='media_context.observations' ? optionalMediaRows(data.media_context) : child;
         if(removable.length)out.push({parent:value,key,path:next.join('.'),chars:JSON.stringify(removable).length,removable});
