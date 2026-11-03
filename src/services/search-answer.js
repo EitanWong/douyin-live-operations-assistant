@@ -14,7 +14,7 @@ export function searchAnswer(output,found){
   grounded:normalized!=='[SKIP]' && citations.length>0 && citations.every(valid)};
 }
 
-export function unavailableCurrentAnswer(found,maxLength){
+export function unavailableCurrentAnswer(found,maxLength=50){
  const disabled=/未启用/u.test(found.error || ''),reason=/429|限流/u.test(found.error || '') ? '搜索限流' : disabled ? '联网未启用' : '查询未成功';
  const next=disabled ? '请启用联网搜索。' : '请稍后重试。';
  const render=query=>`暂未查到“${query}”的实时资料，${reason}，${next}`;

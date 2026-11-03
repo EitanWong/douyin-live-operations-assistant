@@ -8,7 +8,7 @@ test('prepared local replies can ground an explicit web lookup without a cloud-m
 test('local answers survive missing citations and search failures remain visible',async()=>{
  const edge={reply:async p=>p.intentRouting ? JSON.stringify({intent:'web-search',query:'最新新闻',reply:''}) : p.searchResults.error ? '新闻查询尚不可用，请提供具体事件。' : '本次报道未提到事件日期。'},search=async()=>({results:[{index:1,title:'source'}]});
  const records=[];assert.equal(await createLocalReply({edge,search,onSearch:r=>records.push(r)})({target:{text:'搜索最新新闻'}},{search:{enabled:true}}),'本次报道未提到事件日期。');assert.match(records[0].citationWarning,/引用/);
- let calls=0;assert.match(await createLocalReply({edge,search:()=>calls++})({target:{text:'联网查一下'}},{search:{enabled:false}}),/新闻查询尚不可用/);assert.equal(calls,0);
+ let calls=0;assert.match(await createLocalReply({edge,search:()=>calls++})({target:{text:'联网查一下'}},{search:{enabled:false}}),/最新新闻.*联网未启用/u);assert.equal(calls,0);
 });
 
 test('自然天气提问通过意图查证，缺城市先澄清；普通聊天不联网',async()=>{
