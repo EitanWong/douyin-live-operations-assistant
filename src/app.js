@@ -1,3 +1,8 @@
+import {createSpeechRecognizer} from './services/speech-routing.js';
+import {createEdgeRouter} from './browser/edge-router.js';
+import {AccountContext} from './ai/account-context.js';
+import {createResilientAI} from './services/ai-resilience.js';
+import {FoundationSettings} from './ui/foundation-settings.js';
 import {AudienceMemory} from './ai/audience-memory.js';
 import {aiDiagnostics} from './ai/diagnostics.js';
 import {AIWorkbench} from './ui/ai-workbench.js';
@@ -40,6 +45,7 @@ export function boot(options = {}) {
   try { config = validateConfig(mergeConfig(get(configKey, {}))); }
   catch (e) { config = copy(DEFAULTS); configError = `旧配置无效，已使用默认值：${e.message}`; }
   if (!config.anchorId) config.anchorId = new URLSearchParams(location.search).get('anchor_id')?.match(/^\d+$/)?.[0] || '';
+  const accounts=new AccountContext({snapshot:runtimeSnapshot?.accountSources});let accountRevision=0,foundationSettings;
   let audienceMemory=new AudienceMemory({anchor:config.anchorId,state:runtimeSnapshot?.audienceMemory}),workbench,localAgentTasks,localAgentReady;
   const currentMemory=()=>{if(audienceMemory.anchor!==String(engine?.config.anchorId || config.anchorId))audienceMemory=new AudienceMemory({anchor:engine?.config.anchorId || config.anchorId});return audienceMemory;};
   const sessionKeys = new Map(); let panel, engine, tools, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false, persistenceDisabled = false;
@@ -73,7 +79,7 @@ export function boot(options = {}) {
     if (runtimeWriter.failure || adapter.persistenceUnavailable?.()) return immediate ? Promise.reject(runtimeWriter.failure || contextFailure()) : Promise.resolve();
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
     const save = () => {
-      const snapshot = { ...engine.snapshot(), audienceMemory:currentMemory().snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),acknowledgedRuntimeAlert} };
+      const snapshot = { ...engine.snapshot(), audienceMemory:currentMemory().snapshot(),accountSources:accounts.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),acknowledgedRuntimeAlert} };
       const write = runtimeWriter.save(snapshot);
       const reported = write.catch(error => reportPersistenceError(error, '运行状态保存失败'));
       return immediate ? write : reported;
@@ -236,6 +242,7 @@ export function boot(options = {}) {
       refreshGifts();
     }
   };
+  const edge=createEdgeRouter({browser:options.edge,native:options.nativeASR,config:()=>engine?.config.ai.edge || config.ai.edge});
   const request = options.request || (details => GM_xmlhttpRequest(details));
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
   const mediaSecretKey=endpoint=>`live-assistant:media-key:${new URL(validateEndpoint(endpoint)).origin}`;
@@ -248,8 +255,8 @@ export function boot(options = {}) {
   const sourceFor=config=>config.inputSource==='display' ? undefined : directSource;
   const exchange=createSDPExchange({request,getKey:mediaKey});
   const realtimeCapture=createRealtimeCapture({exchange,env:window,sourceFactory:directSource});
-  const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config)},window)),
-    realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room}),recognize:recognizeMedia,
+  const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config),vadFactory:options.vadFactory},window)),
+    realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room}),recognize:createSpeechRecognizer({cloud:recognizeMedia,edge,config:()=>engine.config.ai.edge}),
     onObservation:row=>{mediaEvidence.add(row);panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
@@ -257,11 +264,14 @@ export function boot(options = {}) {
   const searchSecretKey = endpoint => `live-assistant:search-key:${new URL(validateSearchEndpoint(endpoint)).origin}`;
   const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
   let aiStatusSequence=0;
-  const client = createAIClient({ request, getKey: (endpoint,ai) => pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,
+  const cloudClient = createAIClient({ request, getKey: (endpoint,ai) => pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,
     onStatus:status=>{if (engine && resolveReplyConfig(engine.config.ai).endpoint===status.endpoint && resolveReplyConfig(engine.config.ai).model===status.model && status.sequence>aiStatusSequence) {aiStatusSequence=status.sequence;panel?.setAIServiceStatus(status.error);}},
     onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `联网搜索：${record.query} · ${record.results.length} 条来源`);}
   });
+  const client=createResilientAI({cloud:cloudClient,edge,onTrace:r=>{
+    foundationSettings?.trace(r);if(r.provider==='edge'){panel?.setAIServiceStatus('');log('ai',`端侧兜底完成 · ${r.elapsedMs}ms`);}
+  }});
   const lock = options.lock || new RoomLock({ room });
   const makeAdapter = options.adapterFactory || (settings => new DouyinAdapter(settings));
   let stoppedBroadcast = '';
@@ -359,7 +369,7 @@ export function boot(options = {}) {
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
-    config, log, ai: client, viewerMemory:user=>currentMemory().context(user),
+    config, log, ai: client, viewerMemory:user=>currentMemory().context(user),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;
@@ -443,7 +453,7 @@ export function boot(options = {}) {
   }
   function prepareMediaKeys(c,credentials={}) {
     const keys=new Map();
-    const preset=!['custom','text'].includes(pipelineConfig(c.ai).mode);
+    const preset=!['custom','text','local-audio'].includes(pipelineConfig(c.ai).mode);
     for(const kind of preset ? ['pipeline'] : ['vision','audio']){
       const value=credentials[kind];if(!value?.key)continue;
       const name=mediaSecretKey(preset ? aliEndpoints(c.ai).chat : c.ai.media[`${kind}Endpoint`]);
@@ -459,7 +469,8 @@ export function boot(options = {}) {
     if(media.state!=='idle')return;
     if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
     const effective=resolveMediaConfig(c.ai);validateMediaConfig(effective,true);const persistKeys=prepareMediaKeys(c,credentials);
-    for(const kind of ['vision','audio'])if(!(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
+    if(effective.localAudio && !await edge.ready('audio'))throw new Error('请先准备本地中文语音模型并通过设备测速');
+    for(const kind of ['vision','audio'])if(!(effective.localAudio && kind==='audio') && !(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
     activeMediaConfig=copy(effective);mediaAnchor=engine.config.anchorId;clearMedia();
     const started=media.start(activeMediaConfig);
     try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
@@ -726,7 +737,7 @@ export function boot(options = {}) {
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { workbench?.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
+      if (closed) { workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();
@@ -753,8 +764,10 @@ export function boot(options = {}) {
       });
       return localAgentReady;
     };
+    foundationSettings=new FoundationSettings(panel.root,{edge,collector:options.accountCollector,accounts,anchor:()=>engine.config.anchorId,
+      changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
     workbench=new AIWorkbench(panel.root,{memory:currentMemory,saveMemory:()=>persistRuntime(true),onError:error=>panel.toast(error.message,true),tasks:{
-      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
+      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
       list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
     }});
     const installCommand=panel.root.querySelector('[data-native-install-command]');

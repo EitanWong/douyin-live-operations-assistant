@@ -1,3 +1,5 @@
+import {createEdgeClient} from '../../src/browser/edge-client.js';
+import {createNativeASRClient} from '../../src/browser/native-asr-client.js';
 import {RoomContext,roomFromURL} from '../../src/browser/room-context.js';
 import { ProtocolCache } from '../../extension/protocol-cache.js';
 import { fanclubFrameContext, cleanFanclubSnapshot } from '../../src/data/fanclub.js';
@@ -81,9 +83,11 @@ async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{
 }
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
-  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
+  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*']);
   for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
+  assert.match(m.content_security_policy.extension_pages,/wasm-unsafe-eval/u);
+  for(const name of ['edge-worker.js','edge-offscreen.js','speech-vad.js','ort/ort-wasm-simd-threaded.asyncify.mjs','ort/ort-wasm-simd-threaded.asyncify.wasm','ort/ort-wasm-simd-threaded.jsep.mjs','ort/ort-wasm-simd-threaded.jsep.wasm','vad/silero_vad_v5.onnx','vad/ort/ort-wasm-simd-threaded.mjs','vad/ort/ort-wasm-simd-threaded.wasm'])await access(file(name));
   const main=await readFile(file('page.js'),'utf8'); assert.doesNotMatch(main,/chrome\.storage|GM_getValue|api-key:|GM_xmlhttpRequest/);
   assert.doesNotMatch(main,/window\.postMessage/);
 });
@@ -497,7 +501,7 @@ test('内容脚本持续突发按序交接并回收已消费槽位，回放不�
   const gate = new Promise(resolve => { release = resolve; });
   const replayGate = new Promise(resolve => { replayRelease = resolve; });
   Object.assign(dom.window, {
-    EventInbox,roomFromURL,
+    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,
     RequestBridgeClient,
     DouyinAdapter:class { constructor(options) { Object.assign(this, options); } emitStatus() {} },
     IdentityReader:class {},
@@ -539,7 +543,7 @@ test('存储水位阻塞的新事件不会挡住持久日志恢复与释放容�
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter,recovered=false;const handled=[];
   Object.assign(dom.window,{
-    EventInbox,roomFromURL,
+    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,
     RequestBridgeClient,
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     IdentityReader:class {},
@@ -904,7 +908,7 @@ test('抽奖结果持久保存在后台数据库，重启可恢复，拒绝越�
 
 test('上下文同步失效时更新诊断并停止重试，取消保活失败不覆盖恢复提示',async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});let adapter,failedCalls=0;
-  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     chrome:{runtime:{sendMessage:message=>{
       if(message.type==='init')return Promise.resolve({ok:true,value:{}});
@@ -930,7 +934,7 @@ test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不�
     alarms:{create(){},onAlarm:{addListener(){}}},power:{requestKeepAwake(){},releaseKeepAwake(){}},
     tabs:{query:async()=>keeper?[tab]:[],sendMessage:()=>new Promise(resolve=>listeners[0]({type:'collection-wake'},{},resolve))}};
   keeper=installCollectionKeeper(chrome,{wakeTimeoutMs:50});await keeper.refresh();
-  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},boot:()=>{},
     chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async message=>{
       if(message.type==='init')return {ok:true,value:{}};
@@ -949,7 +953,7 @@ test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不�
 test('事件桥短暂失联时暂停发送资格，后台恢复后继续接收，无需刷新',async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter,drains=0;const timers=[],handled=[];
-  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {
       constructor(options){Object.assign(this,options);}
       emitStatus(){}

@@ -80,7 +80,7 @@ export class AISettings {
   reveal(element){const section=element.closest('[data-ai-section]');if(section)this.showSection(section.dataset.aiSection);}
   syncPipeline(){
     const mode=this.root.querySelector('[data-field="ai.pipeline.mode"]').value;
-    this.root.querySelector('[data-pipeline-ali]').hidden=['custom','text'].includes(mode);
+    this.root.querySelector('[data-pipeline-ali]').hidden=['custom','text','local-audio'].includes(mode);
     this.root.querySelector('[data-custom-media]').hidden=mode!=='custom';
     this.root.querySelector('[data-text-service]').hidden=mode==='omni-only';
     this.root.querySelector('[data-media-start]').hidden=mode==='text';
@@ -88,8 +88,8 @@ export class AISettings {
     this.root.querySelector('[data-perception-active]').hidden=mode==='text';
     for(const node of this.root.querySelectorAll('[data-ai-modes]'))node.hidden=!node.dataset.aiModes.split(' ').includes(mode);
     this.root.querySelector('[data-pipeline-role]').textContent=mode==='omni-only' ? '感知 + 回复共用' : '仅感知';
-    this.root.querySelector('[data-pipeline-description]').textContent=({custom:'回复服务独立配置；可按需开启自定义视觉、语音或 Omni 分段识别。',text:'只用直播数据、弹幕、知识与搜索生成回复，无需配置感知服务。','omni-llm':'Omni 持续理解直播音画，回复由独立配置的文字模型生成。','omni-only':'同一套百炼配置，Omni 负责直播感知和弹幕回复。','ali-split':'视觉与语音分别按间隔识别直播内容，回复使用文字模型。'})[mode];
-    this.root.querySelector('[data-perception-description]').textContent=({custom:'在“连接与模型”启用并配置感知服务，再启动直播音视频识别。',text:'','omni-llm':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','omni-only':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','ali-split':'使用“连接与模型”中的视觉模型与语音模型分段识别。'})[mode];
+    this.root.querySelector('[data-pipeline-description]').textContent=({'local-audio':'使用已准备的本地中文语音模型识别直播，回复沿用文字模型及其端侧兜底，无需语音云服务密钥。',custom:'回复服务独立配置；可按需开启自定义视觉、语音或 Omni 分段识别。',text:'只用直播数据、弹幕、知识与搜索生成回复，无需配置感知服务。','omni-llm':'Omni 持续理解直播音画，回复由独立配置的文字模型生成。','omni-only':'同一套百炼配置，Omni 负责直播感知和弹幕回复。','ali-split':'视觉与语音分别按间隔识别直播内容，回复使用文字模型。'})[mode];
+    this.root.querySelector('[data-perception-description]').textContent=({'local-audio':'先在连接与模型准备中文识别，保存设置，再启动直播音频采集。',custom:'在“连接与模型”启用并配置感知服务，再启动直播音视频识别。',text:'','omni-llm':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','omni-only':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','ali-split':'使用“连接与模型”中的视觉模型与语音模型分段识别。'})[mode];
     this.syncMedia();
   }
   syncSource(){

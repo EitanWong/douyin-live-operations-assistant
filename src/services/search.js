@@ -37,7 +37,7 @@ function aiHTTPError(response) {
     : status===403 ? 'AI 服务拒绝访问，请检查 API Key、模型权限和服务商账户。'
     : status===429 ? 'AI 服务请求频率过高或达到限流，请稍后重试并检查服务商限额。'
     : `AI 服务请求失败（HTTP ${status}），请检查接口、模型和服务状态。`;
-  const error=new Error(message);error.aiStatusMessage=message;return error;
+  const error=new Error(message);error.aiStatusMessage=message;error.status=status;return error;
 }
 function parseResponse(response,url,operation,stream=false) {
   if(!response || typeof response!=='object')throw new Error('服务响应状态无效');

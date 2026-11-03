@@ -1,3 +1,6 @@
+import {installNativeASRBridge} from './native-asr.js';
+import {installEdgeBridge} from './edge-background.js';
+import {collectAccount} from './account-collector.js';
 import {installNativePerceptionBridge} from './native-perception.js';
 import {createBackgroundAI} from './ai-background.js';
 import {APPEARANCE_PREFERENCES} from '../src/ui/appearance.js';
@@ -16,6 +19,9 @@ import {parseGiveawayState} from '../src/core/giveaway.js';
 
 const collectionKeeper = installCollectionKeeper(chrome);
 installNativePerceptionBridge(chrome);
+installEdgeBridge(chrome);
+installNativeASRBridge(chrome);
+const accountCollections=new Map();
 
 const durableStorage = new DurableStorage({ local:chrome.storage.local });
 const storageReady = (async()=>{ await chrome.storage.local.setAccessLevel({ accessLevel:'TRUSTED_CONTEXTS' }); await durableStorage.migrate(); })();
@@ -111,6 +117,7 @@ const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
+  if(message?.target==='edge-offscreen')return;
   if (message?.type === 'fanclub-frame') {
     void (async()=>{
       try {
@@ -153,7 +160,15 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
     try {
       await storageReady;
       let value;
-      if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
+      if(message.type==='account-search' && isRoom(sender)){
+        if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
+        await chrome.tabs.create({url:`https://www.douyin.com/search/${encodeURIComponent(message.query.trim())}?type=general`,active:true});value=true;
+      }else if(message.type==='account-collect' && isRoom(sender)){
+        const key=sender.tab.id;if(accountCollections.has(key))throw new Error('账号采集正在进行');
+        const controller=new AbortController();accountCollections.set(key,controller);
+        try{value=await collectAccount(chrome,message.url,{signal:controller.signal});}finally{accountCollections.delete(key);}
+      }else if(message.type==='account-cancel' && isRoom(sender)){accountCollections.get(sender.tab.id)?.abort();value=true;}
+      else if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
       else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
       else if (['rewards-read','rewards-write'].includes(message.type) && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);

@@ -28,8 +28,8 @@ export function validateMediaConfig(config,ready=false) {
   }
   for(const [kind,enabled,label] of [['vision',config.videoEnabled,'视觉'],['audio',config.audioEnabled,'音频']]){
     if(typeof config[`${kind}Endpoint`]!=='string' || typeof config[`${kind}Model`]!=='string' || config[`${kind}Model`].length>200)throw new Error(`${label}服务配置无效`);
-    if(enabled && !(config.omniEnabled && kind==='audio'))validateEndpoint(config[`${kind}Endpoint`]);
-    if(ready && enabled && !(config.omniEnabled && kind==='audio') && !config[`${kind}Model`].trim())throw new Error(`请填写${label}模型，确认服务支持对应输入`);
+    if(enabled && !((config.omniEnabled || config.localAudio) && kind==='audio'))validateEndpoint(config[`${kind}Endpoint`]);
+    if(ready && enabled && !((config.omniEnabled || config.localAudio) && kind==='audio') && !config[`${kind}Model`].trim())throw new Error(`请填写${label}模型，确认服务支持对应输入`);
   }
   if(ready && !config.videoEnabled && !config.audioEnabled)throw new Error('请先选择开启画面识别或音频识别');
   return config;
