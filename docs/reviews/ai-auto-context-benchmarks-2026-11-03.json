@@ -135,5 +135,61 @@
     "Passing the single fixed Chinese self-test detects basic runtime incompatibility; it does not prove general language or factual accuracy.",
     "Cold download time and end-to-end platform delivery latency were not benchmarked.",
     "No authenticated Douyin field collection, long live soak, WER, or naturalness blind evaluation was performed."
-  ]
+  ],
+  "integrated_final": {
+    "device": {
+      "value": {
+        "webgpu": true,
+        "memoryGB": 16,
+        "cores": 10,
+        "maxBufferMB": 4095.9999961853027,
+        "maxStorageMB": 4095.9999961853027,
+        "shaderF16": true,
+        "storageFreeMB": 189549
+      }
+    },
+    "large": {
+      "id": "large",
+      "error": "端侧模型加载或推理失败，请检查 WebGPU、模型下载和设备内存。",
+      "diagnostic": {
+        "name": "Error",
+        "message": "中文结构化上下文自检失败，模型未启用"
+      }
+    },
+    "selected": "qwen-0.5b",
+    "prepared": {
+      "id": "small",
+      "value": {
+        "selfTestPassed": true,
+        "phase": "ready",
+        "firstTokenMs": 231.80000001192093,
+        "tokensPerSecond": 50.7399577167019,
+        "totalMs": 704.8000000119209,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-0.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4"
+      }
+    },
+    "offlineReply": {
+      "id": "answer",
+      "value": "目前领先20分。"
+    },
+    "replyMs": 408,
+    "factualProbePassed": true
+  },
+  "browser_ui": {
+    "errors": [],
+    "settingsReloadPassed": true,
+    "desktopAndNarrow": true,
+    "overflow": [
+      {
+        "width": 402,
+        "overflow": 0
+      }
+    ],
+    "localOnly": true,
+    "textModel": "auto",
+    "incomeSource": false
+  }
 }

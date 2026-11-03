@@ -32,7 +32,7 @@ export function createEdgeRouter({browser,native,config}){
    const state=await browser.status?.();if(state?.text)textStatus=state.text;
    const selected=config().textModel;return !selected || selected==='auto' || textStatus.model===TEXT_MODELS[selected]?.id;
   },
-  reply:(p,c)=>browser.reply(p,c),transcribe:(sample,signal)=>audio().transcribe(sample,signal),
+  reply:(p,c)=>browser.reply(p,c),classify:(text,signal)=>{if(!browser?.classify)throw new Error('此浏览器未连接中文端侧模型');return browser.classify(text,signal);},transcribe:(sample,signal)=>audio().transcribe(sample,signal),
   status:async()=>{const state=await browser?.status() || {};textStatus=state.text || {};return {...state,audio:{...(audioBackend()==='native-sensevoice' ? await native?.status() : state.audio) || {phase:'unprepared'},backend:audioBackend()}};},
   release:async()=>{textStatus={};native?.close();await browser?.release();},close:()=>{textStatus={};native?.close();browser?.close();}};
 }

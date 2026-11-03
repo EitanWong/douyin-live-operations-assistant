@@ -16,6 +16,7 @@ import { GiftStore } from '../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
 import { installCollectionKeeper } from './collection-keeper.js';
 import {parseGiveawayState} from '../src/core/giveaway.js';
+import {createPredictionBackground} from './prediction-background.js';
 
 const collectionKeeper = installCollectionKeeper(chrome);
 installNativePerceptionBridge(chrome);
@@ -28,6 +29,7 @@ const storageReady = (async()=>{ await chrome.storage.local.setAccessLevel({ acc
 void storageReady.catch(()=>{});
 const durableKey = isDurableKey;
 const readRecord = async key => durableKey(key) ? durableStorage.get(key) : (await chrome.storage.local.get(key))[key];
+let predictionHost;
 const readAll = async () => durableStorage.getAll(['live-assistant:config:','live-assistant:profile:']);
 const writeRecord = async (key,value) => {
   if (!durableKey(key)) return writeStorage(key,value);
@@ -160,7 +162,10 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
     try {
       await storageReady;
       let value;
-      if(message.type==='account-search' && isRoom(sender)){
+      if(message.type==='prediction' && isRoom(sender)){
+        predictionHost ||=createPredictionBackground({readRecord});
+        value=await predictionHost.handle(message,roomFromUrl(sender.tab.url));
+      }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
         await chrome.tabs.create({url:`https://www.douyin.com/search/${encodeURIComponent(message.query.trim())}?type=general`,active:true});value=true;
       }else if(message.type==='account-collect' && isRoom(sender)){

@@ -36,3 +36,10 @@ test('local readiness requires the known Chinese fact check as well as token spe
  assert.equal(acceptChineseSelfTest('"{}!!!!!!!!!!!!!!!!!!!!'),false);
  assert.equal(acceptChineseSelfTest(''),false);
 });
+
+test('local prompts preserve integrated statistical forecasts with provenance and obey the forecast source switch',()=>{
+ const predictions={asOf:10,revenue:{status:'ready',point:120,unit:'diamonds'},basis:'本机统计预测，非实测'};
+ const prompt={target:{text:'未来收入呢'},liveContext:{predictions}};
+ const data=JSON.parse(makeEdgeMessages(prompt,{}).at(-1).content);assert.equal(data.live_context.predictions.revenue.point,120);assert.match(data.live_context.predictions.basis,/非实测/);
+ assert.equal(JSON.parse(makeEdgeMessages(prompt,{contextSources:{predictions:false}}).at(-1).content).live_context.predictions,null);
+});

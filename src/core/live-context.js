@@ -1,3 +1,4 @@
+import {predictionContext} from '../analytics/page.js';
 import { summarizeAnchorBattles } from './anchor-stats.js';
 import {selectLiveSources,roomSignalContext} from '../ai/context-policy.js';
 
@@ -62,6 +63,7 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
     activityLastMinute:countActivity(buckets.filter(row=>fresh(row.at,60000))),
     activity:{windowSec:600,bucketSec:10,totals:countActivity(buckets),history:buckets.map(row=>({at:row.at,...fields(row,activityKeys)}))},
     income,collectionHealth,roomSignals:roomSignalContext(room.activities,now,age),
+    predictions:(()=>{try{return predictionContext(engine.liveData()?.predictions,anchorId,now);}catch{return null;}})(),
     recentEvents:events.slice(-20).map(row=>({type:text(row.type),at:row.at,name:text(row.name),text:text(row.text),...(row.type==='gift' ? {gift:text(row.gift),count:num(row.count),unitDiamonds:num(row.unitDiamonds),cumulative:true}:row.type==='like' ? {count:num(row.count)}:{})})),
     roomEvents:roomEvents.map(row=>({type:text(row.type),at:stamp(row),name:text(row.user?.name),text:text(row.text || row.description || row.title || row.display || row.status),
       ...fields(row,['followCount','shareCount','count','total','memberCount','diamondCount'])})),

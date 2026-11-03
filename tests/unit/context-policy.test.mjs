@@ -18,6 +18,6 @@ test('saved source switches apply to actual AI payloads and do not fabricate abs
  const shared=engine.aiContext(),body=JSON.parse(makeAIRequest({...shared,maxLength:40},engine.config.ai).messages[1].content);
  assert.equal(body.live_context.audience,null);assert.equal(body.live_context.income,null);assert.deepEqual(body.live_context.roomSignals,[]);assert.deepEqual(body.evidence_context.accounts,[]);
  assert.ok(body.live_context.coverage.disabledSources.includes('predictions'));assert.equal(body.live_context.forecasts,undefined);
- const snapshot=JSON.parse(makeAIRequest({liveContext:{income:{totalDiamonds:999},pk:{selfScore:20,estimates:{prediction:{selfWin:.99}}}},accountContext:[{content:'hidden'}]},engine.config.ai).messages[1].content);
- assert.equal(snapshot.live_context.income,null);assert.equal(snapshot.live_context.pk.estimates,null);assert.deepEqual(snapshot.evidence_context.accounts,[]);
+ const snapshot=JSON.parse(makeAIRequest({liveContext:{income:{totalDiamonds:999},predictions:{revenue:{status:'ready',point:100}},pk:{selfScore:20,estimates:{prediction:{selfWin:.99}}}},accountContext:[{content:'hidden'}]},engine.config.ai).messages[1].content);
+ assert.equal(snapshot.live_context.income,null);assert.equal(snapshot.live_context.predictions,null);assert.equal(snapshot.live_context.pk.estimates,null);assert.deepEqual(snapshot.evidence_context.accounts,[]);
 });

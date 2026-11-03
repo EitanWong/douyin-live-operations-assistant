@@ -1,4 +1,4 @@
-export const CONTEXT_SOURCES=Object.freeze({audience:'观众样本与互动',income:'本场收入与历史账本',pk:'PK、展馆与段位',predictions:'PK 预测与推演',roomEvents:'连麦、团播、榜单与购物状态',accounts:'所选公开主页与作品',health:'采集完整性'});
+export const CONTEXT_SOURCES=Object.freeze({audience:'观众样本与互动',income:'本场收入与历史账本',pk:'PK、展馆与段位',predictions:'统计预测与 PK 推演',roomEvents:'连麦、团播、榜单与购物状态',accounts:'所选公开主页与作品',health:'采集完整性'});
 export const CONTEXT_DEFAULTS=Object.freeze(Object.fromEntries(Object.keys(CONTEXT_SOURCES).map(key=>[key,true])));
 
 export function selectLiveSources(context,selection={}){
@@ -6,6 +6,7 @@ export function selectLiveSources(context,selection={}){
  if(!sources.audience){c.audience=null;c.audienceProfiles={total:0,included:0,users:[],sampleBasis:'已关闭观众上下文'};c.recentEvents=[];}
  if(!sources.income)c.income=null;
  if(!sources.pk)for(const key of ['pk','pkHistory','tasks','exhibition','rank','exhibitionRetention'])c[key]=null;
+ if(!sources.predictions)c.predictions=null;
  if(!sources.predictions && c.pk){c.pk.estimates=null;c.pk.contributorActivity=null;c.pk.effectHistory=null;}
  if(!sources.roomEvents){c.roomEvents=[];c.roomSignals=[];}
  if(!sources.health)c.collectionHealth=null;
@@ -35,7 +36,7 @@ export function contextInventory(context,accountCount=0){
   `近期弹幕 ${c.recentChat?.length || 0} 条；观众资料 ${c.audienceProfiles?.included || 0} 人（采样）`,
   `公开主页/作品 ${accountCount} 条；原生房间信号 ${c.roomSignals?.length || 0} 类`,
   `本场账本：${c.income ? c.income.stale ? '已过期' : '可用（估算）' : '未知或已关闭'}；PK：${c.pk ? c.pk.stale ? '已过期' : '可用' : '未知或已关闭'}`,
-  `预测：${c.pk?.estimates ? 'PK 未校准推演可用' : '无可用预测'}；未接入的预测不会补造`,
+  `预测：${c.predictions ? '统计预测已接入（以各项状态为准）' : c.pk?.estimates ? 'PK 未校准推演可用' : '无可用预测'}；预测与实测分开`,
   `采集完整性：${c.collectionHealth ? `${c.collectionHealth.connected ? '已连接' : '等待连接'}；已知缺口 ${c.collectionHealth.gaps ?? '未知'}` : '未知或已关闭'}`,
   `关闭来源：${c.coverage?.disabledSources?.map(key=>CONTEXT_SOURCES[key]).join('、') || '无'}；缺失、过期与截断按实际披露`
  ];
