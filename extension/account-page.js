@@ -4,7 +4,13 @@ const key='__liveAssistantPublicAccountV1';
 let source;try{source=accountSource(location.href);}catch{}
 if(source && !window[key]){
  const rows=new Map();
- const ingest=payload=>{for(const r of normalizeAccountPayload(payload,source))rows.set(`${r.kind}:${r.id}`,r);while(rows.size>30)rows.delete(rows.keys().next().value);};
+ const ingest=payload=>{
+  for(const r of normalizeAccountPayload(payload,source)){
+   const key=`${r.kind}:${r.id}`,old=rows.get(key);
+   rows.set(key,old ? {...r,text:r.text.length>=old.text.length ? r.text : old.text,counts:Object.fromEntries(Object.entries(r.counts).map(([k,v])=>[k,v ?? old.counts[k] ?? null]))} : r);
+  }
+  while(rows.size>30)rows.delete(rows.keys().next().value);
+ };
  const accepted=value=>{try{const u=new URL(value,location.href);return u.origin===location.origin && /^\/aweme\/v1\/web\/(user\/profile\/other|aweme\/(post|detail))\/$/u.test(u.pathname);}catch{return false;}};
  const snapshot=()=>{
   if(location.href.split('?')[0].replace(/\/$/u,'')!==source.url)return [];

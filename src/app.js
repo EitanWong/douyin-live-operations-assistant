@@ -1,6 +1,7 @@
+import {createSpeechRecognizer} from './services/speech-routing.js';
 import {createEdgeRouter} from './browser/edge-router.js';
 import {AccountContext} from './ai/account-context.js';
-import {createResilientAI,withDeadline} from './services/ai-resilience.js';
+import {createResilientAI} from './services/ai-resilience.js';
 import {FoundationSettings} from './ui/foundation-settings.js';
 import {AudienceMemory} from './ai/audience-memory.js';
 import {aiDiagnostics} from './ai/diagnostics.js';
@@ -255,12 +256,7 @@ export function boot(options = {}) {
   const exchange=createSDPExchange({request,getKey:mediaKey});
   const realtimeCapture=createRealtimeCapture({exchange,env:window,sourceFactory:directSource});
   const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config),vadFactory:options.vadFactory},window)),
-    realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room}),recognize:async(sample,c,{signal}={})=>{
-      if(c.localAudio){const text=await edge.transcribe(sample,signal);return text ? {...sample,text,isFinal:true,model:engine.config.ai.edge.audioBackend,transport:'local',receivedAt:Date.now()} : null;}
-      try{return await withDeadline(localSignal=>recognizeMedia(sample,c,{signal:localSignal}),{signal,timeout:6000});}
-      catch(error){if(signal?.aborted || sample.kind!=='audio' || !engine.config.ai.edge.audioEnabled || !await edge.ready('audio'))throw error;
-        const text=await edge.transcribe(sample,signal);return text ? {...sample,text,isFinal:true,model:engine.config.ai.edge.audioBackend,transport:'local',receivedAt:Date.now()} : null;}
-    },
+    realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room}),recognize:createSpeechRecognizer({cloud:recognizeMedia,edge,config:()=>engine.config.ai.edge}),
     onObservation:row=>{mediaEvidence.add(row);panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
@@ -373,7 +369,7 @@ export function boot(options = {}) {
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
-    config, log, ai: client, viewerMemory:user=>currentMemory().context(user),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>accountRevision,
+    config, log, ai: client, viewerMemory:user=>currentMemory().context(user),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;

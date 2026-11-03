@@ -4,6 +4,7 @@
 
 - [使用与配置](guides/usage.zh-CN.md)：安装、互动规则、AI、机器人和收入统计。
 - [本机实测](guides/live-testing.zh-CN.md)：开发扩展加载及真实房间验收步骤。
+- [AI 链路与中文端侧](ai-foundation.zh-CN.md)：低延迟、WebGPU 兜底、SenseVoice 安装、公开账号资料与实测边界。
 
 ## 开发
 

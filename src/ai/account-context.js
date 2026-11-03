@@ -54,6 +54,7 @@ export class AccountContext {
  }
  forget(anchor,url){this.rows=this.rows.filter(r=>r.anchor!==anchor || url && r.source!==accountSource(url).url);this.retriever.clear();}
  list(anchor){return structuredClone(this.rows.filter(r=>r.anchor===anchor && r.expiresAt>this.now()));}
+ version(anchor){const now=this.now();return this.rows.filter(r=>r.anchor===anchor && r.expiresAt>now).map(r=>`${r.kind}:${r.id}:${r.source}:${r.observedAt}:${r.expiresAt}`).join('|');}
  snapshot(){return structuredClone(this.rows);}
  context(anchor,query){
   const labels={followers:'粉丝',following:'关注',works:'作品数',likes:'点赞',comments:'评论数',shares:'分享数'};

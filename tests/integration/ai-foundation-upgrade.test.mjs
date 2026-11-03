@@ -26,17 +26,30 @@ test('local Chinese perception needs no cloud ASR model or key; unrelated speech
  assert.equal(awaitingVisual({speech:{text:'今天忙了一整天，终于能聊会儿了',receivedAt:1000,endedAt:1000},alignment:'speech-only'},1100,true),false);
  assert.equal(awaitingVisual({speech:{text:'看看这两个杯子哪个好看？',receivedAt:1000,endedAt:1000},alignment:'speech-only'},1100,true),true);
 });
+test('account evidence expiry invalidates a queued reply before its normal chat freshness expires',async()=>{
+ let now=Date.now();const accounts=new AccountContext({now:()=>now}),url='https://www.douyin.com/user/target';
+ const rows=normalizeAccountPayload({user:{sec_uid:'target',nickname:'陶艺',signature:'周六开课'}},accountSource(url),now).map(r=>({...r,expiresAt:now+1000}));
+ accounts.replace('123',url,rows);
+ const engine=new Engine({now:()=>now,config:mergeConfig({anchorId:'123',ai:{enabled:true,chatEnabled:true}}),evidenceVersion:()=>accounts.version('123'),accountContext:q=>accounts.context('123',q),ai:async()=> '简介写的是周六。'});
+ try{
+  engine.start();engine.requestChatAI({type:'chat',user:{id:'viewer',name:'观众'},text:'陶艺课哪天？'},true);await flush();
+  assert.equal(engine.queue.length,1);assert.equal(engine.validChatReply(engine.queue[0]),true);
+  now+=2000;assert.equal(engine.validChatReply(engine.queue[0]),false);
+ }finally{engine.stop();}
+});
 test('settings prepare the selected Chinese backend, collect bounded sources and clear stale context',async()=>{
  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',pretendToBeVisual:true});
  const previous={document:globalThis.document,window:globalThis.window,location:globalThis.location};
  Object.assign(globalThis,{document:dom.window.document,window:dom.window,location:dom.window.location});
- let panel,settings;const calls=[],accounts=new AccountContext();
+ let panel,settings,failRefresh=false;const calls=[],errors=[],accounts=new AccountContext();
  try{
   panel=new Panel({config:mergeConfig({anchorId:'123'}),callbacks:{}});
-  settings=new FoundationSettings(panel.root,{anchor:()=> '123',accounts,changed:async()=>{},onError:e=>{throw e;},edge:{prepare:async(kind,backend)=>{calls.push([kind,backend]);return {phase:'ready'};}},collector:{collect:async url=>normalizeAccountPayload({user:{sec_uid:'target',nickname:'陶艺',signature:'<img src=x onerror=alert(1)>作品'}},accountSource(url)),cancel:async()=>{}}});
+  settings=new FoundationSettings(panel.root,{anchor:()=> '123',accounts,changed:async()=>{},onError:e=>errors.push(e),edge:{prepare:async(kind,backend)=>{calls.push([kind,backend]);return {phase:'ready'};}},collector:{collect:async url=>{if(failRefresh)throw Error('页面已不可见');return normalizeAccountPayload({user:{sec_uid:'target',nickname:'陶艺',signature:'<img src=x onerror=alert(1)>作品'}},accountSource(url));},cancel:async()=>{}}});
   panel.root.querySelector('[data-edge-prepare="audio"]').click();await flush();assert.deepEqual(calls,[['audio','native-sensevoice']]);
   panel.root.querySelector('[data-account-url]').value='https://www.douyin.com/user/target';panel.root.querySelector('[data-account-collect]').click();await flush();
   assert.equal(accounts.list('123').length,1);assert.equal(panel.root.querySelector('[data-account-records] img'),null);
+  failRefresh=true;panel.root.querySelector('[data-account-collect]').click();await flush();
+  assert.match(errors[0].message,/不可见/);assert.equal(accounts.list('123').length,0);assert.deepEqual(accounts.context('123','陶艺'),[]);
   panel.root.querySelector('[data-account-clear]').click();await flush();assert.equal(accounts.list('123').length,0);
  }finally{settings?.close();panel?.destroy();clearTimeout(panel?.toastTimer);dom.window.close();Object.assign(globalThis,previous);}
 });

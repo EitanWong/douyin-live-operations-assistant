@@ -10,6 +10,8 @@ export class FoundationSettings {
   bind('[data-edge-status-refresh]',async()=>{const state=await edge?.status();this.status(state ? Object.entries(state).map(([kind,s])=>`${kind==='text' ? '文字' : '语音'}：${({loading:'准备中',ready:'已就绪',slow:'设备速度不足',error:'加载失败'})[s.phase] || '未准备'}`).join(' · ') || '尚未准备模型' : '端侧推理需要 Chrome 扩展版');});
   bind('[data-account-collect]',async()=>{
    if(!collector)throw new Error('抖音原生页面采集需要 Chrome 扩展版');const url=root.querySelector('[data-account-url]').value.trim(),scope=anchor(),generation=++this.generation;
+   accounts.forget(scope,url);await changed();this.showAccounts();
+   if(scope!==anchor() || generation!==this.generation)return;
    this.accountStatus('正在读取抖音公开页面，最多等待12秒…');const rows=await collector.collect(url);
    if(scope!==anchor() || generation!==this.generation)return;
    accounts.replace(scope,url,rows);await changed();this.showAccounts();this.accountStatus(`已采集 ${rows.length} 条公开资料，24小时后不再用于回答；可刷新或删除。`);

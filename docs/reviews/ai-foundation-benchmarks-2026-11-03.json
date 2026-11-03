@@ -1,0 +1,64 @@
+{
+  "date": "2026-11-03",
+  "environment": "macOS ARM; Chrome for Testing 151; Python 3.12.14; sherpa-onnx 2.0.1; numpy 2.4.4",
+  "scope": "Single-machine warm smoke tests, not production P95 or accuracy evaluation. VAD uses a silent synthetic stream, not a live microphone.",
+  "browser": {
+    "basic": {
+      "manifest": "0.1.2",
+      "status": {
+        "value": {}
+      }
+    },
+    "result": {
+      "id": "smoke-prepare",
+      "value": {
+        "phase": "ready",
+        "firstTokenMs": 213.5,
+        "tokensPerSecond": 60.22584692597239,
+        "totalMs": 612,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-0.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4"
+      }
+    },
+    "reply": {
+      "id": "smoke-infer",
+      "value": "我选择蓝色的。"
+    },
+    "cache": {
+      "id": "smoke-cache",
+      "value": {
+        "phase": "ready",
+        "firstTokenMs": 214.69999998807907,
+        "tokensPerSecond": 60.51437215975094,
+        "totalMs": 611.3000000119209,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-0.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4"
+      }
+    },
+    "vad": {
+      "initialized": true,
+      "rows": 0
+    },
+    "logs": [
+      "VAD | debug > Loading VAD...",
+      "VAD | debug > ...finished loading VAD",
+      "VAD | debug > initializing micVAD",
+      "using default audio context",
+      "VAD | debug > started micVAD",
+      "VAD | debug > destroy called"
+    ]
+  },
+  "native": {
+    "phase": "ready",
+    "model": "SenseVoiceSmall-int8",
+    "device": "cpu",
+    "elapsedMs": 409,
+    "realTimeFactor": 0.07307757350359011,
+    "threads": 2,
+    "transcript": "开饭时间早上9点至下午5点。"
+  }
+}
