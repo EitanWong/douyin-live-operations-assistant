@@ -68,10 +68,11 @@ test('新默认人设适用于对话，历史默认值升级且幂等，自定�
   assert.equal(mergeConfig({ai:{persona:custom}}).ai.persona,custom);
 });
 
-test('路由同时生成最终回复时尊重用户温度，审核和PK继续使用各自参数',()=>{
+test('路由控制使用确定采样，非路由表达尊重用户温度，审核和PK保持各自参数',()=>{
   const settings={...config.ai,temperature:0.85};
   const value={...prompt,task:{kind:'ai'},intentRouting:true,target:{text:'晚上好呀'}};
-  assert.equal(makeAIRequest(value,settings).temperature,0.85);
+  assert.equal(makeAIRequest(value,settings).temperature,0);
+  assert.equal(makeAIRequest({...value,intentRouting:false},settings).temperature,0.85);
   assert.equal(makeAIRequest({...value,task:{kind:'moderation'}},settings).temperature,0);
   assert.equal(makeAIRequest({...value,task:{kind:'pk'}},settings).temperature,0.2);
 });

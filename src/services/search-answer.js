@@ -13,3 +13,11 @@ export function searchAnswer(output,found){
  return {answer:normalized.replace(/\[(\d+)\]/gu,(match,index)=>valid(Number(index)) ? match : '').trim(),
   grounded:normalized!=='[SKIP]' && citations.length>0 && citations.every(valid)};
 }
+
+export function unavailableCurrentAnswer(found,maxLength){
+ const disabled=/未启用/u.test(found.error || ''),reason=/429|限流/u.test(found.error || '') ? '搜索限流' : disabled ? '联网未启用' : '查询未成功';
+ const next=disabled ? '请启用联网搜索。' : '请稍后重试。';
+ const render=query=>`暂未查到“${query}”的实时资料，${reason}，${next}`;
+ const room=maxLength-[...render('')].length;
+ return room>0 ? render([...found.query].slice(0,Math.min(22,room)).join('')) : [...'实时资料未获取，请稍后重试。'].slice(0,maxLength).join('');
+}

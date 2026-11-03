@@ -31,14 +31,14 @@ test('零结果、搜索停用与服务失败仍交由模型回答具体问题�
  for(const mode of ['empty','failure','disabled']){
   const f=fixture('上海这天的温度未查到，请问你要查实时还是全天预报？',async()=>{if(mode==='failure')throw Error('HTTP 429');return {query:found.query,results:[]};});
   const settings=mode==='disabled' ? {...config,search:{...config.search,enabled:false}} : config;
-  assert.equal(await f.client(prompt,settings),'上海这天的温度未查到，请问你要查实时还是全天预报？');
+  const answer=await f.client(prompt,settings);assert.match(answer,/上海.*实时资料/u);assert.match(answer,mode==='failure' ? /限流/u : mode==='disabled' ? /未启用/u : /查询未成功/u);assert.ok([...answer].length<=prompt.maxLength);
   assert.equal(f.prompts.length,2);assert.equal(f.prompts[1].searchResults.results.length,0);
   assert.match(f.prompts[1].searchResults.error,mode==='failure' ? /429/ : mode==='disabled' ? /未启用/ : /没有/u);
   assert.equal(f.remembers(),0);
  }
 });
 test('搜索失败仍可回答稳定常识，端侧也收到错误状态且不丢掉答案',async()=>{
- const edge={reply:async p=>p.intentRouting ? route : '标准大气压下，纯水沸点约100℃。'};
+ const edge={reply:async p=>p.intentRouting ? '{"intent":"web-search","query":"纯水沸点","freshness":"stable"}' : '标准大气压下，纯水沸点约100℃。'};
  const local=createLocalReply({edge,search:async()=>{throw Error('HTTP 429');}});
  assert.equal(await local({...prompt,target:{text:'纯水的沸点？'}},config),'标准大气压下，纯水沸点约100℃。');
  const messages=makeEdgeMessages({...prompt,searchResults:{results:[],error:'HTTP 429'}},config);
@@ -79,4 +79,11 @@ test('非法结构化来源不能作为公屏正文泄露；字符串编号、�
 test('来源里的虚构设定按资料回答，不用现实中不存在否定已给定的周期',()=>{
  const request=makeAIRequest({...prompt,searchResults:found},config);
  assert.match(request.messages[0].content,/虚构设定.*按资料|按资料.*虚构设定/u);
+});
+test('实时查询没有有效来源时，模型不能把虚构天气送入公屏；稳定常识仍可回答',async()=>{
+ const bad=fixture('上海明天晴，35℃。',async()=>{throw Error('HTTP 429');});
+ const answer=await bad.client(prompt,config);
+ assert.doesNotMatch(answer,/35|℃|明天晴/u);assert.match(answer,/上海|天气/u);assert.match(answer,/限流/u);assert.ok([...answer].length<=80);
+ const stable=createAIClient({generate:async p=>p.intentRouting ? '{"intent":"web-search","query":"纯水沸点","freshness":"stable"}' : '标准大气压下纯水沸点约100℃。',search:async()=>{throw Error('HTTP 429');}});
+ assert.match(await stable({...prompt,target:{text:'纯水沸点是多少？'}},config),/100℃/u);
 });

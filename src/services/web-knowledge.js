@@ -8,8 +8,9 @@ const refreshRequest=/重新(?:查|搜|核)|再(?:查|搜)一次|更新(?:一下
 const volatileQuestion=/天气|气温|降雨|预报|空气质量|新闻|赛果|比分|汇率|股价|价格|热搜|今天|今日|明天|昨天|现在|当前|最近|本周|本月|今年|\b(?:weather|news|today|tomorrow|price|score)\b/iu;
 const rulesQuestion=/规则|政策|机制|抖音|\bpk\b/iu;
 const normalize=value=>String(value || '').normalize('NFKC').trim().toLowerCase().replace(/\s+/gu,' ');
+export const requiresCurrentSources=(query,freshness)=>volatileQuestion.test(query) || freshness==='realtime';
 export function knowledgeLifetime(query,freshness){
- if(volatileQuestion.test(query) || freshness==='realtime')return 2*MINUTE;
+ if(requiresCurrentSources(query,freshness))return 2*MINUTE;
  if(rulesQuestion.test(query) || freshness==='rules')return DAY;
  return freshness==='stable' ? 7*DAY : 10*MINUTE;
 }

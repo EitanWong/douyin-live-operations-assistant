@@ -4,7 +4,8 @@ import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
 import {RESEARCH_TIMEOUT_MS} from './ai-resilience.js';
 import { parseAIIntent } from './intent.js';
-import {searchAnswer} from './search-answer.js';
+import {searchAnswer,unavailableCurrentAnswer} from './search-answer.js';
+import {requiresCurrentSources} from './web-knowledge.js';
 import {calculateQuestion} from './question-math.js';
 import { assembleAIContext,currentAIPrompt,applyPromptSources,applyContextBudget,liveFactFingerprint } from './ai-context.js';
 import {resolveReplyConfig,pipelineConfig} from './ai-pipeline.js';
@@ -23,7 +24,7 @@ export function makeAIRequest(prompt, config) {
   prompt=applyPromptSources(currentAIPrompt(prompt),config);
   if(!prompt.searchResults && prompt.target && prompt.target.type!=='speech' && ['ai','gift','welcome'].includes(prompt.task?.kind || 'ai'))prompt={...prompt,target:{...prompt.target,support:supportContext(prompt.target,prompt.task,config,prompt.getNow?.() ?? prompt.now ?? Date.now())}};
   const request=makeBaseAIRequest(prompt,config);
-  if(prompt.intentRouting)request.temperature=0;
+  if(prompt.intentRouting && ['ai','agent'].includes(prompt.task?.kind || 'ai'))request.temperature=0;
   if (new URL(config.endpoint).hostname==='api.deepseek.com' && ['deepseek-flash','deepseek-v4-pro'].includes(config.model)) request.thinking={type:'disabled'};
   if(!prompt.searchResults && !isSpeechRouting(prompt))request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {})};
@@ -252,7 +253,8 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
     let parsed;
     try{parsed=searchAnswer(await complete({...prompt,searchResults:found}),found);}
     catch(error){notify(onSearch,{...found,question:prompt.target.text,error:found.error || error.message});throw error;}
-    const {answer,grounded}=parsed;
+    const unsupportedCurrent=!found.results.length && requiresCurrentSources(`${prompt.target.text} ${plan.query}`,plan.freshness);
+    const answer=unsupportedCurrent ? unavailableCurrentAnswer(found,prompt.maxLength) : parsed.answer,grounded=!unsupportedCurrent && parsed.grounded;
     if(current() && grounded && !found.error && !found.cached && revision!==null)await cached('remember',found,config.search,{freshness:plan.freshness,question:prompt.target.text,revision});
     notify(onSearch,{...found,question:prompt.target.text,answer,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});
     return answer;
