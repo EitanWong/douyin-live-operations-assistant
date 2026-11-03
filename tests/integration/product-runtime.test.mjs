@@ -16,9 +16,11 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
  try{
   Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,Element:dom.window.Element,getComputedStyle:dom.window.getComputedStyle,MutationObserver:dom.window.MutationObserver,requestAnimationFrame:dom.window.requestAnimationFrame.bind(dom.window),cancelAnimationFrame:dom.window.cancelAnimationFrame.bind(dom.window)});
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:dom.window.navigator});
+  dom.window.HTMLElement.prototype.scrollTo=()=>Promise.resolve(); // Modern CSSOM scrolling can return a completion promise; effects must not return it.
   dom.window.scrollTo=()=>{}; // jsdom has no scrolling layout; Motion measures auto heights in the real browser.
   const reducedQuery=new dom.window.EventTarget();reducedQuery.matches=false;
   dom.window.matchMedia=query=>query.includes('prefers-reduced-motion') ? reducedQuery : {matches:false,addEventListener(){},removeEventListener(){}};
+  dom.window.document.fonts=new dom.window.EventTarget(); // jsdom does not implement FontFaceSet.
   dom.window.ResizeObserver=class{observe(){}disconnect(){}unobserve(){}};
   const root=document.querySelector('#host').attachShadow({mode:'open'});root.innerHTML='<div class="workspace"><button data-tab="ai" aria-label="AI 设置">AI</button><header data-workspace-toolbar><div class="foot"><small>未保存草稿</small><button data-action="save">保存设置</button></div></header><div data-workspace-views><button role="tab" aria-selected="true">模型设置</button><button role="tab" aria-selected="false">额度设置</button></div><section data-page="ai"><div class="workspace-grid"><div class="ai-service-grid" data-workspace-contents><section class="ai-card"><h3>回复模型</h3><div class="grid"><label class="field"><span>模型名</span><input value="qwen-plus"><small>模型名称按服务商提供的完整 ID 填写。</small></label></div><label class="toggle"><input type="checkbox">启用 AI</label><label class="field"><span>接话频率</span><input type="range" min="0" max="4" step="1" value="2" aria-valuetext="克制陪伴"></label><table><thead><tr><th>观众</th><th>钻石</th></tr></thead><tbody><tr><td>甲</td><td>9</td></tr></tbody></table><details><summary>高级参数</summary><label class="field"><span>测试高级字段</span><input value="draft"></label></details></section></div></div></section></div>';
   let saves=0,changes=0;root.querySelector('button[data-action]').onclick=()=>saves++;root.querySelector('input').addEventListener('input',()=>changes++);
@@ -59,6 +61,43 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(reveal.hasAttribute('inert'),false);
   assert.equal(reveal.querySelector('input'),draft);assert.equal(draft.value,'retained-draft');
   assert.equal(root.querySelector('details input').value,'retained-draft');
+  // Large projected datasets must stay bounded and keep original action ownership.
+  const dataset=document.createElement('section');dataset.innerHTML='<h3>互动记录</h3><table aria-label="互动记录"><thead><tr><th>观众</th><th>状态</th><th>钻石</th><th>操作</th></tr></thead><tbody></tbody></table>';
+  const rows=dataset.querySelector('tbody');let acted=-1;
+  for(let i=0;i<63;i++){const row=rows.insertRow();row.innerHTML=`<td>${i===61?'青山 ＡＢＣ':'观众'+i}</td><td>${i%2?'已确认':'待确认'}</td><td>${i*10}</td><td><button>查看 ${i}</button></td>`;row.querySelector('button').onclick=()=>{acted=i;};}
+  root.querySelector('[data-page=ai]').append(dataset);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  const collection=[...ui.querySelectorAll('.product-data-set')].find(n=>n.querySelector('table')?.textContent.includes('观众0'));
+  assert.ok(collection,'表格使用统一的数据浏览区');
+  assert.equal(collection.querySelectorAll('tbody tr').length,20);
+  const next=()=>[...collection.querySelectorAll('button')].find(b=>b.textContent==='下一页');
+  next().click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.match(collection.querySelector('tbody').textContent,/观众20/);
+  [...collection.querySelectorAll('tbody button')].find(b=>b.textContent==='查看 20').click();assert.equal(acted,20,'分页操作必须映射回原始行');
+  const search=collection.querySelector('input[type=search]');assert.ok(search);
+  setter.call(search,'青山 abc');search.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(collection.querySelectorAll('tbody tr').length,1);assert.match(collection.querySelector('tbody').textContent,/青山 ＡＢＣ/);
+  collection.querySelector('tbody button').click();assert.equal(acted,61,'搜索后的操作不能错用结果索引');
+  setter.call(search,'');search.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  const category=collection.querySelector('select[aria-label="筛选状态"]');assert.ok(category);assert.equal(collection.querySelector('select[aria-label="筛选钻石"]'),null);
+  category.value='已确认';category.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.ok([...collection.querySelectorAll('tbody tr')].every(row=>row.cells[1].textContent==='已确认'));
+  next().click();await new Promise(resolve=>setTimeout(resolve,25));
+  rows.replaceChildren(rows.firstElementChild);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(collection.querySelector('input[type=search]'),search,'实时刷新不能重建搜索输入或丢失焦点');
+  assert.equal(collection.querySelector('select[aria-label="筛选状态"]')?.value,'已确认','刷新后仍应如实展示已生效的筛选条件');
+  assert.match(collection.textContent,/没有匹配/);
+  [...collection.querySelectorAll('button')].find(b=>b.textContent==='重置筛选').click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.match(collection.querySelector('tbody').textContent,/观众0/);assert.equal(root.querySelector('details input').value,'retained-draft');
+  // Record lists share paging/search, while editable rule drafts remain mounted.
+  const records=document.createElement('div');records.dataset.profiles='';let profileAction=-1;
+  for(let i=0;i<45;i++){const item=document.createElement('div');item.innerHTML=`<b>${i===44?'末页主播':'主播'+i}</b><button>打开主播 ${i}</button>`;item.querySelector('button').onclick=()=>{profileAction=i;};records.append(item);}
+  root.querySelector('[data-page=ai]').append(records);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  const recordBrowser=ui.querySelector('.product-data-set[aria-label="主播列表"]');assert.ok(recordBrowser);
+  assert.equal(recordBrowser.querySelectorAll('.product-record-scroll button').length,20);
+  const recordSearch=recordBrowser.querySelector('input[type=search]');setter.call(recordSearch,'末页');recordSearch.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(recordBrowser.querySelectorAll('.product-record-scroll button').length,1);recordBrowser.querySelector('.product-record-scroll button').click();assert.equal(profileAction,44);
+  const drafts=document.createElement('div');drafts.dataset.list='keywords';drafts.innerHTML=Array.from({length:30},(_,i)=>`<div class="editor-row"><label><span>规则 ${i}</span><textarea>草稿 ${i}</textarea></label></div>`).join('');root.querySelector('[data-page=ai]').append(drafts);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(ui.querySelector('.product-edit-scroll').querySelectorAll('textarea').length,30,'编辑集合用内部滚动保留全部草稿');
   assert.equal(document.documentElement.getAttribute('data-mantine-color-scheme'),null);assert.equal(document.body.querySelector('[data-portal]'),null);
   runtime.destroy();runtime=null;assert.equal(container.shadowRoot.childNodes.length,0);
  }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);if(navigatorDescriptor)Object.defineProperty(globalThis,'navigator',navigatorDescriptor);else delete globalThis.navigator;dom.window.close();await rm(dir,{recursive:true,force:true});}

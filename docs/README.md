@@ -4,6 +4,8 @@
 
 - [使用与配置](guides/usage.zh-CN.md)：安装、互动规则、AI、机器人和收入统计。
 - [本机实测](guides/live-testing.zh-CN.md)：开发扩展加载及真实房间验收步骤。
+- [AI 链路与中文端侧](ai-foundation.zh-CN.md)：低延迟、WebGPU 兜底、SenseVoice 安装、公开账号资料与实测边界。
+- [主播数据预测与可视化](features/anchor-prediction.zh-CN.md)：实时多维图表、收入/在线/PK/观众预测、历史参考和误差档案。
 
 ## 开发
 

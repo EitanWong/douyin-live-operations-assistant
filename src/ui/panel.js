@@ -1,3 +1,4 @@
+import {PredictionCharts} from './prediction-charts.js';
 import {mountProductPanel} from './product/mount.js';
 import {WorkspaceLayout} from './workspace-layout.js';
 import {WORKSPACE_CSS} from './workspace-styles.js';
@@ -5,7 +6,7 @@ import {AI_SETTINGS_CSS} from './ai-settings-styles.js';
 import {ModelPickers} from './model-picker.js';
 import {AI_SERVICE_PRESETS as presets,replyModelOptions} from './ai-model-options.js';
 import {resolveReplyConfig} from '../services/ai-pipeline.js';
-import { pkSettingsTemplate } from './pk-settings-template.js';
+import {pkDashboardTemplate} from './pk-template.js';
 import { PK_SETTINGS_CSS } from './pk-settings-styles.js';
 import { moderationTemplate } from './moderation-template.js';
 import { bundledTools } from '../tools/bundled.js';
@@ -41,7 +42,7 @@ const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
 const put = (o, path, value) => { const parts = path.split('.'); const key = parts.pop(); parts.reduce((v, k) => v[k], o)[key] = value; };
 const categories = { system: '运行', filter: '过滤', moderation: '内容提醒', queue: '发送队列', preview: '预览', sent: '提交', ai: 'AI', error: '错误', lab: '自检' };
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-const interactionPages = ['anchor','pk','gift','welcome','likes','keywords','bot','timers'];
+const interactionPages = ['anchor','gift','welcome','likes','keywords','bot','timers'];
 const money = value => new Intl.NumberFormat('zh-CN', {style:'currency',currency:'CNY',maximumFractionDigits:2}).format(value);
 
 const CSS_TEXT = `
@@ -49,10 +50,10 @@ const CSS_TEXT = `
 [hidden]{display:none!important}
 .launcher{position:fixed;right:24px;bottom:24px;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;cursor:grab}
 .launcher>*{pointer-events:none}
-button.launcher{display:inline-flex;align-items:center;gap:9px;height:48px;min-width:184px;padding:0 13px;border:0;border-radius:14px;background:var(--sg-solid);color:var(--ink);box-shadow:var(--sg-pane-shadow);font-size:13px;line-height:1;white-space:nowrap}
-button.launcher:hover:not(:disabled),button.launcher:active:not(:disabled){background:var(--sg-solid-hover);color:var(--ink);box-shadow:var(--sg-pane-shadow)}
+button.launcher{display:inline-flex;align-items:center;gap:9px;height:48px;min-width:184px;padding:0 13px;border:0;border-radius:14px;background:transparent;color:var(--ink);box-shadow:var(--sg-pane-shadow);font-size:13px;line-height:1;white-space:nowrap}
+button.launcher:hover:not(:disabled),button.launcher:active:not(:disabled){background:transparent;color:var(--ink);box-shadow:var(--sg-pane-shadow)}
 button.launcher:active:not(:disabled){transform:scale(.98)}
-button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.launcher.dragging:active:not(:disabled){background:var(--sg-solid-hover);box-shadow:var(--sg-pane-shadow);outline:2px solid var(--sg-focus);cursor:grabbing;transform:none;transition:none}
+button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.launcher.dragging:active:not(:disabled){background:transparent;box-shadow:var(--sg-pane-shadow);outline:2px solid var(--sg-focus);cursor:grabbing;transform:none;transition:none}
 .launcher-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:var(--sg-brand-wash);color:var(--sg-brand);flex-shrink:0}
 .launcher-mark svg{width:18px;height:18px}.launcher b{font-weight:650}.launcher i{width:5px;height:5px;flex-shrink:0;border-radius:50%;background:var(--muted);margin-left:3px}.launcher.running i{background:var(--sg-success)}.launcher span{font-size:12px;color:var(--muted);min-width:48px;text-align:left}.launcher.running span{color:var(--ink)}.launcher-grip{width:10px;height:16px;margin-left:3px;color:var(--muted);flex-shrink:0}
 .panel{position:fixed;right:24px;bottom:82px;width:min(620px,calc(100vw - 32px));height:min(800px,calc(100dvh - 110px));display:flex;flex-direction:column;background:var(--sg-popover);border:0;border-radius:18px;box-shadow:inset 0 1px 0 var(--sg-rim),inset 0 0 0 1px var(--sg-inner),0 0 0 1px var(--sg-edge),0 24px 60px -18px var(--sg-shade),0 6px 16px -6px var(--sg-contact);overflow:hidden;backdrop-filter:blur(26px);-webkit-backdrop-filter:blur(26px)}
@@ -68,7 +69,7 @@ button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.la
 .subnav button{border:0;border-radius:7px;background:transparent;box-shadow:none;padding:6px 10px;white-space:nowrap;color:var(--muted);min-height:32px;font-size:12px}
 .subnav button[aria-selected=true],.subnav button:hover:not(:disabled){background:var(--sg-brand-wash);box-shadow:var(--sg-state-shadow);color:var(--sg-brand)}
 .subnav button:focus-visible{outline-offset:-2px}
-.scroll{overflow-y:auto;overflow-x:hidden;min-height:0;flex:1;padding:22px;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--sg-scroll) transparent}
+.scroll{overflow-y:auto;overflow-x:hidden;min-height:0;flex:1;padding:22px;overscroll-behavior:contain;}
 form{margin:0}.page{min-width:0}.page h2{font-size:20px;line-height:1.4;margin:0 0 5px;font-weight:650;letter-spacing:.1px}.intro,.hint{font-size:12px;color:var(--muted);margin:6px 0 16px;line-height:1.7}.page>.intro{margin:3px 0 20px}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.status{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 14px}.status strong{font-size:13px;font-weight:600}.actions{display:flex;gap:7px;flex-wrap:wrap}
 .pk-page-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-bottom:5px}.pk-page-heading h2{margin:0}.pk-mode{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--muted);font-size:11px;font-weight:600}.pk-mode::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}.pk-mode[data-mode=pk]{color:var(--sg-brand);background:var(--sg-brand-wash)}.pk-mode[data-mode=linked]{color:var(--sg-success);background:color-mix(in srgb,var(--sg-success) 10%,transparent)}
@@ -80,7 +81,7 @@ form{margin:0}.page{min-width:0}.page h2{font-size:20px;line-height:1.4;margin:0
 .notice,.mode-note,.pk-note{padding:11px 13px;border:1px solid color-mix(in srgb,var(--sg-warning) 22%,transparent);border-radius:8px;background:color-mix(in srgb,var(--sg-warning) 7%,transparent);font-size:11px;color:var(--sg-warning);line-height:1.75;margin:14px 0}.mode-note{margin:0 0 12px}
 .rule-summary{padding:12px 14px;margin:18px 0;background:var(--sg-panel);border-radius:10px;box-shadow:var(--sg-pane-shadow)}.rule-summary strong{font-size:11px;color:var(--muted);font-weight:500}.rule-summary p{margin:4px 0 0;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
 .queue{margin-top:10px}.candidate{border-bottom:1px solid var(--line);padding:12px 0;display:grid;grid-template-columns:74px minmax(0,1fr);gap:10px}.candidate .kind{font-size:11px;color:var(--ink);font-weight:600}.candidate textarea{display:block;width:100%;padding:8px 10px;resize:vertical;min-height:52px;margin-bottom:7px}.candidate p{margin:0 0 6px;overflow-wrap:anywhere}.candidate button{font-size:12px;padding:4px 9px;min-height:30px}
-.empty{color:var(--muted);font-size:12px;padding:14px 0;line-height:1.7}.log-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}.log-head select{padding:5px 8px;max-width:150px}.logs{max-height:230px;overflow:auto;border-top:1px solid var(--line);scrollbar-color:var(--sg-scroll) transparent}.log{display:grid;grid-template-columns:54px 42px minmax(0,1fr);gap:8px;font-size:11px;padding:9px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.log time,.log .cat{color:var(--muted)}.log[data-category=error]{color:var(--danger)}.log[data-category=preview] .cat{color:var(--sg-success)}
+.empty{color:var(--muted);font-size:12px;padding:14px 0;line-height:1.7}.log-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}.log-head select{padding:5px 8px;max-width:150px}.logs{max-height:230px;overflow:auto;border-top:1px solid var(--line);}.log{display:grid;grid-template-columns:54px 42px minmax(0,1fr);gap:8px;font-size:11px;padding:9px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.log time,.log .cat{color:var(--muted)}.log[data-category=error]{color:var(--danger)}.log[data-category=preview] .cat{color:var(--sg-success)}
 .foot{padding:14px 22px;border-top:1px solid var(--line);background:var(--sg-panel);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-shrink:0;box-shadow:0 -5px 20px var(--sg-contact)}.foot small{font-size:11px;color:var(--muted);max-width:210px}.foot .primary{min-width:132px;min-height:40px}.dirty{color:var(--sg-warning)!important}
 .toast{padding:10px 22px;font-size:12px;background:color-mix(in srgb,var(--sg-success) 8%,var(--sg-solid));color:var(--sg-success);flex-shrink:0;border-bottom:1px solid color-mix(in srgb,var(--sg-success) 20%,transparent)}.toast.error{background:color-mix(in srgb,var(--sg-danger) 8%,var(--sg-solid));color:var(--danger)}
 pre{font:12px/1.7 "SFMono-Regular",Consolas,monospace;white-space:pre-wrap;word-break:break-all;background:var(--sg-well);padding:14px;border:1px solid var(--line);border-radius:9px;color:var(--ink)}.inline{display:flex;gap:8px;align-items:center}.inline input{flex:1;min-width:0}.file{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
@@ -125,11 +126,11 @@ summary{cursor:pointer;color:var(--muted);font-size:12px;padding:11px 0;line-hei
 export class Panel {
   constructor({ config, room, demo = false, callbacks, tools = bundledTools }) {
     this.tools = tools; this.toolStates = new Map();
-    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
+    this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'anchor'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}${WORKSPACE_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style,createLiquidGlassFilter(document));
-    this.root.append(this.build()); this.workspaceLayout=new WorkspaceLayout(this.root);decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onNavigate:key=>this.tab(key),onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), paletteSelect:this.root.querySelector('[data-theme-palette]'), materialSelect:this.root.querySelector('[data-theme-material]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
+    this.root.append(this.build()); this.workspaceLayout=new WorkspaceLayout(this.root);decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onNavigate:key=>this.tab(key),onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), paletteSelect:this.root.querySelector('[data-theme-palette]'), materialSelect:this.root.querySelector('[data-theme-material]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.predictionCharts=new PredictionCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
       forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
@@ -202,52 +203,7 @@ export class Panel {
             <section class="overview-block"><h3>最近回复 <button type="button" class="text-button" data-go="replies">查看记录</button></h3><p data-overview-reply class="overview-empty">暂无回复记录。</p></section>
             <p class="overview-note">提醒用于辅助管理员核查；无法确认的账号身份或权限会保持未知。</p>
           </section>
-          <section class="page" role="tabpanel" id="page-pk" aria-labelledby="tab-pk" data-page="pk" hidden>
-            <div class="pk-page-heading"><h2>PK 局势看板</h2><span class="badge pk-mode" data-slot="tag" data-live-mode data-mode="unknown" role="status" aria-live="polite" aria-label="当前直播状态：待确认">待确认</span></div><p class="intro">比分、追分速度与贡献者，随直播推送更新。</p>
-            ${pkSettingsTemplate()}
-              <div class="pk-overview">
-            <div class="pk-overview-main">
-            <div class="status"><strong data-pk-state>等待 PK 事件</strong><span class="badge" data-slot="tag" data-pk-quality>数据不足</span></div>
-            <div class="pk-scoreboard"><div><strong data-pk-self-score>--</strong><span data-pk-self-name>己方</span></div><div class="vs">VS<br><small data-pk-remaining>--</small></div><div><strong data-pk-opponent-score>--</strong><span data-pk-opponent-name>对方</span></div></div>
-            <section class="pk-multi" data-pk-multi hidden><h3>多人 PK 排名与夺冠估计</h3><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>主播</th><th>比分</th><th>夺冠估计</th></tr></thead><tbody data-pk-competitors><tr><td colspan="3">等待完整比分</td></tr></tbody></table></div></section>
-            <div class="pk-lead" role="img" aria-label="等待双方比分" data-pk-lead><span style="width:50%"></span><span style="width:50%"></span></div>
-            <p class="pk-freshness" data-pk-freshness>等待双方精确比分；未观测的分数保持未知。</p>
-            <div class="pk-verdict"><strong data-pk-summary>等待可分析的战局</strong><p data-pk-basis>收到比分后显示领先、追分压力与数据覆盖情况。</p></div>
-</div><details class="adaptive-detail pk-outlook" data-adaptive-details><summary>追分推演与数据质量</summary><div class="adaptive-detail-body">
-              <div class="pk-reading"><div><span>按近期速度推演的终局分差</span><strong data-pk-projected>--</strong></div><div><span>己方反超所需总分速</span><strong data-pk-required-rate>--</strong></div></div>
-            <div class="pk-prob"><div><b data-pk-self-win>未知</b><span>己方获胜估计</span></div><div><b data-pk-opponent-win>未知</b><span>对方获胜估计</span></div></div>
-            <div class="grid"><div><span class="choice-hint">近 15 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-speed>--</strong> / <strong data-pk-opponent-speed>--</strong></p></div><div><span class="choice-hint">近 60 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-velocity>--</strong> / <strong data-pk-opponent-velocity>--</strong></p></div><div><span class="choice-hint">模型可信程度</span><p><strong data-pk-confidence>--</strong></p></div><div><span class="choice-hint">比分样本与处理延迟</span><p><strong data-pk-sample>--</strong></p></div></div>
-
-</div></details></div>
-            <section class="settings-group" aria-label="PK 任务与播报"><div class="settings-workspace"><div>
-              <h3>每日任务与零点计划</h3>
-              <p data-pk-task-status>等待原生任务面板数据。</p>
-              <p class="hint" data-pk-local-status>本机尚未观测到今日 PK。</p>
-              <p data-pk-exhibition-status>展馆等待采集。</p>
-              <p data-pk-midnight-plan></p>
-              <p class="hint">按北京时间 00:00 计算，提醒你手动开局。实际匹配、延长和结算时间可能变化；有效次数与首胜归属以平台任务为准。</p>
-              </div><div><h3>实时战局播报</h3><p data-pk-strategy>尚未生成播报。</p></div></div>
-            </section>
-            <div class="pk-workspace">
-<section class="pk-visual pk-score-visual">            <div class="pk-chart-head"><h3>比分走势</h3><select data-pk-window aria-label="图表时间范围"><option value="60000">近 1 分钟</option><option value="180000" selected>近 3 分钟</option><option value="0">本场全部</option></select></div>
-            <div class="pk-chart" data-pk-chart="scores" hidden role="img" aria-label="PK参战方比分走势"></div><p class="pk-chart-empty">等待本场比分推送，图表不会填充模拟数据。</p>
-</section><details class="adaptive-detail pk-visual pk-gap-visual" data-adaptive-details><summary>分差变化 · 正数为己方领先</summary><div class="adaptive-detail-body">
-              <div class="pk-chart pk-chart-gap" data-pk-chart="gap" hidden role="img" aria-label="己方分差随时间变化"></div><p class="pk-chart-empty">双方精确比分就绪后，呈现分差。</p>
-</div></details>            <section class="pk-visual pk-contribution-visual"><h3>贡献榜 · 双方前 8 名</h3><div class="pk-chart pk-chart-contributions" data-pk-chart="contributions" hidden role="img" aria-label="已观测贡献榜前八名"></div><p class="pk-chart-empty">尚未采集贡献榜；礼物钻石不会替代 PK 贡献分。</p><details class="pk-data-detail"><summary>查看贡献者明细</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr><th>观众</th><th>阵营</th><th>贡献分</th><th>礼物钻石</th></tr></thead><tbody data-pk-contributors><tr><td colspan="4">暂无贡献者数据</td></tr></tbody></table></div></details></section>
-<details class="adaptive-detail pk-visual pk-activity-visual" data-adaptive-details><summary>直播活动 · 最近 10 分钟</summary><div class="adaptive-detail-body">
-              <p class="choice-hint">每 10 秒汇总本页观测；暂停场控仍持续采集。</p><div class="pk-chart" data-pk-chart="activity" hidden role="img" aria-label="每10秒的弹幕、进场与礼物件数"></div><p class="pk-chart-empty">等待本页直播互动。</p><p class="choice-hint" data-live-totals>尚无互动数据</p></div></details></div>
-            <div class="pk-analysis">
-<details class="adaptive-detail " data-adaptive-details><summary>局势因素、送礼与场上加成</summary><div class="adaptive-detail-body">
-              <section class="section"><h3>局势因素</h3><ul class="pk-factors" data-pk-factors><li>等待可用比分或礼物事件。</li></ul></section>            <section class="section"><h3>近期送礼活跃度</h3><table class="pk-table"><thead><tr><th>侧</th><th>活跃用户占比</th><th>观测用户</th><th>已观测钻石</th></tr></thead><tbody data-pk-intent><tr><td colspan="4" class="empty">暂无可估计样本</td></tr></tbody></table></section>
-            <section class="section"><h3>场上加成与卡片</h3><ul class="pk-effect-list" data-pk-effects><li>尚未采集明确的活动窗口。</li></ul></section>
-</div></details><details class="adaptive-detail " data-adaptive-details><summary>对面弹幕与活动经验记录</summary><div class="adaptive-detail-body">
-              <section class="section"><h3>对面弹幕信号</h3><p data-pk-chat class="empty">等待已采集的对手房间弹幕。</p><div class="grid"><div><span class="choice-hint">近 60 秒样本</span><p><strong data-pk-chat-recent>--</strong></p></div><div><span class="choice-hint">求援倾向</span><p><strong data-pk-chat-request>--</strong></p></div><div><span class="choice-hint">反超倾向</span><p><strong data-pk-chat-comeback>--</strong></p></div><div><span class="choice-hint">情绪信号</span><p><strong data-pk-chat-sentiment>--</strong></p></div></div></section>
-            <section class="section"><h3>活动与卡片经验记录</h3><table class="pk-table"><thead><tr><th>项目</th><th>命中 / 样本</th><th>经验频率</th><th>区间</th></tr></thead><tbody data-pk-rates><tr><td colspan="4" class="empty">尚无已记录样本</td></tr></tbody></table></section>
-</div></details></div>
-            <details class="pk-data-detail" data-adaptive-details><summary data-pk-score-summary>查看比分明细（最近 20 次）</summary><div class="pk-data-scroll"><table class="pk-table"><thead><tr data-pk-score-header><th>北京时间</th><th>己方</th><th>对方</th><th>分差</th></tr></thead><tbody data-pk-score-rows><tr><td colspan="4">等待比分</td></tr></tbody></table></div></details>
-            <p class="pk-note">这是基于当前页面观测和历史样本的估计，不是抖音官方胜率。3 倍加成、卡片和宝箱概率只会按你实际记录的场次给出经验频率与区间；样本不足时保持未知。</p>
-          </section>
-          ${anchorPageTemplate(this.room)}
+          ${anchorPageTemplate(this.room,this.tools.list().filter(tool=>tool.embeddedIn==='anchor').map(tool=>this.toolTemplate(tool)).join(''),pkDashboardTemplate())}
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime" hidden>
             <h2>运行规则</h2><p class="intro">符合规则的消息按优先级及时发送。</p>
             <div class="status"><strong data-state>已暂停</strong></div>
@@ -367,7 +323,7 @@ export class Panel {
             <p class="hint">每组独立循环，话术每行一条。时段留空表示全天，支持跨午夜。</p>
           </section>
           ${moderationTemplate(this)}
-          ${this.tools.list().map(tool => tool.view.template().replace(/<\/section>\s*$/, `<details class="advanced"><summary>工具管理</summary><p data-tool-health="${tool.id}" role="status">正在准备工具</p><div class="actions"><button type="button" data-tool-control="restart" data-tool-id="${tool.id}">重新启用工具</button><button type="button" data-tool-control="disable" data-tool-id="${tool.id}">停用工具</button></div><p class="hint">只影响当前工具。本次手动任务需重新开始。</p></details></section>`)).join('')}
+          ${this.tools.list().filter(tool=>!tool.embeddedIn).map(tool=>this.toolTemplate(tool)).join('')}
 
 
           <section class="page" role="tabpanel" id="page-diagnostics" aria-labelledby="tab-diagnostics" data-page="diagnostics" hidden>
@@ -578,7 +534,7 @@ export class Panel {
     this.applyFeatureVisibility();
   }
   setBusy(action, value) { if (value) this.busyActions.add(action); else this.busyActions.delete(action); this.syncControls(); }
-  revealError(el, page = el.closest('[data-page]')?.dataset.page) { el.setAttribute('aria-invalid','true'); if (page) this.tab(page); this.aiSettings.reveal(el); for (let parent=el.parentElement;parent;parent=parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; el.focus(); }
+  revealError(el, page = el.closest('[data-page]')?.dataset.page) { el.setAttribute('aria-invalid','true'); if (page) this.tab(page); const anchorView=el.closest('[data-anchor-content]');if(anchorView)this.setAnchorView(anchorView.dataset.anchorContent);this.aiSettings.reveal(el); for (let parent=el.parentElement;parent;parent=parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true; el.focus(); }
   read() {
     for (const el of this.root.querySelectorAll('[aria-invalid]')) el.removeAttribute('aria-invalid');
     const result = copy(this.config);
@@ -708,13 +664,14 @@ export class Panel {
     const node = this.root.querySelector('.toast'); node.textContent = message; node.classList.toggle('error', error); node.hidden = false;
     clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { node.hidden = true; }, 8000);
   }
+  toolTemplate(tool){return tool.view.template().replace(/<section/,`<section data-tool-panel="${tool.id}"`).replace(/<\/section>\s*$/,`<details class="advanced"><summary>${tool.embeddedIn?'分析模块管理':'工具管理'}</summary><p data-tool-health="${tool.id}" role="status">正在准备模块</p><div class="actions"><button type="button" data-tool-control="restart" data-tool-id="${tool.id}">重新启用工具</button><button type="button" data-tool-control="disable" data-tool-id="${tool.id}">停用工具</button></div></details></section>`);}
   updateToolState(id, state) {
     this.toolStates.set(id, {...state});
-    this.tools.get(id)?.view.update(this, state);
+    this.tools.get(id)?.view.update(this, state);this.productUI?.refresh();
     const enabled = state.hostPhase === 'active';
     this.text(`[data-tool-health="${id}"]`, enabled ? '工具已就绪' : state.reason || '工具已停用');
     for (const button of this.root.querySelectorAll(`[data-tool-id="${id}"]`)) button.disabled = button.dataset.toolControl === 'disable' && !enabled;
-    if (state.hostPhase && !enabled) for (const button of this.root.querySelectorAll(`[data-page="${id}"] [data-action]`)) button.disabled = true;
+    if (state.hostPhase && !enabled) for (const button of this.root.querySelectorAll(`[data-tool-panel="${id}"] [data-action]`)) button.disabled = true;
   }
   syncLauncher() {
     const launcher = this.node('.launcher'), running = Boolean(this.latest?.[0].running);
@@ -780,7 +737,7 @@ export class Panel {
       this.text('[data-live-totals]',`弹幕 ${totals.chat} · 进场 ${totals.enter} · 点赞 ${totals.like} 次 · 礼物 ${totals.gift} 件 · 已知价值 ${totals.diamonds.toLocaleString('zh-CN')} 钻${totals.unknownGifts ? ` · ${totals.unknownGifts} 件单价未知` : ''}`);
     }
     if (!data || !data.key) {
-      if(this.activeTab==='pk')this.charts.render({key:'waiting',activity});
+      if(this.isPKVisible())this.charts.render({key:'waiting',activity});
       return;
     }
     data={...data,activity};
@@ -848,7 +805,7 @@ export class Panel {
     if (multi) {
       for(const selector of ['[data-pk-self-speed]','[data-pk-opponent-speed]','[data-pk-self-velocity]','[data-pk-opponent-velocity]'])this.text(selector,'--');
     }
-    if (this.activeTab==='pk') this.charts.render(data);
+    if (this.isPKVisible()) this.charts.render(data);
     const factors = data.prediction.factors?.length ? data.prediction.factors : ['等待更多比分和速度变化']; this.node('[data-pk-factors]').innerHTML = factors.map(item => `<li>${esc(item)}</li>`).join('');
     const intent = [['己方', data.selfIntent], ['对方', data.opponentIntent]]; this.node('[data-pk-intent]').innerHTML = intent.map(([label, item]) => `<tr><td>${label}</td><td>${pct(item.probability)}</td><td>${item.sampleSize || 0}</td><td>${fmt(item.expected)}</td></tr>`).join('');
     const chat = data.chatSignals || { recent:0, opponent:{ total:0, request:0, comeback:0, positive:0, negative:0 } };
@@ -865,30 +822,34 @@ export class Panel {
     };
     this.node('[data-pk-rates]').innerHTML = [rate('3 倍加成', data.multiplierStats), rate('卡片 / 宝箱命中', data.cardStats)].join('');
   }
+  isPKVisible() {return this.activeTab==='anchor' && this.anchorView==='pk';}
   setAnchorView(view) {
-    if (!['overview','income','broadcast'].includes(view)) return;
+    if (!['overview','pk','income','broadcast'].includes(view)) return;
     this.anchorView = view;
     for (const button of this.root.querySelectorAll('[data-anchor-view]')) button.setAttribute('aria-pressed', String(button.dataset.anchorView === view));
     for (const content of this.root.querySelectorAll('[data-anchor-content]')) content.hidden = content.dataset.anchorContent !== view;
     this.node('.scroll').scrollTop = 0;
+    if(this.isPKVisible() && this.latest)this.renderPK(this.latest[0]);
+    if(this.activeTab==='anchor')this.workspaceLayout.show('anchor');
   }
   tab(key) {
+    if(key==='pk'){this.setAnchorView('pk');key='anchor';}
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
     if (['anchor','profiles'].includes(key)) void this.callbacks.income?.();
-    const category = (key === 'anchor' || this.tools.get(key)) ? 'tools' : interactionPages.includes(key) ? 'interaction' : 'settings';
+    const category = this.tools.get(key) ? 'tools' : interactionPages.includes(key) ? 'interaction' : 'settings';
     this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
     this.navigation.sync(category);
-    const featureByPage = { pk: null, anchor:null, gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword', bot:'bot', timers: 'timersEnabled' };
+    const featureByPage = { anchor:null, gift: 'gift', welcome: 'welcome', likes: 'like', keywords: 'keyword', bot:'bot', timers: 'timersEnabled' };
     for (const node of this.root.querySelectorAll('[data-page]')) {
       const feature = featureByPage[node.dataset.page];
       const disabled = feature && !this.root.querySelector(`[data-field="${feature === 'timersEnabled' ? feature : `${feature}.enabled`}"]`)?.checked;
       node.hidden = node.dataset.page !== key || Boolean(disabled);
     }
     this.workspaceLayout.show(key);
-    if(key==='pk' && this.latest) this.renderPK(this.latest[0]);
+    if(this.isPKVisible() && this.latest) this.renderPK(this.latest[0]);
     if(key==='anchor' && this.latest) this.renderAnchor(this.latest[0]);
   }
   bind() {
@@ -1178,5 +1139,5 @@ export class Panel {
     this.productUI?.refresh();
     for (const action of ['identify','test-ai','diagnose','refresh-anchor']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { this.productUI?.destroy();this.workspaceLayout.destroy();this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
+  destroy() { this.productUI?.destroy();this.workspaceLayout.destroy();this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.predictionCharts.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
 }

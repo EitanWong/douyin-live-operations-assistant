@@ -1,4 +1,6 @@
-import {spring} from 'motion';
+// Share the React entry with the deferred workspace. Mixing Motion's DOM and
+// React barrels lets the bundler defer the shared spring initializer too late.
+import {spring} from 'motion/react';
 
 // Motion owns the physics; FloatingWindow owns the one view-bound frame loop.
 // Sampling its public generator keeps interruption velocity exact and lets

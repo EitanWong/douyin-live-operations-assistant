@@ -8,6 +8,8 @@ import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
 import {gridOptions} from './layout.js';
+import {recordText} from './collection.js';
+import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
 import {componentTheme,componentVariables,paletteScale} from '../theme-palette.js';
 
 const features=tableFeatures({});
@@ -33,13 +35,25 @@ function Control({node,bridge}) {
   return h(TextInput,props);
 }
 function DataTable({node,bridge}) {
-  const columns=useMemo(()=>node.headers.map((title,i)=>({id:String(i),accessorFn:row=>row[i],header:title})),[node.headers.join('\0')]);
-  const table=useTable({features,columns,data:node.rows});
-  return h('div',{className:'product-table-scroll',tabIndex:0,'aria-label':node.caption || '数据表格，可横向滚动'},
+  const browser=useDataBrowser(node.rows,node.headers,node.scope),label=node.caption || '数据表格';
+  const columns=useMemo(()=>node.headers.map((title,i)=>({id:String(i),accessorFn:row=>row.values[i],header:title})),[node.headers.join('\0')]);
+  const table=useTable({features,columns,data:browser.indices.map(index=>({index,values:node.rows[index]}))});
+  return h('section',{className:'product-data-set','aria-label':label},
+    node.sourceControlled ? null : h(DataBrowserTools,{browser,label,scope:node.scope}),
+    h('div',{className:'product-table-scroll',ref:browser.scroll,tabIndex:0,'aria-label':`${label}，可滚动`},
     h(Table,{striped:true,highlightOnHover:true,withTableBorder:false,verticalSpacing:'sm',horizontalSpacing:'md'},
       node.caption ? h('caption',null,node.caption) : null,
       h(Table.Thead,null,h(Table.Tr,null,table.getAllColumns().map(col=>h(Table.Th,{key:col.id},col.columnDef.header)))),
-      h(Table.Tbody,null,table.getRowModel().rows.map(row=>h(Table.Tr,{key:row.id},(node.cells[row.index] || []).map((cell,i)=>h(Table.Td,{key:i,colSpan:cell.colSpan},renderChildren(cell.children,bridge))))))));
+      h(Table.Tbody,null,browser.count ? table.getRowModel().rows.map(row=>h(Table.Tr,{key:row.original.index},(node.cells[row.original.index] || []).map((cell,i)=>h(Table.Td,{key:i,colSpan:cell.colSpan},renderChildren(cell.children,bridge))))) : h(Table.Tr,null,h(Table.Td,{colSpan:Math.max(1,node.headers.length)},'没有匹配的数据，请调整搜索或筛选'))))),
+    node.sourceControlled ? null : h(DataBrowserFooter,{browser,label,scope:node.scope}));
+}
+function RecordCollection({node,bridge}) {
+  const rows=useMemo(()=>node.children.map(child=>[recordText(child)]),[node.children]);
+  const browser=useDataBrowser(rows),label=node.collection.label;
+  return h('section',{className:'product-data-set','aria-label':label},
+    h(DataBrowserTools,{browser,label}),
+    h('div',{className:'product-record-scroll',ref:browser.scroll,tabIndex:0,'aria-label':`${label}，可滚动`},browser.count ? h(View,{node:{...node,collection:undefined,children:browser.indices.map(index=>node.children[index])},bridge}) : h('p',{className:'empty'},'没有匹配的记录')),
+    h(DataBrowserFooter,{browser,label}));
 }
 function Disclosure({node,bridge}) {
   // The bridge is the only expansion owner, including section jumps and errors.
@@ -63,6 +77,7 @@ function View({node,bridge}) {
   if(node.kind==='button')return h(Button,{size:'sm',variant:node.primary || node.selected ? 'filled' : 'light',color:node.danger ? 'red' : undefined,disabled:node.disabled,loading:node.busy,'aria-label':node.label,'aria-pressed':node.selected || undefined,onClick:()=>bridge.activate(node.id),leftSection:icon(node.icon)},node.text);
   if(node.kind==='details')return h(Disclosure,{node,bridge});
   if(node.kind==='table')return h(DataTable,{node,bridge});
+  if(node.collection?.mode==='records')return h(RecordCollection,{node,bridge});
   if(node.kind==='chart')return h(Chart,{node});
   if(node.kind==='progress')return node.value===null ? h('small',null,node.label) : h(Progress,{value:node.value,'aria-label':node.label});
   if(node.kind==='bars')return h('div',{className:'product-stat-bars','aria-label':node.label},node.items.map((item,i)=>h('div',{key:i,title:item.label},h('small',null,item.label),h(Progress,{value:item.scale,'aria-label':item.label}))));
@@ -71,7 +86,7 @@ function View({node,bridge}) {
   if(node.kind==='image')return h('img',{src:node.src,alt:node.alt,loading:'lazy',className:'product-image'});
   if(node.kind==='break')return h('br');
   if(node.kind==='link')return h('a',{href:node.href,target:'_blank',rel:'noopener noreferrer'},node.text);
-  const props={className:[node.classes,node.layout ? 'product-layout' : ''].filter(Boolean).join(' '),'data-view-id':node.id,'data-layout':node.layout,'data-surface':node.surface,'aria-label':node.label,role:node.role,tabIndex:node.tag==='h3' ? -1 : undefined};
+  const props={className:[node.classes,node.layout ? 'product-layout' : '',node.collection?.mode==='scroll' ? 'product-edit-scroll' : ''].filter(Boolean).join(' '),'data-view-id':node.id,'data-layout':node.layout,'data-surface':node.surface,'aria-label':node.label,role:node.role,tabIndex:node.tag==='h3' ? -1 : undefined};
   const content=renderChildren(node.children,bridge);
   if(['cards','fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:node.layout==='cards' ? 'var(--product-section-gap)' : 'var(--product-gap)'},content);
   if(node.layout==='scoreboard')return h('div',props,content);

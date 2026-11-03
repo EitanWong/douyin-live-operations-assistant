@@ -1,6 +1,6 @@
 // Transitional boundary: the controller owns drafts and actions; React owns
 // presentation. Only the active page is projected, never a second config store.
-import {describeLayout,isTransparentLayout,layoutChildren} from './layout.js';
+import {describeLayout,describeCollection,isTransparentLayout,layoutChildren} from './layout.js';
 import {APPEARANCE_PREFERENCES} from '../appearance.js';
 
 const ignored = 'STYLE,SCRIPT,OPTION,SUMMARY,TEMPLATE'.split(',');
@@ -30,7 +30,10 @@ export function createWorkspaceBridge(panel) {
   function table(node) {
     const body=node.tBodies[0], headers=[...node.querySelectorAll('thead th')].map(cleanText);
     const rows=[...(body?.rows || [])];
-    return {kind:'table',id:id(node),headers,rows:rows.map(row=>[...row.cells].map(cleanText)),cells:rows.map(row=>[...row.cells].map(cell=>({children:children(cell),colSpan:cell.colSpan}))),caption:node.getAttribute('aria-label') || cleanText(node.caption)};
+    let scope='loaded';
+    for(let parent=node.parentElement;parent && !parent.matches('[data-page]');parent=parent.parentElement)if(parent.querySelector(':scope>.anchor-pagination')){scope='page';break;}
+    const heading=node.closest('details')?.querySelector(':scope>summary') || node.closest('section')?.querySelector('h3');
+    return {kind:'table',id:id(node),headers,scope,sourceControlled:Boolean(node.closest('[data-collection-source]')),rows:rows.map(row=>[...row.cells].map(cleanText)),cells:rows.map(row=>[...row.cells].map(cell=>({children:children(cell),colSpan:cell.colSpan}))),caption:node.getAttribute('aria-label') || cleanText(node.caption) || cleanText(heading)};
   }
   function project(node) {
     if(!node)return null;
@@ -42,6 +45,8 @@ export function createWorkspaceBridge(panel) {
     if(node.matches('.stat-progress'))return {kind:'progress',id:id(node),label:node.getAttribute('aria-label'),value:node.hasAttribute('aria-valuenow') ? Number(node.getAttribute('aria-valuenow'))/Number(node.getAttribute('aria-valuemax'))*100 : null};
     if(node.matches('.stat-bars'))return {kind:'bars',id:id(node),label:node.getAttribute('aria-label'),items:[...node.querySelectorAll('.stat-bar')].map(bar=>({label:bar.getAttribute('aria-label'),value:cleanText(bar.querySelector('.stat-bar-value')),scale:Number(bar.querySelector('.stat-bar-fill')?.style.transform.match(/scaleY\(([^)]+)\)/u)?.[1] || 0)*100}))};
     if(node.matches('.stat-distribution'))return {kind:'distribution',id:id(node),label:node.getAttribute('aria-label'),parts:[...node.children].map(part=>({value:Number(part.style.flex),label:part.title,outcome:part.dataset.outcome}))};
+    const predictionName=node.getAttribute('data-pred-chart');
+    if(predictionName && panel.predictionCharts?.options[predictionName])return {kind:'chart',id:id(node),option:panel.predictionCharts.options[predictionName],label:node.getAttribute('aria-label')};
     const chartName=node.getAttribute('data-pk-chart') || node.getAttribute('data-anchor-chart');
     if(chartName){const owner=node.hasAttribute('data-pk-chart') ? panel.charts : panel.anchorDashboard?.charts,chart=owner?.instances.get(chartName);if(chart)return {kind:'chart',id:id(node),option:chart.getOption(),label:node.getAttribute('aria-label')};}
     if(node.tagName==='BUTTON')return {kind:'button',id:id(node),text:cleanText(node) || node.getAttribute('aria-label'),label:node.getAttribute('aria-label'),disabled:node.disabled,busy:node.getAttribute('aria-busy')==='true',selected:node.getAttribute('aria-pressed')==='true' || node.getAttribute('aria-selected')==='true',primary:node.matches('.primary'),danger:node.matches('.danger'),icon:node.querySelector('svg')?.outerHTML};
@@ -54,7 +59,7 @@ export function createWorkspaceBridge(panel) {
     const content=children(node);if(!content.length)return null;
     const classes=[node.className?.baseVal ?? node.className,node.dataset.aiSection ? `product-ai-${node.dataset.aiSection}` : '',node.hasAttribute('data-workspace-contents') ? 'workspace-contents' : ''].filter(Boolean).join(' ');
     const layout=describeLayout(node);
-    return {kind:'group',id:id(node),...layout,tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
+    return {kind:'group',id:id(node),...layout,collection:describeCollection(node),tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
   }
   function collect() {
     // Drop removed controls, including retired dynamic list rows.

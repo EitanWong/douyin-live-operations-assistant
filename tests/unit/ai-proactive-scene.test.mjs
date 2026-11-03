@@ -21,7 +21,7 @@ test('新鲜音画可在冷场阈值前触发与主播互动，弹幕问答开�
   f.scene('主播把烧制前后的杯子并排展示。');await f.engine.tick(false);assert.equal(f.prompts.length,2);await f.answer();assert.equal(f.engine.queue.length,1);f.engine.stop();
 });
 
-for(const [name,ai,extra] of [['未启用',{proactiveEnabled:false},{}],['只有半句识别',{}, {isFinal:false}],['空识别',{}, {text:''}],['未来观察',{}, {endedAt:1800000100000}],['没有额度',{maxPerHour:1},{}]])test(`主动互动保持沉默：${name}`,async()=>{
+for(const [name,ai,extra] of [['未启用',{proactiveEnabled:false},{}],['只有半句识别',{}, {isFinal:false}],['空识别',{}, {text:''}],['未来观察',{}, {endedAt:1800000100000}],['没有额度',{maxPerHour:1,edge:{enabled:false}},{}]])test(`主动互动保持沉默：${name}`,async()=>{
   const f=fixture(ai);f.advance(46000);f.scene(undefined,extra);if(name==='没有额度')f.engine.calls.push(1800000000000);
   await f.engine.tick(false);await flush();assert.equal(f.prompts.length,0);f.engine.stop();
 });

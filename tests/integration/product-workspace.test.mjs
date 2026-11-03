@@ -124,3 +124,11 @@ test('PK 播报开关保留无重复文案的可访问标签，间隔优先使�
   f.bridge.change(toggle.id,true);assert.equal(f.root.querySelector('input[type=checkbox]').checked,true);
  }finally{f.close();}
 });
+
+
+test('已有业务分页的表格明确标记搜索范围，源控制器已有搜索时不重复接管',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page=ai]');page.innerHTML='<details data-collection-source><summary>粉丝团成员</summary><label><span>搜索已采集成员</span><input type="search"></label><div><table><thead><tr><th>成员</th></tr></thead><tbody><tr><td>末页</td></tr></tbody></table></div><div class="anchor-pagination"><button>下一页</button></div></details>';f.bridge.refresh();
+  const table=find(f.bridge.getSnapshot().content,'table');assert.equal(table.scope,'page');assert.equal(table.sourceControlled,true);assert.equal(table.caption,'粉丝团成员');
+ }finally{f.close();}
+});

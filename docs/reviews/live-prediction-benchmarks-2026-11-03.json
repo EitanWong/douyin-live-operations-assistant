@@ -1,0 +1,22 @@
+{
+  "measuredAt": "2026-11-03T13:40:57.508Z",
+  "runtime": "v26.12.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "fixture": {
+    "simulated": true,
+    "minutes": 20,
+    "users": 12,
+    "completeSessions": 8,
+    "paths": 192
+  },
+  "samples": 100,
+  "warmup": 16,
+  "scope": "Pure numeric forecast plus seven chart option generation; excludes IndexedDB, DOM, rendering and language-model inference",
+  "milliseconds": {
+    "p50": 1.9092080000000067,
+    "p95": 2.007249999999999,
+    "max": 2.0747910000000047
+  },
+  "accuracy": "Not measured. Synthetic fixtures verify behavior and latency only; no production accuracy or device-wide guarantee."
+}

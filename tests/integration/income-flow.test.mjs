@@ -33,7 +33,7 @@ test('未打开主播数据页也主动播报本场榜单及千票人数，预�
     identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
   try {
     await api.panel.callbacks.income();
-    assert.equal(api.panel.activeTab,'pk');engine.start();
+    api.panel.tab('gift');assert.equal(api.panel.activeTab,'gift');engine.start();
     await waitFor(()=>engine.stats.previews===3,5000);
     assert.deepEqual(api.panel.entries.filter(row=>row.category==='preview').map(row=>row.message),[
       '本场观众贡献榜第1名：甲。','本场观众贡献榜第2名：乙。','本场千票贡献榜人数：1 人。'
@@ -59,7 +59,7 @@ test('本场播报预览与实际入队一致，统计历史、搜索和表格�
     adapterFactory:()=>({status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>false,sync(){}}),
     identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
   try {
-    api.panel.node('[data-category=tools]').click();
+    api.panel.tab('anchor');
     await api.panel.callbacks.income();
     await waitFor(()=>api?.panel.anchorDashboard.broadcastSession && engine.liveData()?.income);
     const dashboard=api.panel.anchorDashboard, sessionId=dashboard.broadcastSession;
