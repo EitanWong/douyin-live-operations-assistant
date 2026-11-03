@@ -83,7 +83,7 @@ export class GiveawayRunner {
         const round=this.data.rounds.find(row=>row.feedback?.some(message=>`${row.id}:${message.id}`===key));
         const message=round?.feedback.find(row=>`${round.id}:${row.id}`===key);
         if(!message || message.expiresAt<=this.now() || message.attemptedBy && message.attemptedBy!==owner)return false;
-        if(['start','entry','countdown'].includes(message.kind) && round.status!=='running')return false;
+        if(['start','entry','countdown','reminder'].includes(message.kind) && round.status!=='running')return false;
         if(round.broadcastId && this.broadcastId() && round.broadcastId!==this.broadcastId())return false;
         if(message.attemptedBy===owner)return true;
         await this.save({...round,feedback:round.feedback.map(row=>row.id===message.id ? {...row,attemptedBy:owner} : row)});

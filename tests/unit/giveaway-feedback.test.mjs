@@ -24,13 +24,14 @@ test('开始、合并报名与多奖品结果生成有界公屏消息，重复�
   assert.deepEqual(prepareGiveawayFeedback(round,362000,50).feedback,round.feedback);
   assert.deepEqual(parseGiveawayState({version:2,rounds:[round]},'123').rounds[0].feedback,round.feedback);
 });
-test('可隐藏开轮及开奖结果的奖品名称，同时公布中奖者',()=>{
+test('开场可隐藏奖品，但开奖结果始终恭喜并点名播报奖品',()=>{
   let round=createGiveaway({...config,announcePrizeNames:false},{id:'hidden',room:'123',now:1000});
   round=prepareGiveawayFeedback(round,1000,50,{start:true});
   round=enter(round,'1');round=prepareGiveawayFeedback(drawGiveaway(round,361000,()=>0),361000,50);
-  const messages=round.feedback.map(row=>row.text).join('');
-  assert.match(messages,/抽奖开始/);assert.match(messages,/观众1/);
-  assert.doesNotMatch(messages,/签名礼盒|纪念杯/);
+  const start=round.feedback.filter(row=>row.kind==='start').map(row=>row.text).join('');
+  assert.match(start,/抽奖开始/);assert.doesNotMatch(start,/签名礼盒|纪念杯/);
+  const result=round.feedback.filter(row=>row.kind==='result').map(row=>row.text).join('');
+  assert.match(result,/签名礼盒.*恭喜.*@观众1/);
   assert.equal(parseGiveawayState({version:2,rounds:[round]},'123').rounds[0].config.announcePrizeNames,false);
 });
 test('抽奖反馈优先请求管理员弹幕',async()=>{
@@ -101,4 +102,39 @@ test('已取消轮次的排队报名确认不再发送，取消通知仍可发�
   const f=sender();f.engine.giveawayCurrent=message=>message.kind==='cancelled';
   await f.engine.enqueueGiveaway(f.message('entry','报名成功：小雨'));await f.engine.enqueueGiveaway(f.message('cancel','本轮抽奖已取消',{kind:'cancelled'}));
   await f.engine.tick();assert.deepEqual(f.sent,['本轮抽奖已取消']);assert.equal(f.engine.queue.length,0);
+});
+
+test('主播必中与权重规则不进入公屏结果，奖品名称完整保留',()=>{
+  const prize='限量签名纪念礼盒'.repeat(8);
+  let round=createGiveaway({...config,prizes:[{name:prize,count:1}],anchorGuaranteed:true,weights:[{userId:'1',weight:2}]},{id:'private',room:'123',anchorId:'1',now:1000});
+  round=prepareGiveawayFeedback(drawGiveaway(enter(round,'1'),361000,()=>0),361000,50);
+  const result=round.feedback.filter(row=>row.kind==='result');
+  assert.doesNotMatch(result.map(row=>row.text).join(''),/必中|权重|抽取规则/);
+  assert.match(result.map(row=>row.text).join(''),/@观众1/);
+  assert.ok(result.map(row=>row.text.replace(/^奖品：/, '')).join('').includes(prize));
+  assert.ok(result.every(row=>[...row.text].length<=50));
+});
+test('每分钟主动提示全部参与方式，重复tick及刷新不重复，恢复只发当前提示',()=>{
+  let round=make();
+  assert.equal(prepareGiveawayFeedback(round,60000,50).feedback.length,0);
+  round=prepareGiveawayFeedback(round,61000,50);
+  const reminders=round.feedback.filter(row=>row.kind==='reminder');
+  assert.match(reminders.map(row=>row.text).join(''),/抽奖进行中.*参与抽奖.*小心心.*1.*任一/);
+  const restored=parseGiveawayState({version:2,rounds:[round]},'123').rounds[0];
+  assert.deepEqual(prepareGiveawayFeedback(restored,62000,50).feedback,round.feedback);
+  round=prepareGiveawayFeedback(restored,241000,50);
+  assert.equal(new Set(round.feedback.filter(row=>row.kind==='reminder').map(row=>row.createdAt)).size,2);
+  assert.ok(round.feedback.filter(row=>row.kind==='reminder').every(row=>row.expiresAt<=round.endsAt && [...row.text].length<=50));
+  const ending=prepareGiveawayFeedback(round,352000,50);
+  assert.equal(ending.feedback.filter(row=>row.kind==='reminder').length,round.feedback.filter(row=>row.kind==='reminder').length);
+});
+test('仅弹幕或仅礼物的提示准确且取消或开奖后不再招募',()=>{
+  for(const chatEnabled of [true,false]) {
+    let round=createGiveaway({...config,chatEnabled,giftEnabled:!chatEnabled},{id:'single',room:'123',now:1000});
+    round=prepareGiveawayFeedback(round,61000,50);
+    const messages=round.feedback.filter(row=>row.kind==='reminder').map(row=>row.text).join('');
+    assert.match(messages,chatEnabled ? /参与抽奖/ : /小心心/);
+    assert.doesNotMatch(messages,chatEnabled ? /小心心|任一/ : /发送弹幕|任一/);
+    for(const status of ['drawn','cancelled'])assert.equal(prepareGiveawayFeedback({...round,status},121000,50).feedback.filter(row=>row.kind==='reminder').length,round.feedback.filter(row=>row.kind==='reminder').length);
+  }
 });

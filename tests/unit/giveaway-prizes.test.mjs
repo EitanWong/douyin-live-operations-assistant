@@ -46,7 +46,7 @@ test('主播必中只对已入池的主播 UID 生效，占用首项奖品名额
   let r=make();for(const id of ['1','2','3','9'])r=enterGiveaway(r,{type:'chat',text:'参与抽奖',at:1500,user:{id,name:id==='9'?'主播':'观众'}},1500);
   const drawn=drawGiveaway(r,3000,()=>0);
   assert.deepEqual(drawn.awards[0],{userId:'9',prizeIndex:0});assert.equal(drawn.awards.filter(row=>row.userId==='9').length,1);
-  assert.equal(drawn.awards.length,3);assert.match(giveawayAnnouncement(drawn),/主播参与必中/);
+  assert.equal(drawn.awards.length,3);assert.doesNotMatch(giveawayAnnouncement(drawn),/必中|权重/);
   assert.deepEqual(drawGiveaway(make(),3000,()=>0).awards,[]);
   assert.throws(()=>createGiveaway({...config,anchorGuaranteed:true},{id:'host',room:'123',now:1000}),/主播/);
 });
@@ -57,7 +57,7 @@ test('指定观众权重控制抽取区间，其他观众默认 1，抽中后不
   assert.deepEqual(wins,{'1':100,'2':300});
   const multi={...round(),config:validateGiveawayConfig({...config,weights:[{userId:'2',weight:10}]})};
   const drawn=drawGiveaway(multi,3000,max=>max-1);assert.equal(new Set(drawn.awards.map(award=>award.userId)).size,3);
-  assert.match(giveawayAnnouncement(drawn),/观众权重/);assert.match(giveawayCSV({version:2,rounds:[drawn]}),/抽取权重/);
+  assert.doesNotMatch(giveawayAnnouncement(drawn),/必中|权重/);assert.match(giveawayCSV({version:2,rounds:[drawn]}),/抽取权重/);
 });
 test('权重为正数且最多两位小数，拒绝重复 UID；不能用昵称识别或设置无效权重',()=>{
   for(const weights of [[{userId:'1',weight:0}],[{userId:'1',weight:1001}],[{userId:'1',weight:0.001}],[{userId:'昵称',weight:2}],[{userId:'1',weight:2},{userId:'1',weight:3}]])assert.throws(()=>validateGiveawayConfig({...config,weights}));

@@ -160,7 +160,7 @@ function validateAwards(round) {
 
 function validateFeedback(round) {
   round.feedback ??= [];
-  const kinds=['start','entry','countdown','result','cancelled'];
+  const kinds=['start','entry','countdown','reminder','result','cancelled'];
   if(!Array.isArray(round.feedback) || round.feedback.some(row=>!row || !boundedText(row.id,100) || !kinds.includes(row.kind)
     || typeof row.text!=='string' || !row.text.trim() || [...row.text].length>50 || typeof row.queued!=='boolean'
     || !Number.isFinite(row.createdAt) || !Number.isFinite(row.expiresAt) || row.expiresAt<=row.createdAt
@@ -199,8 +199,7 @@ export function giveawayAnnouncement(round) {
     const names=round.awards.filter(award=>award.prizeIndex===index).map(award=>round.entrants.find(row=>row.userId===award.userId)?.userName || award.userId);
     return `${prize.name}：${names.length ? `恭喜 ${names.join('、')}` : '未产生中奖者'}`;
   });
-  const rules=[round.config.weights.length ? '按观众权重抽取' : '',round.config.anchorGuaranteed ? '主播参与必中' : ''].filter(Boolean);
-  return `【抽奖结果】${results.join('；')}。共 ${round.entrants.length} 人参与。${rules.length ? `本轮规则：${rules.join('；')}。` : ''}`;
+  return `【抽奖结果】${results.join('；')}。共 ${round.entrants.length} 人参与。`;
 }
 
 const csvCell = value => '"'+String(value ?? '').replace(/^(?:\s*[=+\-@]|[\t\r\n]|\d{15,}$)/,"'$&").replaceAll('"','""')+'"';

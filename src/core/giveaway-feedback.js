@@ -23,18 +23,25 @@ function groups(rows,label,limit,mention=false) {
 function resultLines(round,limit) {
   if(!round.entrants.length)return [{text:'抽奖结束，无人参与'}];
   const result=[];
-  if(round.config.weights.length)result.push(...lines('抽取规则：','按观众权重抽取',limit).map(text=>({text})));
-  if(round.config.anchorGuaranteed)result.push(...lines('抽取规则：','主播参与必中',limit).map(text=>({text})));
-  if(!round.config.announcePrizeNames) {
-    const ids=new Set(round.awards.map(row=>row.userId));
-    return result.concat(groups(round.entrants.filter(row=>ids.has(row.userId)),'中奖：',limit));
-  }
   for(const [index,prize] of round.config.prizes.entries()) {
     const ids=new Set(round.awards.filter(row=>row.prizeIndex===index).map(row=>row.userId));
-    const label=`开奖·${clip(prize.name,Math.min(12,Math.floor((limit-4)/2)))}：`;
-    result.push(...groups(round.entrants.filter(row=>ids.has(row.userId)),label,limit));
+    const winners=round.entrants.filter(row=>ids.has(row.userId));
+    if(!winners.length)continue;
+    const label=`开奖·${text(prize.name)}：恭喜`;
+    if(size(label)+4<=limit)result.push(...groups(winners,label,limit,true));
+    else {
+      result.push(...groups(winners,'恭喜中奖：',limit,true));
+      result.push(...lines('奖品：',prize.name,limit).map(text=>({text})));
+    }
   }
   return result;
+}
+
+function participationLines(config,limit) {
+  const methods=[];
+  if(config.chatEnabled)methods.push(`发送弹幕“${config.keyword}”即可参与`);
+  if(config.giftEnabled)methods.push(`赠送${config.gifts}，累计${config.giftMin}个即可参与`);
+  return lines('抽奖进行中：',`${methods.join('；')}。${methods.length>1 ? '满足任一方式即可，' : ''}每人一份机会，欢迎加入！`,limit).map(text=>({text}));
 }
 
 // The saved outbox is the source of truth for confirmations and stage deduplication.
@@ -55,6 +62,10 @@ export function prepareGiveawayFeedback(round,now,limit=50,{start=false}={}) {
     append('start',messages.map(text=>({text})),liveExpiry);
   }
   if(round.status==='running') {
+    const reminder=Math.floor((now-round.startedAt)/60000);
+    if(reminder>0 && now<round.endsAt-10000 && !next.some(row=>row.kind==='reminder' && Math.floor((row.createdAt-round.startedAt)/60000)===reminder)) {
+      append('reminder',participationLines(round.config,limit),Math.min(liveExpiry,round.endsAt-10000));
+    }
     const confirmed=new Set(next.filter(row=>row.kind==='entry').flatMap(row=>row.userIds));
     append('entry',groups(round.entrants.filter(row=>!confirmed.has(row.userId)),'报名成功：',limit,true),round.endsAt);
     for(const seconds of GIVEAWAY_COUNTDOWNS) {

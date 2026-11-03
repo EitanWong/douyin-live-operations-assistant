@@ -125,3 +125,24 @@ test('跨页面发送同一公告先持久认领，其他页面不能重复点�
   assert.equal(await second.claimFeedback({key:message.key,owner:'page-two'}),false);
   assert.ok(secondMessages.length>0);assert.ok(!secondMessages.some(row=>row.key===message.key));await second.dispose();
 });
+
+test('定时参与提示先保存再交付，刷新不重复且取消后不能认领旧招募',async()=>{
+  const f=fixture(),messages=[];
+  const feedback=async message=>{assert.ok(f.saved().rounds[0].feedback.some(row=>row.id===message.id));messages.push(message);};
+  let runner=f.create({feedback});
+  try {
+    await runner.ready();await runner.start({...config,durationSec:180});
+    f.time(61000);await runner.tick();
+    const reminders=messages.filter(row=>row.kind==='reminder');assert.ok(reminders.length);
+    for(const row of reminders)assert.equal(await runner.claimFeedback({key:row.key,owner:'sender'}),true);
+    await runner.dispose();runner=f.create({feedback});await runner.ready();await runner.tick();
+    assert.equal(messages.filter(row=>row.kind==='reminder').length,reminders.length);
+    f.time(165000);await runner.tick();
+    const late=messages.filter(row=>row.kind==='reminder').at(-1);
+    assert.ok(late.expiresAt<=171000);
+    await runner.cancel();
+    assert.equal(await runner.claimFeedback({key:late.key,owner:'sender'}),false);
+    const before=messages.filter(row=>row.kind==='reminder').length;
+    f.time(181000);await runner.tick();assert.equal(messages.filter(row=>row.kind==='reminder').length,before);
+  } finally {await runner.dispose();}
+});

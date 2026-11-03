@@ -143,7 +143,8 @@ test('存储失败的抽奖事件保留日志且不妨碍核心处理，重建�
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });
 
-test('配置多个奖品，搜索多选礼物与手动规则同步，开轮后锁定并导出各自奖品',async()=>{
+test('配置多个奖品，搜索多选礼物与手动规则同步，开轮后锁定并导出各自奖品',async t=>{
+  let clock=Date.now();t.mock.method(Date,'now',()=>clock);
   const dom=page(),values=new Map();let api;
   boot({page:dom.window,demo:true,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),onReady:value=>{api=value;}});
   try {
@@ -167,6 +168,7 @@ test('配置多个奖品，搜索多选礼物与手动规则同步，开轮后�
     p.node('[data-action=giveaway-start]').click();await until(()=>api.tools.state('giveaway').phase==='running');
     assert.equal(select('791').disabled,true);assert.equal(p.node('[data-action=giveaway-add-prize]').disabled,true);
     const at=Date.now();for(const id of ['1','2','3'])await api.tools.dispatch('event',{type:'gift',id:`g-${id}`,at,source:'socket',giftId:'791',giftName:'玫瑰',count:1,user:{id,name:`观众${id}`}});
+    clock+=1100;
     await until(()=>api.tools.state('giveaway').rounds[0].status==='drawn');
     const report=await api.tools.invoke('giveaway','export');assert.equal(report.version,2);
     assert.deepEqual(report.rounds[0].config.prizes,[{name:'签名礼盒',count:1},{name:'纪念杯',count:2}]);
@@ -189,7 +191,7 @@ test('观众权重和主播必中通过工具入口锁定，主播使用当前�
     await until(()=>api.tools.state('giveaway').rounds[0].status==='drawn');
     const report=await api.tools.invoke('giveaway','export'),round=report.rounds[0];
     assert.deepEqual(round.config.weights,[{userId:'2',weight:3}]);assert.equal(round.anchorId,'1234567890');
-    assert.deepEqual(round.awards,[{userId:'1234567890',prizeIndex:0}]);assert.match(p.node('[data-giveaway-result]').textContent,/主播参与必中/);
+    assert.deepEqual(round.awards,[{userId:'1234567890',prizeIndex:0}]);assert.doesNotMatch(p.node('[data-giveaway-result]').textContent,/必中|权重/);
     await api.tools.restart('giveaway');assert.deepEqual(api.tools.state('giveaway').rounds[0].awards,round.awards);
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });

@@ -108,8 +108,8 @@ export const giveawayView = {
     </fieldset>
     <fieldset class="giveaway-config"><legend>弹幕反馈</legend>
       <p class="hint">抽奖反馈自动发送到公屏。</p>
-      <label class="giveaway-option"><input type="checkbox" data-giveaway="announcePrizeNames" checked>弹幕播报奖品名称</label>
-      <p class="hint">播报开轮、报名成功和开奖结果；剩余 5 分钟、1 分钟、30 秒、10 秒时提醒。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p>
+      <label class="giveaway-option"><input type="checkbox" data-giveaway="announcePrizeNames" checked>开场播报奖品名称</label>
+      <p class="hint">开场可隐藏奖品，中奖后始终 @ 中奖者并播报奖品，不公开抽取规则。每分钟主动提示参与方式，最后 10 秒停止招募；播报开轮、报名成功和开奖结果；剩余 5 分钟、1 分钟、30 秒、10 秒时提醒。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p>
     </fieldset>
     <div class="actions"><button type="button" class="primary" data-action="giveaway-start">开始抽奖</button><button type="button" class="danger" data-action="giveaway-cancel" disabled>取消本轮</button></div>
     <p class="hint" data-giveaway-status role="status" aria-live="polite">正在读取抽奖记录</p>

@@ -71,7 +71,7 @@ export function toolOperations({transport, click, saveConfig, selfId = () => '',
   return {
     ...giftOperations(transport,selfId),
     'giveaway.announce': {validate:value=>{
-      if(typeof value?.key!=='string' || typeof value.roundId!=='string' || !['start','entry','countdown','result','cancelled'].includes(value.kind)
+      if(typeof value?.key!=='string' || typeof value.roundId!=='string' || !['start','entry','countdown','reminder','result','cancelled'].includes(value.kind)
         || typeof value.text!=='string' || !value.text.trim() || [...value.text].length>50 || !Number.isFinite(value.expiresAt)
         || !Number.isFinite(value.endsAt))throw new Error('抽奖弹幕参数无效');
     },run:value=>announceGiveaway(value)},
