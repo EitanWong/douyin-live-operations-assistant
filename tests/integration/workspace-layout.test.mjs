@@ -41,9 +41,10 @@ test('紧凑导航按分类选择页面，禁用功能不出现且切换导航�
 test('互动设置与独立工具按有名分区组织，开关保留表单语义',()=>{
   const f=fixture(),p=f.panel;
   try{
-    for(const key of ['gift','welcome','likes','keywords','timers','auto-like','auto-gift','giveaway','rewards','diagnostics','features','runtime','profiles','bot','moderation','ai','appearance','anchor','pk']){
+    for(const key of ['gift','welcome','likes','keywords','timers','auto-like','auto-gift','giveaway','rewards','diagnostics','features','runtime','profiles','bot','moderation','ai','appearance','anchor']){
       const page=p.node(`[data-page="${key}"]`);assert.ok(page);assert.ok(page.querySelector('h3,legend,details>summary'),key+' 缺少分组标题');
     }
+    assert.ok(p.node('[data-page=anchor] [data-anchor-content=pk]').querySelector('h3'));
     const input=p.node('[data-field="welcome.requireFan"]');assert.equal(input.getAttribute('role'),'switch');
     const before=input.checked;input.closest('label').click();assert.equal(input.checked,!before);assert.equal(p.dirty,true);
   }finally{f.close();}

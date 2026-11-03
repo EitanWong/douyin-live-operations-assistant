@@ -9,6 +9,7 @@ export class ToolRegistry {
   register(definition) {
     if (!definition || !/^[a-z][a-z0-9-]*$/.test(definition.id) ||
         !/^\d+\.\d+\.\d+$/.test(definition.version) || definition.apiVersion !== TOOL_API_VERSION ||
+        definition.embeddedIn!=null && !/^[a-z][a-z0-9-]*$/.test(definition.embeddedIn) ||
         typeof definition.mount !== 'function' || !Array.isArray(definition.capabilities) ||
         definition.capabilities.some(name => typeof name !== 'string') ||
         definition.timeoutMs != null && (!Number.isInteger(definition.timeoutMs) || definition.timeoutMs < 1 || definition.timeoutMs > 60000) ||

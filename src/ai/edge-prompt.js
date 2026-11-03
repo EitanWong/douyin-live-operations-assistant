@@ -11,7 +11,7 @@ export function makeEdgeMessages(input,config){
   recent_chat:(p.context || []).slice(-4).map(r=>({text:String(r.text || '').slice(0,160)})),recent_replies:(p.recentReplies || []).slice(-3).map(x=>String(x).slice(0,80)),
   knowledge:String(p.knowledge || '').slice(0,400),memories:evidence.evidence_context.memories.slice(0,2).map(r=>({content:r.content.slice(0,300),source:r.source})),
   media:(evidence.media_context?.observations || []).slice(-2).map(r=>({kind:r.kind,text:r.text.slice(0,300)})),
-  accounts:(evidence.evidence_context.accounts || []).slice(0,2),live_context:p.liveContext ? {income:p.liveContext.income,audience:p.liveContext.audience} : null};
+  accounts:(evidence.evidence_context.accounts || []).slice(0,2),live_context:p.liveContext ? {income:p.liveContext.income,audience:p.liveContext.audience,predictions:p.liveContext.predictions} : null};
  // Drop whole large facts, never cut a number or turn partial records into totals.
  if(JSON.stringify(data.live_context).length>2000)data.live_context={coverage:'现场统计超出端侧预算，未知，不得猜测'};
  if(JSON.stringify(data.accounts).length>1000)data.accounts=[];

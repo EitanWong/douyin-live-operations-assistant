@@ -1,5 +1,8 @@
 import {createSpeechRecognizer} from './services/speech-routing.js';
 import {createEdgeRouter} from './browser/edge-router.js';
+import {createPredictionClient} from './analytics/service.js';
+import {analyzeSamples} from './analytics/ai.js';
+import {predictionPulse} from './analytics/page.js';
 import {AccountContext} from './ai/account-context.js';
 import {createResilientAI} from './services/ai-resilience.js';
 import {FoundationSettings} from './ui/foundation-settings.js';
@@ -49,6 +52,8 @@ export function boot(options = {}) {
   let audienceMemory=new AudienceMemory({anchor:config.anchorId,state:runtimeSnapshot?.audienceMemory}),workbench,localAgentTasks,localAgentReady;
   const currentMemory=()=>{if(audienceMemory.anchor!==String(engine?.config.anchorId || config.anchorId))audienceMemory=new AudienceMemory({anchor:engine?.config.anchorId || config.anchorId});return audienceMemory;};
   const sessionKeys = new Map(); let panel, engine, tools, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false, persistenceDisabled = false;
+  let predictionIdentityWrite=Promise.resolve();
+  const predictions=createPredictionClient({transport:options.predictions ? async(...args)=>{await predictionIdentityWrite;return options.predictions(...args);} : undefined,context:()=>({room,anchor:String(engine?.config.anchorId || config.anchorId || '')})});
   const runtimeWriter = new RuntimeWriter(snapshot => set(runtimeKey, snapshot));
   // 自动开启只在本页首次进入时保持武装；只有用户明确点击暂停才关闭。
   let autoStartArmed = true, resumeAutoStart = false, manualPause = false, autoStartNext = 0, autoStartError = '';
@@ -190,11 +195,16 @@ export function boot(options = {}) {
     renderIncomeSummary();
     void drainIncome();
   };
+  function syncPredictionIdentity(){
+    if(options.predictions && engine.config.anchorId && get(configKey,{})?.anchorId!==engine.config.anchorId)predictionIdentityWrite=Promise.resolve(set(configKey,copy(engine.config)));
+    return predictionIdentityWrite;
+  }
   async function registerProfile(name) {
     if (persistenceDisabled) return;
     const profile = { room, anchorId: engine.config.anchorId, name: name || identity.anchor?.name };
     const signature = `${profile.anchorId}:${profile.name || ''}`;
     if (profileSignature === signature) return;
+    await syncPredictionIdentity();
     await repository.profile(profile); profileSignature = signature;
     if (panel) await loadIncome({profiles:true});
   }
@@ -306,7 +316,7 @@ export function boot(options = {}) {
       if(engine.config.ai.enabled && engine.config.ai.assistant.memoryEnabled && currentMemory().observe(liveEvent))persistRuntime();
       let journalWrite = null;
       const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
-      if ((engine.running || tools?.state('giveaway')?.receiving || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
+      if ((engine.running || predictions.enabled() || tools?.state('giveaway')?.receiving || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
         // Incoming messages are structured-cloned in the extension, but direct
         // integrations/tests may provide frozen objects. Work on a shallow copy
         // before attaching recovery metadata so a read-only event cannot abort
@@ -338,6 +348,14 @@ export function boot(options = {}) {
       const giveawayState=tools?.state('giveaway');
       const giveawayRound=giveawayState?.phase==='running' ? giveawayState.rounds.find(round=>round.status==='running') : null;
       engine.ingest(event, {giveawayChat:matchesGiveawayChat(giveawayRound,event,Date.now())});
+      // Persist analysis before acknowledging the recovery journal. Other
+      // consumers already ran; retries are idempotent by event/combo identity.
+      if(!persistenceDisabled){
+        const user=event.user,age=user?audienceAge(user):null;
+        const knownPrice=event.type==='gift' ? (engine.config.gift.prices[event.giftId] ?? engine.config.gift.prices[event.giftName]):undefined;
+        try{await predictions.ingest({...event,user:user?{...user,minor:user.minor===true || age!=null && age<18}:undefined,unitValue:event.unitValue>0?event.unitValue:knownPrice>0?knownPrice:null});}
+        catch(error){if(journalWrite)await journalWrite;log('error',`预测档案保存失败：${error.message}`);throw error;}
+      }
       stopEndedTools();
       if(['chat','gift'].includes(liveEvent.type)) {
         await tools?.ready;
@@ -365,7 +383,7 @@ export function boot(options = {}) {
       refresh(); wakeSender();
       if ((status.ingestion?.gaps || 0)+(status.bridgeGaps || 0)+(status.frameGaps || 0)+(status.capture?.gaps || 0) !== previousGaps || JSON.stringify(acknowledgedRuntimeAlert) !== previousAcknowledgement) persistRuntime();
     },
-    shouldReadChat: () => tools?.state('giveaway')?.phase==='running' || engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
+    shouldReadChat: () => predictions.enabled() || tools?.state('giveaway')?.phase==='running' || engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
@@ -387,7 +405,7 @@ export function boot(options = {}) {
       const current=engine.pkOperations.broadcast?.roomId;
       const income=saved && (!current || saved.roomId===current) ? saved : local && ledgerAnchorId===engine.config.anchorId && (!current || local.roomId===current)
         ? {...local,anchorId:engine.config.anchorId,at:Date.now(),source:'page-ledger'} : null;
-      return {income:income ? {...income,pending:incomePending.size} : null};
+      return {income:income ? {...income,pending:incomePending.size} : null,predictions:predictions.context()};
     },
     manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
@@ -400,6 +418,7 @@ export function boot(options = {}) {
     }
   });
   tools = createPageTools({page:window,room,engine,adapter,demo,log,
+    predictions,predictionAI:(samples,signal)=>analyzeSamples(edge,samples,signal),
     getRoomId:()=>identity.live?.roomId || engine.liveMode?.roomId || '',
     current:()=>!closed && !suspended && roomContext.current(),unavailable:()=>persistenceDisabled,liveStatus:()=>identity.live?.status,
     rewardStorage:options.rewardStorage || {get:key=>get(key,[]),set},
@@ -428,6 +447,7 @@ export function boot(options = {}) {
     }
     if (c.identity.autoSelf && Object.hasOwn(next,'self')) c.selfId = next.self?.id || '';
     panel?.updateIdentity(identity); refresh();
+    void syncPredictionIdentity().catch(error=>reportPersistenceError(error,'预测主播资料保存失败'));
     if (next.live && !closed && !suspended && roomContext.current()) {
       const live = next.live, type = live.status === 'live' ? 'start' : 'end';
       const at = type === 'start' ? live.startAt || live.observedAt : live.endAt || live.observedAt;
@@ -704,6 +724,7 @@ export function boot(options = {}) {
     const timer = setInterval(async () => {
       if (closed || suspended) return;
       tools.notify('tick');
+      if(!persistenceDisabled && roomContext.current())void predictions.pulse(predictionPulse({engine,network,identity,connected:(demo || adapter.healthy()) && (!identity.live?.status || identity.live.status==='live')}));
       if (demo) { network.lastFrame = adapter.status.lastFrame = Date.now(); }
       if (!demo && identityReader.refreshRoom && roomContext.current() && Date.now() - lastLiveCheck >= 15000) {
         lastLiveCheck = Date.now();
@@ -714,7 +735,7 @@ export function boot(options = {}) {
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
       if (!roomContext.current()) { media.stop(); void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
-      if ((engine.pk.current()?.phase === 'active' || panel.activeTab === 'pk') && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
+      if ((engine.pk.current()?.phase === 'active' || panel.isPKVisible()) && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
       void tryAutoStart();
       syncMedia();
@@ -737,7 +758,7 @@ export function boot(options = {}) {
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
+      if (closed) { predictions.close();workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();
@@ -772,7 +793,7 @@ export function boot(options = {}) {
     }});
     const installCommand=panel.root.querySelector('[data-native-install-command]');
     if(installCommand && /^[a-p]{32}$/u.test(options.nativeExtensionId || ''))installCommand.textContent=`npm run native:install -- --extension-id=${options.nativeExtensionId}`;
-    options.onReady?.({ engine, panel, adapter, tools,media, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
+    options.onReady?.({ engine, panel, adapter, tools,media,predictions, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });
   return engine;

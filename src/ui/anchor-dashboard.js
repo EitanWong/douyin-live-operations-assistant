@@ -46,6 +46,7 @@ export class AnchorDashboard {
     if (!engine?.anchorStats?.report) return;
     const configuredId = String(engine.config.anchorId || identity?.anchor?.id || '');
     const selectedId = this.anchorId || configuredId;
+    const analytics=this.root.querySelector('[data-tool-panel=predictions]');if(analytics)analytics.hidden=Boolean(this.anchorId && selectedId!==configuredId);
     // Version gating avoids aggregation and serialization for unrelated live events.
     const stats = engine.anchorStats;
     const date = new Date((stats.now?.() ?? Date.now()) + 8 * 3600000).toISOString().slice(0,10);

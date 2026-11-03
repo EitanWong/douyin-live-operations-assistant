@@ -3,5 +3,6 @@ import { autoLikeTool } from './auto-like/index.js';
 import { rewardsTool } from './rewards/index.js';
 import { autoGiftTool } from './auto-gift/index.js';
 import { giveawayTool } from './giveaway/index.js';
+import { predictionsTool } from './predictions/index.js';
 
-export const bundledTools = new ToolRegistry([autoLikeTool, rewardsTool, autoGiftTool, giveawayTool]);
+export const bundledTools = new ToolRegistry([autoLikeTool, rewardsTool, autoGiftTool, giveawayTool, predictionsTool]);
