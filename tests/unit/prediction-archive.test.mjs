@@ -48,10 +48,24 @@ test('rejects malformed events, future samples and settings; scoped forgetting r
  const a=create();try{
   await assert.rejects(a.ingest(scope,gift(-1),at),/事件/);
   await assert.rejects(a.ingest(scope,{...gift(1),receivedAt:at+999999},at),/事件/);
+  for(const field of ['at','startAt'])for(const value of [-1,'0',at+1,NaN]){
+   await assert.rejects(a.ingest(scope,{...gift(1),receivedAt:at,[field]:value},at),/事件/);
+  }
   await a.ingest(scope,gift(1),at+1000);await a.forget(scope,'uid:9');
   assert.deepEqual((await a.read(scope,at+2000)).users,[]);
   assert.equal((await a.read(scope,at+2000)).session.diamonds,10,'forgetting identity does not erase accounting totals');
   await a.clear(scope);assert.equal((await a.read(scope,at+2000)).session,null);
+ }finally{a.close();}
+});
+
+test('protocol missing timestamps remain unknown while receive time preserves observations',async()=>{
+ const a=create();try{
+  for(const [i,value] of [0,null,undefined].entries()){
+   await a.ingest(scope,{type:'chat',id:`missing-${i}`,at:value,startAt:value,text:'支持',receivedAt:at+i},at+i);
+  }
+  const data=await a.read(scope,at+3);
+  assert.equal(data.session.startKnown,false);
+  assert.equal(data.minutes[0].chats,3);
  }finally{a.close();}
 });
 

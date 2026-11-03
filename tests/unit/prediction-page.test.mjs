@@ -14,3 +14,11 @@ test('AI sees bounded numeric projections only for current fresh anchor',async()
  assert.equal(predictionContext(r,'3',now),null);assert.equal(predictionContext(r,'2',now+31000),null);
  const context=predictionContext(r,'2',now);assert.equal(context.revenue.point,100);assert.ok(!JSON.stringify(context).includes('private'));assert.ok(!JSON.stringify(context).includes('password'));
 });
+
+test('blocked or quarantined collection cannot establish continuous prediction coverage',()=>{
+ const engine={config:{anchorId:'2'},pk:{current:()=>null},anchorStats:{records:new Map()}};
+ for(const ingestion of [{blocked:true},{quarantined:50},{state:'retrying'},{state:'buffering'}]){
+  assert.equal(predictionPulse({engine,network:{ingestion},identity:{},connected:true}).connected,false);
+ }
+ assert.equal(predictionPulse({engine,network:{ingestion:{state:'healthy',blocked:false,quarantined:0}},identity:{},connected:true}).connected,true);
+});
