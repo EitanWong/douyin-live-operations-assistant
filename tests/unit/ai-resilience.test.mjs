@@ -78,3 +78,10 @@ test('addressed chat can use local quota after cloud cap without bypassing the l
   now+=21000;engine.requestChatAI({type:'chat',user:{id:'b',name:'其他人'},text:'再聊一句'},true);await new Promise(setImmediate);assert.equal(engine.localCalls.length,1);
  }finally{engine.stop();}
 });
+test('未启用端侧时云端可用完整总预算，仍受总截止限制并取消底层',async()=>{
+ const ai=createResilientAI({cloud:async()=>{await new Promise(resolve=>setTimeout(resolve,25));return '蓝白搭配很清爽。';}});
+ assert.equal(await ai({},{edge:{enabled:false},latency:{cloudMs:5,totalMs:100}}),'蓝白搭配很清爽。');
+ let aborted=false;
+ const blocked=createResilientAI({cloud:p=>new Promise(()=>p.signal.addEventListener('abort',()=>{aborted=true;}))});
+ await assert.rejects(blocked({},{edge:{enabled:false},latency:{cloudMs:5,totalMs:20}}),/超时/u);assert.equal(aborted,true);
+});

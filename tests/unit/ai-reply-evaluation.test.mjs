@@ -23,3 +23,18 @@ test('失败、取消、跳过不能因包含正确关键词而通过评测',()=
  const row=AI_TEST_CASES.find(r=>r.id==='weather');
  for(const status of ['failed','cancelled','skipped'])assert.ok(evaluateReply({status,answer:answers.weather,intent:'web-search'},row).some(c=>!c.pass));
 });
+test('自然表达“还没采集到”与“未知”具有相同语义，不把正确措辞误判为失败',()=>{
+ const row=AI_TEST_CASES.find(r=>r.id==='missing-data');
+ assert.ok(evaluateReply({status:'succeeded',answer:'本场收入目前还没采集到，null不等于0。'},row).every(c=>c.pass));
+ assert.ok(evaluateReply({status:'succeeded',answer:'本场还没采集到，就按0元算。'},row).some(c=>!c.pass));
+});
+test('纠正错误前提时接受同句指代，但不能接受巴黎属于德国的结论',()=>{
+ const row=AI_TEST_CASES.find(r=>r.id==='false-premise');
+ assert.ok(evaluateReply({status:'succeeded',answer:'巴黎不是德国首都，它是法国首都。'},row).every(c=>c.pass));
+ assert.ok(evaluateReply({status:'succeeded',answer:'巴黎是德国首都，而不是法国首都。'},row).some(c=>!c.pass));
+});
+test('澄清城市接受口语市，编造天气仍不通过',()=>{
+ const scenario=AI_TEST_CASES.find(r=>r.id==='clarify');
+ assert.ok(evaluateReply({status:'succeeded',answer:'查天气得知道城市，你在哪个市呀？'},scenario).every(r=>r.pass));
+ assert.ok(evaluateReply({status:'succeeded',answer:'你在哪个市呀？明天晴，20℃。'},scenario).some(r=>!r.pass));
+});

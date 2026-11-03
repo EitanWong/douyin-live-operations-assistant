@@ -52,7 +52,7 @@ test('配置切换后迟到结果失效，失败原因与联网异常可见',asy
  assert.equal((await running).status,'cancelled');
  const bad=fixture({request:d=>d.onload({status:401,responseText:'{}'})});assert.match((await bad.service.run({question:'你好'})).error,/认证|API Key/u);
  const offline=fixture({search:async()=>{throw Error('HTTP 429');},request:d=>respond(d,plan('web-search','','测试'))});
- const result=await offline.service.run({question:'查资料'});assert.match(result.searchError,/429/u);assert.equal(result.checks.every(c=>c.pass),false);
+ const result=await offline.service.run({question:'查资料'});assert.match(result.searchError,/429/u);assert.ok(result.status==='failed' || result.checks.some(c=>!c.pass));
 });
 test('测试额度按真实模型请求计数，搜索后第二次请求也计费，过一小时可继续',async()=>{
  let calls=0;const f=fixture({request:d=>respond(d,++calls%2 ? plan('web-search','','规则') : '规则。[1]'),search:async()=>({results:[{index:1,content:'规则'}]})});

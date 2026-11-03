@@ -20,3 +20,13 @@ test('上下文经过 JSON 二次转义后仍在扩展后台整包上限以内',
   const request=makeAIRequest({knowledge:'"'.repeat(12000),context:Array.from({length:100},()=>({text:'"'.repeat(500)})),target:{text:'资料是什么'},maxLength:30},c.ai);
   assert.ok(JSON.stringify(request).length<=100000);assert.equal(JSON.parse(request.messages[1].content).target.text,'资料是什么');
 });
+test('过期账本不以当前总额进入模型，零仍为零，原始账本保持不变',async()=>{
+ const {applyPromptSources}=await import('../../src/services/ai-context.js');
+ const original={liveContext:{income:{at:10,stale:true,totalDiamonds:80,estimatedIncome:4,monthTotals:{totalDiamonds:80},dailyHistory:[{totalDiamonds:80}]}}};
+ const result=applyPromptSources(original,{});
+ assert.equal(result.liveContext.income.totalDiamonds,null);assert.equal(result.liveContext.income.estimatedIncome,null);
+ assert.equal(result.liveContext.income.monthTotals,undefined);assert.equal(result.liveContext.income.dailyHistory,undefined);
+ assert.equal(result.liveContext.income.stale,true);assert.equal(original.liveContext.income.totalDiamonds,80);
+ assert.equal(applyPromptSources({liveContext:{income:{stale:false,totalDiamonds:0}}},{}).liveContext.income.totalDiamonds,0);
+ assert.deepEqual(applyPromptSources(result,{}),result,'投影重复执行一致');
+});

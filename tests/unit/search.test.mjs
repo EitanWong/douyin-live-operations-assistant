@@ -57,6 +57,13 @@ test('开源jsonrepair修复模型JSON语法，修复后仍拒绝未知意图、
   assert.equal(parseAIIntent('```json\n{"intent":"chat","query":"","reply":"你好"}\n```',50).reply,'你好');
   for(const raw of ['{"intent":"shell","query":"","reply":"x"}','{"intent":"chat","query":"","reply":"x","code":"x"}','x'.repeat(12001)])assert.throws(()=>parseAIIntent(raw,50));
 });
+test('搜索和跳过意图允许省略语义上必为空的字段，不放宽搜索词或实际回复',()=>{
+ assert.deepEqual(parseAIIntent('{"intent":"web-search","query":"天气","freshness":"realtime"}',50),{intent:'web-search',query:'天气',reply:'',freshness:'realtime'});
+ assert.deepEqual(parseAIIntent('{"intent":"skip"}',50),{intent:'skip',query:'',reply:''});
+ assert.deepEqual(parseAIIntent('{"intent":"chat","reply":"你好。"}',50),{intent:'chat',query:'',reply:'你好。'});
+ assert.throws(()=>parseAIIntent('{"intent":"chat","query":"不应搜索","reply":"你好。"}',50));
+ for(const raw of ['{"intent":"web-search"}','{"intent":"chat","query":""}','{"intent":"web-search","query":"天气","reply":"直接编造"}'])assert.throws(()=>parseAIIntent(raw,50));
+});
 
 test('语义识别直播数据、聊天、澄清和跳过意图不调用搜索，不依赖问题关键词',async()=>{
   for(const [intent,reply] of [['live-data','本场已采集100钻。'],['chat','你好。'],['clarify','你想查哪个城市？'],['skip','']]){

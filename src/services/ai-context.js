@@ -3,7 +3,15 @@ import {retrieveMemories} from './knowledge.js';
 import {DOUYIN_RULES} from '../data/douyin-rules.js';
 import {selectLiveSources} from '../ai/context-policy.js';
 
-export function applyPromptSources(prompt,config){return prompt.liveContext && Object.values(config.contextSources || {}).includes(false) ? {...prompt,liveContext:selectLiveSources(structuredClone(prompt.liveContext),config.contextSources)} : prompt;}
+export function applyPromptSources(prompt,config){
+ if(!prompt.liveContext)return prompt;
+ const liveContext=selectLiveSources(structuredClone(prompt.liveContext),config.contextSources);
+ // A stale ledger is unavailable current evidence. Keep historical questions
+ // on the separately dated giftHistory, never a tempting stale current total.
+ if(liveContext.income?.stale)liveContext.income={at:liveContext.income.at,stale:true,totalDiamonds:null,estimatedIncome:null,
+  unavailableReason:'本场账本观测已过期，当前钻石与金额未知；不能视为0。'};
+ return {...prompt,liveContext};
+}
 
 export function currentAIPrompt(prompt) {
   const current=prompt.getAIContext?.();

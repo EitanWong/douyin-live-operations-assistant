@@ -43,7 +43,7 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
   const provider=JSON.stringify([config.pipeline?.mode,config.pipeline?.workspaceId,config.pipeline?.region,config.endpoint,config.model,config.pipeline?.replyModel]);
   const cloudWork=async()=>{
    if(prompt.cloudAllowed===false || config.edge?.localOnly || (quotaPauses.get(provider) || 0)>now())throw new Error('云端额度暂停或使用本地模式，需要已准备的端侧模型');
-   try{return await breaker(config).execute(()=>withDeadline(signal=>cloud({...prompt,signal,onLookup},config,{signal}),{signal:cloudSignal.signal,timeout:()=>researching ? RESEARCH_TIMEOUT_MS : limits.cloudMs}));}
+   try{return await breaker(config).execute(()=>withDeadline(signal=>cloud({...prompt,signal,onLookup},config,{signal}),{signal:cloudSignal.signal,timeout:()=>researching ? RESEARCH_TIMEOUT_MS : config.edge?.enabled ? limits.cloudMs : limits.totalMs}));}
    catch(error){if(error.aiQuota || error.status===402){if(quotaPauses.size>=8)quotaPauses.delete(quotaPauses.keys().next().value);quotaPauses.set(provider,now()+300000);}throw error;}
   };
   try{

@@ -53,10 +53,10 @@ test('新增知识弹窗校验、确认与取消，未确认内容不污染列�
 test('编辑弹窗取消不改原文，跨页保留在编内容，确认后支持筛选、保存及重新打开',async()=>{
  let saved;const f=setup([record('a','开播安排'),record('b','商品口径',{content:'陶瓷茶杯不可微波',enabled:false}),record('c','旧活动',{expiresOn:'2020-01-01'})],{save:async config=>saved=config});
  try{
-  const {panel,edit}=f;panel.tab('knowledge');const row=panel.node('[data-memory-list]').firstElementChild;
+  const {panel,edit}=f;panel.tab('knowledge');const row=[...panel.node('[data-memory-list]').children].find(r=>r.record.id==='a');
   assert.ok(!row.open);row.open=true;row.querySelector('[data-memory-edit]').click();
   edit('[data-memory-field="content"]','取消的修改');panel.node('[data-memory-cancel]').click();
-  assert.equal(panel.read().ai.memory.entries[0].content,record('a','').content);assert.equal(panel.dirty,false);
+  assert.equal(panel.read().ai.memory.entries.find(r=>r.id==='a').content,record('a','').content);assert.equal(panel.dirty,false);
   row.querySelector('[data-memory-edit]').click();edit('[data-memory-field="title"]','每周排期');panel.tab('ai');panel.tab('knowledge');
   assert.equal(panel.node('[data-memory-field="title"]').value,'每周排期');panel.node('[data-memory-confirm]').click();
   edit('[data-memory-filter-query]','陶瓷');assert.deepEqual(visibleRows(panel).map(r=>r.record.id),['b']);
@@ -64,7 +64,7 @@ test('编辑弹窗取消不改原文，跨页保留在编内容，确认后支�
   panel.node('[data-action="save"]').click();await new Promise(setImmediate);
   assert.equal(saved.ai.memory.entries.find(r=>r.id==='a').title,'每周排期');assert.equal(saved.ai.memory.entries.length,3);
   assert.equal(panel.node('[data-knowledge-status]').value,'expired');
-  const reopened=new Panel({room:'1',config:saved,callbacks:{}});try{reopened.tab('knowledge');reopened.node('[data-memory-edit]').click();assert.equal(reopened.node('[data-memory-field="title"]').value,'每周排期');}finally{reopened.destroy();}
+  const reopened=new Panel({room:'1',config:saved,callbacks:{}});try{reopened.tab('knowledge');[...reopened.node('[data-memory-list]').children].find(r=>r.record.id==='a').querySelector('[data-memory-edit]').click();assert.equal(reopened.node('[data-memory-field="title"]').value,'每周排期');}finally{reopened.destroy();}
  }finally{f.close();}
 });
 

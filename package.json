@@ -12,7 +12,8 @@
     "native:install": "node scripts/install-native.mjs",
     "test:native": "python3 -m unittest discover -s native",
     "test:unit": "node --test tests/unit",
-    "test:integration": "node --test tests/integration"
+    "test:integration": "node --test tests/integration",
+    "eval:agent": "node scripts/evals/run.mjs"
   },
   "engines": {
     "node": ">=20"

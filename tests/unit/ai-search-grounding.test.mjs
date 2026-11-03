@@ -25,7 +25,7 @@ test('长直播资料下搜索正文仍进入最终请求，回复使用仅存�
   assert.equal(await client(prompt,config),'观测周期为73天。[3]');
   assert.deepEqual(answerInput.web_search,found);
   assert.ok(JSON.stringify(answerInput).length<=16000);
-  assert.ok(answerInput.context_meta.budget.omissions.length);
+  assert.equal(answerInput.evidence_context,undefined,'查证阶段不再发送无关直播背景，完整来源无需挤占裁剪预算');
   assert.equal(calls,2);assert.equal(searches,1);
 });
 

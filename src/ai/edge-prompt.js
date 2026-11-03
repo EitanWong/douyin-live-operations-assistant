@@ -18,7 +18,7 @@ function compactPK(pk){
 }
 export function makeEdgeMessages(input,config){
  const p=applyPromptSources(currentAIPrompt(input),config),evidence=assembleAIContext(p,config),limit=Math.min(p.maxLength || 50,50),live=p.liveContext;
- const data={question:String(p.target?.text || p.task?.instruction || '').slice(0,600),kind:p.task?.kind || 'ai',target:pick(p.target,['type','name','address','title']),
+ const data={question:String(p.target?.text || p.task?.instruction || '').slice(0,600),kind:p.task?.kind || 'ai',target:pick(p.target,['type','name','address','title']),calculation:p.calculation || null,
   recent_chat:(p.context || []).slice(-3).map(r=>({text:String(r.text || '').slice(0,100)})),recent_replies:(p.recentReplies || []).slice(-2).map(x=>String(x).slice(0,60)),
   knowledge:String(p.knowledge || '').slice(0,240),memories:evidence.evidence_context.memories.slice(0,1).map(r=>({content:r.content.slice(0,160),source:r.source})),
   media:(evidence.media_context?.observations || []).slice(-2).map(r=>({kind:r.kind,text:r.text.slice(0,160)})),
