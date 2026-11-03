@@ -73,7 +73,8 @@ const ext = development ? `${dist}/.chrome-extension-next-${process.pid}` : dest
 await mkdir(ext, { recursive:true });
 for (const name of ['manifest.json','popup.html','popup.css','popup.js','durable-storage.js','protocol-cache.js']) await writeFile(`${ext}/${name}`,await readFile(`${root}extension/${name}`));
 const glassLicense = await readFile(`${root}vendor/solid-glass/LICENSE`, 'utf8');
-await writeFile(`${ext}/solid-glass.css`, `/* Solid Glass · https://github.com/deeplethe/solid-glass\n${glassLicense}\n*/\n${SOLID_GLASS_CSS}`);
+const liquidGlassLicense = await readFile(`${root}vendor/liquid-glass-react/LICENSE`, 'utf8');
+await writeFile(`${ext}/solid-glass.css`, `/* Solid Glass · https://github.com/deeplethe/solid-glass\n${glassLicense}\nLiquid Glass React · https://github.com/rdev/liquid-glass-react\n${liquidGlassLicense}\n*/\n${SOLID_GLASS_CSS}`);
 await build({entryPoints:[`${root}extension/durable-storage.js`],bundle:true,format:'esm',target:'chrome120',banner:{js:bundleNotice},outfile:`${ext}/durable-storage.js`});
 await build({entryPoints:[`${root}src/ui/theme.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/theme.js`});
 // AI 模块的源码相对依赖不属于扩展目录，必须一起打包供后台加载。
@@ -98,6 +99,7 @@ chartLicenses += `jsonrepair · ISC\n${intentLicense}\n`;
 chartLicenses += `Cordis 4.0.0-rc.12 (vendor/cordis)\n${cordisLicense}\nCosmokit\n${cosmokitLicense}\n`;
 chartLicenses+=mediaLicense;
 chartLicenses+=productLicenses;
+chartLicenses+=`\nLiquid Glass React · https://github.com/rdev/liquid-glass-react\n${liquidGlassLicense}\n`;
 await writeFile(`${ext}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 await writeFile(`${dist}/THIRD_PARTY_LICENSES.txt`,chartLicenses);
 console.log('Built dist/chrome-extension (Manifest V3)');

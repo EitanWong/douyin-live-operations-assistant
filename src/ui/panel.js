@@ -20,6 +20,7 @@ import { ADAPTIVE_LAYOUT_CSS } from './adaptive-styles.js';
 import { FloatingWindow } from './floating-window.js';
 import { FLOATING_WINDOW_CSS } from './floating-styles.js';
 import { SOLID_GLASS_CSS } from './solid-glass.js';
+import {createLiquidGlassFilter} from './liquid-glass.js';
 import { installTheme } from './theme.js';
 import { sessionStart, sessionEnd, sessionDuration } from './live-session-view.js';
 import { AnchorDashboard } from './anchor-dashboard.js';
@@ -126,7 +127,7 @@ export class Panel {
     this.config = config; this.room = room; this.demo = demo; this.callbacks = callbacks; this.entries = []; this.open = true; this.anchorView = 'overview'; this.activeTab = 'pk'; this.activeCategory = 'interaction'; this.dirty = false; this.rowSerial = 0; this.logDirty = false; this.viewers = [];
     this.busyActions = new Set(); this.anchorIncome = null; this.host = document.createElement('div'); this.host.id = 'douyin-live-assistant'; this.host.style.cssText = 'position:fixed;z-index:2147483000;inset:0;pointer-events:none';
     this.root = this.host.attachShadow({ mode: 'open' });
-    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}${WORKSPACE_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style);
+    const style = document.createElement('style'); style.textContent = `${SOLID_GLASS_CSS}${CSS_TEXT}${ANCHOR_DASHBOARD_CSS}${FLOATING_WINDOW_CSS}${ADAPTIVE_LAYOUT_CSS}${NAVIGATION_CSS}${PK_SETTINGS_CSS}${AI_SETTINGS_CSS}${WORKSPACE_CSS}.panel,.launcher{pointer-events:auto}`; this.root.append(style,createLiquidGlassFilter(document));
     this.root.append(this.build()); this.workspaceLayout=new WorkspaceLayout(this.root);decorateActionIcons(this.root); document.body.append(this.host); this.navigation = new Navigation(this.root, {onNavigate:key=>this.tab(key),onError:message=>this.toast(message,true)}); this.adaptive = new AdaptiveLayout(this.root); this.theme = installTheme({ target:this.host, select:this.root.querySelector('[data-theme-choice]'), paletteSelect:this.root.querySelector('[data-theme-palette]'), materialSelect:this.root.querySelector('[data-theme-material]'), onError:message=>this.toast(message,true) }); this.charts = new LiveCharts(this.root); this.cache = new Map(); this.anchorDashboard = new AnchorDashboard(this.root, () => { if (this.latest) this.renderAnchor(this.latest[0]); });
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
@@ -253,7 +254,7 @@ export class Panel {
           </section>
           <section class="page" role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" data-page="appearance" hidden>
             <h2>外观</h2><p class="intro">选择适合当前环境的亮暗模式。</p>
-            <section class="settings-group"><h3>主题与配色</h3><p class="group-note">默认保留原始 Solid Glass 外观。可选 Radix Colors 配色，每套均支持亮色、暗色与跟随系统。</p><div class="grid"><label class="field"><span>主题配色</span><select data-theme-palette aria-label="主题配色"></select></label><label class="field"><span>表面材质</span><select data-theme-material aria-label="表面材质"></select></label></div><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
+            <section class="settings-group"><h3>主题与配色</h3><p class="group-note">默认使用 Liquid Glass 流光玻璃，可切换原始玻璃或简洁实色。可选 Radix Colors 配色，每套均支持亮色、暗色与跟随系统。</p><div class="grid"><label class="field"><span>主题配色</span><select data-theme-palette aria-label="主题配色"></select></label><label class="field"><span>表面材质</span><select data-theme-material aria-label="表面材质"></select></label></div><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
             <section class="settings-group"><h3>导航布局</h3><p class="group-note">宽窗口使用侧边栏，窄窗口自动切换为顶部导航。</p><label class="field"><span>侧边栏位置</span><select data-sidebar-side aria-label="侧边栏位置"><option value="left">左侧</option><option value="right">右侧</option></select><small>按操作习惯选择；右侧也适合左手操作。选择后自动保存到当前浏览器。</small></label></section>
           </section>
           <section class="page" role="tabpanel" id="page-features" aria-labelledby="tab-features" data-page="features" hidden>

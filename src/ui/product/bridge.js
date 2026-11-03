@@ -1,6 +1,7 @@
 // Transitional boundary: the controller owns drafts and actions; React owns
 // presentation. Only the active page is projected, never a second config store.
 import {describeLayout,isTransparentLayout,layoutChildren} from './layout.js';
+import {APPEARANCE_PREFERENCES} from '../appearance.js';
 
 const ignored = 'STYLE,SCRIPT,OPTION,SUMMARY,TEMPLATE'.split(',');
 const containers = 'DIV,SECTION,ARTICLE,MAIN,HEADER,FOOTER,FORM,FIELDSET,LABEL,NAV,UL,OL,LI,DL,DT,DD'.split(',');
@@ -64,7 +65,7 @@ export function createWorkspaceBridge(panel) {
     const subviews=[...root.querySelectorAll('[data-workspace-views] button')].filter(n=>available(n)).map(project);
     return {key,title:nav.find(n=>n.key===key)?.label || cleanText(page?.querySelector('h2')),nav,toolbar,subviews,sidebar:{side:panel.navigation?.side || 'left',collapsed:Boolean(panel.navigation?.collapsed),toggle:project(root.querySelector('[data-sidebar-toggle]'))},
       content:page ? {kind:'group',id:id(page),layout:'stack',tag:'div',classes:'product-page',children:children(page)} : null,
-      messages:[...(root.querySelector('.workspace-message-list')?.children || [])].filter(shown).map(node=>({...project(node),error:node.classList.contains('error')})).filter(Boolean),status:[...(root.querySelector('.shell-status')?.children || [])].map(cleanText).join(' · '),theme:panel.host.dataset.theme || 'system',palette:panel.host.dataset.palette || 'original',material:panel.host.dataset.material || 'glass',focus};
+      messages:[...(root.querySelector('.workspace-message-list')?.children || [])].filter(shown).map(node=>({...project(node),error:node.classList.contains('error')})).filter(Boolean),status:[...(root.querySelector('.shell-status')?.children || [])].map(cleanText).join(' · '),theme:panel.host.dataset.theme || APPEARANCE_PREFERENCES.theme.fallback,palette:panel.host.dataset.palette || APPEARANCE_PREFERENCES.palette.fallback,material:panel.host.dataset.material || APPEARANCE_PREFERENCES.material.fallback,focus};
   }
   function refresh() {
     if(destroyed)return;
@@ -72,7 +73,7 @@ export function createWorkspaceBridge(panel) {
     signature=value;snapshot=next;for(const listener of listeners)listener();
   }
   const observer=new view.MutationObserver(records=>{const invalid=records.find(r=>r.attributeName==='aria-invalid' && r.target.getAttribute('aria-invalid')==='true');if(invalid)focus={id:id(invalid.target),serial:++focusSerial};refresh();});
-  observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','open','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','class']});
+  observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','open','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','class','data-nav-collapsed','data-nav-side']});
   const themeObserver=new view.MutationObserver(refresh);themeObserver.observe(panel.host,{attributes:true,attributeFilter:['data-theme','data-palette','data-material']});
   root.addEventListener('input',refresh);root.addEventListener('change',refresh);
   refresh();

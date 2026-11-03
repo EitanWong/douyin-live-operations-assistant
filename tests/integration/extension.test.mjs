@@ -996,7 +996,7 @@ test('构建后台独立交换百炼 WebRTC SDP，要求直播页、服务授权
 
 test('配色与材质经同一后台白名单保存，直播页和弹窗共享，拒绝任意键和值',async()=>{
  const w=await worker(),popup={url:'chrome-extension://test/popup.html'};
- for(const [kind,initial,next] of [['palette','original','teal'],['material','glass','liquid']]){
+ for(const [kind,initial,next] of [['palette','original','teal'],['material','liquid','solid']]){
   assert.equal((await w.send({type:'appearance-get',kind})).value,initial);
   assert.equal((await w.send({type:'appearance-set',kind,value:next},popup)).ok,true);
   assert.equal((await w.send({type:'appearance-get',kind})).value,next);

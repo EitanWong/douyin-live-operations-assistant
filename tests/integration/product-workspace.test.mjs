@@ -23,6 +23,18 @@ test('操作通过原控制器执行一次，导航不重置草稿，服务消�
  const toast=f.root.querySelector('.toast');toast.hidden=false;toast.textContent='连接失败';await Promise.resolve();assert.match(JSON.stringify(f.bridge.getSnapshot().messages),/连接失败/);
  }finally{f.close();}
 });
+
+test('侧栏偏好由原控制器或跨窗口同步更新时，组件界面立即读取新状态',async()=>{
+ const f=setup();try{
+  f.panel.navigation={side:'left',collapsed:false};f.bridge.refresh();
+  let updates=0;const unsubscribe=f.bridge.subscribe(()=>updates++);
+  f.panel.navigation.collapsed=true;f.root.querySelector('.workspace').dataset.navCollapsed='true';
+  await Promise.resolve();assert.equal(f.bridge.getSnapshot().sidebar.collapsed,true);assert.equal(updates,1);
+  f.panel.navigation.side='right';f.root.querySelector('.workspace').dataset.navSide='right';
+  await Promise.resolve();assert.equal(f.bridge.getSnapshot().sidebar.side,'right');assert.equal(updates,2);
+  assert.equal(f.root.querySelector('input').value,'qwen-plus');unsubscribe();
+ }finally{f.close();}
+});
 test('表格快照保留列与行、数字排序值及导出边界，移除的控件不能被旧操作执行',()=>{
  const f=setup();try{const page=f.root.querySelector('[data-page="ai"]');page.innerHTML='<table><thead><tr><th>观众</th><th>钻石</th></tr></thead><tbody><tr><td>甲</td><td>9</td></tr><tr><td>乙</td><td>1,200</td></tr></tbody></table>';f.bridge.refresh();const table=find(f.bridge.getSnapshot().content,'table');assert.deepEqual(table.headers,['观众','钻石']);assert.equal(table.rows[1][1],'1,200');
  const old=f.bridge.getSnapshot().toolbar.find(n=>n.kind==='button');f.root.querySelector('[data-action="save"]').remove();assert.equal(f.bridge.activate(old.id),false);

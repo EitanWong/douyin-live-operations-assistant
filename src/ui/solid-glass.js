@@ -1,3 +1,4 @@
+import {LIQUID_GLASS_CSS} from './liquid-glass.js';
 import {THEME_PALETTE_CSS} from './theme-palette.js';
 
 /*
@@ -134,4 +135,4 @@ a{color:var(--sg-foreground);text-underline-offset:3px}
 [aria-invalid=true]{border-color:var(--sg-danger)!important}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 @media(forced-colors:active){.glass-panel,.glass-chosen,[data-slot=tag]{border:1px solid CanvasText}.primary{border:1px solid ButtonText}}
-`+THEME_PALETTE_CSS;
+`+THEME_PALETTE_CSS+LIQUID_GLASS_CSS;
