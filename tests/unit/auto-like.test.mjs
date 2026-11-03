@@ -15,7 +15,7 @@ function controller(overrides={}) {
 function pageFixture() {
   const dom=new JSDOM('',{url:'https://live.douyin.com/123'}),page=dom.window,requests=[];
   page.__STORE__={roomStore:{roomInfo:{roomId:'7700231539170609947',room:{web_rid:'123',status:2,room_auth:{Digg:true}}}},userStore:{userInfo:{id_str:'987654321'}}};
-  const sender=new PageRequestSender(page),client={request:async request=>{requests.push(request);return {data:{status_code:0}};}};
+  const sender=new PageRequestSender(page),client={request:async request=>{requests.push(request);return {data:{status_code:0,data:{}}};}};
   sender.client=()=>client;
   return {dom,page,sender,client,requests,room:page.__STORE__.roomStore.roomInfo.room};
 }
@@ -110,6 +110,45 @@ test('网页点赞 POST 空 body、精确64位房间ID、原生 count，同批�
     assert.equal((await f.sender.commitLike(token,20,1)).submitted,true);assert.equal(f.requests.length,1);
   }finally{f.dom.window.close();}
 });
+test('原生空成功回包立即接受，无本人广播也不等待或创建回执超时',async()=>{
+  const f=pageFixture();try{
+    f.page.setTimeout=()=>assert.fail('点赞成功不应等待广播超时');
+    const pending=deferred();f.client.request=request=>{f.requests.push(request);return pending.promise;};
+    const {token}=f.sender.prepareLike();let settled=false;
+    const request=f.sender.commitLike(token,5,1);request.then(()=>{settled=true;});
+    await new Promise(setImmediate);assert.equal(settled,false);assert.equal(f.requests.length,1);
+    pending.resolve({data:{status_code:0,data:{},extra:{now:1793031045057}}});
+    assert.deepEqual(await request,{submitted:true,count:5});assert.equal(f.sender.likes.pending,false);
+  }finally{f.page.close();}
+});
+test('没有消息服务、订阅不可用或消息服务替换均不阻止平台接受点赞',async()=>{
+  for(const message of [undefined,{}, {on:()=>{}}, {on:()=>{throw Error('IM unavailable');}}]){
+    const f=pageFixture();try{
+      f.page.__STORE__.singletonStore={message};
+      const {available,token}=f.sender.prepareLike();assert.equal(available,true);
+      f.client.request=async request=>{f.requests.push(request);f.page.__STORE__.singletonStore.message={};return {data:{status_code:0}};};
+      assert.deepEqual(await f.sender.commitLike(token,3,1),{submitted:true,count:3});
+      assert.equal(f.requests.length,1);
+    }finally{f.page.close();}
+  }
+});
+test('HTTP 尚未返回时切房、换账号或失去点赞权限，停止且不继续下一批',async()=>{
+  for(const change of [
+    f=>{f.page.__STORE__.roomStore.roomInfo.roomId='7700000000000000000';},
+    f=>{f.page.__STORE__.userStore.userInfo.id_str='123456789';},
+    f=>{f.room.room_auth.Digg=false;},
+    f=>{f.room.status=4;},
+    f=>{Object.defineProperty(f.page.navigator,'onLine',{value:false});}
+  ]){
+    const f=pageFixture();try{
+      const pending=deferred();f.client.request=request=>{f.requests.push(request);return pending.promise;};
+      const {token}=f.sender.prepareLike(),request=f.sender.commitLike(token,3,1);
+      change(f);pending.resolve({data:{status_code:0}});
+      assert.equal((await request).submitted,false);assert.equal(f.requests.length,1);
+      assert.equal((await f.sender.commitLike(token,3,2)).submitted,false);assert.equal(f.requests.length,1);
+    }finally{f.page.close();}
+  }
+});
 test('网页节流、非法数量、跳号和停止后的票据不产生第二个请求',async t=>{
   t.mock.method(Date,'now',()=>1800000000000);
   for(const [count,sequence] of [[0,1],[101,1],[1.5,1],[1,0],[1,2],[1,'1']]){
@@ -144,10 +183,16 @@ test('准备和提交均核对登录、开播、点赞权限、账号与当前�
 });
 test('网页会话取消、pagehide、过期、服务端拒绝或未知后均失效',async()=>{
   for(const cancel of [f=>f.sender.stopLike(f.sender.likes.session.token),f=>f.page.dispatchEvent(new f.page.Event('pagehide')),f=>{f.sender.likes.session.at-=3600001;}]){const f=pageFixture();try{const {token}=f.sender.prepareLike();cancel(f);assert.equal((await f.sender.commitLike(token,1,1)).submitted,false);assert.equal(f.requests.length,0);}finally{f.dom.window.close();}}
-  for(const response of [{data:{status_code:403}},{data:{}},'throw']){const f=pageFixture();try{let calls=0;f.client.request=async()=>{calls++;if(response==='throw')throw Error();return response;};const {token}=f.sender.prepareLike();const result=await f.sender.commitLike(token,1,1);assert.equal(result.submitted,false);assert.equal(result.unknown,response?.data?.status_code===403?undefined:true);await f.sender.commitLike(token,1,1);assert.equal(calls,1);}finally{f.dom.window.close();}}
+  for(const response of [{data:{status_code:403}},{data:{}},{data:{status_code:'0'}},{data:{status_code:null}},null,'throw']){const f=pageFixture();try{let calls=0;f.client.request=async()=>{calls++;if(response==='throw')throw Error();return response;};const {token}=f.sender.prepareLike();const result=await f.sender.commitLike(token,1,1);assert.equal(result.submitted,false);assert.equal(result.unknown,response?.data?.status_code===403?undefined:true);await f.sender.commitLike(token,1,1);assert.equal(calls,1);}finally{f.dom.window.close();}}
 });
-test('网页提交期间停止并重新准备也不能绕过并发限制',async()=>{
-  const f=pageFixture();try{const pending=deferred();f.client.request=()=>pending.promise;const {token}=f.sender.prepareLike();const request=f.sender.commitLike(token,20,1);f.sender.stopLike(token);assert.equal(f.sender.prepareLike().available,false);pending.resolve({data:{status_code:0}});assert.equal((await request).count,20);}finally{f.dom.window.close();}
+test('网页提交期间停止后仍能确认已在途批次，不能重开或产生第二个请求',async()=>{
+  const f=pageFixture();try{
+    const pending=deferred();f.client.request=request=>{f.requests.push(request);return pending.promise;};
+    const {token}=f.sender.prepareLike(),request=f.sender.commitLike(token,20,1);f.sender.stopLike(token);
+    assert.equal(f.sender.prepareLike().available,false);pending.resolve({data:{status_code:0}});
+    assert.deepEqual(await request,{submitted:true,count:20});assert.equal(f.requests.length,1);
+    assert.equal((await f.sender.commitLike(token,20,2)).submitted,false);assert.equal(f.requests.length,1);
+  }finally{f.dom.window.close();}
 });
 test('默认浏览器定时器保持正确 receiver 并能继续第二批',async()=>{
   const originalSet=globalThis.setTimeout,originalClear=globalThis.clearTimeout,timers=[];

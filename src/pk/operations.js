@@ -1,4 +1,5 @@
 import { summarizeAnchorBattles } from '../core/anchor-stats.js';
+import { GIFT_BROADCAST_VERSION } from '../core/gift-analytics.js';
 
 const DAY_MS = 86400000;
 const SHANGHAI_OFFSET_MS = 8 * 3600000;
@@ -34,7 +35,25 @@ const strategyCompetitors = pk => pk?.competitors?.length ? pk.competitors : [
   {anchorId:pk?.opponentId,name:pk?.opponentName,isSelf:false,score:pk?.opponentScore,scoreObserved:pk?.opponentScoreObserved,scoreAgeMs:pk?.dataQuality?.opponentScoreAgeMs}
 ];
 
-export function buildPKStrategyContext(pk, liveContext, rank) {
+export function unlightedExhibitionGifts(exhibition, now = Date.now()) {
+  if (!Number.isFinite(exhibition?.updatedAt) || exhibition.updatedAt>now || now-exhibition.updatedAt>=120000) return [];
+  const known=new Map();
+  for (const gift of exhibition.items || []) if (gift.lighted===false && String(gift.name || '').trim() && gift.giftId) known.set(String(gift.giftId),{giftId:String(gift.giftId),name:String(gift.name).trim().slice(0,80)});
+  return [...known.values()];
+}
+
+export function exhibitionGiftNotice(exhibition, now = Date.now(), maxLength = 80) {
+  const gifts=unlightedExhibitionGifts(exhibition,now), selected=[];
+  const prefix=exhibition?.partial || exhibition?.truncated ? '已知还差' : '展馆还差';
+  const suffix='未点亮。';
+  for (const gift of gifts) {
+    if ([...`${prefix}${[...selected,gift].map(row=>row.name).join('、')}${suffix}`].length>maxLength) continue;
+    selected.push(gift); if (selected.length>=5) break;
+  }
+  return selected.length ? {text:`${prefix}${selected.map(row=>row.name).join('、')}${suffix}`,giftIds:selected.map(row=>row.giftId)} : null;
+}
+
+export function buildPKStrategyContext(pk, liveContext, rank, exhibition = null, now = Date.now()) {
   if (!pk || pk.phase !== 'active') return null;
   const competitors = strategyCompetitors(pk), self = competitors.find(item => item.isSelf);
   const top = Math.max(...competitors.filter(item => item.scoreObserved).map(item => item.score), -Infinity);
@@ -67,6 +86,10 @@ export function buildPKStrategyContext(pk, liveContext, rank) {
     observedChat: (pk.chatHistory || []).slice(-12).map(item => ({ side: item.side, text: String(item.text || '').slice(0,160), at: item.at })),
     roomActivity: liveContext?.activityLastMinute || null,
     audience: liveContext?.audience || null,
+    exhibition:exhibition && unlightedExhibitionGifts(exhibition,now).length ? {
+      unlightedGifts:unlightedExhibitionGifts(exhibition,now).slice(0,30),partial:Boolean(exhibition.partial || exhibition.truncated),
+      instruction:'展馆提醒优先直接说还差哪些礼物未点亮，只使用 unlightedGifts 的名称；不播报已点亮数量、总项数或保级款数。列表不完整时说已知还差，不声称这是全部。'
+    } : null,
     rank: rank ? { at: rank.observedAt, before:visibleRank(rank.beforeRank), after:visibleRank(rank.afterRank),
       exhibitionRetention:rank.exhibitionRetention && !rank.exhibitionRetention.stale ? {name:rank.exhibitionRetention.name,remaining:rank.exhibitionRetention.remaining,at:rank.exhibitionRetention.observedAt} : null } : null,
     dataLimits: '只提供本页采集到的样本；未观测数据为未知。礼物钻石不等于 PK 分数，观众等级不能证明可用预算。'
@@ -171,12 +194,12 @@ export class PKOperations {
     const job=engine.queue.at(-1);
     // Keep the factual template in its queue position. AI may replace it once,
     // before the deadline; failure, quota, SKIP or late output keeps the template.
-    if (engine.config.ai.enabled && !engine.aiBusy) {
+    if (engine.config.ai.enabled && !engine.aiBusy && !extra.exhibitionGiftIds) {
       job.revision=(job.revision || 0)+1;job.aiPending=true;
       const deadline=Math.min(job.expires,engine.now()+5000);job.readyAt=deadline;
       void engine.requestAI(null,{
         kind:generation.kind || 'pk-announcement',data:generation.data || {fixedText:clipped},
-        instruction:'基于固定播报事实和共享直播上下文生成简短播报，不编造进度、比分或时间。',
+        instruction:'基于固定播报事实生成简短播报，所有统计仅用当前直播场次。若 data.exhibition.unlightedGifts 存在，优先直接提示这些礼物还未点亮，不说已点亮数量、总项数或保级款数；不得推荐清单之外的礼物。不编造进度、比分或时间。',
         targetJob:job,revision:job.revision,deadline,timeoutMs:Math.max(1,deadline-engine.now()),fallback:clipped,
         transform:raw=>{
           if(!this.validJob(job) || generation.current && !generation.current()){
@@ -196,8 +219,19 @@ export class PKOperations {
     return true;
   }
   validJob(job) {
+    if (job.kind==='live-stats' && job.liveStatsVersion!==GIFT_BROADCAST_VERSION) return false;
+    if (job.liveStatsAutomatic && (!this.engine.config.audienceBroadcast.enabled || !this.engine.config.incomeEnabled)) return false;
+    if (job.liveGiftSession) {
+      let income;
+      try { income=this.engine.liveData?.()?.income; } catch { return false; }
+      if (!income || income.endAt || income.id!==job.liveGiftSession || income.anchorId!==this.engine.config.anchorId) return false;
+    }
     if (!job.pkNotice) return true;
     const c = this.engine.config.pkOperations, pk = this.engine.pk.current();
+    if (job.exhibitionGiftIds) {
+      const gifts=unlightedExhibitionGifts(this.engine.anchorStats.exhibitionFor(this.engine.config.anchorId),this.engine.now());
+      if (!job.exhibitionGiftIds.every(id=>gifts.some(gift=>gift.giftId===id))) return false;
+    }
     return c.enabled && job.expires > this.engine.now()
       && (!job.pkFeature || c[job.pkFeature])
       && (!job.pkBattle || pk?.key === job.pkBattle && pk?.phase === 'active' && pk.remainingMs !== 0)
@@ -257,8 +291,8 @@ export class PKOperations {
       const s = view.session;
       this.notice(`report-session:${period}`,this.sessionText(),{pkFeature:'reportEnabled'});
       if (s.active || s.pendingResults) this.notice(`report-pending:${period}`, `本场PK：进行中${s.active}场，已结束待确认${s.pendingResults}场。`,{pkFeature:'reportEnabled'});
-      if (view.exhibition && now - view.exhibition.updatedAt < 120000) this.notice(`exhibition:${Math.floor(now / (c.reportSec * 1000))}`, `展馆已观测点亮${view.exhibition.lightedCount}/${view.exhibition.totalCount}项${view.exhibition.partial || view.exhibition.truncated ? '，列表不完整' : ''}。`,{pkFeature:'reportEnabled'});
-      if (view.exhibitionRetention && !view.exhibitionRetention.stale) this.notice(`retention:${Math.floor(now / (c.reportSec * 1000))}`, `${view.exhibitionRetention.name}，${view.exhibitionRetention.remaining ? `还差${view.exhibitionRetention.remaining}款保级` : '已保级'}。`,{pkFeature:'reportEnabled'});
+      const exhibitionNotice=exhibitionGiftNotice(view.exhibition,now,engine.config.sending.maxLength);
+      if (exhibitionNotice) this.notice(`exhibition:${Math.floor(now / (c.reportSec * 1000))}`,exhibitionNotice.text,{pkFeature:'reportEnabled',exhibitionGiftIds:exhibitionNotice.giftIds});
     }
     if (c.midnightEnabled && view.plan && pk?.phase !== 'active') {
       const plan = view.plan, until = plan.startAt - now;

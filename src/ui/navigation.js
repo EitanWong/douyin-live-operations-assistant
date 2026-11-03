@@ -4,11 +4,11 @@ import { bundledTools } from '../tools/bundled.js';
 
 export const NAVIGATION_GROUPS = [
   {key:'interaction',label:'直播互动',items:[
-    ['anchor','主播数据','chart-no-axes-combined'],['pk','PK 预测','swords'],
+    ['pk','PK 预测','swords'],
     ['gift','礼物感谢','gift'],['welcome','进场欢迎','hand'],['likes','点赞感谢','heart'],
     ['keywords','关键词回复','messages-square'],['bot','@机器人','bot'],['timers','定时消息','timer']
   ]},
-  {key:'tools',label:'扩展工具',items:[]},
+  {key:'tools',label:'扩展工具',items:[['anchor','主播数据','chart-no-axes-combined']]},
   {key:'settings',label:'设置',items:[
     ['features','功能开关','sliders-horizontal'],['appearance','外观','palette'],
     ['moderation','内容治理','activity'],['ai','AI 设置','sparkles'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],

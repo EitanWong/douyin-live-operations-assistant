@@ -47,6 +47,8 @@ test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，�
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,requests=[];
   try {
     Object.assign(page,{TextDecoder,TextEncoder});
+    // Regression: a native successful response need not have a LikeMessage,
+    // and the room may not expose an IM subscription service at all.
     page.__STORE__={roomStore:{roomInfo:{roomId:'7700231539170609947',room:{web_rid:'1',status:2,room_auth:{Digg:true}}}},userStore:{userInfo:{id_str:'987654321'}}};
     const client={defaults:{baseURL:page.location.origin,withCredentials:true},request:async request=>{requests.push(request);return {data:{status_code:0,data:{}}};}};
     const require=()=>({ZP:client});require.m={request:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
@@ -378,6 +380,10 @@ test('事件日志先持久化、后台重启后可回放，并严格隔离主�
   assert.equal((await restarted.send({type:'event-list'})).value[0].event.type,'room-sync');
   assert.equal((await restarted.send({type:'event-ack',key:observed.value.key})).ok,true);
   assert.equal((await restarted.send({type:'event-list'})).value.length,0);
+  const linked=await restarted.send({type:'event-append',id:'event-uuid-00000005',event:{type:'link-state',id:'link-1',linkedUsers:[{id:'12345',name:'连线主播'}]}});
+  assert.equal(linked.ok,true,'连线事件可通过后台白名单持久化');
+  assert.equal((await restarted.send({type:'event-list'})).value[0].event.type,'link-state');
+  assert.equal((await restarted.send({type:'event-ack',key:linked.value.key})).ok,true);
   assert.equal((await restarted.send({type:'event-ack-many',keys:['live-assistant:event:2:foreign-000000000000']})).ok,false);
   assert.equal((await restarted.send({type:'event-ack-many',keys:Array(101).fill(batch.value.key)})).ok,false);
 });
@@ -398,6 +404,16 @@ test('音视频后台接收有界媒体包，拒绝网页伪造、远程图片�
   const key='live-assistant:media-key:https://vision.test';
   assert.equal((await w.send({type:'set',key,value:'media-key'})).ok,true);
   const restarted=await worker(w.values,w.indexedDB);assert.equal((await restarted.send({type:'init'})).value[key],'media-key');
+  w.deny();assert.equal((await w.send(message)).ok,false);assert.equal(w.requests.length,1);
+});
+
+test('扩展后台接受 Omni 音画组合，仅允许本地媒体并检查权限',async()=>{
+  const w=await worker(),body={model:'qwen3.5-omni-flash',stream:true,temperature:0,max_tokens:500,modalities:['text'],messages:[{role:'system',content:'描述音画'},{role:'user',content:[{type:'text',text:'描述直播'},{type:'image_url',image_url:{url:'data:image/jpeg;base64,/9j/2Q=='}},{type:'input_audio',input_audio:{format:'wav',data:'data:audio/wav;base64,UklGRiQAAABXQVZF'}}]}]};
+  const message={type:'media',url:'https://vision.test/v1/chat/completions',data:JSON.stringify(body),headers:{Authorization:'Bearer media-test',Cookie:'secret'}};
+  assert.equal((await w.send(message)).ok,true);assert.equal(w.requests.length,1);
+  assert.equal(w.requests[0].opts.headers.Cookie,undefined);assert.equal(w.requests[0].opts.credentials,'omit');
+  const remote=structuredClone(body);remote.messages[1].content[2].input_audio.data='https://example.com/audio.wav';
+  assert.equal((await w.send({...message,data:JSON.stringify(remote)})).ok,false);
   w.deny();assert.equal((await w.send(message)).ok,false);assert.equal(w.requests.length,1);
 });
 
@@ -592,12 +608,17 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
     const root = dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot;
     assert.ok(root);
     const emit = event => nativeEvent(dom.window,event);
+    emit({type:'link-state',id:'link-1',roomId:'server-room',linkedUsers:[{id:anchorId},{id:'12345'}]});
+    const linkDeadline=Date.now()+2000;
+    while(Date.now()<linkDeadline && root.querySelector('[data-live-mode]').textContent!=='连线中')await new Promise(resolve=>setTimeout(resolve,25));
+    assert.equal(root.querySelector('[data-live-mode]').textContent,'连线中');
     emit({type:'pk-score',id:'pk-score-1',battleId:'two-battle',roomId:'server-room',scores:[{anchorId:'12345',score:0},{anchorId,score:65249}]});
     const deadline = Date.now()+2000;
     while (Date.now()<deadline && root.querySelector('[data-pk-self-score]').textContent !== '65,249') await new Promise(resolve=>setTimeout(resolve,25));
     assert.equal(root.querySelector('[data-pk-self-score]').textContent, '65,249');
     assert.equal(root.querySelector('[data-pk-opponent-score]').textContent, '0');
     assert.equal(root.querySelector('[data-pk-state]').textContent, 'PK 进行中');
+    assert.equal(root.querySelector('[data-live-mode]').textContent,'PK 中');
     assert.equal(root.querySelector('[data-pk-self-speed]').textContent, '0');
     assert.notEqual(root.querySelector('[data-pk-self-win]').textContent, '未知');
     assert.equal(values['live-assistant:runtime:1']?.wasRunning || false, false);

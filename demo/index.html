@@ -46,10 +46,10 @@ body{background:#f3f3f5;color:#1d1d1f}main{width:min(1420px,calc(100% - 48px));m
   <div class="event-group"><h3>进场欢迎</h3><div class="buttons"><button data-event="qualified">高等级 · 本房粉丝团</button><button data-event="other">非本房粉丝团</button><button data-event="unlit">粉丝团未点亮</button><button data-event="low-level">低等级观众</button></div></div>
   <div class="event-group"><h3>互动与公屏</h3><div class="buttons"><button data-event="like">❤️ 点赞 ×30</button><button data-chat="随便聊两句，主播～">普通弹幕</button><button data-chat="@场控 菜单" data-mention="true">@场控 菜单</button></div><small>AI 默认关闭；按你的功能开关生成回复。</small></div>
   <div class="event-group"><h3>多人互动游戏</h3><div class="buttons"><button data-chat="开始接龙">🔤 成语接龙</button><button data-chat="开始猜数字">🔢 猜数字</button><button data-chat="开始真心话">💬 真心话</button><button data-chat="开始大冒险">🎭 大冒险</button></div><small>先在控制面板启用机器人，再开始场控；开局后直接发答案或「报名」。</small></div>
-  <div class="event-group"><h3>主播与 PK 数据演示</h3><div class="buttons"><button data-pk-demo="start">模拟 PK 追分局</button><button data-pk-demo="end">模拟终局</button><button data-anchor-demo>模拟主播统计</button></div><small>仅生成本地模拟数据，不连接真实直播间。</small></div>
+  <div class="event-group"><h3>主播与 PK 数据演示</h3><div class="buttons"><button data-link-demo="start">模拟连线</button><button data-link-demo="end">模拟断开连线</button><button data-pk-demo="start">模拟 PK 追分局</button><button data-pk-demo="end">模拟终局</button><button data-anchor-demo>模拟主播统计</button></div><small>仅生成本地模拟数据，不连接真实直播间。</small></div>
 </div></section>
 <footer>模拟器不会登录直播间，也不会发送真实弹幕或礼物。礼物图标从抖音公开 CDN 加载；名称和钻石价格取自一次公开直播间，仅作本地样例，真实目录、价格和房间布局可能变化。主播收入按约 0.05 元/钻估算，不代表平台结算。AI 请求仅在配置后发往你填写的服务。</footer>
-</main><script type="importmap">{"imports":{"/src/ui/window-presence.js":"/dist/window-presence.js","/src/ai/audience-memory.js":"/dist/audience-memory.js","/src/ai/assistant-config.js":"/dist/assistant-config.js","/src/ai/skills.js":"/dist/assistant-skills.js","/src/ai/local-agent.js":"/dist/local-agent.js","/src/services/retrieval.js":"/dist/knowledge-retrieval.js","/src/browser/media-session.js":"/dist/media-session.js","/src/services/completion-stream.js":"/dist/completion-stream.js","/src/ui/theme-palette.js":"/dist/theme-palettes.js","/src/services/ai-pipeline.js":"/dist/ai-pipeline.js","/src/ui/product/runtime.js":"/dist/product-ui.js","/src/ui/live-charts.js":"/dist/live-charts.js","/src/tools/cordis-adapter.js":"/dist/tool-runtime.js","/src/services/intent.js":"/dist/ai-intent.js","/src/services/live-stream-codecs.js":"/dist/live-stream-codecs.js"}}</script><script type="module">
+</main><script type="importmap">{"imports":{"/src/ui/window-presence.js":"/dist/window-presence.js","/src/ai/audience-memory.js":"/dist/audience-memory.js","/src/ai/assistant-config.js":"/dist/assistant-config.js","/src/ai/skills.js":"/dist/assistant-skills.js","/src/ai/local-agent.js":"/dist/local-agent.js","/src/services/retrieval.js":"/dist/knowledge-retrieval.js","/src/browser/media-session.js":"/dist/media-session.js","/src/services/completion-stream.js":"/dist/completion-stream.js","/src/ui/theme-palette.js":"/dist/theme-palettes.js","/src/services/ai-pipeline.js":"/dist/ai-pipeline.js","/src/ui/product/runtime.js":"/dist/product-ui.js","/src/ui/live-charts.js":"/dist/live-charts.js","/src/services/intent.js":"/dist/ai-intent.js","/src/services/live-stream-codecs.js":"/dist/live-stream-codecs.js","/src/tools/cordis-adapter.js":"/dist/tool-runtime.js"}}</script><script type="module">
 import { boot } from '../src/app.js';
 import { DEFAULTS, copy } from '../src/core/engine.js';
 const prefix = 'douyin-live-demo:';
@@ -65,6 +65,11 @@ boot({ demo: true, get: (key, fallback) => storage.has(key) ? storage.get(key) :
 const user = { id: '987654321000001', name: '青山', wealthLevel: 35, fanClubs: [{ anchorId: c.anchorId, level: 8, status: 1 }] };
 let pkDemoTimer,pkDemoBattle='',pkDemoSelf=0,pkDemoOpponent=0;
 const pkDemoEmit=event=>api.engine.ingest({roomId:'demo',id:`pk-demo-${++serial}`,source:'demo',...event});
+document.querySelector('[data-link-demo="start"]').addEventListener('click',()=>{
+  pkDemoEmit({type:'link-state',linkedUsers:[{id:c.anchorId,name:'夜航 · 模拟'},{id:'rival',name:'星河 · 模拟'}]});
+  api.panel.tab('pk');api.panel.refresh(api.engine,{connected:true,frames:1});
+});
+document.querySelector('[data-link-demo="end"]').addEventListener('click',()=>pkDemoEmit({type:'room-sync',syncType:'RoomLinkMicSyncData',syncDetails:{users:[]}}));
 document.querySelector('[data-pk-demo="start"]').addEventListener('click',()=>{
   clearInterval(pkDemoTimer);const now=Date.now();pkDemoBattle=`demo-battle-${now}`;
   pkDemoEmit({type:'pk-start',battleId:pkDemoBattle,anchorId:c.anchorId,opponentId:'rival',anchorName:'夜航 · 模拟',opponentName:'星河 · 模拟',startedAt:now-90000,endsAt:now+120000,receivedAt:now-90000});
@@ -92,13 +97,17 @@ document.querySelector('[data-anchor-demo]').addEventListener('click',async()=>{
       selfScore:score,opponentScore:i%3===0?score+1500:i%3===1?score-2300:score,selfScoreObserved:true,opponentScoreObserved:true,selfScoreAt:endedAt,opponentScoreAt:endedAt,selfScoreMeta:{final:true},opponentScoreMeta:{final:true}});
   }
   const sessions=Array.from({length:7},(_,i)=>({id:`anchor-live-${i}`,roomId:`anchor-room-${i}`,startAt:now-i*day-2*3600000,endAt:i ? now-i*day+1000 : 0,startSource:'platform',endSource:i ? 'platform' : '',giftCount:20+i,totalDiamonds:12000+i*1800,unknownCount:0,estimatedIncome:(12000+i*1800)*0.05}));
+  for (const [index,session] of sessions.entries()) {
+    session.audience=['晨星 · 模拟','青山 · 模拟','晚风 · 模拟','小鱼 · 模拟'].map((name,i)=>({userId:`uid:${1001+i}`,name,totalDiamonds:session.totalDiamonds*[0.5,0.25,0.15,0.1][i],giftDiamonds:session.totalDiamonds*[0.5,0.25,0.15,0.1][i],calibrationDiamonds:0,giftCount:[10+index,5,3,2][i],unknownCount:0}));
+    session.highestGift={unitValue:6000,tiedCount:1,gifts:[{giftId:'demo-castle',name:'梦幻城堡 · 模拟',unitValue:6000,senders:[{userId:'uid:1001',name:'晨星 · 模拟'}]}]};
+  }
   pkDemoEmit({type:'pk-rank-season',anchorId:c.anchorId,receivedAt:now,afterRank:{detail:'璀璨钻石 · 模拟',starCount:'3',targetStarCount:'5'}});
   const snapshotId=`demo-exhibition-${now}`;
   const items=giftCatalog.slice(0,16).map((gift,index)=>({giftId:`demo-${gift.id}`,name:gift.name,diamonds:gift.price,lighted:index<11,received:index<11?3:1,threshold:3,
     task:index%3===0?{current:2,target:5,rewardStars:3,finished:false}:null}));
   for(let chunk=0;chunk<2;chunk++) pkDemoEmit({type:'anchor-exhibition',anchorId:c.anchorId,snapshotId,receivedAt:now,section:'items',chunk,chunks:2,totalItems:items.length,
     summary:{name:'夜航 · 模拟',title:'本周展馆 · 模拟',level:8,gradeLevel:3,stars:{current:18,target:30}},items:items.slice(chunk*10,chunk*10+10)});
-  api.panel.open=true;api.panel.node('.panel').hidden=false;api.panel.tab('anchor');api.panel.refresh(api.engine,{connected:true});
+  if (!api.panel.open) api.panel.toggleOpen();api.panel.tab('anchor');api.panel.refresh(api.engine,{connected:true});
   await api.panel.callbacks.income();
   api.panel.updateAnchorIncome({anchorId:c.anchorId,allSessions:sessions,currentSession:sessions[0]});
   api.panel.updateIncome({room:'demo',month:new Date(now+8*3600000).toISOString().slice(0,7),sessions,days:[],legacyDays:[],summary:sessions.reduce((sum,row)=>({totalDiamonds:sum.totalDiamonds+row.totalDiamonds,giftCount:sum.giftCount+row.giftCount,estimatedIncome:sum.estimatedIncome+row.estimatedIncome,unknownCount:0}),{totalDiamonds:0,giftCount:0,estimatedIncome:0})});

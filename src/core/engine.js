@@ -10,18 +10,19 @@ import { DEFAULT_PHRASES, DEFAULT_TIMER_PHRASES, DEFAULT_KEYWORD_RULES, choosePh
 import { LEGACY_PHRASES, LEGACY_TIMER_PHRASES, PREVIOUS_DEFAULT_PHRASES } from './legacy-phrases.js';
 import { DeliveryTracker } from '../runtime/delivery.js';
 import { LiveMetrics } from '../runtime/live-metrics.js';
-import { REWARDS_DEFAULTS } from '../browser/rewards.js';
-import { SEARCH_DEFAULTS, validateSearchEndpoint } from '../services/search.js';
-import { MEMORY_DEFAULTS, validateMemory } from '../services/knowledge.js';
-import { MEDIA_DEFAULTS, validateMediaConfig } from '../services/media.js';
 import { LiveModeTracker, isLiveModeEvent } from '../runtime/live-mode.js';
 import { PKTracker, PK_EVENT_TYPES } from '../pk/model.js';
-import { PKOperations, PK_OPERATIONS_DEFAULTS, buildPKStrategyContext, strategyRegime } from '../pk/operations.js';
+import { PKOperations, PK_OPERATIONS_DEFAULTS, buildPKStrategyContext, strategyRegime, exhibitionGiftNotice, unlightedExhibitionGifts } from '../pk/operations.js';
 import { milestoneThankYou, recognizeMilestone } from './milestones.js';
 import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplate, validAudienceAI } from './audience.js';
 import { AnchorStats } from './anchor-stats.js';
 import { audienceReplyContext, giftReplyContext, isIntrusiveReply, liveReplyContext, observedReplyEvent } from './reply-context.js';
+import { SEARCH_DEFAULTS, validateSearchEndpoint } from '../services/search.js';
+import { currentGiftBroadcastMessages, GIFT_BROADCAST_VERSION } from './gift-analytics.js';
+import { REWARDS_DEFAULTS } from '../browser/rewards.js';
+import { MEMORY_DEFAULTS, validateMemory } from '../services/knowledge.js';
 import {AI_PIPELINE_DEFAULTS,validatePipeline,resolveMediaConfig} from '../services/ai-pipeline.js';
+import { MEDIA_DEFAULTS, validateMediaConfig } from '../services/media.js';
 
 export { recognizeMilestone };
 
@@ -34,6 +35,7 @@ export const DEFAULTS = {
   identity: { autoAnchor: true, autoSelf: true },
   moderation: MODERATION_DEFAULTS,
   incomeEnabled: true,
+  audienceBroadcast: {enabled:true,intervalSec:300},
   pkOperations: PK_OPERATIONS_DEFAULTS,
   // 消息按优先级连续出队；发送控件本身仍串行确认每条消息。
   sending: { maxLength: 50, duplicateSec: 120, queueLimit: 200 },
@@ -119,6 +121,9 @@ export function validateConfig(c) {
   if (typeof c.rewards.entryXPath !== 'string' || c.rewards.entryXPath.length > 2000 || c.rewards.entryXPath && !c.rewards.entryXPath.startsWith('/')) throw new Error('福袋入口 XPath 应以 / 开头，最多 2000 字符');
   if (typeof c.automation.autoStart !== 'boolean' || typeof c.gift.batchEnabled !== 'boolean') throw new Error('自动开启或合并感谢开关无效');
   if (typeof c.timersEnabled !== 'boolean') throw new Error('定时消息开关无效');
+  if (typeof c.audienceBroadcast.enabled !== 'boolean') throw new Error('贡献榜主动播报开关无效');
+  range(c.audienceBroadcast.intervalSec,30,3600,'贡献榜播报间隔');
+  if (!Number.isSafeInteger(c.audienceBroadcast.intervalSec)) throw new Error('贡献榜播报间隔必须为整数秒');
   for (const key of ['enabled','announceLifecycle','reportEnabled','midnightEnabled','aiEnabled']) if (typeof c.pkOperations[key] !== 'boolean') throw new Error('PK 播报开关无效');
   for (const [key,min,max] of [['reportSec',30,86400],['durationSec',30,3600],['crossMidnightSec',1,120],['preparationSec',10,600],['aiIntervalSec',15,600]]) {
     range(c.pkOperations[key],min,max,'PK 时间设置');
@@ -266,7 +271,7 @@ export class Engine {
     this.inFlight = null;
     this.deliveries = new DeliveryTracker({now});
     this.backlogLimit = 2000;
-    this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity;
+    this.bot = new RoomBot({now, random}); this.lastBotSend = -Infinity; this.lastGiftSend = -Infinity; this.lastLiveStatsSend = -Infinity;
     this.pk = new PKTracker({ now });
     this.liveMetrics = new LiveMetrics({now});
     this.liveMode = new LiveModeTracker({now});
@@ -274,6 +279,7 @@ export class Engine {
     this.roomData = {stats:null,audience:null,activities:[]};
     this.anchorStats = new AnchorStats({now});
     this.pkOperations = new PKOperations(this);
+    this.audienceBroadcast = {sessionKey:'',lastAt:null,retryAt:0};
     this.observationSignatures = new Map();
     this.stats = { events: 0, filtered: 0, previews: 0, submitted: 0, aiCalls: 0, retries: 0, expired: 0, overflow: 0, maxQueueWaitMs: 0 };
   }
@@ -283,6 +289,7 @@ export class Engine {
     if (!this.config.ai.enabled || !this.config.ai.chatEnabled || this.config.ai.replyFrequency==='off') this.chatAIBackground = null;
     if (!this.config.ai.enabled || !(this.config.ai.chatEnabled || this.config.bot.enabled) || this.config.ai.replyFrequency==='off') this.chatAIQueue = [];
     if (!this.config.moderation.enabled || !this.config.moderation.warningsEnabled) this.queue = this.queue.filter(job => job.kind !== 'moderation');
+    if (!this.config.audienceBroadcast.enabled || !this.config.incomeEnabled) this.queue=this.queue.filter(job=>!job.liveStatsAutomatic);
     this.rotation.clear();
     this.changed();
   }
@@ -298,7 +305,7 @@ export class Engine {
       seen: entries(this.seen), cooldowns: entries(this.cooldowns), duplicates: entries(this.duplicates),
       timerDue: entries(this.timerDue), rotation: entries(this.rotation), giftSentAt: entries(this.giftSentAt), milestoneSeen: entries(this.milestoneSeen), milestoneSession:this.milestoneSession,
       moderation:this.moderation.snapshot(), history: this.history.slice(-80), contextChat:this.contextChat.slice(-100),replyEvents:this.replyEvents.slice(-40),stats: this.stats, serial: this.serial,
-      lastInteraction: this.lastInteraction, lastChat: this.lastChat,
+      lastInteraction: this.lastInteraction, lastChat: this.lastChat, audienceBroadcast:this.audienceBroadcast,
       inFlight: this.inFlight, deliveries:this.deliveries.snapshot(), liveMetrics:this.liveMetrics.snapshot(), liveMode:this.liveMode.snapshot(), audience:this.audience.snapshot()
       , pk: this.pk.export(), roomData:this.roomData, anchorStats:this.anchorStats.snapshot(), pkOperations:this.pkOperations.snapshot()
     });
@@ -340,6 +347,9 @@ export class Engine {
     this.pk.restore(snapshot.pk || {});
     this.anchorStats.restore(snapshot.anchorStats || {});
     this.pkOperations.restore(snapshot.pkOperations);
+    if (typeof snapshot.audienceBroadcast?.sessionKey==='string') this.audienceBroadcast={sessionKey:snapshot.audienceBroadcast.sessionKey,
+      lastAt:Number.isFinite(snapshot.audienceBroadcast.lastAt) ? snapshot.audienceBroadcast.lastAt : null,
+      retryAt:Number.isFinite(snapshot.audienceBroadcast.retryAt) ? snapshot.audienceBroadcast.retryAt : 0};
     this.liveMetrics.restore(snapshot.liveMetrics);
     this.liveMode.restore(snapshot.liveMode);
     if (snapshot.roomData && typeof snapshot.roomData === 'object') this.roomData = {
@@ -364,6 +374,12 @@ export class Engine {
     }
     for (const record of this.deliveries.pending()) this.retryDelivery(record, '恢复未点击或明确被拒绝的消息');
     this.queue = this.queue.filter(job=>!job.deliveryUncertain);
+    // An old saved round may contain scores or truncated names. Replace that
+    // whole round with the current formatter rather than resume obsolete text.
+    if (this.queue.some(job=>job.kind==='live-stats' && job.liveStatsVersion!==GIFT_BROADCAST_VERSION)) {
+      this.queue=this.queue.filter(job=>job.kind!=='live-stats');
+      this.audienceBroadcast={sessionKey:'',lastAt:null,retryAt:0};
+    }
     this.rebuildGiftIndex();
     this.resumeRequested = Boolean(snapshot.running);
     this.changed();
@@ -544,9 +560,9 @@ export class Engine {
     const checked = cleanMessage(text, this.config);
     if (!checked.ok) { this.filtered(`${kind}：${checked.reason}`); return false; }
     const now = this.now();
-    const eventReplies = kind === 'gift' || kind === 'like' || kind === 'bot';
+    const eventReplies = kind === 'gift' || kind === 'like' || kind === 'bot' || kind === 'live-stats' && extra.liveStatsAutomatic;
     if (!eventReplies && ((this.duplicates.get(checked.text) ?? -Infinity) + this.config.sending.duplicateSec * 1000 > now || this.queue.some(q => q.text === checked.text))) { this.filtered('重复话术已过滤'); return false; }
-    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, pk: 105, bot: 90, moderation: 110, milestone: 85, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
+    const item = { id: ++this.serial, kind, text: checked.text, priority: ({ gift: 100, pk: 105, bot: 90, moderation: 110, milestone: 85, 'live-stats':85, welcome: 80, keyword: 60, ai: 40, like: 30, timer: 20 })[kind] || 10, created: now, expires: now + (kind === 'gift' ? 120000 : 45000), ...extra };
     // 礼物是已发生的事实，不能因为普通互动积压而静默丢弃。
     // 普通互动仍受 queueLimit 约束，并优先淘汰低优先级、较旧的任务。
     const isGift = kind === 'gift' || extra.giftReply;
@@ -555,7 +571,7 @@ export class Engine {
       let lowest = null, lowestIndex = -1;
       for (let index = 0; index < this.queue.length; index++) {
         const q = this.queue[index];
-        if (q.giftReply || q.kind === 'bot' || q.kind==='giveaway') continue;
+        if (q.giftReply || q.kind === 'bot' || q.kind==='giveaway' || q.liveStatsGroup) continue;
         if (!lowest || q.priority < lowest.priority || q.priority === lowest.priority && q.created < lowest.created) { lowest = q; lowestIndex = index; }
       }
       if (!lowest || lowest.priority >= item.priority) { if (!extra.quietOverflow) { this.stats.overflow++; this.filtered('队列已满，本次互动未入队'); } return false; }
@@ -563,6 +579,41 @@ export class Engine {
     }
     this.queue.push(item); this.indexGiftJob(item);
     this.log('queue', `${kind}：${checked.text}`); this.changed(); return true;
+  }
+  queueLiveStats(messages, sessionId, {automatic=false} = {}) {
+    const extra={kind:'live-stats',liveGiftSession:sessionId,liveStatsVersion:GIFT_BROADCAST_VERSION,liveStatsAutomatic:automatic};
+    if (!this.running || !sessionId || !messages.length || !this.pkOperations.validJob(extra)) return false;
+    if (this.queue.some(job=>job.liveGiftSession===sessionId) || this.inFlight?.jobs.some(job=>job.liveGiftSession===sessionId)) return false;
+    // Reserve one accepted response, including all its platform-sized parts,
+    // just like a multi-part bot reply. Validate everything before reserving it.
+    const checked=messages.map(text=>cleanMessage(text,this.config)), now=this.now();
+    if (this.queue.length>=this.config.sending.queueLimit || this.queue.length+messages.length>this.backlogLimit || checked.some(row=>!row.ok)) return false;
+    const texts=checked.map(row=>row.text);
+    if (new Set(texts).size!==texts.length || texts.some(text=>!automatic && (this.duplicates.get(text) ?? -Infinity)+this.config.sending.duplicateSec*1000>now || this.queue.some(job=>job.text===text))) return false;
+    // Lifecycle validation cancels the whole round on pause/end/session change;
+    // short message expiry must not cut off a round during a slow send or retry.
+    if (!this.enqueue('live-stats',texts[0],{...extra,liveStatsGroup:this.serial+1,liveStatsPart:0,expires:Infinity})) return false;
+    const first=this.queue.at(-1);
+    for (const [index,text] of texts.slice(1).entries()) this.queue.push({...first,id:++this.serial,text,liveStatsPart:index+1});
+    this.audienceBroadcast={sessionKey:JSON.stringify([this.config.anchorId,sessionId]),lastAt:now,retryAt:0};
+    this.changed();
+    return true;
+  }
+  tickAudienceBroadcast(canSend) {
+    if (!canSend || !this.config.audienceBroadcast.enabled || !this.config.incomeEnabled) return false;
+    let income;
+    try { income=this.liveData()?.income; } catch { return false; }
+    if (!income || income.endAt || !income.id || income.anchorId!==this.config.anchorId) return false;
+    const now=this.now(), key=JSON.stringify([this.config.anchorId,income.id]);
+    if (this.audienceBroadcast.sessionKey!==key) this.audienceBroadcast={sessionKey:key,lastAt:null,retryAt:0};
+    const state=this.audienceBroadcast;
+    if (now<state.retryAt || state.lastAt!==null && now-state.lastAt<this.config.audienceBroadcast.intervalSec*1000) return false;
+    if (this.queue.some(job=>job.liveGiftSession===income.id) || this.inFlight?.jobs.some(job=>job.liveGiftSession===income.id)) return false;
+    const messages=currentGiftBroadcastMessages(income,this.config.sending.maxLength);
+    if (messages.length && this.queueLiveStats(messages,income.id,{automatic:true})) return true;
+    // Retry after data or queue capacity changes, without piling up missed rounds.
+    state.retryAt=now+5000;
+    return true;
   }
   ingest(event, {giveawayChat=false} = {}) {
     try { this.ingestEvent(event, {giveawayChat}); } finally { this.changed(); }
@@ -654,7 +705,7 @@ export class Engine {
       }
       this.log('system', text); return;
     }
-    if (['emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push'].includes(event.type)) {
+    if (['emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','link-state','guest-link-state','fansclub-push'].includes(event.type)) {
       this.roomData.activities.push({...event,receivedAt:arrival});
       this.roomData.activities = this.roomData.activities.slice(-100);
       const labels = {
@@ -667,7 +718,7 @@ export class Engine {
         'room-indicator':'房间状态标记', 'gift-catalog':'团播礼物目录候选', 'battle-bonus':'PK 奖励',
         'battle-property':'PK 道具状态', 'battle-season-honor':'PK 赛季荣誉', 'popular-card':'人气卡状态',
         'fansclub-statistics':'粉丝团人数', 'group-live-members':'团播成员榜', 'group-live-income':'团播成员收益', 'room-ticket':'付费房票状态',
-        'linkmic-positions':'连麦席位状态', 'guest-link-state':'嘉宾连麦状态', 'fansclub-push':'粉丝团播报'
+        'linkmic-positions':'连麦席位状态', 'link-state':'主播连线状态', 'guest-link-state':'嘉宾连麦状态', 'fansclub-push':'粉丝团播报'
       };
       const detail = event.text || event.notifySubType || event.syncType || event.activityKind || event.title || event.display || event.scene || event.status || (event.type === 'gift-catalog' ? `${event.itemCount || 0} 项候选` : '') || event.products?.map(row=>row.promotionId).filter(Boolean).join('、') || event.updates?.map(row=>row.text).filter(Boolean).join('、') || '';
       this.log('system', `${labels[event.type]}${detail ? `：${String(detail).slice(0,160)}` : '已更新'}`);
@@ -778,6 +829,7 @@ export class Engine {
       if (command !== null) {
         if (this.config.bot.enabled && this.handleBot(event, command)) return;
         if (a.enabled && (a.chatEnabled || this.config.bot.enabled)) this.requestChatAI(event, true);
+        else if (this.config.bot.enabled) this.handleBot(event, '菜单');
         return;
       }
       if (this.config.bot.enabled) {
@@ -1036,7 +1088,7 @@ export class Engine {
   }
   giftReady(q, now) {
     if(q.kind==='giveaway' ? this.validGiveawayJob(q)!==true || now<(this.lastGiveawaySend+2000) : !this.running)return false;
-    return (!q.botGroup || !this.queue.some(job => job.botGroup === q.botGroup && job.botPart < q.botPart)) && (!q.afterBot || !this.queue.some(job => job.id === q.afterBot)) && (q.retryAt || 0) <= now && now >= (q.readyAt || 0) && (!q.giftReply || now >= Math.max(q.readyAt || 0, (this.giftSentAt.get(q.giftReply.userKey) ?? -Infinity) + this.config.gift.cooldownSec * 1000));
+    return (!q.liveStatsGroup || !this.queue.some(job=>job.liveStatsGroup===q.liveStatsGroup && job.liveStatsPart<q.liveStatsPart)) && (!q.botGroup || !this.queue.some(job => job.botGroup === q.botGroup && job.botPart < q.botPart)) && (!q.afterBot || !this.queue.some(job => job.id === q.afterBot)) && (q.retryAt || 0) <= now && now >= (q.readyAt || 0) && (!q.giftReply || now >= Math.max(q.readyAt || 0, (this.giftSentAt.get(q.giftReply.userKey) ?? -Infinity) + this.config.gift.cooldownSec * 1000));
   }
   giftBatch(first, now) {
     const jobs = [first]; let text = first.text;
@@ -1062,7 +1114,7 @@ export class Engine {
     return {jobs,text};
   }
   selectNextJob(queue, now) {
-    let best = null, oldestGift = null, waitingBot = null;
+    let best = null, oldestGift = null, waitingBot = null, waitingStats = null;
     const earlier = (a, b) => !b || a.created < b.created || a.created === b.created && a.id < b.id;
     const higherPriority = (a, b) => !b || a.priority > b.priority || a.priority === b.priority && earlier(a, b);
     for (const item of queue) {
@@ -1070,9 +1122,13 @@ export class Engine {
       if (higherPriority(item, best)) best = item;
       if (item.kind === 'gift' && earlier(item, oldestGift)) oldestGift = item;
       if ((item.kind === 'bot' || item.kind==='giveaway') && earlier(item, waitingBot)) waitingBot = item;
+      if (item.liveStatsGroup && earlier(item, waitingStats)) waitingStats = item;
     }
     if (!best) return null;
     if(best.kind==='giveaway' && best.priority>=115)return best;
+    // A busy gift/game stream still gives an accepted leaderboard one sending
+    // slot every five seconds, preserving room for the other interactions.
+    if (waitingStats && now-waitingStats.created>=5000 && now-this.lastLiveStatsSend>=5000) return waitingStats;
     if (!oldestGift) return waitingBot || best;
 
     // 礼物感谢是事实型事件，等待过久后必须占用下一个发送槽。
@@ -1160,17 +1216,19 @@ export class Engine {
   requestPKStrategy(pk) {
     const now = this.now(), battle = pk.key;
     const rank = this.anchorStats.rank.get(this.config.anchorId), retention = this.anchorStats.retentionFor(this.config.anchorId);
-    const context = buildPKStrategyContext(pk, liveReplyContext(this, now), rank || retention ? {...rank,exhibitionRetention:retention} : null);
+    const exhibition=this.anchorStats.exhibitionFor(this.config.anchorId);
+    const exhibitionNotice=exhibitionGiftNotice(exhibition,now,this.config.sending.maxLength);
+    const context = buildPKStrategyContext(pk, liveReplyContext(this, now), rank || retention ? {...rank,exhibitionRetention:retention} : null,exhibition,now);
     if (!context || pk.dataQuality?.stale || !Number.isFinite(pk.remainingMs) || pk.remainingMs <= 0) return;
     const regime = strategyRegime(pk);
-    const isCurrent = () => this.config.pkOperations.enabled && this.config.pkOperations.aiEnabled && this.pk.current()?.key === battle && this.pk.current()?.phase === 'active' && this.pk.current()?.remainingMs > 0 && !this.pk.current()?.dataQuality?.stale && strategyRegime(this.pk.current()) === regime && this.now() - now <= 10000;
+    const isCurrent = () => this.config.pkOperations.enabled && this.config.pkOperations.aiEnabled && this.pk.current()?.key === battle && this.pk.current()?.phase === 'active' && this.pk.current()?.remainingMs > 0 && !this.pk.current()?.dataQuality?.stale && strategyRegime(this.pk.current()) === regime && this.now() - now <= 10000 && (!exhibitionNotice || exhibitionNotice.giftIds.every(id=>unlightedExhibitionGifts(this.anchorStats.exhibitionFor(this.config.anchorId),this.now()).some(gift=>gift.giftId===id)));
     const self=context.competitors.find(row=>row.self), rivals=context.competitors.filter(row=>!row.self && row.score!==null);
     if(self?.score==null || !rivals.length)return;
     const top=Math.max(...rivals.map(row=>row.score)),gap=self.score-top;
-    const fixed=`PK剩余${Math.ceil(pk.remainingMs/1000)}秒，己方${self.score}分，${gap>0 ? `领先${gap}分` : gap<0 ? `落后${-gap}分` : '当前持平'}。`;
+    const fixed=exhibitionNotice?.text || `PK剩余${Math.ceil(pk.remainingMs/1000)}秒，己方${self.score}分，${gap>0 ? `领先${gap}分` : gap<0 ? `落后${-gap}分` : '当前持平'}。`;
     this.pkOperations.strategy={text:fixed,at:now,battle,regime,source:'rules'};
     this.pkOperations.notice(`strategy:${battle}:${Math.floor(now/(this.config.pkOperations.aiIntervalSec*1000))}`,fixed,
-      {channel:'admin',pkNotice:true,pkFeature:'aiEnabled',pkStrategy:true,pkRegime:regime,pkBattle:battle,expires:now+15000},
+      {channel:'admin',pkNotice:true,pkFeature:'aiEnabled',pkStrategy:true,pkRegime:regime,pkBattle:battle,expires:now+15000,...(exhibitionNotice ? {exhibitionGiftIds:exhibitionNotice.giftIds} : {})},
       {kind:'pk',data:context,current:isCurrent,accept:text=>{
         if(cleanMessage(text,this.config).ok && !isIntrusiveReply(text))this.pkOperations.strategy={text,at:this.now(),battle,regime,source:'ai'};
       }});
@@ -1179,6 +1237,7 @@ export class Engine {
   produceJobs(canSend,now) {
     let stateChanged=false;
     this.pkOperations.tick(canSend);
+    if (this.tickAudienceBroadcast(canSend)) stateChanged=true;
     this.drainChatAI();
     for (const job of this.queue) if (job.aiPending && now >= job.readyAt) { job.aiPending=false; job.needsGiftAI=false; stateChanged=true; }
     const sessionNotice = this.config.bot.enabled ? this.bot.expire(now) : null;
@@ -1285,6 +1344,7 @@ export class Engine {
       if (q.kind === 'giveaway') this.lastGiveawaySend=sentAt;
       if (q.kind === 'bot') this.lastBotSend = sentAt;
       if (q.kind === 'gift') this.lastGiftSend = sentAt;
+      if (q.liveStatsGroup) this.lastLiveStatsSend = sentAt;
       if (!['gift','like','bot'].includes(q.kind)) this.duplicates.set(q.text, sentAt);
       for (const job of batch.jobs) if (job.giftReply) this.giftSentAt.set(job.giftReply.userKey, sentAt);
     };

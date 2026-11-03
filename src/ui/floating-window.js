@@ -72,7 +72,9 @@ export class FloatingWindow {
   }
   applySize(size = this.preferredSize) {
     const limits = this.sizeLimits(), v = this.viewport();
-    this.width = floatingClamp(size?.width ?? 620, limits.minWidth, limits.maxWidth);
+    // Use desktop space on first open; explicit resizing remains authoritative.
+    const defaultWidth = Math.min(1280, Math.max(620, Math.round(v.width * .78)));
+    this.width = floatingClamp(size?.width ?? defaultWidth, limits.minWidth, limits.maxWidth);
     this.height = floatingClamp(size?.height ?? Math.min(800, v.height - (v.width > 560 ? 110 : 24)), limits.minHeight, limits.maxHeight);
     this.shell.style.width = `${this.width}px`;
     this.shell.style.height = `${this.height}px`;

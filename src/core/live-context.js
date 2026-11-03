@@ -1,4 +1,5 @@
 import { summarizeAnchorBattles } from './anchor-stats.js';
+import { giftSessionContext, giftHistoryContext, pkPeriodContext } from './live-statistics.js';
 
 export const sharedLiveContext = (() => {
 const text = value => typeof value === 'string' ? [...value].slice(0,160).join('') : '';
@@ -35,13 +36,16 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
   const view=engine.pkOperations.view(), exhibition=view.exhibition, rank=engine.anchorStats.rank.get(anchorId);
   const events=engine.replyEvents.filter(row=>fresh(row.at));
   const roomEvents=room.activities.filter(row=>fresh(stamp(row))).slice(-30);
-  let income=null;
+  let income=null, giftHistory=null, historySessions=[];
   try {
-    const observed=engine.liveData()?.income;
+    const data=engine.liveData() || {}, observed=data.income;
+    if (data.giftHistory?.anchorId===anchorId) {
+      historySessions=data.giftHistory.sessions || [];
+      giftHistory=giftHistoryContext(data.giftHistory,now);
+    }
     if(observed && observed.anchorId===anchorId && (!currentRoom || observed.roomId===currentRoom)) income={
       at:num(observed.at),stale:!fresh(observed.at,120000),source:text(observed.source),
-      startAt:num(observed.startAt),endAt:num(observed.endAt),pending:num(observed.pending),
-      ...fields(observed,['totalDiamonds','giftCount','unknownCount','estimatedIncome','calibrationIncome','calibrationDiamonds']),
+      ...giftSessionContext(observed,now),pending:num(observed.pending),
       month:text(observed.month),monthTotals:observed.summary ? fields(observed.summary,['totalDiamonds','giftCount','unknownCount','estimatedIncome']):null,
       dailyHistory:(observed.days || []).slice(-31).map(row=>({date:text(row.date),...fields(row,['totalDiamonds','giftCount','unknownCount','estimatedIncome'])})),
       estimateOnly:true,basis:'本机采集与账本校准；钻石面值与人民币估算分列，不代表平台结算收入。'
@@ -59,7 +63,7 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
     recentChat:chat.slice(-config.ai.contextSize).map(row=>({at:row.at,name:text(row.name),text:text(row.text)})),
     activityLastMinute:countActivity(buckets.filter(row=>fresh(row.at,60000))),
     activity:{windowSec:600,bucketSec:10,totals:countActivity(buckets),history:buckets.map(row=>({at:row.at,...fields(row,activityKeys)}))},
-    income,
+    income,giftHistory,
     recentEvents:events.slice(-20).map(row=>({type:text(row.type),at:row.at,name:text(row.name),text:text(row.text),...(row.type==='gift' ? {gift:text(row.gift),count:num(row.count),unitDiamonds:num(row.unitDiamonds),cumulative:true}:row.type==='like' ? {count:num(row.count)}:{})})),
     roomEvents:roomEvents.map(row=>({type:text(row.type),at:stamp(row),name:text(row.user?.name),text:text(row.text || row.description || row.title || row.display || row.status),
       ...fields(row,['followCount','shareCount','count','total','memberCount','diamondCount'])})),
@@ -82,7 +86,7 @@ function buildSharedLiveContext(engine, now, config=engine.config) {
       historyCoverage:sample(scoreHistory,60),
       chat:(pk.chatHistory || []).filter(row=>fresh(row.at)).slice(-30).map(row=>({at:row.at,side:text(row.side),text:text(row.text)}))
     } : null,
-    pkHistory:{basis:'本机观测，仅明确终局比分计入胜负与总分',summary:summarizeAnchorBattles(records),session:summarizeAnchorBattles(sessionRows),...sample(records,20),battles:records.slice(-20).map(publicBattle)},
+    pkHistory:{basis:'本机观测，仅明确终局比分计入胜负与总分',summary:summarizeAnchorBattles(records),session:summarizeAnchorBattles(sessionRows),calendar:pkPeriodContext(records,historySessions,now),...sample(records,20),battles:records.slice(-20).map(publicBattle)},
     tasks:view.task ? {at:view.task.at,stale:view.task.stale,...fields(view.task,['valid','target','validWins','winTarget']),firstWin:view.task.firstWin} : null,
     exhibition:exhibition ? {at:exhibition.updatedAt,stale:!fresh(exhibition.updatedAt,120000),title:text(exhibition.title),
       ...fields(exhibition,['level','floor','keepTarget','gapToNextLevel','exhibitionType','lightedCount','totalCount']),

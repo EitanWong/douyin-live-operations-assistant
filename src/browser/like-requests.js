@@ -45,7 +45,8 @@ export class LikeRequests {
     }
     const context = this.context();
     if (!context || context.path !== session.context.path || context.roomId !== session.context.roomId
-      || context.userId !== session.context.userId || Date.now()-session.at >= 3600000) {
+      || context.userId !== session.context.userId
+      || Date.now()-session.at >= 3600000) {
       this.stop(token);
       return Promise.resolve({submitted:false,reason:'账号、房间或点赞权限已变化，已停止'});
     }
@@ -57,7 +58,16 @@ export class LikeRequests {
     try {
       const response = await session.client.request({url:'/webcast/room/like/',method:'post',data:{},
         params:{room_id:session.context.roomId,count},timeout:8000,...(signal ? {signal} : {})});
-      if (response?.data?.status_code === 0) return {submitted:true,count};
+      if (response?.data?.status_code === 0) {
+        // Match LiveLike's native success condition. LikeMessage is a room broadcast,
+        // not a receipt guaranteed for this request.
+        // This acknowledges acceptance, not the final room display total.
+        const context = this.context();
+        if (context?.roomId === session.context.roomId && context.path === session.context.path
+          && context.userId === session.context.userId) return {submitted:true,count};
+        this.stop(session.token);
+        return {submitted:false,reason:'账号、房间或点赞权限已变化，已停止'};
+      }
       this.stop(session.token);
       if (Number.isInteger(response?.data?.status_code)) return {submitted:false,reason:`平台拒绝点赞（${response.data.status_code}），已停止，请稍后再试`};
     } catch { this.stop(session.token); }

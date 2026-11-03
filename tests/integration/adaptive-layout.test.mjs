@@ -15,7 +15,8 @@ test('宽窗口展开分析，紧凑窗口折叠；各尺寸记住手动选择�
   const f=fixture();
   try {
     const input=f.root.querySelector('input');
-    f.layout.update(1100);assert.equal(f.detail.open,true);
+    f.layout.update(719);assert.equal(f.detail.open,false);
+    f.layout.update(720);assert.equal(f.detail.open,true);
     f.detail.querySelector('summary').click();assert.equal(f.detail.open,false);
     f.layout.update(1000);assert.equal(f.detail.open,false);
     f.layout.update(0);assert.equal(f.layout.mode,'wide');

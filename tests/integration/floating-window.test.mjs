@@ -133,7 +133,7 @@ test('键盘缩放、恢复默认、标题栏移动及视口缩小后恢复偏�
     f.pointer(f.view,'pointermove',500,180); f.tick(); f.pointer(f.view,'pointerup',500,180);
     assert.equal(w.manual,true); assert.ok(w.px.value>100);
     grip.dispatchEvent(new f.view.KeyboardEvent('keydown',{key:'Home',bubbles:true}));
-    assert.equal(w.width,620); assert.equal(w.manual,false);
+    assert.equal(w.width,998); assert.equal(w.manual,false);
     assert.equal(f.view.localStorage.getItem('douyin-live-assistant:window'),null);
   } finally { f.dispose(); }
 });

@@ -24,6 +24,29 @@ function setup(body = '') {
   for (const el of dom.window.document.querySelectorAll('*')) el.getClientRects = () => [{ width: 100, height: 30 }];
   return dom;
 }
+test('AI 服务故障提示保持可见，恢复后消失并可进入设置', () => {
+  const dom=setup(),panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
+  try {
+    panel.setAIServiceStatus('API Key 无效，请检查密钥');
+    assert.equal(panel.node('[data-ai-alert]').hidden,false);
+    assert.match(panel.node('[data-ai-alert]').textContent,/API Key/);
+    assert.match(panel.node('.launcher').textContent,/AI 异常/);
+    panel.node('[data-ai-alert] button').click();assert.equal(panel.activeTab,'ai');
+    panel.setAIServiceStatus('');assert.equal(panel.node('[data-ai-alert]').hidden,true);
+  } finally {panel.destroy();dom.window.close();}
+});
+test('应用 AI 请求失败提示余额，成功后恢复状态',async()=>{
+  const dom=setup(),values=new Map([['live-assistant:api-key:https://api.deepseek.com','saved-key']]);let api,fail=true;
+  const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>false,send:async()=>{}};
+  boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:(key,value)=>values.set(key,value),del:key=>values.delete(key),
+    request:details=>details.onload(fail ? {status:402,responseText:'{}'} : {status:200,responseText:'{"choices":[{"message":{"content":"[\\"欢迎 {user}\\"]"}}]}'}),
+    adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>{api=value;}});
+  try {
+    const button=api.panel.root.querySelector('[data-generate-phrases="welcome"]');
+    await api.panel.fillPhrases(button);assert.match(api.panel.node('[data-ai-alert]').textContent,/余额/);
+    fail=false;await api.panel.fillPhrases(button);assert.equal(api.panel.node('[data-ai-alert]').hidden,true);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});
 test('福袋红包工具可导航、独立保存配置，立即停止同步关闭开关并显示确认进度',async()=>{
   const dom=setup();let saved,stops=0;
   const panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{save:async c=>{saved=c;},toolAction:async(id,action)=>{assert.equal(id,'rewards');assert.equal(action,'stop');stops++;}}});
@@ -40,11 +63,68 @@ test('福袋红包工具可导航、独立保存配置，立即停止同步关�
     assert.equal(stops,1);assert.equal(enabled.checked,false);assert.equal(panel.read().rewards.enabled,false);
   } finally {panel.destroy();dom.window.close();}
 });
+test('贡献榜主动播报默认五分钟，设置可读写且关闭后禁用间隔输入',()=>{
+  const dom=setup(), config=copy(DEFAULTS), panel=new Panel({config,room:'1',callbacks:{}});
+  try {
+    panel.node('[data-category=tools]').click();
+    const enabled=panel.node('[data-field="audienceBroadcast.enabled"]'), interval=panel.node('[data-field="audienceBroadcast.intervalSec"]');
+    assert.equal(enabled.checked,true);assert.equal(interval.value,'300');assert.equal(interval.disabled,false);
+    assert.deepEqual(panel.read().audienceBroadcast,{enabled:true,intervalSec:300});
+    enabled.click();assert.equal(interval.disabled,true);
+    assert.deepEqual(panel.read().audienceBroadcast,{enabled:false,intervalSec:300});
+    enabled.click();interval.value='600';interval.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+    assert.deepEqual(panel.read().audienceBroadcast,{enabled:true,intervalSec:600});
+    assert.equal(config.audienceBroadcast.intervalSec,300,'保存前不改变运行中的设置');
+    assert.equal(panel.node('[data-action=broadcast-anchor]').textContent,'立即播报贡献榜');
+  } finally {panel.destroy();dom.window.close();}
+});
+
+test('联网搜索配置切换服务、保存独立密钥，来源链接可核对且不执行HTML',async()=>{
+  const dom=setup();let saved;
+  const panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{save:async(...args)=>{saved=args;}}});
+  try {
+    const provider=panel.node('[data-field="ai.search.provider"]');
+    assert.equal(provider.value,'bocha');
+    panel.node('[data-search-key]').value='bocha-unsaved';provider.value='tavily';provider.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+    assert.equal(panel.node('[data-search-key]').value,'');assert.equal(panel.node('[data-field="ai.search.endpoint"]').value,'https://api.tavily.com/search');
+    panel.node('[data-field="ai.search.enabled"]').checked=true;panel.node('[data-search-key]').value='search-secret';panel.node('[data-remember-search-key]').checked=true;
+    panel.node('[data-action="save"]').click();await new Promise(setImmediate);
+    assert.equal(saved[0].ai.search.provider,'tavily');assert.deepEqual(saved[3],{key:'search-secret',remember:true});assert.ok(!JSON.stringify(saved[0]).includes('search-secret'));
+    panel.recordSearch({question:'上海天气',answer:'晴。[1]',results:[{title:'<img src=x onerror=alert(1)>',url:'https://weather.test/"x'},{title:'恶意',url:'javascript:alert(1)'}]});
+    assert.equal(panel.node('[data-search-history]').querySelectorAll('a').length,1);assert.equal(panel.node('[data-search-history]').querySelector('img'),null);
+    assert.equal(panel.node('[data-search-history] a').rel,'noopener noreferrer');
+    for(let i=0;i<10;i++)panel.recordSearch({query:`q${i}`,results:[]});
+    assert.equal(panel.searchRecords.length,8);
+  } finally {panel.destroy();dom.window.close();}
+});
+
+test('PK 看板徽标随连线、PK、结束和下播切换，断线时标记待确认', () => {
+  const dom=setup(),config=copy(DEFAULTS);config.anchorId='1001';
+  const now=1800000000000,engine=new Engine({config,now:()=>now});
+  const panel=new Panel({config,room:'1',callbacks:{}});
+  const badge=panel.node('[data-live-mode]');
+  const emit=event=>{engine.ingest({roomId:'room',at:now,...event});panel.refresh(engine);};
+  try {
+    panel.refresh(engine);assert.equal(badge.textContent,'待确认');assert.equal(badge.getAttribute('role'),'status');
+    emit({type:'link-state',linkedUsers:[{id:'1001'},{id:'rival'}]});
+    assert.equal(badge.textContent,'连线中');assert.equal(badge.dataset.mode,'linked');
+    emit({type:'pk-start',battleId:'battle',durationMs:300000});assert.equal(badge.textContent,'PK 中');
+    panel.refresh(engine,{frames:1,connected:false});assert.equal(badge.textContent,'待确认');
+    panel.refresh(engine,{frames:1,connected:true});assert.equal(badge.textContent,'PK 中');
+    emit({type:'pk-end',battleId:'battle'});assert.equal(badge.textContent,'连线中');
+    assert.match(panel.node('[data-pk-state]').textContent,/PK 已结束/);
+    emit({type:'guest-link-state',channelFinished:true});assert.equal(badge.textContent,'未连线');
+    emit({type:'end'});assert.equal(badge.textContent,'已下播');
+    assert.equal(badge.getAttribute('aria-label'),'当前直播状态：已下播');
+    assert.equal(panel.dirty,false);assert.equal(engine.queue.length,0);
+  } finally {panel.destroy();dom.window.close();}
+});
 test('扩展工具自动点赞独立于回复模式：输入不会污染配置，状态和停止按钮可用',async()=>{
   const dom=setup(),config=copy(DEFAULTS),calls=[];
   const panel=new Panel({config,room:'1',callbacks:{toolAction:(id,action,value)=>{assert.equal(id,'auto-like');calls.push(action==='start'?value:action);}}});
   try {
-    panel.node('[data-category=tools]').click();
+    panel.node('[data-category=tools]').click();assert.equal(panel.activeTab,'anchor');
+    panel.node('[data-tab=auto-like]').click();
     assert.equal(panel.activeTab,'auto-like');assert.equal(panel.node('[data-page=auto-like]').hidden,false);
     assert.equal(panel.node('[data-auto-like=intervalSec]').value,'2');
     assert.equal(panel.node('[data-auto-like=intervalSec]').min,'0.001');
@@ -104,7 +184,8 @@ test('PK 播报设置通过内联摘要展开，开关联动、零点预览与�
     panel.node('[data-field="pkOperations.enabled"]').click();assert.equal(interval.value,'90');assert.equal(report.checked,true);
     for(const key of ['gift','welcome','like','keyword','bot'])panel.node(`[data-field="${key}.enabled"]`).checked=false;
     panel.node('[data-field="timersEnabled"]').checked=false;panel.applyFeatureVisibility();
-    panel.tab('ai');panel.node('[data-category=interaction]').click();assert.equal(panel.activeTab,'anchor');
+    panel.tab('ai');panel.node('[data-category=interaction]').click();assert.equal(panel.activeTab,'pk');
+    panel.node('[data-category=tools]').click();assert.equal(panel.activeTab,'anchor');
     panel.node('[data-tab=pk]').click();assert.equal(panel.activeTab,'pk');assert.equal(settings.open,true);assert.equal(interval.value,'90');
     panel.tab('ai');
     const contextInfo=[...panel.root.querySelectorAll('h3')].find(node=>node.textContent==='所有 AI 功能共用直播上下文');
@@ -1417,6 +1498,9 @@ test('房间状态进入真实账本并驱动本场概览，接口失效不制�
     await new Promise(resolve=>setTimeout(resolve,650));
     assert.equal(api.panel.node('[data-gift-diamonds]').textContent,'200');
     assert.equal(api.panel.node('[data-gift-total-title]').textContent,'本场礼物价值');
+    const aiData=engine.aiContext().liveContext;
+    assert.equal(aiData.income.totalDiamonds,200);assert.equal(aiData.income.highestGift.unitDiamonds,100);
+    assert.equal(aiData.giftHistory.periods.all.totalDiamonds,200);assert.equal(aiData.giftHistory.periods.all.sessions,1);
     onIdentity({warning:'接口暂不可用'});await new Promise(setImmediate);
     const saved=()=>values.get(`live-assistant:income:${room}`);
     assert.equal(saved().sessions.length,1);assert.equal(saved().sessions[0][1].endAt,0);

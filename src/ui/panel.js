@@ -71,6 +71,7 @@ button.launcher.dragging,button.launcher.dragging:hover:not(:disabled),button.la
 .scroll{overflow-y:auto;overflow-x:hidden;min-height:0;flex:1;padding:22px;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--sg-scroll) transparent}
 form{margin:0}.page{min-width:0}.page h2{font-size:20px;line-height:1.4;margin:0 0 5px;font-weight:650;letter-spacing:.1px}.intro,.hint{font-size:12px;color:var(--muted);margin:6px 0 16px;line-height:1.7}.page>.intro{margin:3px 0 20px}
 .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.status{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:0 0 14px}.status strong{font-size:13px;font-weight:600}.actions{display:flex;gap:7px;flex-wrap:wrap}
+.pk-page-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;margin-bottom:5px}.pk-page-heading h2{margin:0}.pk-mode{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--muted);font-size:11px;font-weight:600}.pk-mode::before{content:'';width:5px;height:5px;border-radius:50%;background:currentColor}.pk-mode[data-mode=pk]{color:var(--sg-brand);background:var(--sg-brand-wash)}.pk-mode[data-mode=linked]{color:var(--sg-success);background:color-mix(in srgb,var(--sg-success) 10%,transparent)}
 .stats{display:flex;margin:16px 0 20px;padding:14px 0;border-block:1px solid var(--line)}.stats div{flex:1}.stats b{font-size:24px;display:block;line-height:1.3;font-weight:600;font-variant-numeric:tabular-nums}.stats span{font-size:11px;color:var(--muted)}
 .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 14px}.wide{grid-column:1/-1}
 .field{display:flex;flex-direction:column;gap:7px;margin:0 0 16px;min-width:0}.field span{font-size:12px;font-weight:600}.field small{color:var(--muted);font-size:11px;font-weight:400;line-height:1.6}.field input,.field select,.field textarea{width:100%;padding:10px 12px;min-height:42px}.field textarea{resize:vertical;min-height:92px;line-height:1.7}
@@ -202,7 +203,7 @@ export class Panel {
             <p class="overview-note">提醒用于辅助管理员核查；无法确认的账号身份或权限会保持未知。</p>
           </section>
           <section class="page" role="tabpanel" id="page-pk" aria-labelledby="tab-pk" data-page="pk" hidden>
-            <h2>PK 局势看板</h2><p class="intro">比分、追分速度与贡献者，随直播推送更新。</p>
+            <div class="pk-page-heading"><h2>PK 局势看板</h2><span class="badge pk-mode" data-slot="tag" data-live-mode data-mode="unknown" role="status" aria-live="polite" aria-label="当前直播状态：待确认">待确认</span></div><p class="intro">比分、追分速度与贡献者，随直播推送更新。</p>
             ${pkSettingsTemplate()}
               <div class="pk-overview">
             <div class="pk-overview-main">
@@ -218,14 +219,14 @@ export class Panel {
             <div class="grid"><div><span class="choice-hint">近 15 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-speed>--</strong> / <strong data-pk-opponent-speed>--</strong></p></div><div><span class="choice-hint">近 60 秒速度 · 己 / 对 · 分/秒</span><p><strong data-pk-self-velocity>--</strong> / <strong data-pk-opponent-velocity>--</strong></p></div><div><span class="choice-hint">模型可信程度</span><p><strong data-pk-confidence>--</strong></p></div><div><span class="choice-hint">比分样本与处理延迟</span><p><strong data-pk-sample>--</strong></p></div></div>
 
 </div></details></div>
-            <section class="settings-group" aria-label="PK 任务与播报">
+            <section class="settings-group" aria-label="PK 任务与播报"><div class="settings-workspace"><div>
               <h3>每日任务与零点计划</h3>
               <p data-pk-task-status>等待原生任务面板数据。</p>
               <p class="hint" data-pk-local-status>本机尚未观测到今日 PK。</p>
               <p data-pk-exhibition-status>展馆等待采集。</p>
               <p data-pk-midnight-plan></p>
               <p class="hint">按北京时间 00:00 计算，提醒你手动开局。实际匹配、延长和结算时间可能变化；有效次数与首胜归属以平台任务为准。</p>
-              <h3>实时战局播报</h3><p data-pk-strategy>尚未生成播报。</p>
+              </div><div><h3>实时战局播报</h3><p data-pk-strategy>尚未生成播报。</p></div></div>
             </section>
             <div class="pk-workspace">
 <section class="pk-visual pk-score-visual">            <div class="pk-chart-head"><h3>比分走势</h3><select data-pk-window aria-label="图表时间范围"><option value="60000">近 1 分钟</option><option value="180000" selected>近 3 分钟</option><option value="0">本场全部</option></select></div>
@@ -254,8 +255,8 @@ export class Panel {
           </section>
           <section class="page" role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" data-page="appearance" hidden>
             <h2>外观</h2><p class="intro">选择适合当前环境的亮暗模式。</p>
-            <section class="settings-group"><h3>主题与配色</h3><p class="group-note">默认使用 Liquid Glass 液态玻璃，可切换原始玻璃或简洁实色。可选 Radix Colors 配色，每套均支持亮色、暗色与跟随系统。</p><div class="grid"><label class="field"><span>主题配色</span><select data-theme-palette aria-label="主题配色"></select></label><label class="field"><span>表面材质</span><select data-theme-material aria-label="表面材质"></select></label></div><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
-            <section class="settings-group"><h3>导航布局</h3><p class="group-note">宽窗口使用侧边栏，窄窗口自动切换为顶部导航。</p><label class="field"><span>侧边栏位置</span><select data-sidebar-side aria-label="侧边栏位置"><option value="left">左侧</option><option value="right">右侧</option></select><small>按操作习惯选择；右侧也适合左手操作。选择后自动保存到当前浏览器。</small></label></section>
+            <div class="settings-workspace"><section class="settings-group"><h3>主题与配色</h3><p class="group-note">默认使用 Liquid Glass 液态玻璃，可切换原始玻璃或简洁实色。可选 Radix Colors 配色，每套均支持亮色、暗色与跟随系统。</p><div class="grid"><label class="field"><span>主题配色</span><select data-theme-palette aria-label="主题配色"></select></label><label class="field"><span>表面材质</span><select data-theme-material aria-label="表面材质"></select></label></div><p class="group-note">默认跟随浏览器或系统的颜色偏好，系统切换时自动更新。</p><label class="field"><span>显示模式</span><select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p class="group-note">选择后自动保存，应用于所有直播间面板与扩展弹窗。</p></section>
+            <section class="settings-group"><h3>导航布局</h3><p class="group-note">宽窗口使用侧边栏，窄窗口自动切换为顶部导航。</p><label class="field"><span>侧边栏位置</span><select data-sidebar-side aria-label="侧边栏位置"><option value="left">左侧</option><option value="right">右侧</option></select><small>按操作习惯选择；右侧也适合左手操作。选择后自动保存到当前浏览器。</small></label></section></div>
           </section>
           <section class="page" role="tabpanel" id="page-features" aria-labelledby="tab-features" data-page="features" hidden>
             <h2>功能开关</h2><p class="intro">集中启用或停用直播互动模块；关闭后，该模块从互动导航中隐藏。</p>
@@ -276,7 +277,7 @@ export class Panel {
             <div class="settings-workspace gift-workspace">
             <div class="settings-column">
             <section class="gift-totals" data-gift-totals aria-label="礼物价值统计"><h3 data-gift-total-title>本场礼物价值</h3><div class="gift-total-grid"><div><b data-gift-diamonds>0</b><span data-gift-diamonds-label>已知礼物面值 · 钻</span></div><div><b data-gift-income>未设置</b><span>收入估算 · 人民币</span></div></div><p class="gift-total-note" data-gift-estimate-note>正在读取本地账本…</p><button type="button" class="text-button" data-go="anchor" data-anchor-target="income" data-income-link>查看收入账本</button></section>
-            <section class="recent-gifts section"><div class="log-head"><h3>近期送礼</h3><span class="choice-hint" data-gift-count>仅保留本次页面数据</span></div><div data-recent-gifts><p class="empty">收到礼物后，送礼用户和已知礼物信息会显示在这里。</p></div></section>
+            </div><div class="settings-column"><section class="recent-gifts section"><div class="log-head"><h3>近期送礼</h3><span class="choice-hint" data-gift-count>仅保留本次页面数据</span></div><div data-recent-gifts><p class="empty">收到礼物后，送礼用户和已知礼物信息会显示在这里。</p></div></section>
 </div>
             <div class="settings-column">
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="gift"></p></div>
@@ -286,6 +287,7 @@ export class Panel {
             <p class="hint">默认按 100 钻约 10 元、主播分成约一半估算（0.05 元/钻）；请按主播结算情况调整。</p>
             <div class="presets" aria-label="常用礼物阈值"><span>快速设为</span>${[[50,'50'],[100,'100'],[500,'500'],[1000,'1000']].map(([value,label])=>`<button type="button" data-gift-value="${value}">${label} 钻</button>`).join('')}</div>
             <details><summary>筛选与防刷屏</summary>${this.select('gift.basis', '按什么计算价值', [['total', '整次连击的总价值（推荐）'], ['unit', '单个礼物的价值']])}</details>
+            </div><div class="settings-column">
             ${this.area('gift.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 自动称呼、{nickname} 原昵称、{gift} 礼物名、{count} 数量、{value} 总钻石、{unit} 单价。公开性别为男/女时称哥/姐；未知或已知未成年时仅用昵称，不猜年龄。')}
             ${this.phraseGenerator('gift')}
             <div class="notice">单价未知时，在 1 钻默认门槛下仍会使用不含金额的通用感谢；提高门槛后，需先补充礼物单价才可判断是否感谢。未知单价不会计入收入估算。</div>
@@ -301,23 +303,29 @@ export class Panel {
           <section class="page" role="tabpanel" id="page-welcome" aria-labelledby="tab-welcome" data-page="welcome" hidden>
             <h2>进场欢迎</h2><p class="intro">按荣誉等级、本房粉丝团或指定名单欢迎观众。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="welcome"></p></div>
+            <div class="settings-workspace"><div class="settings-column">
             ${this.select('welcome.responseMode', '欢迎生成方式', [['rules', '使用预设话术'], ['ai', '使用 AI 生成']])}
             ${this.select('welcome.mode', '欢迎范围', [['qualified-or-listed', '达标用户 + 指定名单'], ['qualified', '只欢迎达标用户'], ['listed', '只欢迎指定名单']])}
             <div data-qualified><div class="grid">${this.input('welcome.minWealth', '最低荣誉等级', 'number')}${this.input('welcome.minFanLevel', '最低粉丝团等级', 'number')}</div>
             ${this.toggle('welcome.requireFan', '必须加入本直播间粉丝团')}${this.toggle('welcome.requireLit', '粉丝牌必须已点亮')}</div>
             <details class="section"><summary>管理员弹幕欢迎</summary>${this.toggle('welcome.admin.enabled', '达到等级后使用管理员弹幕')}<div class="grid">${this.input('welcome.admin.minWealth', '管理员弹幕最低荣誉等级', 'number')}${this.input('welcome.admin.minFanLevel', '管理员弹幕最低灯牌等级', 'number')}</div><p class="hint">荣誉与本房灯牌须同时达到门槛，且均不能低于基础欢迎；点亮要求沿用基础欢迎。指定名单也须满足这些条件。管理员弹幕选项不可用时使用普通弹幕。</p></details>
             <details data-welcome-list><summary>指定欢迎的人</summary><div class="inline"><select data-viewer-picker aria-label="最近观众"><option value="">等待观众出现…</option></select><button type="button" data-action="add-viewer">加入欢迎名单</button></div><p class="hint">优先按账号识别；仅有昵称的备用弹幕可能重名。</p><div data-list="listed"></div><button type="button" class="list-add" data-add="listed">手动添加用户</button></details>
+            </div><div class="settings-column">
             ${this.area('welcome.templates', '欢迎话术（每行一条）', 'lines', '变量：{user} 自动称呼、{nickname} 原昵称、{level} 荣誉等级、{fanLevel} 粉丝团等级。按公开性别称哥／姐；未知或已知未成年时仅用昵称。')}
             ${this.phraseGenerator('welcome')}
             <div class="notice">无法核实主播 UID、粉丝团或等级时，条件筛选不会通过。指定名单仍可按明确身份匹配。</div>
+            </div></div>
           </section>
           <section class="page" role="tabpanel" id="page-likes" aria-labelledby="tab-likes" data-page="likes" hidden>
             <h2>点赞感谢</h2><p class="intro">按点赞事件感谢观众。</p>
             <div class="rule-summary"><strong>当前规则</strong><p data-summary="like"></p></div>
+            <div class="settings-workspace"><div class="settings-column">
             ${this.select('like.responseMode', '感谢生成方式', [['rules', '使用预设话术'], ['ai', '使用 AI 生成']])}
+            </div><div class="settings-column">
             ${this.area('like.templates', '感谢话术（每行一条，轮流使用）', 'lines', '变量：{user} 自动称呼、{nickname} 原昵称、{count} 本次点赞数。按公开性别称哥/姐；资料未知或已知未成年时仅用昵称。')}
             ${this.phraseGenerator('like')}
             <div class="notice">点赞感谢使用当前回复方式，按事件及时发送。</div>
+            </div></div>
           </section>
           <section class="page" role="tabpanel" id="page-keywords" aria-labelledby="tab-keywords" data-page="keywords" hidden>
             <h2>关键词回复</h2><p class="intro">固定话术优先于 AI；每条弹幕最多命中一条规则。</p>
@@ -336,9 +344,9 @@ export class Panel {
             <div class="rule-summary"><strong>试着这样说</strong><p data-bot-address>@当前昵称 菜单</p></div>
             <p class="hint" data-bot-identity></p>
             <p class="hint" data-bot-session>当前没有进行中的游戏。</p>
-            <section class="settings-group"><h3>房间游戏</h3><p class="group-note">发送下方指令开局，同一时间进行一场游戏。观众直接报名或回答；@账号发「菜单」查看已开启的玩法。</p><div class="feature-list">${BOT_COMMANDS.map(item => `<div class="feature-row"><div class="feature-title">${item.label}<small>${item.description}；发「${item.example}」开局</small></div><label class="switch" aria-label="${item.label}"><input type="checkbox" role="switch" data-field="bot.${item.key}" aria-label="${item.label}"><span></span></label></div>`).join('')}</div></section>
+            <div class="settings-workspace"><div class="settings-column"><section class="settings-group"><h3>房间游戏</h3><p class="group-note">发送下方指令开局，同一时间进行一场游戏。观众直接报名或回答；@账号发「菜单」查看已开启的玩法。</p><div class="feature-list">${BOT_COMMANDS.map(item => `<div class="feature-row"><div class="feature-title">${item.label}<small>${item.description}；发「${item.example}」开局</small></div><label class="switch" aria-label="${item.label}"><input type="checkbox" role="switch" data-field="bot.${item.key}" aria-label="${item.label}"><span></span></label></div>`).join('')}</div></section>
             <div class="rule-summary"><strong>观众看到的菜单 · 第 1 页</strong><p data-bot-menu></p></div>
-            <section class="settings-group"><h3>成语接龙规则</h3>
+            </div><div class="settings-column"><section class="settings-group"><h3>成语接龙规则</h3>
               <p class="group-note">发送「开始接龙」开局，所有观众直接发成语参与。同音接续、声调不限，可放宽前后鼻音。</p>
               <div class="grid">${this.input('bot.idiomGames', '每场游戏局数', 'number', '1～20 局；自动接着开下一局，整场累计个人积分。')}${this.input('bot.idiomMaxAttempts', '每局目标次数', 'number', '1～1000 次；可选择仅在答对时计次。')}</div>
               ${this.toggle('bot.idiomCountCorrectOnly', '仅答对才推进次数（错误、重复不计次）')}
@@ -350,7 +358,7 @@ export class Panel {
               <p class="hint">扩展词典包含成语、部分惯用语和异体表达；未收录会提示换词。每局达标后自动进入下一局，最后一局或 @账号 结束游戏后公布总冠军，同分并列。规则修改从下一场生效。</p>
               <h4>本场个人积分榜</h4><p class="hint" data-bot-score-empty>参与后显示个人积分、答对和答错次数；结束后保留结果。</p><ol data-bot-scores aria-label="成语接龙积分榜"></ol>
             </section>
-            <p class="hint" data-bot-ai></p>
+            </div></div><p class="hint" data-bot-ai></p>
           </section>
           <section class="page" role="tabpanel" id="page-timers" aria-labelledby="tab-timers" data-page="timers" hidden>
             <h2>定时消息</h2><p class="intro">填写话术和间隔，开始场控后自动轮流发送。</p>
@@ -366,22 +374,23 @@ export class Panel {
             <h2>连接</h2><p class="intro">检查直播数据、账号识别与页面发送控件。</p>
             <div class="identity section"><strong data-anchor-name>正在识别主播…</strong><p data-self-name>正在识别登录账号…</p><p data-admin-status>管理员身份：未验证，管理操作不可用</p><p data-identity-warning hidden></p><details><summary>账号不对？</summary><div class="actions"><button type="button" data-action="identify">重新识别</button><button type="button" data-action="identity-settings">手动补充</button></div></details></div>
             <div class="rule-summary"><strong>检查顺序</strong><p>先检查连接与解析，再定位输入框和发送按钮。修改页面适配参数后需要刷新直播间。</p></div>
-            <h3 class="subhead">直播连接</h3>
+            <div class="settings-workspace"><div class="settings-column"><h3 class="subhead">直播连接</h3>
             <div class="actions"><button type="button" data-action="diagnose">检查连接与发送控件</button><button type="button" data-action="pick-input">定位输入框</button><button type="button" data-action="pick-send">定位发送按钮</button></div>
             <div class="actions"><button type="button" data-action="debug-send">发送普通弹幕</button><button type="button" data-action="debug-send-admin">发送管理员弹幕</button></div><p class="hint">调试消息通过正常发送队列发送到直播公屏，分别为“调试消息发送测试”和“管理员弹幕调试消息发送测试”。仅自动发送模式且场控运行时可用；管理员通道不可用时回退普通弹幕，原因可在运行记录中查看。</p>
             <pre data-diagnostics>点击“检查连接与发送控件”查看结果。</pre>
             <p class="hint" data-delivery-health role="status">发送队列为空。</p>
-            <section class="settings-group"><h3>发送状态</h3><p class="hint">发送后跟踪本人普通弹幕或管理员弹幕的结构化回显；结果未知时不自动重发，后续消息继续处理。</p><div data-deliveries><p class="empty">暂无发送记录。</p></div></section>
+            </div><div class="settings-column"><section class="settings-group"><h3>发送状态</h3><p class="hint">发送后跟踪本人普通弹幕或管理员弹幕的结构化回显；结果未知时不自动重发，后续消息继续处理。</p><div data-deliveries><p class="empty">暂无发送记录。</p></div></section>
             <section class="settings-group"><h3>采集与存储</h3><p data-ingestion-health role="status">采集就绪，尚未检查存储用量。</p><p class="hint">礼物事实先写入日志，感谢任务独立排队。缓冲耗尽后的采集缺口无法自动补回。</p><div class="actions"><button type="button" data-action="recover-events">恢复采集与重试隔离事件</button><button type="button" data-action="export-events">导出恢复数据</button><button type="button" data-action="release-cache">释放临时协议缓存</button><button type="button" data-action="import-income">导入礼物恢复数据</button></div><input class="file" data-import-income-file type="file" accept="application/json,.json"><p class="hint">收入账本、设置和待处理事件保存在 IndexedDB；临时协议帧会自动过期或在空间紧张时清理。导出可能包含观众昵称和弹幕，请妥善保管。</p></section>
-            <h3 class="subhead">账号身份</h3>
+            </div><div class="settings-column"><h3 class="subhead">账号身份</h3>
             <details data-manual-identity><summary>主播与账号识别</summary>${this.toggle('identity.autoAnchor', '自动识别主播')}${this.input('anchorId', '主播 UID（自动识别不到时填写）')}${this.toggle('identity.autoSelf', '自动识别登录账号')}${this.input('selfId', '登录账号 UID（自动识别不到时填写）')}</details>
             <h3 class="subhead">互动过滤</h3>
             ${this.area('ignored', '忽略用户（每行一位）', 'lines', '支持 uid:、sec:、name: 前缀。')}${this.area('blockedWords', '禁止发送的词（每行一个）')}
 
-            <details><summary>高级页面适配与去重</summary><div class="grid">${this.input('adapter.inputSelector', '公屏输入框选择器')}${this.input('adapter.sendSelector', '公屏发送按钮选择器')}${this.input('sending.duplicateSec', '重复话术冷却 / 秒', 'number')}</div></details>
+            </div><div class="settings-column"><details><summary>高级页面适配与去重</summary><div class="grid">${this.input('adapter.inputSelector', '公屏输入框选择器')}${this.input('adapter.sendSelector', '公屏发送按钮选择器')}${this.input('sending.duplicateSec', '重复话术冷却 / 秒', 'number')}</div></details>
             <details class="section"><summary>弹幕备用采集与场次识别</summary><p class="hint">场次开播时间需配置一个直播中状态元素；下播优先使用平台结束消息，也可配置结束提示。修改后需刷新。</p>${this.input('adapter.chatSelector', '弹幕行选择器')}${this.input('adapter.nicknameSelector', '行内昵称选择器')}${this.input('adapter.contentSelector', '行内内容选择器')}${this.input('adapter.startSelector', '直播中状态选择器（场次开始）')}${this.input('adapter.endSelector', '下播提示选择器（可选）')}</details>
             <details class="section" data-log-details><summary>运行记录</summary><div class="stats">${[['events', '接收事件'], ['filtered', '已过滤'], ['previews', '已预览'], ['submitted', '已提交']].map(([key, name]) => `<div><b data-stat="${key}">0</b><span>${name}</span></div>`).join('')}</div><div class="log-head"><select data-log-filter aria-label="筛选运行记录"><option value="all">全部记录</option>${Object.entries(categories).map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}</select></div><div class="logs" data-logs aria-label="运行记录"></div></details>
             <div class="section"><h3>配置与运行记录</h3><div class="actions"><button type="button" data-action="lab">运行规则自检</button><button type="button" data-action="export">导出配置</button><button type="button" data-action="import">导入配置</button><button type="button" data-action="export-log">导出运行记录</button><button type="button" data-action="clear-log">清空记录</button></div><input class="file" data-import-file type="file" accept="application/json,.json"><p class="hint">每个直播间单独保存设置。导出配置不包含密钥；导出的运行记录可能包含公屏昵称和回复。</p></div>
+            </div></div>
           </section>
         </form></div>
         </main></div>
@@ -565,6 +574,7 @@ export class Panel {
     get('welcome.admin.minWealth').max = get('welcome.admin.minFanLevel').max = 100;
     get('anchorId').readOnly = get('identity.autoAnchor').checked && Boolean(this.identity?.anchor);
     get('selfId').readOnly = get('identity.autoSelf').checked && Boolean(this.identity?.self);
+    get('audienceBroadcast.intervalSec').disabled=!get('audienceBroadcast.enabled').checked;
     this.applyFeatureVisibility();
   }
   setBusy(action, value) { if (value) this.busyActions.add(action); else this.busyActions.delete(action); this.syncControls(); }
@@ -740,6 +750,17 @@ export class Panel {
     }
   }
   renderPK(engine) {
+    const mode = engine.liveMode?.current?.() || {mode:'unknown',label:'待确认',reason:'等待当前房间的 PK 或连线推送'};
+    const network = this.latest?.[1] || {};
+    if (!this.demo && network.frames > 0 && network.connected === false && !(network.lastPoll && engine.now() - network.lastPoll < 90000) && mode.mode !== 'ended') {
+      mode.mode = 'unknown'; mode.label = '待确认'; mode.reason = '直播数据连接已中断，等待重新确认';
+    }
+    const modeBadge = this.node('[data-live-mode]');
+    this.text('[data-live-mode]',mode.label);
+    if (modeBadge.dataset.mode !== mode.mode) modeBadge.dataset.mode = mode.mode;
+    const modeLabel = `当前直播状态：${mode.label}`;
+    if (modeBadge.getAttribute('aria-label') !== modeLabel) modeBadge.setAttribute('aria-label',modeLabel);
+    if (modeBadge.title !== mode.reason) modeBadge.title = mode.reason;
     let data = engine.pk?.current?.();
     const operations = engine.pkOperations?.view();
     if (operations) {
@@ -855,7 +876,7 @@ export class Panel {
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
     if (['anchor','profiles'].includes(key)) void this.callbacks.income?.();
-    const category = this.tools.get(key) ? 'tools' : interactionPages.includes(key) ? 'interaction' : 'settings';
+    const category = (key === 'anchor' || this.tools.get(key)) ? 'tools' : interactionPages.includes(key) ? 'interaction' : 'settings';
     this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }
@@ -939,6 +960,7 @@ export class Panel {
         }
         if (action === 'export-income') { this.setBusy(action,true); await this.callbacks.exportIncome?.(); return; }
         if (action === 'export-anchor') { await this.callbacks.exportAnchor?.(this.anchorDashboard.exportReport()); return; }
+        if (action === 'broadcast-anchor') { this.setBusy(action,true); await this.callbacks.broadcastAnchor?.(this.anchorDashboard.broadcastSession); this.toast('本场贡献榜已加入弹幕队列'); return; }
         if (action === 'refresh-anchor') { this.setBusy(action,true); await this.callbacks.income?.(); const refreshed = await this.callbacks.refreshAnchor?.(); this.toast(refreshed ? '主播统计已刷新。' : '本地统计已刷新；展馆暂不可用，请确认已登录并打开直播间。', !refreshed); return; }
         if (action === 'add-profile') { this.setBusy(action,true); await this.callbacks.addProfile?.(this.node('[data-profile-url]').value); this.node('[data-profile-url]').value = ''; return; }
         if (action === 'close') return this.toggleOpen();

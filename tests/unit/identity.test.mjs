@@ -2,6 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { IdentityReader, identityFromResponse, identityUser, parseIdentityJSON, roomAdminStatus } from '../../src/browser/identity.js';
 
+test('登录账号保留安全 UID，供结构化 @ 匹配', () => {
+  assert.equal(identityUser({id_str:'100',nickname:'小明',sec_uid:'sec-self'}).secUid,'sec-self');
+});
+
 test('身份解析保留64位ID且不改写昵称里的数字', () => {
   const data = parseIdentityJSON('{"id":9876543210987654321,"nickname":"abc :9876543210987654321}"}');
   assert.equal(data.id,'9876543210987654321'); assert.equal(data.nickname,'abc :9876543210987654321}');

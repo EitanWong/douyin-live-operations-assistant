@@ -16,6 +16,7 @@ import {LiveMediaAnalyzer,createDisplayCapture} from './browser/live-media.js';
 import { Panel } from './ui/panel.js';
 import { IdentityReader, roomAdminStatus } from './browser/identity.js';
 import { GiftLedger, GiftStore, giftDate, contributionSnapshot } from './data/gifts.js';
+import { currentGiftBroadcastMessages } from './core/gift-analytics.js';
 import { JournalCommitter, RuntimeWriter } from './runtime/journal.js';
 import { failureCode } from './runtime/inbox.js';
 import { audienceAge } from './core/audience.js';
@@ -50,7 +51,7 @@ export function boot(options = {}) {
   // 账本写入与场控发送解耦：存储短暂失败时保留最新连击进度并自动重试，
   // 不让一次扩展后台/IndexedDB 抖动造成收入遗漏。
   const incomePending = new Map(); let incomeDrainBusy = false, incomeRetryTimer = null;
-  let incomeSummary = null, incomeFailure = '', incomeContext = null, ledgerAnchorId = '';
+  let incomeSummary = null, incomeFailure = '', incomeContext = null, giftHistoryContext = null, ledgerAnchorId = '', endedIncomeBroadcast = null;
   function renderIncomeSummary() {
     if (panel && engine.config.incomeEnabled) panel.updateGiftSummary(incomeSummary || {}, engine.config.gift.yuanPerDiamond, true, { pending:incomePending.size, error:incomeFailure });
   }
@@ -130,6 +131,7 @@ export function boot(options = {}) {
       panel.updateAnchorIncome({...own,anchorId:incomeAnchorId});
       incomeSummary = own.currentSession || {totalDiamonds:0,giftCount:0,unknownCount:0,estimatedIncome:0};
       incomeContext = own.currentSession ? {...own.currentSession,anchorId:incomeAnchorId,at:Date.now(),source:'durable-ledger',month:own.month,summary:own.summary,days:own.days} : null;
+      giftHistoryContext = {anchorId:incomeAnchorId,at:Date.now(),source:'durable-ledger',sessions:own.allSessions || own.sessions || []};
       if (!incomePending.size) incomeFailure = '';
       renderIncomeSummary();
     } catch (error) { if (!closed) { incomeFailure = error.message; renderIncomeSummary(); panel.incomeError(error.message); reportPersistenceError(error, '礼物账本读取失败'); } }
@@ -207,7 +209,7 @@ export function boot(options = {}) {
       const eventUserKey = user?.id ? `uid:${user.id}` : user?.secUid ? `sec:${user.secUid}` : user?.name ? `name:${user.name}` : 'anonymous';
       const override = engine.config.gift.prices[event.giftId] ?? engine.config.gift.prices[event.giftName];
       const unitValue = event.unitValue > 0 ? event.unitValue : override > 0 ? override : null;
-      const record = { type:'gift', id:event.id, groupId:event.groupId, giftId:event.giftId, giftName:event.giftName, roomId:event.roomId, count:Number(event.count) || 1, unitValue, at:event.at, receivedAt:event.receivedAt, capturedAt:event._journalSavedAt || event.receivedAt || Date.now(), final:Boolean(event.final), user:{id:user?.id || ''} };
+      const record = { type:'gift', id:event.id, groupId:event.groupId, giftId:event.giftId, giftName:event.giftName, roomId:event.roomId, count:Number(event.count) || 1, unitValue, at:event.at, receivedAt:event.receivedAt, capturedAt:event._journalSavedAt || event.receivedAt || Date.now(), final:Boolean(event.final), user:{id:user?.id || '',secUid:user?.secUid || '',name:String(user?.name || '').slice(0,60)} };
       giftLedger.observe(record, room, eventUserKey, engine.config.gift.yuanPerDiamond);
       ledgerAnchorId=engine.config.anchorId;
       if (engine.config.incomeEnabled) queueIncome(record, eventUserKey);
@@ -295,7 +297,7 @@ export function boot(options = {}) {
       }
       if(engine.config.ai.enabled && engine.config.ai.assistant.memoryEnabled && currentMemory().observe(liveEvent))persistRuntime();
       let journalWrite = null;
-      const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
+      const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','link-state','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
       if ((engine.running || tools?.state('giveaway')?.receiving || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
         // Incoming messages are structured-cloned in the extension, but direct
         // integrations/tests may provide frozen objects. Work on a shallow copy
@@ -313,6 +315,8 @@ export function boot(options = {}) {
         const at = Number.isFinite(liveEvent.at) && liveEvent.at > 0 ? liveEvent.at : observedAt;
         const source = liveEvent.source || 'platform', roomId = liveEvent.roomId || '';
         const startAt = liveEvent.startAt || 0;
+        if (liveEvent.type === 'end' && (!incomeContext || !roomId || incomeContext.roomId===roomId) && at>=(incomeContext?.startAt || 0)) endedIncomeBroadcast={roomId,at};
+        if (liveEvent.type === 'start' && endedIncomeBroadcast && (roomId && roomId!==endedIncomeBroadcast.roomId || at>endedIncomeBroadcast.at)) endedIncomeBroadcast=null;
         giftLedger.observeSession({type:liveEvent.type,at,source,roomId,observedAt,startAt});
         refreshGifts();
         try { await repository.recordSession({room,type:liveEvent.type,at,observedAt,roomId,source,startAt}); refreshIncome(); }
@@ -372,12 +376,15 @@ export function boot(options = {}) {
     },
     mediaContext:()=>media.state==='running' && mediaAnchor===engine.config.anchorId && (demo || roomContext.current()) ? mediaEvidence.context(activeMediaConfig.contextAgeSec) : null,
     liveData: () => {
-      const local=giftLedger.currentSession();
+      const local=giftLedger.calibratedSession(giftLedger.currentSession());
       const saved=engine.config.incomeEnabled && incomeContext?.anchorId===engine.config.anchorId ? incomeContext : null;
       const current=engine.pkOperations.broadcast?.roomId;
       const income=saved && (!current || saved.roomId===current) ? saved : local && ledgerAnchorId===engine.config.anchorId && (!current || local.roomId===current)
         ? {...local,anchorId:engine.config.anchorId,at:Date.now(),source:'page-ledger'} : null;
-      return {income:income ? {...income,pending:incomePending.size} : null};
+      const ended=income && endedIncomeBroadcast && (!endedIncomeBroadcast.roomId || income.roomId===endedIncomeBroadcast.roomId) && income.startAt<=endedIncomeBroadcast.at;
+      const liveIncome=ended || income && identity.live?.status && identity.live.status !== 'live' ? null : income;
+      return {income:liveIncome ? {...liveIncome,...(local?.id===liveIncome.id && local.endAt ? {endAt:local.endAt} : {}),pending:incomePending.size} : null,
+        giftHistory:engine.config.incomeEnabled && giftHistoryContext?.anchorId===engine.config.anchorId ? giftHistoryContext : null};
     },
     manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
@@ -630,6 +637,17 @@ export function boot(options = {}) {
       income: () => loadIncome({profiles:true}),
       refreshAnchor: () => adapter.anchorData?.refresh(),
       exportAnchor: data => download(`douyin-anchor-${data.anchorId}-${data.period}-${giftDate()}.json`, JSON.stringify(data, null, 2)),
+      broadcastAnchor: async sessionId => {
+        if (persistenceDisabled) throw contextFailure();
+        if (!engine.running) throw new Error('请先开始场控');
+        const own=await repository.report(room,giftDate().slice(0,7));
+        const current=own.currentSession, messages=currentGiftBroadcastMessages(current,engine.config.sending.maxLength);
+        const live=engine.liveData()?.income;
+        if (!current || current.endAt || current.id!==sessionId || live?.id!==sessionId || live.endAt) throw new Error('直播场次已变化，请刷新本场贡献榜后重试');
+        if (!messages.length) throw new Error('本场观众贡献榜暂无数据，请等待采集后重试');
+        if (!engine.queueLiveStats(messages,current.id)) throw new Error('播报未加入队列，请检查场控状态、队列容量、屏蔽词或重复播报间隔');
+        wakeSender();
+      },
       exportIncome: async () => { const selection = panel.incomeSelection(); download(`douyin-income-${selection.room}-${selection.month}.json`, JSON.stringify(await repository.report(selection.room, selection.month), null, 2)); },
       addProfile: async input => {
         const url = new URL(input.trim());

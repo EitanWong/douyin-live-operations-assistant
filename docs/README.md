@@ -8,6 +8,7 @@
 ## 开发
 
 - [项目结构与架构](development/architecture.zh-CN.md)：模块职责、消息流和持久化边界。
+- [包内工具插件开发](development/tool-plugins.zh-CN.md)：统一注册、Cordis 运行时适配、资源回收、操作网关及自动点赞／福袋红包接入。
 - [开发与测试](development/contributing.zh-CN.md)：本地命令、测试分类、产物管理。
 - [直播数据可视化](development/visualization.zh-CN.md)：PK 图表、活动统计、数据边界与验证。
 - [发布流程](development/release-process.zh-CN.md)：dev / main 分支与版本发布。
@@ -26,7 +27,12 @@
 
 - [AI 基础层与阿里 Omni](research/ai-foundation-and-omni-2026-11-01.zh-CN.md)：实时接口官方依据、持续观察与问答分离、统一证据上下文、本地 RAG、联网与分阶段验收。
 
+- [页面响应式布局与开源参考](research/responsive-layout-and-open-source-2026-10-26.zh-CN.md)：容器断点、页面分栏、窗口默认尺寸，以及 Tabler、GridStack、React Grid Layout 的布局参考。
+- [扩展工具插件化、热更新与 Cordis 评估](research/tool-plugins-and-hot-update-2026-10-25.zh-CN.md)：当前工具耦合、MV3 更新边界、Cordis 核心独立实验、工具宿主接口与渐进实施方案。
+- [订阅商业化、支付授权与 AI 辅助破解防护](research/commercial-subscriptions-and-anti-tamper-2026-10-25.zh-CN.md)：面向“大哥”和观众的产品价值、本地/云端边界、支付、授权、防滥用和实施顺序。
+- [订阅商业化威胁模型](research/douyin-live-operations-assistant-threat-model.md)：基于当前代码的信任边界、AI 辅助逆向与拟议商业后端的攻击路径及防护重点。
 - [PK 播报与共享直播上下文](research/shared-live-context-2026-10-25.zh-CN.md)：PK 页内设置、固定格式兜底、所有 AI 共用数据与验证边界。
+- [直播数据问答、联网搜索与开源组件](research/ai-search-and-open-source-2026-10-26.zh-CN.md)：博查、Tavily、SearXNG 接入、自动意图识别、jsonrepair、来源引用和验证边界。
 - [实时直播音视频理解](research/realtime-av-understanding-2026-10-24.zh-CN.md)：采集路径、中文流式识别、视觉与全模态开源方案、成本、延迟目标和扩展接入设计。
 - [侧边栏与界面组件](research/sidebar-and-ui-components-2026-10-23.zh-CN.md)：左右布局、折叠交互、Lucide 许可与组件边界。
 - [悬浮窗口交互与动效](research/floating-window-motion-2026-10-23.zh-CN.md)：Apple 交互原则、开源组件比较、可打断弹簧与窗口响应式设计。

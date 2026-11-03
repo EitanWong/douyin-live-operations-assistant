@@ -133,7 +133,42 @@ export class GiftLedger {
         }
       }
     }
+    // User totals outlive the bounded deduplication checkpoints. Older ledgers
+    // retain their known diamonds; their missing gift counts stay explicit.
+    if (state?.version < 6) {
+      for (const session of this.sessions.values()) {
+        session.giftAudience = {};
+        for (const [userId,diamonds] of Object.entries(session.giftUserDiamonds || {})) session.giftAudience[userId] = {userId,name:'',giftDiamonds:diamonds,giftCount:0,unknownCount:0,countsPartial:true};
+      }
+      for (const progress of [...this.active.values(),...this.finalized.values()]) for (const segment of progress?.segments || []) {
+        const session=this.sessions.get(segment.sessionId), userId=progress.incomeUser;
+        if (!session || !/^uid:\d+$/.test(userId || '')) continue;
+        const user=session.giftAudience[userId] ||= {userId,name:'',giftDiamonds:0,giftCount:0,unknownCount:0,countsPartial:true};
+        user.giftCount+=segment.count; if (progress.unitValue === null) user.unknownCount+=segment.count;
+      }
+    }
     this.serial = 0;
+  }
+
+  giftAudienceUser(session, userId, name = '') {
+    if (!/^(?:uid:\d+|sec:.+)$/.test(userId || '')) return null;
+    session.giftAudience ||= {};
+    const user=session.giftAudience[userId] ||= {userId,name:'',giftDiamonds:0,giftCount:0,unknownCount:0,countsPartial:false};
+    if (name) user.name=String(name).slice(0,60);
+    return user;
+  }
+
+  observePricedGift(session, event, unitValue) {
+    if (!Number.isFinite(unitValue) || unitValue <= 0) return;
+    session.pricedGifts ||= {};
+    const giftId=String(event.giftId || event.giftName || 'unknown').slice(0,120), key=`gift:${giftId}`;
+    const previous=session.pricedGifts[key];
+    if (previous && previous.unitValue>unitValue) return;
+    const userId=event.user?.id ? `uid:${event.user.id}` : event.user?.secUid ? `sec:${event.user.secUid}` : '';
+    const sender={userId,name:String(event.user?.name || '').slice(0,60)};
+    const senders=previous?.unitValue === unitValue ? [...previous.senders] : [];
+    if (sender.name && !senders.some(row=>userId ? row.userId===userId : row.name===sender.name) && senders.length<3) senders.push(sender);
+    session.pricedGifts[key]={giftId,name:String(event.giftName || previous?.name || '').slice(0,80),unitValue,senders};
   }
 
   observe(event, room, userKey, rate = 0.05) {
@@ -141,6 +176,7 @@ export class GiftLedger {
     const key = `${event.roomId || room}:${userKey}:${event.giftId || event.giftName || 'gift'}:${group}`;
     const checkpoint = this.finalized.get(key);
     const incomeUser = /^\d+$/.test(String(event.user?.id || '')) ? `uid:${event.user.id}` : /^uid:\d+$/.test(userKey) ? userKey : '';
+    const audienceUser = incomeUser || (event.user?.secUid ? `sec:${event.user.secUid}` : /^sec:.+/.test(userKey) ? userKey : '');
     // 旧版本只存了 true，继续保留其去重语义；新记录保留数量和计价片段，支持乱序补全。
     if (checkpoint === true) return false;
     const count = Math.max(1, Math.floor(Number(event.count) || 1));
@@ -157,6 +193,7 @@ export class GiftLedger {
         day.totalDiamonds += delta; day.estimatedIncome += delta * segment.rate;
         const session = this.sessions.get(segment.sessionId);
         if (session) {
+          this.observePricedGift(session,event,unitValue);
           if (previous.unitValue === null) session.unknownCount -= segment.count;
           session.totalDiamonds += delta; session.estimatedIncome += delta * segment.rate;
           const uid = previous.incomeUser || incomeUser;
@@ -164,6 +201,8 @@ export class GiftLedger {
             session.giftUsers ||= {}; session.giftUsers[uid] = (session.giftUsers[uid] || 0) + delta * segment.rate;
             session.giftUserDiamonds ||= {}; session.giftUserDiamonds[uid] = (session.giftUserDiamonds[uid] || 0) + delta;
           }
+          const user=this.giftAudienceUser(session,previous.audienceUser || audienceUser,event.user?.name);
+          if (user) { user.giftDiamonds+=delta; if (previous.unitValue === null) user.unknownCount=Math.max(0,user.unknownCount-segment.count); }
         } else {
           const legacy = this.legacyDays.get(segment.date);
           if (legacy) {
@@ -182,6 +221,7 @@ export class GiftLedger {
       const date = giftDate(platformAt && capturedAt - platformAt <= 600000 && platformAt - capturedAt <= 60000 ? platformAt : capturedAt);
       const previousSession = this.sessions.get(previous.segments.at(-1)?.sessionId);
       const session = previousSession || this.sessionForGift(capturedAt, event.roomId);
+      this.observePricedGift(session,event,unitValue);
       const day = this.days.get(date) || emptyGiftTotal();
       const appliedRate = Number.isFinite(rate) && rate >= 0 ? rate : 0.05;
       day.giftCount += added;
@@ -197,12 +237,14 @@ export class GiftLedger {
         session.giftUserDiamonds ||= {};
         session.giftUserDiamonds[incomeUser] = (session.giftUserDiamonds[incomeUser] || 0) + added * unitValue;
       }
+      const audience=this.giftAudienceUser(session,previous.audienceUser || audienceUser,event.user?.name);
+      if (audience) { audience.giftCount+=added; if (unitValue === null) audience.unknownCount+=added; else audience.giftDiamonds+=added*unitValue; }
       const last = previous.segments.at(-1);
       if (last?.date === date && last.rate === appliedRate && last.sessionId === session.id) last.count += added;
       else previous.segments.push({ date, count: added, rate: appliedRate, sessionId: session.id });
     }
     const changed = Boolean(added || previous.unitValue !== unitValue || (event.final && this.active.has(key)));
-    const next = { count: nextCount, unitValue, segments: previous.segments, incomeUser:previous.incomeUser || incomeUser };
+    const next = { count: nextCount, unitValue, segments: previous.segments, incomeUser:previous.incomeUser || incomeUser, audienceUser:previous.audienceUser || audienceUser };
     this.active.delete(key);
     if (event.final || checkpoint) this.rememberFinalized(key, next);
     else {
@@ -330,8 +372,20 @@ export class GiftLedger {
 
   calibratedSession(session) {
     if (!session) return null;
-    const {giftUsers = {}, giftUserDiamonds = {}, contributions = {}, contributionFloor, ...raw} = session;
+    const {giftUsers = {}, giftUserDiamonds = {}, giftAudience = {}, pricedGifts = {}, contributions = {}, contributionFloor, ...raw} = session;
+    const gifts=Object.values(pricedGifts), highest=Math.max(0,...gifts.map(gift=>gift.unitValue));
+    const tied=gifts.filter(gift=>gift.unitValue===highest).sort((a,b)=>a.giftId.localeCompare(b.giftId));
+    raw.highestGift=highest ? {unitValue:highest,gifts:tied.slice(0,20),tiedCount:tied.length} : null;
     const entries = Object.values(contributions);
+    const audience=new Map(Object.values(giftAudience).map(user=>[user.userId,{...user,totalDiamonds:user.giftDiamonds,calibrationDiamonds:0}]));
+    for (const entry of entries) {
+      const user=audience.get(entry.userId) || {userId:entry.userId,name:'',giftDiamonds:giftUserDiamonds[entry.userId] || 0,giftCount:0,unknownCount:0,countsPartial:false};
+      user.name ||= entry.name;
+      user.calibrationDiamonds=Math.max(0,entry.score-user.giftDiamonds);
+      user.totalDiamonds=user.giftDiamonds+user.calibrationDiamonds;
+      audience.set(entry.userId,user);
+    }
+    raw.audience=[...audience.values()];
     if (!entries.length && !contributionFloor) return {...raw};
     const unidentified = Math.max(0, session.estimatedIncome - Object.values(giftUsers).reduce((sum,value) => sum+value,0));
     // Boards contain cumulative totals, not transactions. Never add one board
@@ -367,7 +421,7 @@ export class GiftLedger {
     return total;
   }
   currentSession() { return this.sessions.get(this.currentSessionId) || [...this.sessions.values()].sort((a,b) => b.startAt-a.startAt)[0] || null; }
-  serialize() { return { version: 5, days: [...this.days], legacyDays: [...this.legacyDays], active: [...this.active], finalized: [...this.finalized], sessions: [...this.sessions], currentSessionId: this.currentSessionId }; }
+  serialize() { return { version: 6, days: [...this.days], legacyDays: [...this.legacyDays], active: [...this.active], finalized: [...this.finalized], sessions: [...this.sessions], currentSessionId: this.currentSessionId }; }
 }
 
 // 存储层供扩展后台和用户脚本共用；持久数据每次从存储读取，服务工作线程重启不丢账。

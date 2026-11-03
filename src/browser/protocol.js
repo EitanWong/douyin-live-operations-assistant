@@ -254,7 +254,14 @@ function decodeBattleMessage(method, bytes, outerId) {
   if (name === 'LinkMicMethod' || name === 'LinkMicMethodMessage') {
     const scores = battleScores(m, 17), rawBattleId = textAt(m, 114) || idAt(m, 104), battleId = validId(rawBattleId) ? rawBattleId : '';
     const contributions = contributionEvents(event, m, 22, 'linkmic', { battleId });
-    if (!scores.length) return contributions.length ? contributions : null; // 普通连麦不能建立 PK 战局。
+    // 普通连线只输出已连接名单，不能建立 PK 战局；邀请 UID / 布局不作为连接证明。
+    const linkedUsers = [...(m.get(45) || []), ...messagesAt(m, 58).map(item => bytesAt(item, 1))]
+      .filter(bytes => bytes instanceof Uint8Array).slice(0, 24).map(decodeUser).filter(user => user.id || user.name);
+    const link = linkedUsers.length ? {...event,id:event.id ? `${event.id}:link` : '',type:'link-state',channelId:idAt(m, 8),linkedUsers} : null;
+    if (!scores.length) {
+      const results = [...(link ? [link] : []), ...contributions];
+      return results.length === 1 ? results[0] : results.length ? results : null;
+    }
     // 中途入场或开局名单迟到时，用已核对的连麦用户字段补全昵称，且只接受比分中的参战 UID。
     const scoreIds = new Set(scores.map(item => item.anchorId)), participants = new Map();
     const users = [...(m.get(45) || []), ...messagesAt(m, 58).map(item => bytesAt(item, 1))];
@@ -268,6 +275,7 @@ function decodeBattleMessage(method, bytes, outerId) {
       ...(participants.size ? {participants:[...participants.values()]} : {}),
       ...(startedAt > 0 && duration > 0 && duration <= 7200 ? { startedAt, durationMs: duration * 1000, endsAt: startedAt + duration * 1000 } : {}),
       ...(textAt(m, 82) ? { scoreUpdateId: textAt(m, 82) } : {}) }, ...contributions];
+    if (link) results.push(link);
     return results.length === 1 ? results[0] : results;
   }
   if (name === 'LinkMicArmiesMethod' || name === 'LinkMicArmies') {
@@ -400,9 +408,10 @@ function decodeGuestLink(m, event) {
     return user.id || user.name ? [user] : [];
   });
   const data={channelId:idAt(channel, 1) || idAt(join, 1), messageType, linkedUsers, channelUsers,
+    channelSnapshot:update.has(1), channelJoined:m.has(56), channelFinished:m.has(57),
     score:idAt(channel, 4) || idAt(join, 4), callDuration:idAt(channel, 5) || idAt(join, 5),
     startedAt:idAt(channel, 6), channelUserCount:idAt(channel, 9), scoreDisplay:textAt(channel, 10)};
-  return data.channelId || linkedUsers.length || channelUsers.length || data.callDuration
+  return data.channelId || linkedUsers.length || channelUsers.length || data.callDuration || data.channelFinished || data.channelSnapshot
     ? { ...event, type:'guest-link-state', ...data }
     : null;
 }
@@ -626,7 +635,7 @@ export function decodeMessage(method, bytes, outerId = '') {
   if (observed) return observed;
   if (method === 'WebcastChatMessage') {
     const atUser = bytesAt(m, 12) ? decodeUser(bytesAt(m, 12)) : null;
-    return { ...event, type: 'chat', user: decodeUser(bytesAt(m, 2)), text: textAt(m, 3), atUser, mentions: atUser?.id ? [atUser.id] : [] };
+    return { ...event, type: 'chat', user: decodeUser(bytesAt(m, 2)), text: textAt(m, 3), atUser, mentions: [atUser?.id, atUser?.secUid].filter(id => id && id !== '0') };
   }
   if (method === 'WebcastMemberMessage') {
     const action = numberAt(m, 10);
@@ -635,6 +644,7 @@ export function decodeMessage(method, bytes, outerId = '') {
   }
   if (method === 'WebcastControlMessage') return numberAt(m, 2) === 3 ? { ...event, type: 'end' } : null;
   if (method === 'WebcastLikeMessage') return { ...event, type: 'like', user: decodeUser(bytesAt(m, 5)), count: numberAt(m, 2) || 1, total: numberAt(m, 3) };
+  if (method !== 'WebcastGiftMessage') return null; // 已知但无有效内容的连线消息不能落入礼物分支。
   const gift = nested(m, 15), count = numberAt(m, 5) || numberAt(m, 6) || numberAt(m, 4) || numberAt(m, 44) || 1;
   // GiftStruct.type 是字段 11，字段 10 是 combo 标记。显式的零分组不是连击 ID。
   const giftType = numberAt(gift, 11), combo = giftType === 1 || (giftType === null && numberAt(gift, 10) === 1);

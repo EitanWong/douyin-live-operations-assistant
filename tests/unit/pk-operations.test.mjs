@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { Engine, DEFAULTS, copy, validateConfig } from '../../src/core/engine.js';
-import { nextChinaMidnight, calculateMidnightPKStart, buildPKStrategyContext } from '../../src/pk/operations.js';
+import { nextChinaMidnight, calculateMidnightPKStart, buildPKStrategyContext, exhibitionGiftNotice, unlightedExhibitionGifts } from '../../src/pk/operations.js';
 import { readPKTasks, AnchorDataCollector } from '../../src/browser/anchor-data.js';
 import { DouyinAdapter } from '../../src/browser/adapter.js';
 import { makeAIRequest } from '../../src/services/ai.js';
@@ -118,16 +118,53 @@ test('定时报告只用新鲜页面任务，预览不发送且关闭后撤销�
   h.engine.config.pkOperations.enabled=false;await h.engine.tick(true);assert.equal(h.engine.queue.length,0);
 });
 
-test('新鲜展馆保级信息进入定时报送和 AI 段位上下文，过期后不继续报送',()=>{
+test('展馆保级信息保留在段位上下文，缺少未点亮清单时不播报数量',()=>{
   const h=harness();h.engine.config.pkOperations.reportEnabled=true;
   h.engine.ingest({type:'anchor-exhibition-retention',id:'retention',source:'web-exhibition',anchorId:'123',roomId:'456',name:'甄选展馆',remaining:1,receivedAt:h.time()});
   h.engine.pkOperations.tick(true);
-  assert.ok(h.engine.queue.some(job=>job.text==='甄选展馆，还差1款保级。'));
+  assert.ok(h.engine.queue.every(job=>!job.text.includes('保级')));
   start(h);
   const rank={exhibitionRetention:h.engine.pkOperations.view().exhibitionRetention};
   assert.equal(buildPKStrategyContext(h.engine.pk.current(),{},rank).rank.exhibitionRetention.remaining,1);
   h.engine.queue=[];h.advance(300000);h.engine.pkOperations.tick(true);
   assert.ok(h.engine.queue.every(job=>!job.text.includes('保级')));
+});
+
+test('展馆播报只直接列未点亮礼物，跳过已点亮、未知、无名称和过期数据',()=>{
+  const h=harness();h.engine.config.pkOperations.reportEnabled=true;
+  const exhibition={updatedAt:h.time(),lightedCount:18,totalCount:28,items:[{giftId:'1',name:'玫瑰',lighted:true},{giftId:'2',name:'城堡',lighted:false},{giftId:'3',name:'飞船',lighted:false},{giftId:'4',name:'未知礼物',lighted:null},{giftId:'5',name:'',lighted:false}]};
+  assert.equal(exhibitionGiftNotice(exhibition,h.time()).text,'展馆还差城堡、飞船未点亮。');
+  assert.equal(exhibitionGiftNotice({...exhibition,partial:true},h.time()).text,'已知还差城堡、飞船未点亮。');
+  assert.equal(exhibitionGiftNotice(exhibition,h.time()+120000),null);
+  assert.deepEqual(unlightedExhibitionGifts({...exhibition,updatedAt:h.time()+1},h.time()),[]);
+  h.engine.ingest({type:'anchor-exhibition',anchorId:'123',snapshotId:'new-1',receivedAt:h.time(),items:exhibition.items,totalItems:5});
+  h.engine.pkOperations.tick(true);
+  const job=h.engine.queue.find(row=>row.exhibitionGiftIds);
+  assert.equal(job.text,'展馆还差城堡、飞船未点亮。');assert.doesNotMatch(job.text,/18|28|已观测|保级/);
+  h.advance(1);
+  h.engine.ingest({type:'anchor-exhibition',anchorId:'123',snapshotId:'new-2',receivedAt:h.time(),items:exhibition.items.map(row=>({...row,lighted:true})),totalItems:5});
+  assert.equal(h.engine.pkOperations.validJob(job),false,'点亮后撤销尚未发送的旧提醒');
+});
+
+test('PK 战局播报优先未点亮礼物，名字超过字数时整名跳过，AI 上下文不靠汇总猜清单',()=>{
+  const h=harness();start(h);h.engine.queue=[];
+  const exhibition={type:'anchor-exhibition',anchorId:'123',snapshotId:'gift-snapshot',receivedAt:h.time(),totalItems:3,items:[{giftId:'1',name:'已点亮礼物',lighted:true},{giftId:'2',name:'未点亮城堡',lighted:false},{giftId:'3',name:'长'.repeat(60),lighted:false}]};
+  h.engine.ingest(exhibition);h.engine.config.pkOperations.aiEnabled=true;
+  h.engine.requestPKStrategy(h.engine.pk.current());
+  assert.equal(h.engine.queue[0].text,'展馆还差未点亮城堡未点亮。');
+  const context=buildPKStrategyContext(h.engine.pk.current(),{},null,h.engine.anchorStats.exhibitionFor('123'),h.time());
+  assert.deepEqual(context.exhibition.unlightedGifts.map(row=>row.giftId),['2','3']);
+  assert.match(context.exhibition.instruction,/不播报已点亮数量/);
+  assert.equal(exhibitionGiftNotice({updatedAt:h.time(),items:[{giftId:'1',name:'长'.repeat(60),lighted:false}]},h.time(),50),null);
+});
+
+test('本场礼物播报下播或切场即失效，预览队列也不会引用历史场次',()=>{
+  const h=harness();let income={id:'A',anchorId:'123',endAt:0};h.engine.liveData=()=>({income});
+  const job={liveGiftSession:'A'};
+  assert.equal(h.engine.pkOperations.validJob(job),true);
+  income={...income,endAt:h.time()};assert.equal(h.engine.pkOperations.validJob(job),false);
+  income={...income,id:'B',endAt:0};assert.equal(h.engine.pkOperations.validJob(job),false);
+  income={...income,id:'A',anchorId:'other'};assert.equal(h.engine.pkOperations.validJob(job),false);
 });
 
 test('平台拒绝后的重试保留PK原始有效期，异步发送准备期间过期不能提交',async()=>{

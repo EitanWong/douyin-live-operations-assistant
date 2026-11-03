@@ -34,6 +34,10 @@ test('ChatMessage 字段 12 atUser 解析被 @ 用户 UID', () => {
   const e = decodeMessage('WebcastChatMessage', cat(b(1, common), b(2, user), b(3, '请看一下'), b(12, cat(i(1, '12345678901234567890'), b(3, '小助手')))));
   assert.equal(e.atUser.name, '小助手'); assert.deepEqual(e.mentions, ['12345678901234567890']);
 });
+test('ChatMessage 只有安全 UID 时仍保留结构化 @', () => {
+  const e = decodeMessage('WebcastChatMessage', cat(b(1, common), b(2, user), b(3, '菜单'), b(12, cat(b(46, 'sec-self'), b(3, '小助手')))));
+  assert.deepEqual(e.mentions, ['sec-self']);
+});
 test('缺失等级和粉丝团不猜测默认达标', () => { const u = decodeUser(cat(i(1, uid), b(3, '未知用户'))); assert.equal(u.wealthLevel, null); assert.deepEqual(u.fanClubs, []); });
 test('礼物读取 diamondCount、repeatCount、groupId 与 repeatEnd', () => {
   const gift = cat(i(5, 77), i(10, 1), i(12, 50), b(16, '星星'));
@@ -205,6 +209,12 @@ test('连麦席位、嘉宾连麦和粉丝团播报按当前网页 proto 解码'
   assert.equal(guest.type,'guest-link-state'); assert.equal(guest.channelId,'123');
   assert.equal(guest.linkedUsers[0].user.id,uid); assert.equal(guest.channelUsers[0].name,'青山');
   assert.equal(guest.scoreDisplay,'1000分'); assert.equal(JSON.stringify(guest).includes('internal-link-id'),false);
+  assert.equal(guest.channelSnapshot,true); assert.equal(guest.channelJoined,false); assert.equal(guest.channelFinished,false);
+  const joined=decodeMessage('LinkmicGuestLinkMessage',cat(b(1,common),b(56,i(1,123))));
+  assert.equal(joined.channelJoined,true); assert.equal(joined.channelId,'123');
+  const finished=decodeMessage('LinkmicGuestLinkMessage',cat(b(1,common),b(57,b(1,'频道已结束'))));
+  assert.equal(finished.channelFinished,true); assert.equal(finished.type,'guest-link-state');
+  assert.equal(decodeMessage('LinkmicGuestLinkMessage',cat(b(1,common),b(51,b(2,'仅邀请')))),null);
   const fansclub=decodeMessage('FansclubV1PushMessage',cat(b(1,common),b(2,'青山点亮粉丝牌'),b(6,'查看粉丝团'),i(7,2),i(8,3000),b(12,'room_card')));
   assert.equal(fansclub.type,'fansclub-push'); assert.equal(fansclub.content,'青山点亮粉丝牌');
   assert.equal(fansclub.actionType,'2'); assert.equal(fansclub.displayDuration,'3000');
@@ -320,10 +330,13 @@ test('比分字段兼容纯数字显示文本、默认零和模糊展示，不�
 
 test('多人比分从两种连麦名单补齐昵称，只接收比分中明确参战的 UID', () => {
   const user=(id,name)=>cat(b(1028,id),b(3,name));
-  const event=decodeMessage('WebcastLinkMicMethod',cat(b(17,score(uid,100)),b(17,score(21,50)),b(17,score(22,20)),
+  const events=decodeMessage('WebcastLinkMicMethod',cat(b(17,score(uid,100)),b(17,score(21,50)),b(17,score(22,20)),
     b(45,user(uid,'己方')),b(45,user('21','乙')),b(58,b(1,user('22','丙'))),b(58,b(1,user('23','连麦观众')))));
+  const event=events.find(item=>item.type==='pk-score');
   assert.deepEqual(event.participants,[{anchorId:uid,name:'己方'},{anchorId:'21',name:'乙'},{anchorId:'22',name:'丙'}]);
-  assert.equal(decodeMessage('WebcastLinkMicMethod',b(45,user('21','普通连麦'))),null);
+  assert.equal(events.find(item=>item.type==='link-state').linkedUsers.length,4);
+  const link=decodeMessage('WebcastLinkMicMethod',b(45,user('21','普通连麦')));
+  assert.equal(link.type,'link-state'); assert.equal(link.linkedUsers[0].id,'21');
 });
 
 test('指标协议的明确展馆文案可作为保级数据，不保留跳转或未知额外载荷',()=>{

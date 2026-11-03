@@ -26,7 +26,7 @@ export class AdaptiveLayout {
   }
   update(width) {
     if (!width) return; // A closed surface must not reset disclosure choices.
-    const mode = width >= 800 ? 'wide' : 'compact';
+    const mode = width >= 720 ? 'wide' : 'compact';
     if (mode === this.mode) return;
     this.mode = mode;
     this.apply();
