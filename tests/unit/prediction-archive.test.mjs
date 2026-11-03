@@ -2,11 +2,23 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {IDBFactory,IDBKeyRange} from 'fake-indexeddb';
 import {AnalyticsArchive} from '../../src/analytics/archive.js';
+import Dexie from 'dexie';
 
 const at=Date.parse('2026-11-03T10:00:00Z');
 function create(indexedDB=new IDBFactory()){return new AnalyticsArchive({indexedDB,IDBKeyRange});}
 const scope={room:'1',anchor:'2'};
 const gift=(count,id='event-1',unitValue=10)=>({type:'gift',id,groupId:'combo-1',giftId:'rose',count,unitValue,receivedAt:at+1000,user:{id:'9',name:'观众'}});
+test('upgrading the existing archive preserves settings, issued forecasts and their actuals',async()=>{
+ const indexedDB=new IDBFactory(),old=new Dexie('douyin-live-prediction',{indexedDB,IDBKeyRange});
+ old.version(1).stores({meta:'&scope',settings:'&scope',minutes:'&key,[scope+at],scope',sessions:'&key,[scope+startAt],scope',users:'&key,[scope+lastAt],scope',seen:'&key,[scope+at],scope',progress:'&key,[scope+at],scope',forecasts:'&id,[scope+asOf],[scope+dueAt],scope',exposures:'&id,[scope+dueAt],scope',history:'&key,scope',outcomes:'&key,scope'});
+ const forecast={id:'1:2:old',scope:'1:2',asOf:at-60000,startAt:at-60000,dueAt:at,target:'online',point:20,low:10,high:30,evaluation:{status:'scored',actual:22,at}};
+ await old.table('forecasts').put(forecast);await old.table('settings').put({scope:'1:2',value:{remainingMinutes:42,viewerEnabled:false}});old.close();
+ const archive=create(indexedDB);
+ try{
+  const data=await archive.read(scope,at);
+  assert.deepEqual(data.forecasts,[forecast]);assert.equal(data.settings.remainingMinutes,42);assert.equal(data.settings.viewerEnabled,false);assert.deepEqual(data.feedback,[]);
+ }finally{archive.close();}
+});
 test('archive keeps combo increments and late prices across restart without contaminating anchors',async()=>{
  const indexedDB=new IDBFactory(),a=create(indexedDB);
  try{
@@ -66,6 +78,29 @@ test('protocol missing timestamps remain unknown while receive time preserves ob
   const data=await a.read(scope,at+3);
   assert.equal(data.session.startKnown,false);
   assert.equal(data.minutes[0].chats,3);
+ }finally{a.close();}
+});
+
+test('mature comparison samples survive report limits and restart without counting overlapping windows twice',async()=>{
+ const indexedDB=new IDBFactory(),a=create(indexedDB);
+ try{
+  await a.pulse(scope,{connected:true},at);
+  for(let t=5000;t<=240000;t+=5000){
+   await a.ingest(scope,{type:'room-audience',id:`online-${t}`,onlineCount:30,receivedAt:at+t},at+t);
+   await a.pulse(scope,{connected:true},at+t);
+  }
+  await a.saveForecasts(scope,Array.from({length:9},(_,i)=>({id:`overlap-${i}`,asOf:at+i*15000,startAt:at+i*15000,dueAt:at+i*15000+60000,target:'online',horizonMinutes:1,method:'local-level-damped-trend',point:20,low:10,high:40,baseline:{point:20,low:10,high:40}})));
+  await a.evaluate(scope,at+240000);
+  await a.saveForecasts(scope,Array.from({length:1100},(_,i)=>({id:`snapshot-${i}`,target:'snapshot',asOf:at+240000+i,dueAt:null})));
+  await a.evaluate(scope,at+240000);a.close();
+  const b=create(indexedDB);
+  try{
+   const data=await b.read(scope,at+300000);
+   assert.equal(data.forecasts.some(row=>row.target==='online'),false,'recent snapshot limit intentionally excludes old numerical rows');
+   assert.equal(data.feedback.length,3);assert.deepEqual(data.feedback.map(row=>row.evaluation.actual),[30,30,30]);
+   assert.equal((await b.read({room:'1',anchor:'3'},at+300000)).feedback.length,0);
+   await b.clear(scope,at+300000);assert.deepEqual((await b.read(scope,at+300000)).feedback,[]);
+  }finally{b.close();}
  }finally{a.close();}
 });
 

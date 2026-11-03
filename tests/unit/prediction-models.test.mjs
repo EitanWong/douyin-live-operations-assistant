@@ -28,6 +28,18 @@ test('future observations and missing minutes do not leak into forecasts',()=>{
  assert.deepEqual(r.revenue,baseline.revenue);assert.deepEqual(r.online,baseline.online);
  const partial=forecastReport({...data,minutes:minutes.map(m=>({...m,coverageMs:0}))});assert.equal(partial.revenue.status,'insufficient-data');
 });
+
+test('real report applies validated online feedback and keeps target/horizon comparisons separate',()=>{
+ const feedback=Array.from({length:24},(_,i)=>({id:`f${i}`,target:'online',horizonMinutes:5,method:'local-level-damped-trend',
+  asOf:now-(24-i)*300000,startAt:now-(24-i)*300000,dueAt:now-(23-i)*300000,point:100,low:80,high:120,
+  baseline:{point:100,low:80,high:120},evaluation:{status:'scored',actual:130,at:now}}));
+ const base=forecastReport(data),r=forecastReport({...data,feedback});
+ assert.equal(r.online[1].point,base.online[1].point+30);
+ assert.equal(r.online[1].baseline.point,base.online[1].point);
+ assert.equal(r.online[1].feedback.status,'applied');
+ assert.equal(r.online[0].point,base.online[0].point);assert.equal(r.flow.point,base.flow.point);
+ assert.equal(r.feedback.targets.find(row=>row.target==='online' && row.horizonMinutes===5).n,24);
+});
 test('history needs labeled comparable evidence, not rank alone; imports validate at boundary',()=>{
  assert.equal(historicalEstimate({month:'2026-08',hours:80,grade:'黄金'},[],now).point,null);
  const history=parseHistory([{month:'2026-08',hours:80,diamonds:160000,grade:'黄金',category:'聊天',source:'授权月报'}]);

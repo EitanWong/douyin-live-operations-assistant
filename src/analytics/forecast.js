@@ -1,6 +1,7 @@
 import {MINUTE,MODEL_VERSION,nextMonth} from './schema.js';
-import {clamp,mean,variance,distribution,random,normal,gamma,compound,featureVector,giftProbability,quantile} from './math.js';
+import {clamp,mean,variance,distribution,random,normal,gamma,compound,featureVector,giftProbability} from './math.js';
 import {semanticSummary,nextChatIntent} from './semantics.js';
+import {calibrateForecast,feedbackMetrics} from './feedback.js';
 
 const paths=192;
 const missing=(reason,unit='diamonds')=>({status:'insufficient-data',point:null,low:null,high:null,unit,reason,sampleSize:0,calibration:'unavailable'});
@@ -101,12 +102,13 @@ function thousandForecast(data,sampler){
 export function forecastReport(data){
  const minutes=validMinutes(data.minutes.filter(m=>!m.sessionId || m.sessionId===data.session?.key),data.now),fresh=data.connected!==false && !data.session?.endAt && data.settings.enabled,sampler=fresh?amountSampler(minutes):null,observed=data.session?.diamonds || 0;
  const viewers=data.settings.viewerEnabled ? viewerForecasts(data):[];
- const revenue=revenueForecast(data,sampler,data.settings.remainingMinutes,observed),flow=revenueForecast(data,sampler,5);
+ const history=data.feedback || [];
+ const revenue=revenueForecast(data,sampler,data.settings.remainingMinutes,observed),flow=calibrateForecast(revenueForecast(data,sampler,5),'diamonds',history,data.now);
+ const online=onlineForecasts(fresh?data.minutes:[],data.now).map(row=>calibrateForecast(row,'online',history,data.now));
  const month=monthlyForecast(data);const forecastMonth=month.status==='ready'?month:historicalMonthly(data) || month;
  const evaluated=data.forecasts.filter(f=>f.evaluation?.status==='scored' && f.asOf<data.now),numeric=evaluated.filter(f=>f.target==='diamonds' && Number.isFinite(f.evaluation.error));
- const same=evaluated.filter(f=>f.target==='diamonds' && f.horizonMinutes===5),residuals=same.map(f=>Math.abs(f.evaluation.actual-f.point)).sort((a,b)=>a-b);
- if(residuals.length>=20 && flow.status==='ready'){const q=quantile(residuals,.8);flow.low=Math.max(0,flow.point-q);flow.high=flow.point+q;flow.calibration='rolling-residual-empirical';flow.calibrationSize=residuals.length;}
- return {phase:!data.settings.enabled?'disabled':fresh?'ready':'stale',asOf:data.now,observedDiamonds:observed,modelVersion:MODEL_VERSION,scope:data.scope,revenue,flow,online:onlineForecasts(fresh?data.minutes:[],data.now),month:forecastMonth,
+ return {phase:!data.settings.enabled?'disabled':fresh?'ready':'stale',asOf:data.now,observedDiamonds:observed,modelVersion:MODEL_VERSION,scope:data.scope,revenue,flow,online,month:forecastMonth,
+  feedback:{targets:feedbackMetrics(history,data.now),calibrations:[{target:'diamonds',horizonMinutes:5,...flow.feedback},...online.map(row=>({target:'online',horizonMinutes:row.horizonMinutes,...row.feedback}))]},
   historical:historicalEstimate({month:data.settings.historyMonth,hours:data.settings.historyHours,grade:data.settings.grade,category:data.settings.category},data.history || [],data.now),
   pk:pkForecast(data.pk,data.now),rank:rankForecast(data.settings.rankRules || {},data.outcomes || [],data.now),viewers,thousand:thousandForecast(data,sampler),
   semantics:{...semanticSummary(data.minutes.filter(m=>m.at<=data.now && m.at>=data.now-10*MINUTE)),nextIntent:data.now-(data.chatModel?.lastAt || 0)<=5*MINUTE?nextChatIntent(data.chatModel):[],method:'smoothed-intent-markov',evaluation:{scored:data.chatModel?.scored || 0,logLoss:data.chatModel?.scored?data.chatModel.logLoss/data.chatModel.scored:null},basis:'下一条弹幕规则意图的平滑一阶转移模型；边预测边评分，仅验证规则标签，不预测原话或真实心理'},

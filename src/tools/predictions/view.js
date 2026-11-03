@@ -3,11 +3,14 @@ const ruleFields=[['points','当前积分',0],['promotionPoints','晋级门槛',
 const label={support:'明确支持',decline:'拒绝消费',leave:'离开',question:'提问',other:'其他',positive:'正向文本',negative:'负向文本',uncertain:'情绪不明',gift:'礼物',pk:'PK',schedule:'排班',content:'内容'};
 const num=n=>Number.isFinite(n)?n.toLocaleString('zh-CN',{maximumFractionDigits:1}):'—';
 const pct=n=>Number.isFinite(n)?`${(n*100).toFixed(1)}%`:'样本不足';
-const time=t=>t?new Date(t).toLocaleString('zh-CN',{hour12:false}):'—';
+const time=t=>t?new Date(t).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'—';
+const targetName=row=>`${row.target==='online'?'在线人数':'新增钻石'} · ${row.horizonMinutes} 分钟`;
+const deviation=value=>!Number.isFinite(value)?'—':value===0?'吻合':`${value>0?'偏高':'偏低'} ${num(Math.abs(value))}`;
+const calibration=row=>row?.calibration==='rolling-feedback'?'已按历史误差校准点值与区间':row?.feedback?'沿用原始预测，详见自动校准进度':'未校准';
 function estimate(row,rate){
  if(row?.status!=='ready')return `暂不可预测 · ${row?.reason || '等待有效样本'}`;
  const money=row.unit==='diamonds',unit=money?'钻':row.unit==='people'?'人':'积分';
- return `中位数 ${num(row.point)} ${unit} · 80%模型区间 ${num(row.low)}–${num(row.high)}${money?` · 约 ¥${num(row.point*rate)}（按所填系数）`:''} · 样本 ${num(row.sampleSize)} · ${row.calibration==='rolling-residual-empirical'?'已按历史残差调整区间':'未校准'}`;
+ return `中位数 ${num(row.point)} ${unit} · 80%模型区间 ${num(row.low)}–${num(row.high)}${money?` · 约 ¥${num(row.point*rate)}（按所填系数）`:''} · 样本 ${num(row.sampleSize)} · ${calibration(row)}`;
 }
 function table(panel,selector,headers,rows){
  const root=panel.root.querySelector(selector),doc=root.ownerDocument;root.replaceChildren();
@@ -23,6 +26,21 @@ function syncSettings(panel,settings){
  section.querySelector('[data-pred-rule-enabled]').checked=Boolean(settings.rankRules);
  for(const input of section.querySelectorAll('[data-pred-rule]'))input.value=settings.rankRules?.[input.dataset.predRule] ?? input.defaultValue;
 }
+function renderFeedback(panel,r){
+ const feedback=r.feedback || {targets:[],calibrations:[]};
+ table(panel,'[data-pred-metrics]',['目标 / 窗口','不重叠样本','平均绝对误差 / RMSE','平均偏差','平均百分比误差','80%区间命中','原始 / 发布 MAE'],feedback.targets.map(row=>[
+  targetName(row),row.n,`${num(row.mae)} / ${num(row.rmse)}`,deviation(row.bias),`${pct(row.mape)}（${row.percentageN} 条非零实测）`,pct(row.coverage),`${num(row.baselineMAE)} / ${num(row.pairedMAE)}（${row.pairedN} 对）`]));
+ table(panel,'[data-pred-feedback]',['目标 / 窗口','自动校准','训练 / 后段验证','验证 MAE：原始 → 候选'],feedback.calibrations.map(row=>[
+  targetName(row),row.status==='applied'?`已启用 · 修正 ${row.shift>0?'+':''}${num(row.shift)}`:row.status==='baseline'?'验证未改善5%，沿用原始预测':`等待20个不重叠窗口（${row.samples || 0}/20）`,
+  `${row.training || 0} / ${row.validation || 0}`,`${num(row.baselineMAE)} → ${num(row.candidateMAE)}`]));
+ table(panel,'[data-pred-history]',['发布时间 → 到期 / 目标','原始预测','当时发布预测 / 80%区间','到期实测','偏差（预测−实测）','绝对百分比误差','区间命中'],(r.comparisons || []).slice(0,60).map(row=>{
+  const actual=row.evaluation.actual,error=row.point-actual;
+  return [`${time(row.asOf)} → ${time(row.dueAt)} / ${targetName(row)}`,num(row.baseline?.point ?? row.point),`${num(row.point)} / ${num(row.low)}–${num(row.high)}`,num(actual),deviation(error),actual===0?'实测为0，不计算百分比':pct(Math.abs(error)/actual),actual>=row.low && actual<=row.high?'命中':'未命中'];
+ }));
+ table(panel,'[data-pred-pending]',['发布时间 → 到期 / 目标','发布预测 / 80%区间','状态'],(r.forecastHistory || []).filter(row=>row.evaluation?.status!=='scored').slice(0,20).map(row=>[
+  `${time(row.asOf)} → ${time(row.dueAt)} / ${targetName(row)}`,`${num(row.point)} / ${num(row.low)}–${num(row.high)}`,
+  row.evaluation?.status==='censored'?(row.evaluation.reason==='missing-online'?'截止前人数缺测，不评分':'观察覆盖或价格不完整，不评分'):'等待到期采集实测']));
+}
 function renderReport(panel,r,state){
  const rate=r.settings.yuanPerDiamond;
  const kpis={observed:num(r.observedDiamonds),future:num(r.flow.point),month:Number.isFinite(r.month.point)?`¥${num(r.month.point*rate)}`:'—',online:num(r.online.find(row=>row.horizonMinutes===5)?.point),users:num(r.statistics?.observedUsers),conversion:pct(r.statistics?.payerRatio)};for(const [key,value] of Object.entries(kpis))panel.text(`[data-pred-kpi=${key}]`,value);
@@ -33,7 +51,7 @@ function renderReport(panel,r,state){
   panel.text(`[data-pred-${key}-basis]`,r[key].basis || r[key].reason || '');
  }
  panel.text('[data-pred-historical-sources]',`参考来源：${(r.historical.sources || []).join('、') || '尚未导入匹配样本'}`);
- table(panel,'[data-pred-online]',['未来窗口','人数中位数','80%模型区间 / 依据'],r.online.map(row=>[`${row.horizonMinutes} 分钟`,num(row.point),row.status==='ready'?`${num(row.low)}–${num(row.high)} · 未校准`:row.reason]));
+ table(panel,'[data-pred-online]',['未来窗口','人数中位数','80%模型区间 / 依据'],r.online.map(row=>[`${row.horizonMinutes} 分钟`,num(row.point),row.status==='ready'?`${num(row.low)}–${num(row.high)} · ${calibration(row)}`:row.reason]));
  const pk=r.pk;panel.text('[data-pred-pk-basis]',pk.basis || pk.reason);
  table(panel,'[data-pred-pk]',['参战方','胜 / 平 / 负','终局积分80%区间'],(pk.rows || []).map(row=>[`${row.isSelf?'本方 · ':''}${row.name}`,`${pct(row.win)} / ${pct(row.draw)} / ${pct(row.loss)}`,`${num(row.low)}–${num(row.high)}`]));
  table(panel,'[data-pred-thousand-table]',['观众','本场已观察钻石','达到千钻 / 前三概率'],r.thousand.rows.map(row=>[row.name,num(row.observed),`${pct(row.reachProbability)} / ${pct(row.topThreeProbability)}`]));
@@ -44,9 +62,8 @@ function renderReport(panel,r,state){
  panel.text('[data-pred-semantic-basis]',`${sem.basis} · 已评分 ${sem.evaluation?.scored || 0} 条 · 平均对数损失 ${num(sem.evaluation?.logLoss)}`);
  panel.text('[data-pred-ai]',state.ai ? state.ai.map(row=>`「${row.text}」：${label[row.intent] || row.intent} / ${label[row.emotion] || row.emotion} / ${label[row.topic] || row.topic}（本地模型文本分类）`).join('；') : '可使用已准备的本地中文模型复核最近弹幕的文字意图、主题与情绪；结果仅作文本分析。');
  const e=r.evaluation;panel.text('[data-pred-evaluation]',`已评分 ${e.scored} · 因缺测未评分 ${e.censored} · 钻石MAE ${num(e.mae)} · 80%区间实测覆盖 ${pct(e.coverage)} · 观众成熟窗口 ${e.viewerTrials} · Brier ${num(e.viewerBrier)}`);
- table(panel,'[data-pred-metrics]',['目标','有效样本','MAE','区间实测覆盖'],(e.targets || []).map(row=>[row.target==='online'?'在线人数':'新增钻石',row.n,num(row.mae),pct(row.coverage)]));
+ renderFeedback(panel,r);
  table(panel,'[data-pred-calibration]',['送礼概率桶','预测均值','实际送礼比例'],e.buckets.filter(b=>b.n).map(b=>[`${b.n} 个窗口`,pct(b.sum/b.n),pct(b.positive/b.n)]));
- table(panel,'[data-pred-history]',['发布时间 / 目标','预测中位数 / 80%区间','到期实际 / 状态'],(r.forecastHistory || []).slice(0,20).map(f=>[`${time(f.asOf)} / ${f.target==='online'?'在线':'新增钻石'}`,`${num(f.point)} / ${num(f.low)}–${num(f.high)}`,f.evaluation?.status==='scored'?num(f.evaluation.actual):f.evaluation?'缺测未评分':'等待到期']));
  panel.text('[data-pred-basis]',r.basis);panel.predictionCharts?.render(r);syncSettings(panel,{...r.settings,_scope:r.scope});
 }
 function readSettings(panel){
@@ -68,7 +85,7 @@ export const predictionView={
  <label class="field"><span>历史月报 / 可比样本 JSON</span><textarea data-pred-import placeholder='[{"month":"2026-10","hours":80,"diamonds":160000,"grade":"黄金","category":"聊天","source":"授权月报","kind":"self"}]'></textarea></label><input type="file" accept=".json,application/json" data-pred-file><div class="actions"><button type="button" data-action="predictions-import">导入参考样本</button></div><p class="hint">kind=self 为本人月报、peer 为可比样本；至少3条本人月报可推演下月，同一内容重复导入不会叠加。最多2400条/次。</p></details>
  <div class="pred-card" data-pred-result><h3>PK、段位与千票榜</h3><div class="pred-table" data-pred-pk></div><p class="hint" data-pred-pk-basis></p><p data-pred-rank></p><p class="hint" data-pred-rank-basis></p><p data-pred-thousand></p><p class="hint" data-pred-thousand-basis></p><div class="pred-table" data-pred-thousand-table></div></div>
  <div class="pred-card" data-pred-result><h3>观众互动与弹幕语义</h3><p class="hint">仅近期公开互动样本；不代表在线名单、财力或真实心理。明确未成年用户不参与个体建模。成熟窗口≥50、正样本≥5、负样本≥10后才显示送礼概率。</p><div class="pred-table" data-pred-viewers></div><p data-pred-semantics></p><p class="hint" data-pred-semantic-basis></p><button type="button" data-action="predictions-analyze">本地AI复核弹幕</button><p class="hint" data-pred-ai></p><label class="field"><span>删除观众个体资料并停止后续个体采集</span><select data-pred-forget></select></label><button type="button" data-action="predictions-forget">忘记所选观众</button></div>
- <details class="pred-card" data-pred-result><summary>预测档案与实际误差</summary><p data-pred-evaluation></p><div class="pred-table" data-pred-metrics></div><div class="pred-table" data-pred-calibration></div><div class="pred-table" data-pred-history></div><p class="hint">数值预测每15秒刷新保存，完整情景每分钟存档；到期且窗口覆盖≥90%才评分。未观察时不填零，误差只对可验证样本统计；重叠窗口并非独立样本。分钟45天、预测30天、观众30天，均仅保存在本机。</p></details>
+ <section class="pred-card" data-pred-result aria-label="预测与实测对比"><h3>预测与实测对比 · 自动校准</h3><p>预测发出时保存原始值和实际发布值；到期后自动采集同一窗口的实测，展示差多少、偏高还是偏低。仅完整观察窗口进入反馈。</p><p data-pred-evaluation></p><div class="pred-table" data-pred-metrics></div><h3>自动校准进度</h3><div class="pred-table" data-pred-feedback></div><p class="hint">每个目标和时长单独积累，至少20个不重叠窗口；用较早75%训练偏差，后段25%验证，平均绝对误差改善至少5%才修正后续点值与区间。每次按最近最多120个窗口重算，原预测不会改写。已发布结果继续对比实测；历史改善不保证未来改善。</p><div class="pred-visual-grid"><section><h3>5分钟新增钻石：预测与实测</h3><div data-pred-chart="diamondsComparison" role="img" aria-label="5分钟新增钻石预测与实测对比"></div></section><section><h3>5分钟后在线：预测与实测</h3><div data-pred-chart="onlineComparison" role="img" aria-label="5分钟后在线人数预测与实测对比"></div></section></div><h3>已到期窗口逐条对比</h3><div class="pred-table" data-pred-history></div><h3>等待到期或缺测的预测</h3><div class="pred-table" data-pred-pending></div><details><summary>观众送礼概率校准</summary><div class="pred-table" data-pred-calibration></div></details><p class="hint">偏差=预测−实测，正数偏高、负数偏低；实测为0时不算百分比，仍计绝对误差。原始/发布MAE使用相同成对样本；逐条表仅列用于反馈的不重叠窗口，全部预测可导出。数值预测每15秒保存，到期且覆盖≥90%才评分。缺测或价格未知不填零；分钟45天、预测与反馈30天，均保存在本机。</p></section>
  <details class="pred-card"><summary>清理当前主播分析档案</summary><p class="hint">先导出需要保留的档案。输入“清空”删除当前直播间与主播的分析记录。</p><input data-pred-reset placeholder="清空"><button type="button" class="danger" data-action="predictions-clear">清空分析档案</button></details>
  </section>`,
  update(panel,state){panel.root.querySelector('[data-pred-demo]').hidden=!panel.demo;const r=state.report;for(const button of panel.root.querySelectorAll('[data-predictions] [data-action]'))button.disabled=Boolean(state.hostPhase && state.hostPhase!=='active');for(const section of panel.root.querySelectorAll('[data-pred-result]'))section.hidden=!r?.settings;if(!r?.settings){panel.predictionCharts?.clear();panel.text('[data-pred-status]',r?.reason || state.reason || '等待采集与识别主播');return;}renderReport(panel,r,state);},

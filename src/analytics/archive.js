@@ -2,15 +2,17 @@ import Dexie from 'dexie';
 import {MINUTE,DAY,LIMITS,MODEL_VERSION,parseEvent,parsePulse,parseSettings,parseHistory,scopeKey,userKey} from './schema.js';
 import {analyzeChat,updateChatModel} from './semantics.js';
 import {featureVector,learnGift,giftProbability} from './math.js';
+import {FEEDBACK_TARGETS} from './feedback.js';
 
 const tables={meta:'&scope',settings:'&scope',minutes:'&key,[scope+at],scope',sessions:'&key,[scope+startAt],scope',users:'&key,[scope+lastAt],scope',seen:'&key,[scope+at],scope',progress:'&key,[scope+at],scope',forecasts:'&id,[scope+asOf],[scope+dueAt],scope',exposures:'&id,[scope+dueAt],scope',history:'&key,scope',outcomes:'&key,scope'};
+const feedbackTables={...tables,feedback:'&id,[scope+target+horizonMinutes+asOf],[scope+asOf],scope'};
 const digest=async value=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(b=>b.toString(16).padStart(2,'0')).join('');
 const blankMinute=(scope,at)=>({key:`${scope}:${at}`,scope,at,coverageMs:0,ranges:[],cash:[],diamonds:0,giftGroups:0,giftUnits:0,unknownCount:0,chats:0,amounts:[],intents:{},topics:{},emotions:{},samples:[]});
 const newModel=()=>({trials:0,positives:0,weights:Array(6).fill(0),brier:0});
 
 export class AnalyticsArchive {
  constructor({indexedDB=globalThis.indexedDB,IDBKeyRange=globalThis.IDBKeyRange,name='douyin-live-prediction'}={}){
-  this.db=new Dexie(name,{indexedDB,IDBKeyRange});this.db.version(1).stores(tables);this.db.on('versionchange',()=>this.db.close());
+  this.db=new Dexie(name,{indexedDB,IDBKeyRange});this.db.version(1).stores(tables);this.db.version(2).stores(feedbackTables);this.db.on('versionchange',()=>this.db.close());
  }
  transaction(work){return this.db.transaction('rw',this.db.tables,work);}
  async metadata(scope){return await this.db.meta.get(scope) || {scope,serial:0,sessionKey:null,lastPulse:0,connected:false,forgotten:[],model:newModel()};}
@@ -152,7 +154,10 @@ export class AnalyticsArchive {
     if(f.target==='diamonds')actual=window.minutes.flatMap(m=>m.cash || []).filter(row=>row.at>=f.startAt && row.at<f.dueAt).reduce((s,row)=>s+row.diamonds,0);
     if(f.target==='online'){const row=window.minutes.flatMap(m=>m.onlineSamples || []).filter(r=>r.at>=f.dueAt-MINUTE && r.at<=f.dueAt).sort((a,b)=>a.at-b.at).at(-1);if(row)actual=row.value;}
    }
-   f.evaluation=Number.isFinite(actual) ? {status:'scored',actual,error:actual-f.point,covered:actual>=f.low && actual<=f.high,at:now}:{status:'censored',actual:null,at:now};await this.db.forecasts.put(f);
+   f.evaluation=Number.isFinite(actual) ? {status:'scored',actual,error:actual-f.point,covered:actual>=f.low && actual<=f.high,at:now}:
+    {status:'censored',actual:null,at:now,reason:window.complete?'missing-online':'incomplete-observation'};
+   await this.db.forecasts.put(f);
+   if(f.evaluation.status==='scored')await this.rememberFeedback(scope,meta,f);
   }
   const exposures=await this.db.exposures.where('[scope+dueAt]').between([scope,0],[scope,now],true,true).toArray();
   for(const e of exposures){
@@ -161,22 +166,31 @@ export class AnalyticsArchive {
    await this.db.exposures.delete(e.id);
   }
  }
+ async rememberFeedback(scope,meta,forecast){
+  if(!FEEDBACK_TARGETS.some(row=>row.target===forecast.target && row.horizonMinutes===forecast.horizonMinutes))return;
+  const key=`${forecast.target}:${forecast.horizonMinutes}`,until=meta.feedbackUntil?.[key] || 0;
+  if(!(forecast.asOf<=forecast.startAt && forecast.startAt>=until && forecast.startAt<forecast.dueAt))return;
+  await this.db.feedback.put({...forecast,scope});
+  (meta.feedbackUntil ||= {})[key]=forecast.dueAt;
+ }
  async evaluate(context,now=Date.now()){const scope=scopeKey(context);await this.transaction(async()=>{const m=await this.metadata(scope);await this.evaluateWithin(scope,m,now);await this.db.meta.put(m);});}
  async prune(scope,now){
   for(const [table,index,days] of [['minutes','at',LIMITS.minuteDays],['forecasts','asOf',LIMITS.forecastDays],['users','lastAt',LIMITS.userDays],['seen','at',LIMITS.replayDays],['progress','at',LIMITS.replayDays],['sessions','startAt',LIMITS.sessionDays]])await this.db[table].where(`[scope+${index}]`).between([scope,0],[scope,now-days*DAY],true,false).delete();
   await this.db.outcomes.where('scope').equals(scope).filter(row=>row.endedAt<now-LIMITS.sessionDays*DAY).delete();
+  await this.db.feedback.where('[scope+asOf]').between([scope,0],[scope,now-LIMITS.forecastDays*DAY],true,false).delete();
  }
  async read(context,now=Date.now()){
   const scope=scopeKey(context);
   return this.db.transaction('r',this.db.tables,async()=>{
    const meta=await this.metadata(scope);
-   const [settings,minutes,sessions,users,forecasts,history,outcomes]=await Promise.all([
+   const [settings,minutes,sessions,users,forecasts,history,outcomes,feedback]=await Promise.all([
     this.settings(context),this.db.minutes.where('[scope+at]').between([scope,now-LIMITS.reportMinutes*MINUTE],[scope,now],true,true).toArray(),
     this.db.sessions.where('[scope+startAt]').between([scope,0],[scope,now],true,true).reverse().limit(1000).toArray(),
     this.db.users.where('[scope+lastAt]').between([scope,now-30*DAY],[scope,now],true,true).reverse().limit(500).toArray(),
     this.db.forecasts.where('[scope+asOf]').between([scope,now-30*DAY],[scope,now],true,true).reverse().limit(1000).toArray(),
-    this.db.history.where('scope').equals(scope).toArray(),this.db.outcomes.where('scope').equals(scope).toArray()]);
-   return {scope,now,simulated:Boolean(meta.simulated),settings,minutes,sessions,users,forecasts,history,outcomes,model:meta.model,session:meta.sessionKey?await this.db.sessions.get(meta.sessionKey) || null:null,pk:meta.pk || null,chatModel:meta.chatModel || null,connected:meta.connected && now-meta.lastPulse<15000,lastPulse:meta.lastPulse};
+    this.db.history.where('scope').equals(scope).toArray(),this.db.outcomes.where('scope').equals(scope).toArray(),
+    Promise.all(FEEDBACK_TARGETS.map(row=>this.db.feedback.where('[scope+target+horizonMinutes+asOf]').between([scope,row.target,row.horizonMinutes,now-LIMITS.forecastDays*DAY],[scope,row.target,row.horizonMinutes,now],true,true).reverse().limit(120).toArray()))]);
+   return {scope,now,simulated:Boolean(meta.simulated),settings,minutes,sessions,users,forecasts,history,outcomes,feedback:feedback.flat(),model:meta.model,session:meta.sessionKey?await this.db.sessions.get(meta.sessionKey) || null:null,pk:meta.pk || null,chatModel:meta.chatModel || null,connected:meta.connected && now-meta.lastPulse<15000,lastPulse:meta.lastPulse};
   });
  }
  async forget(context,uid){
@@ -191,11 +205,11 @@ export class AnalyticsArchive {
  }
  async clear(context,now=Date.now()){
   const scope=scopeKey(context);
-  return this.transaction(async()=>{for(const name of Object.keys(tables))if(!['meta','settings'].includes(name))await this.db[name].where('scope').equals(scope).delete();await this.db.meta.put({scope,serial:0,lastPulse:0,connected:false,forgotten:[],forgetBefore:now,model:newModel()});});
+  return this.transaction(async()=>{for(const name of Object.keys(feedbackTables))if(!['meta','settings'].includes(name))await this.db[name].where('scope').equals(scope).delete();await this.db.meta.put({scope,serial:0,lastPulse:0,connected:false,forgotten:[],forgetBefore:now,model:newModel()});});
  }
  async export(context,now=Date.now()){
   const scope=scopeKey(context),data={schemaVersion:1,exportedAt:now,scope,modelVersion:MODEL_VERSION};
-  await this.db.transaction('r',this.db.tables,async()=>{for(const name of ['minutes','sessions','users','forecasts','history','outcomes'])data[name]=await this.db[name].where('scope').equals(scope).toArray();data.settings=await this.settings(context);const meta=await this.metadata(scope);data.simulated=Boolean(meta.simulated);data.models={gift:meta.model,chat:meta.chatModel};});return data;
+  await this.db.transaction('r',this.db.tables,async()=>{for(const name of ['minutes','sessions','users','forecasts','history','outcomes','feedback'])data[name]=await this.db[name].where('scope').equals(scope).toArray();data.settings=await this.settings(context);const meta=await this.metadata(scope);data.simulated=Boolean(meta.simulated);data.models={gift:meta.model,chat:meta.chatModel};});return data;
  }
  close(){this.db.close();}
 }

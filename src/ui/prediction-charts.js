@@ -17,6 +17,12 @@ function online(r){
  const start=[r.asOf,forecast.length?last?.online ?? null:null],series=forecast.map(row=>[r.asOf+row.horizonMinutes*60000,row.point]),low=[start,...forecast.map(row=>[r.asOf+row.horizonMinutes*60000,row.low])],high=[start,...forecast.map(row=>[r.asOf+row.horizonMinutes*60000,row.high])];
  return {...base('人'),series:[line('已观察在线人数',timeline(rows,row=>n(row.online),row=>row.onlineAt || row.at)),...band(low,high),line('预测中位数',[start,...series],{lineStyle:{type:'dashed',width:2},itemStyle:{color:colors[1]}})]};
 }
+function comparison(r,target,unit){
+ const rows=(r.comparisons || []).filter(row=>row.target===target && row.horizonMinutes===5 && row.evaluation?.status==='scored' && row.dueAt<=r.asOf).sort((a,b)=>a.dueAt-b.dueAt);
+ return {...base(unit),series:[line('原始预测',rows.map(row=>[row.dueAt,n(row.baseline?.point ?? row.point)]),{lineStyle:{type:'dotted',width:1}}),
+  line('当时发布预测',rows.map(row=>[row.dueAt,n(row.point)]),{showSymbol:true,lineStyle:{type:'dashed',width:2}}),
+  line('到期实测',rows.map(row=>[row.dueAt,n(row.evaluation.actual)]),{showSymbol:true})]};
+}
 export function predictionChartOptions(r){
  const rows=r.timeline || [],activity={...base('次 / 分钟'),series:[['chats','弹幕'],['enters','进场'],['giftUnits','礼物件数']].map(([field,name])=>line(name,timeline(rows,row=>row.coverageMs>=54000?n(row[field]):null)))};
  const contributors=(r.thousand?.rows || []).slice(0,10).reverse(),contribution={...base('钻石',false),legend:{show:false},xAxis:{type:'value'},yAxis:{type:'category',data:contributors.map(row=>String(row.name || '昵称未知').slice(0,16)),axisLabel:{width:90,overflow:'truncate'}},series:[{name:'已识别观众本场贡献',type:'bar',barMaxWidth:18,data:contributors.map(row=>row.observed)}]};
@@ -24,8 +30,9 @@ export function predictionChartOptions(r){
  const buckets=(r.evaluation?.buckets || []).filter(b=>b.n),calibration={...base('实际送礼比例',false),xAxis:{type:'value',min:0,max:1,name:'预测概率',axisLabel:{formatter:v=>`${Math.round(v*100)}%`}},yAxis:{type:'value',min:0,max:1,axisLabel:{formatter:v=>`${Math.round(v*100)}%`}},series:[line('理想校准',[[0,0],[1,1]],{lineStyle:{type:'dashed',color:'#9b9b9b'}}),line('实测概率桶',buckets.map(b=>[b.sum/b.n,b.positive/b.n]),{showSymbol:true,symbolSize:7})]};
  const grouped=new Map();for(const s of r.sessions || []){if(!s.complete || !(s.endAt>s.startAt))continue;const hour=new Date(s.startAt+8*3600000).getUTCHours(),v=grouped.get(hour) || {diamonds:0,hours:0,n:0};v.diamonds+=s.diamonds;v.hours+=(s.endAt-s.startAt)/3600000;v.n++;grouped.set(hour,v);}
  const hourly={...base('钻石 / 小时',false),legend:{show:false},xAxis:{type:'category',data:Array.from({length:24},(_,i)=>`${i}时`)},series:[{name:'按开播小时分组的小时收益',type:'bar',data:Array.from({length:24},(_,i)=>{const g=grouped.get(i);return g?{value:g.diamonds/g.hours,name:`${g.n}场完整直播`}:null;}),barMaxWidth:18}]};
- const charts={revenue:revenue(r),online:online(r),activity,contribution,semantics,calibration,hourly};
+ const charts={revenue:revenue(r),online:online(r),activity,contribution,semantics,calibration,hourly,diamondsComparison:comparison(r,'diamonds','钻石'),onlineComparison:comparison(r,'online','人')};
  const descriptions={revenue:'钻石累计趋势：实线为已采集金额，虚线为未来5分钟累计中位数，阴影为80%模型区间。缺测处断开，金额明细见本节统计。',online:'在线人数趋势：实线为已观察在线人数，虚线为未来1、5、15分钟预测，阴影为80%模型区间。数据不足或过期时不显示预测。',activity:'互动频率：每分钟弹幕、进场和礼物件数，缺少完整采集的分钟不作零值展示。',contribution:'本场已识别观众贡献前十，单位为钻石；仅代表已采集事件，明细见本节贡献榜。',semantics:'已观察弹幕的规则意图分布，包括明确支持、拒绝消费、离开、提问和其他；不代表真实心理。',calibration:'送礼概率校准：横轴为预测概率，纵轴为后续实际送礼比例，虚线为理想校准；只有成熟观察窗口进入统计。',hourly:'按开播小时分组的完整场次小时收益，单位为钻石每小时；未采集时段不填零，各组按实际开播时长加权。'};
+ Object.assign(descriptions,{diamondsComparison:'未来5分钟新增钻石的预测与实测对比：按到期时刻逐点展示原始预测、当时实际发布的预测与到期采集钻石；只含已评分的不重叠窗口。',onlineComparison:'5分钟后在线人数的预测与实测对比：按到期时刻逐点展示原始预测、当时实际发布的预测与截止前最后有效人数；缺测窗口不进入对比。'});
  for(const [key,option] of Object.entries(charts)){
   option.aria.label={description:descriptions[key]};
   if(key==='revenue' || key==='online')option.legend.data=option.series.filter(s=>s.name!=='80%区间下界').map(s=>s.name);

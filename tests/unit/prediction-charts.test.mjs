@@ -18,3 +18,16 @@ test('expired online observations are not moved to the current forecast origin; 
  assert.match(c.revenue.aria.label.description,/钻石/);
  assert.match(c.online.aria.label.description,/在线/);
 });
+
+test('comparison charts align original prediction, published prediction and later actual by due time and unit',()=>{
+ const r={asOf:1000000,comparisons:[
+  {target:'online',horizonMinutes:5,dueAt:900000,point:120,baseline:{point:100},evaluation:{status:'scored',actual:130}},
+  {target:'online',horizonMinutes:1,dueAt:910000,point:500,evaluation:{status:'scored',actual:600}},
+  {target:'diamonds',horizonMinutes:5,dueAt:920000,point:200,evaluation:{status:'scored',actual:0}},
+  {target:'online',horizonMinutes:5,dueAt:930000,point:999,evaluation:{status:'censored',actual:null}}
+ ]};
+ const c=predictionChartOptions(r);
+ assert.equal(c.onlineComparison.yAxis.name,'人');assert.equal(c.diamondsComparison.yAxis.name,'钻石');
+ assert.deepEqual(c.onlineComparison.series.map(s=>s.data),[[[900000,100]],[[900000,120]],[[900000,130]]]);
+ assert.deepEqual(c.diamondsComparison.series.at(-1).data,[[920000,0]]);
+});

@@ -26,3 +26,17 @@ test('service saves every emitted numerical forecast with its own asOf without o
   assert.deepEqual(data.forecasts.filter(f=>f.target==='diamonds').map(f=>f.asOf).sort(),[a.asOf,b.asOf].sort());
  }finally{service.close();}
 });
+test('explicit demo provides simulated comparisons and persists issued calibration without seeding real rooms',async()=>{
+ const archive=new AnalyticsArchive({indexedDB:new IDBFactory(),IDBKeyRange}),service=new PredictionService({archive,now:()=>at}),demo={room:'demo',anchor:'2'};
+ try{
+  await assert.rejects(service.call(context,'demo'),/真实直播间/);
+  await service.call(demo,'demo');const report=await service.call(demo,'report');
+  assert.equal(report.simulated,true);assert.equal(report.comparisons.length,96);
+  assert.ok(report.feedback.calibrations.every(row=>row.status==='applied' && row.samples===24));
+  assert.ok(report.comparisons.some(row=>row.point!==row.baseline.point));
+  const exported=await service.call(demo,'export');assert.equal(exported.feedback.length,96);assert.equal(exported.simulated,true);
+  const online=exported.forecasts.find(row=>row.target==='online' && !row.evaluation);
+  assert.equal(online.feedback.status,'applied');assert.notEqual(online.baseline.point,online.point);
+  assert.equal((await archive.read(context,at)).feedback.length,0);
+ }finally{service.close();}
+});

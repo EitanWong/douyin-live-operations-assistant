@@ -1,6 +1,6 @@
 import {z} from 'zod';
 
-export const MINUTE=60000, DAY=86400000, MODEL_VERSION='local-probabilistic-v1';
+export const MINUTE=60000, DAY=86400000, MODEL_VERSION='local-probabilistic-v2-feedback';
 export const LIMITS=Object.freeze({minuteDays:45,forecastDays:30,userDays:30,sessionDays:730,replayDays:7,reportMinutes:180,viewers:50});
 export const localDate=at=>new Date(at+8*3600000).toISOString().slice(0,10);
 const bounded=(max=1e12)=>z.number().finite().min(0).max(max);

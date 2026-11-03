@@ -24,6 +24,21 @@ test('read-only prediction tool remains functional when automation is stopped an
  fail=true;await tool.actions.refresh();assert.equal(states.at(-1).report.reason,'存储暂不可用');
 });
 
+test('prediction feedback shows issued versus actual, direction, zero-actual handling and model selection',()=>{
+ const dom=new JSDOM(predictionView.template()),root=dom.window.document;
+ const panel={root,demo:false,text:(s,t)=>{root.querySelector(s).textContent=t;}};
+ const r=forecastReport({scope:'1:2',now:Date.now(),settings:parseSettings({}),minutes:[],sessions:[],users:[],forecasts:[],feedback:[],history:[],outcomes:[],connected:false});
+ r.comparisons=[{asOf:1000,startAt:1000,dueAt:61000,target:'online',horizonMinutes:1,point:120,low:90,high:150,baseline:{point:100},evaluation:{status:'scored',actual:100}},
+  {asOf:2000,startAt:2000,dueAt:302000,target:'diamonds',horizonMinutes:5,point:10,low:0,high:20,evaluation:{status:'scored',actual:0}}];
+ predictionView.update(panel,{report:r});
+ const text=root.querySelector('[data-pred-history]').textContent;
+ assert.match(text,/在线人数 · 1 分钟/);assert.match(text,/新增钻石 · 5 分钟/);
+ assert.match(text,/偏高 20/);assert.match(text,/20\.0%/);assert.match(text,/实测为0/);
+ assert.match(root.querySelector('[data-pred-feedback]').textContent,/等待.*20|20.*窗口/);
+ assert.ok(root.querySelector('[data-pred-chart=onlineComparison]'));
+ dom.window.close();
+});
+
 test('prediction analytics live inside anchor data, with no duplicate top-level navigation',async()=>{
  const {Panel}=await import('../../src/ui/panel.js'),{copy,DEFAULTS,Engine}=await import('../../src/core/engine.js');
  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',pretendToBeVisual:true});
