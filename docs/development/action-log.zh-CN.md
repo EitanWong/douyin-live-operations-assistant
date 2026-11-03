@@ -1244,3 +1244,10 @@ AI 对话改进最终回执：实现 `a7f1daf` 已推送 `origin/dev`。首次�
 实际限制：未进行登录抖音真实采集、2/8 小时实播稳定性、各服务商端到端延迟基准、中文 WER/方言音乐重叠语音对比或自然感人工盲评。浏览器 Whisper 已集成，未在本轮做完整模型识别对比。测得的本机预热样例不是生产 P95 或所有设备保证；公开作品描述不等于观看视频，不凭主题推断个人偏好或私人关系。
 
 提交与推送：首个实现提交 897d56e；合并上游提交 24c069f。收尾实现、文档、最终测试和 dev 集成回执在下方补充。原始 checkout 的并行草稿不在本任务提交范围内；不直接推送 main。
+
+
+交付回执：实现提交 897d56e，收尾实现与使用说明 51a7c8d，上游集成 24c069f / 882d61a 已推送 origin/codex/ai-foundation-upgrade。[PR #12](https://github.com/EitanWong/douyin-live-operations-assistant/pull/12) 的 [CI 41636909131](https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/41636909131) 两组任务均成功，随后合并至 dev，合并提交 a8ce68ba2d4c1a8db990f04f46620ced45d34da4。CodeRabbit 因目标不是默认分支跳过自动审查，其状态不记作代码评审通过。本地最终 1137/1137 JS、15/15 原生、npm ci/build/check 通过；专用 crapper/dryer/mutator 不可用、未执行。
+
+补充实际 Native Messaging 宿主帧协议验证：在临时宿主目录发送 prepare / infer / status，使用真实模型和约 5.6s 中文样例，无云端密钥；三条响应均成功，识别往返 88ms，正常关闭进程。结果已补入实测 JSON；临时宿主目录已回收，用户的 Chrome 注册和现有本地组件未修改。此验证补齐宿主协议路径，不冒称已完成登录抖音现场验收。
+
+本回执与补充证据作为独立文档提交推送 dev；没有再次修改运行时代码，不重复本地全量检查。回执推送会自动触发新的 dev CI，该次运行不预记为通过。工作树继续保留已构建扩展供加载，原始 checkout 的并行草稿保留；未更新 main、版本或标签。完成报告列出本回执提交号与实际推送结果。

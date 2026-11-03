@@ -60,5 +60,42 @@
     "realTimeFactor": 0.07307757350359011,
     "threads": 2,
     "transcript": "开饭时间早上9点至下午5点。"
+  },
+  "nativeHostProtocol": {
+    "prepare": {
+      "response": {
+        "id": "prepare",
+        "value": {
+          "phase": "ready",
+          "model": "SenseVoiceSmall-int8",
+          "device": "cpu",
+          "elapsedMs": 90,
+          "realTimeFactor": 0.016031734254317778,
+          "threads": 2
+        }
+      },
+      "roundTripMs": 676
+    },
+    "infer": {
+      "response": {
+        "id": "infer",
+        "value": "开饭时间早上9点至下午5点。"
+      },
+      "roundTripMs": 88
+    },
+    "status": {
+      "response": {
+        "id": "status",
+        "value": {
+          "phase": "ready",
+          "model": "SenseVoiceSmall-int8",
+          "device": "cpu",
+          "elapsedMs": 90,
+          "realTimeFactor": 0.016031734254317778,
+          "threads": 2
+        }
+      },
+      "roundTripMs": 0
+    }
   }
 }
