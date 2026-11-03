@@ -39,6 +39,7 @@ import {knowledgePageTemplate} from './knowledge-template.js';
 import {KNOWLEDGE_CSS} from './knowledge-styles.js';
 import {AISettings} from './ai-settings.js';
 import {aiSettingsTemplate} from './ai-settings-template.js';
+import {aiPlaygroundTemplate} from './ai-playground.js';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const at = (o, path) => path.split('.').reduce((v, k) => v?.[k], o);
@@ -328,6 +329,7 @@ export class Panel {
             <p class="hint">每组独立循环，话术每行一条。时段留空表示全天，支持跨午夜。</p>
           </section>
           ${moderationTemplate(this)}
+          ${aiPlaygroundTemplate()}
           ${this.tools.list().filter(tool=>!tool.embeddedIn).map(tool=>this.toolTemplate(tool)).join('')}
 
 
@@ -841,7 +843,7 @@ export class Panel {
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
     this.activeTab = key; this.node('.scroll').scrollTop = 0; if (key === 'diagnostics') this.renderLogs();
     if (['anchor','profiles'].includes(key)) void this.callbacks.income?.();
-    const category = this.tools.get(key) ? 'tools' : interactionPages.includes(key) ? 'interaction' : 'settings';
+    const category = this.root.querySelector(`[data-tab="${key}"]`)?.closest('[data-nav-group]')?.dataset.navGroup || 'settings';
     this.activeCategory = category;
     for (const node of this.root.querySelectorAll('[data-category]')) node.setAttribute('aria-pressed', String(node.dataset.category === category));
     for (const node of this.root.querySelectorAll('[data-tab]')) { const active = node.dataset.tab === key; node.setAttribute('aria-selected', String(active)); node.tabIndex = active ? 0 : -1; }

@@ -125,7 +125,7 @@ test('扩展工具自动点赞独立于回复模式：输入不会污染配置�
   const dom=setup(),config=copy(DEFAULTS),calls=[];
   const panel=new Panel({config,room:'1',callbacks:{toolAction:(id,action,value)=>{assert.equal(id,'auto-like');calls.push(action==='start'?value:action);}}});
   try {
-    panel.node('[data-category=tools]').click();assert.equal(panel.activeTab,'auto-like');
+    panel.node('[data-category=tools]').click();assert.equal(panel.activeCategory,'tools');
     panel.node('[data-tab=auto-like]').click();
     assert.equal(panel.activeTab,'auto-like');assert.equal(panel.node('[data-page=auto-like]').hidden,false);
     assert.equal(panel.node('[data-auto-like=intervalSec]').value,'2');

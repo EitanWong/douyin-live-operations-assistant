@@ -12,7 +12,7 @@ const blocks='div,section,article,main,header,footer,form,fieldset,nav,ul,ol,li,
 export const isTransparentLayout=node=>node.matches(transparent);
 export function describeCollection(node) {
  if(node.matches('[data-list],[data-memory-list],.anchor-gifts,[data-anchor-fanclub-activities]'))return {mode:'scroll'};
- for(const [selector,label] of [['[data-logs]','运行记录'],['[data-profiles]','主播列表'],['[data-agent-results]','研究任务'],['[data-account-records]','账号资料'],['[data-search-history]','问答来源'],['[data-skill-list]','回复技能']]){
+ for(const [selector,label] of [['[data-logs]','运行记录'],['[data-profiles]','主播列表'],['[data-agent-results]','研究任务'],['[data-playground-results]','AI测试记录'],['[data-account-records]','账号资料'],['[data-search-history]','问答来源'],['[data-skill-list]','回复技能']]){
   if(node.matches(selector))return {mode:'records',label};
  }
 }

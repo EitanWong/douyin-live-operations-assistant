@@ -11,6 +11,8 @@ import {FoundationSettings} from './ui/foundation-settings.js';
 import {AudienceMemory} from './ai/audience-memory.js';
 import {aiDiagnostics} from './ai/diagnostics.js';
 import {AIWorkbench} from './ui/ai-workbench.js';
+import {AIPlayground} from './ui/ai-playground.js';
+import {createAIPlayground} from './services/ai-playground.js';
 import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
@@ -52,7 +54,7 @@ export function boot(options = {}) {
   catch (e) { config = copy(DEFAULTS); configError = `旧配置无效，已使用默认值：${e.message}`; }
   if (!config.anchorId) config.anchorId = new URLSearchParams(location.search).get('anchor_id')?.match(/^\d+$/)?.[0] || '';
   const accounts=new AccountContext({snapshot:runtimeSnapshot?.accountSources});let accountRevision=0,foundationSettings;
-  let audienceMemory=new AudienceMemory({anchor:config.anchorId,state:runtimeSnapshot?.audienceMemory}),workbench,localAgentTasks,localAgentReady;
+  let audienceMemory=new AudienceMemory({anchor:config.anchorId,state:runtimeSnapshot?.audienceMemory}),workbench,playground,localAgentTasks,localAgentReady;
   const currentMemory=()=>{if(audienceMemory.anchor!==String(engine?.config.anchorId || config.anchorId))audienceMemory=new AudienceMemory({anchor:engine?.config.anchorId || config.anchorId});return audienceMemory;};
   const sessionKeys = new Map(); let panel, engine, tools, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false, persistenceDisabled = false;
   let predictionIdentityWrite=Promise.resolve();
@@ -615,7 +617,7 @@ export function boot(options = {}) {
         if (c.identity.autoAnchor && identity.anchor) c.anchorId = identity.anchor.id;
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
         if(c.ai.enabled!==engine.config.ai.enabled || c.anchorId!==mediaAnchor || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(activeMediaConfig) || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(resolveMediaConfig(engine.config.ai))){media.stop();mediaAttemptKey='';}
-        await set(configKey, c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
+        await set(configKey, c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c);playground?.cancel();playground?.updateConfig(); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
       },
@@ -750,7 +752,7 @@ export function boot(options = {}) {
       }
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
-      if (!roomContext.current()) { media.stop(); accountRefresh.close();void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (!roomContext.current()) { media.stop(); playground?.cancel();accountRefresh.close();void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
       if ((engine.pk.current()?.phase === 'active' || panel.isPKVisible()) && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
@@ -767,7 +769,7 @@ export function boot(options = {}) {
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, engine.config.gift.yuanPerDiamond);
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
     window.addEventListener('pagehide', event => {
-      media.stop();
+      media.stop();playground?.cancel();
       void accountRefresh.cancel().catch(()=>{});
       void (event.persisted ? tools.suspend() : tools.close());
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
@@ -776,7 +778,7 @@ export function boot(options = {}) {
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { webKnowledge.close();accountRefresh.close();predictions.close();workbench?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
+      if (closed) { webKnowledge.close();accountRefresh.close();predictions.close();workbench?.close();playground?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();
@@ -805,6 +807,13 @@ export function boot(options = {}) {
     };
     foundationSettings=new FoundationSettings(panel.root,{edge,collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
       changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
+    playground=new AIPlayground(panel.root,{
+      service:createAIPlayground({request,search:searchClient,knowledge:webKnowledge,edge,getConfig:()=>engine.config,getContext:c=>engine.aiContext(c),
+        isCurrent:()=>!closed && !suspended && roomContext.current(),
+        getKey:(endpoint,ai)=>pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),'')}),
+      describe:()=>{const ai=resolveReplyConfig(engine.config.ai);return `已保存 · ${ai.model} · 联网${ai.search.enabled ? '开启' : '关闭'} · 每条最多${engine.config.sending.maxLength}字`;},
+      exportReport:report=>download(`douyin-ai-tests-${room}-${giftDate()}.json`,JSON.stringify(report,null,2))
+    });
     workbench=new AIWorkbench(panel.root,{memory:currentMemory,saveMemory:()=>persistRuntime(true),onError:error=>panel.toast(error.message,true),tasks:{
       submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
       list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
