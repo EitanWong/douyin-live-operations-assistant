@@ -90,7 +90,7 @@ export class LiveCharts {
     this.lastData=data;
     const target=this.root.querySelector('[data-pk-chart="scores"]');
     // No chart work in a hidden tab, collapsed panel or DOM-only tests.
-    if (!target.closest('[data-page]').getBoundingClientRect().width) return;
+    if (!(target.closest('[data-anchor-content]') || target.closest('[data-page]')).getBoundingClientRect().width) return;
     if(!force && Date.now()-this.lastRender<750) {
       if(!this.timer)this.timer=this.view.setTimeout(()=>{this.timer=null;this.render(this.lastData,true);},750-(Date.now()-this.lastRender));
       return;
