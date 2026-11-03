@@ -4,7 +4,7 @@ import {createMediaClient,MEDIA_DEFAULTS,MediaEvidence} from '../../src/services
 const image='data:image/jpeg;base64,/9j/2Q==';
 test('独立视觉可按时间顺序分析最多三帧，保留覆盖范围且不把图片放入文本上下文',async()=>{
  let sent;const client=createMediaClient({getKey:()=> 'key',now:()=>4000,request:d=>{sent=JSON.parse(d.data);d.onload({status:200,responseText:'{"choices":[{"message":{"content":"主播先拿起杯子，随后展示杯口。"}}]}'});}});
- const result=await client({kind:'video',data:image,at:1000,endedAt:3000,frames:[{data:image,at:1000},{data:image,at:2000},{data:image,at:3000}]},{...MEDIA_DEFAULTS,videoEnabled:true,visionModel:'qwen-vl-plus'});
+ const result=await client({kind:'video',data:image,at:1000,endedAt:3000,frames:[{data:image,at:1000},{data:'data:image/jpeg;base64,/9j/2g==',at:2000},{data:'data:image/jpeg;base64,/9j/2w==',at:3000}]},{...MEDIA_DEFAULTS,videoEnabled:true,visionModel:'qwen-vl-plus'});
  assert.equal(sent.messages[1].content.filter(p=>p.type==='image_url').length,3);assert.equal(result.frameCount,3);
  const evidence=new MediaEvidence({now:()=>4000});evidence.add(result);const context=evidence.context(30);assert.equal(context.scene.visual.frameCount,3);assert.match(context.scene.visual.text,/展示杯口/);assert.ok(!JSON.stringify(context).includes('base64'));
 });

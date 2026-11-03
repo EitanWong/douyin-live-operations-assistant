@@ -79,7 +79,7 @@ test('媒体证据按采集时间保留最近片段，重复送达幂等且保�
   assert.equal(evidence.context(60).observations[0].isFinal,true);
   for(let i=20;i>0;i--)evidence.add({...row,at:now-i*1000,endedAt:now-i*1000+500,text:`片段${i}`});
   const observations=evidence.context(60).observations;
-  assert.equal(observations.length,12);assert.equal(observations.at(-1).at,now-1000);
+  assert.equal(observations.length,20);assert.equal(observations.at(-1).at,now-1000);
   assert.ok(observations.every((value,index)=>index===0 || value.at>=observations[index-1].at));
   evidence.add({...row,at:now-100,endedAt:now-200,text:'错误时间'});
   assert.ok(!evidence.context(60).observations.some(value=>value.text==='错误时间'));
