@@ -1,10 +1,16 @@
 import {jsonrepair} from 'jsonrepair';
 import {z} from 'zod';
+import {weatherPlanSchema} from './weather.js';
+import {DEFAULT_TIME_ZONE,validTimeZone} from './current-facts.js';
+import {publicDataIntentSchema} from './public-data.js';
 
 const empty=z.string().trim().max(0);
 const base={query:empty.default(''),reply:z.string().trim()};
 // Model intent determines the legal payload, rather than independent flags.
 export const intentSchema=z.discriminatedUnion('intent',[
+ weatherPlanSchema,
+ publicDataIntentSchema,
+ z.strictObject({intent:z.literal('clock'),timeZone:z.string().refine(validTimeZone).default(DEFAULT_TIME_ZONE)}),
  z.strictObject({intent:z.literal('web-search'),query:z.string().trim().min(1),reply:empty.default(''),freshness:z.enum(['realtime','rules','stable','short']).optional()}),
  z.strictObject({intent:z.literal('knowledge'),query:z.string().uuid(),reply:z.string().trim().min(1),sources:z.array(z.number().int().positive()).max(5).optional()}),
  z.strictObject({intent:z.literal('skip'),query:empty.default(''),reply:empty.default('')}),
@@ -17,7 +23,7 @@ export function parseAIIntent(raw,maxLength,{chatReply}={}){
  const parsed=intentSchema.safeParse(input);if(!parsed.success)throw new Error('AI 意图识别结果无效');
  const plan=parsed.data;
  if(plan.intent==='chat' && chatReply)plan.reply=chatReply;
- if([...plan.query].length>300)throw new Error('AI 搜索词无效');
- if(!['skip','web-search'].includes(plan.intent) && (!plan.reply || [...plan.reply].length>maxLength))throw new Error('AI 回复为空或超过字数限制');
+ if(plan.query && [...plan.query].length>300)throw new Error('AI 搜索词无效');
+ if(!['skip','web-search','weather','clock','public-data'].includes(plan.intent) && (!plan.reply || [...plan.reply].length>maxLength))throw new Error('AI 回复为空或超过字数限制');
  return plan;
 }

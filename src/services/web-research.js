@@ -21,15 +21,21 @@ export function reviewResearch(question,found){
  const pk=livePK(`${question} ${found.query || ''} ${found.results.map(row=>`${row.title} ${row.content}`).join(' ')}`);
  const excluded=[...(found.excluded || [])],results=[];
  for(const row of found.results){
-  if(pk && videoMetricClaim(row.content)){
+  const weather=found.weather,text=`${row.title || ''} ${row.content || ''}`;
+  if(weather && !text.includes(weather.location)){
+   excluded.push({url:row.url,title:row.title,reason:'地点不匹配，不能用相似地名的天气回答。'});
+  }else if(weather?.region && !text.includes(weather.region.replace(/(?:省|市)$/u,''))){
+   excluded.push({url:row.url,title:row.title,reason:'行政区域不匹配，不能把同名地点的天气混用。'});
+  }else if(weather && !text.replace(/(\d{4})年(\d{1,2})月(\d{1,2})日/gu,(_,y,m,d)=>`${y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`).includes(weather.date)){
+   excluded.push({url:row.url,title:row.title,reason:'未明确覆盖所问日期，不能用旧天气或其他日期作答。'});
+  }else if(pk && videoMetricClaim(row.content)){
    excluded.push({url:row.url,title:row.title,reason:'把视频播放量当作直播PK计分，不能支持直播规则。'});
   }else results.push(row);
  }
  return {...found,topic:pk ? 'live-pk' : null,results,evidence:results.map(sourceEvidence),excluded};
 }
-export async function collectResearch({question,plan,config,search,signal,timeout}){
+async function researchRound({question,plan,config,search,signal,timeout},queries){
  if(signal?.aborted)throw new Error('查询已取消');
- const queries=researchQueries(question,plan);
  const settled=await Promise.allSettled(queries.map(query=>search(query,config,{signal,timeout})));
  if(signal?.aborted)throw new Error('查询已取消');
  const searches=settled.map((entry,i)=>({query:queries[i],...(entry.status==='rejected' ? {error:entry.reason?.message || '查询失败'} : {count:entry.value.results.length,...(entry.value.error ? {error:entry.value.error} : {})})}));
@@ -38,8 +44,15 @@ export async function collectResearch({question,plan,config,search,signal,timeou
  const merged=batches.flatMap(batch=>batch.results).sort((a,b)=>Number(sourceEvidence(b).kind==='official-document')-Number(sourceEvidence(a).kind==='official-document'))
   .filter(row=>{if(seen.has(row.url))return false;seen.add(row.url);return true;});
  const base=batches[0] || {};
- const reviewed=reviewResearch(question,{...base,query:plan.query,results:merged,searches});
+ const reviewed=reviewResearch(question,{...base,query:plan.query,weather:plan.weather,results:merged,searches});
  const results=reviewed.results.slice(0,config.maxResults).map((row,i)=>({...row,index:i+1}));
  const error=results.length ? undefined : searches.map(row=>row.error).filter(Boolean).join('；') || '搜索没有返回适用资料';
  return {...reviewed,results,evidence:results.map(sourceEvidence),error};
+}
+export async function collectResearch(options){
+ const deadline=Date.now()+(options.timeout ?? 8000),found=await researchRound(options,researchQueries(options.question,options.plan));
+ if(!options.plan.weather || found.results.length || found.searches.some(row=>row.error) || options.signal?.aborted)return found;
+ const remaining=deadline-Date.now();if(remaining<=0)return found;
+ const retry=await researchRound({...options,timeout:remaining},[clip(`${options.plan.query} site:weather.com.cn`)]);
+ return {...retry,searches:[...found.searches,...retry.searches],excluded:[...found.excluded,...retry.excluded]};
 }

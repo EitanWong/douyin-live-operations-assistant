@@ -293,10 +293,10 @@ export function boot(options = {}) {
   let aiStatusSequence=0;
   const cloudClient = createAIClient({ request, getKey: (endpoint,ai) => pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,knowledge:webKnowledge,
     onStatus:status=>{if (engine && resolveReplyConfig(engine.config.ai).endpoint===status.endpoint && resolveReplyConfig(engine.config.ai).model===status.model && status.sequence>aiStatusSequence) {aiStatusSequence=status.sequence;panel?.setAIServiceStatus(status.error);}},
-    onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',knowledge:'复用知识',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
+    onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',weather:'天气查询',clock:'当前时间','public-data':'公共数据工具',knowledge:'复用知识',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:recordSearch
   });
-  const client=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,search:searchClient,knowledge:webKnowledge,onSearch:recordSearch})},onTrace:r=>{
+  const client=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,request,search:searchClient,knowledge:webKnowledge,onSearch:recordSearch})},onTrace:r=>{
     foundationSettings?.trace(r);if(r.provider==='edge'){panel?.setAIServiceStatus('');log('ai',`端侧兜底完成 · ${r.elapsedMs}ms`);}
   }});
   const lock = options.lock || new RoomLock({ room });

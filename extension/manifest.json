@@ -14,7 +14,13 @@
   ],
   "host_permissions": [
     "https://live.douyin.com/*",
-    "https://www.douyin.com/*"
+    "https://www.douyin.com/*",
+    "https://geocoding-api.open-meteo.com/*",
+    "https://api.open-meteo.com/*",
+    "https://air-quality-api.open-meteo.com/*",
+    "https://api.frankfurter.dev/*",
+    "https://raw.githubusercontent.com/*",
+    "https://date.nager.at/*"
   ],
   "optional_host_permissions": [
     "https://*/*",

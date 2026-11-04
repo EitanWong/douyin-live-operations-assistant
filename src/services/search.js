@@ -53,7 +53,7 @@ function parseResponse(response,url,operation,stream=false) {
   try {return JSON.parse(response.responseText);} catch {throw new Error('服务响应不是有效 JSON');}
 }
 
-export function requestJSON(request, {url,key,body,timeout=25000,operation='ai',provider,form=false,stream=false,signal}) {
+export function requestJSON(request, {url,key,body,method='POST',timeout=25000,operation='ai',provider,form=false,stream=false,signal}) {
   return new Promise((resolve,reject)=>{
     let settled=false,handle,timer;
     const abort=()=>{if(settled)return;finish(new Error('请求已取消'));try{handle?.abort?.();}catch{}};
@@ -62,8 +62,8 @@ export function requestJSON(request, {url,key,body,timeout=25000,operation='ai',
     signal?.addEventListener('abort',abort,{once:true});
     timer=setTimeout(()=>{finish(new Error(operation==='search' ? '联网搜索超时' : 'AI 请求超时'));try {handle?.abort?.();} catch {}},timeout);
     try {
-      handle=request({method:'POST',url,operation,searchProvider:provider,anonymous:true,timeout,responseType:'text',
-        headers:{'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(key ? {Authorization:`Bearer ${key}`} : {})},data:form ? new URLSearchParams(body).toString() : JSON.stringify(body),
+      handle=request({method,url,operation,searchProvider:provider,anonymous:true,timeout,responseType:'text',
+        headers:{...(method==='GET' ? {} : {'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json'}),...(key ? {Authorization:`Bearer ${key}`} : {})},data:method==='GET' ? undefined : form ? new URLSearchParams(body).toString() : JSON.stringify(body),
         onload:response=>{
           try {finish(null,parseResponse(response,url,operation,stream));} catch(error) {finish(error);}
         },

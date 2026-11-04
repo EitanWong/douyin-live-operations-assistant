@@ -19,7 +19,7 @@ export function createResearchAgent({request,getKey,readPublicPage,reserve=async
  return async(job,{signal,checkpoint})=>{
   const data=validateAgentInput(job.input);await checkpoint('context','读取任务提交时的上下文快照与本地知识');
   const pages=[];for(const url of data.sources){if(signal.aborted)throw new Error('任务已取消');await checkpoint('public-source',new URL(url).hostname);try{const page=await readPublicPage(url,signal);pages.push({...page,text:page.text.slice(0,2000),truncated:page.text.length>2000});}catch(error){pages.push({url,error:error.message});}}
-  const sources=[],citationIndices=[];let modelCalls=0;const metered=details=>{if(details.operation!=='search'){modelCalls++;if(modelCalls>3)throw new Error('Agent模型调用预算已用完');}return request(details);};
+  const sources=[],citationIndices=[];let modelCalls=0;const metered=details=>{if(!['search','weather','public-data'].includes(details.operation)){modelCalls++;if(modelCalls>3)throw new Error('Agent模型调用预算已用完');}return request(details);};
   const search=createSearchClient({request:metered,getKey:endpoint=>getKey('search',endpoint)});
   const client=createAIClient({request:metered,getKey:endpoint=>getKey('ai',endpoint),search,
    onIntent:record=>{void checkpoint('plan',record.intent).catch(()=>{});},onSearch:record=>{sources.push(...(record.results || []));citationIndices.push(...(record.citationIndices || []));}});

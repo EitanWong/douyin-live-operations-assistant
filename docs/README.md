@@ -11,6 +11,7 @@
 
 - [项目结构与架构](development/architecture.zh-CN.md)：模块职责、消息流和持久化边界。
 - [包内工具插件开发](development/tool-plugins.zh-CN.md)：统一注册、Cordis 运行时适配、资源回收、操作网关及自动点赞／福袋红包接入。
+- [公共数据工具与免费接口](development/public-data-tools.zh-CN.md)：时间、天气、地名、空气质量、汇率、节假日的 Agent 调用契约、实际接口与免费使用范围。
 - [开发与测试](development/contributing.zh-CN.md)：本地命令、测试分类、产物管理。
 - [直播数据可视化](development/visualization.zh-CN.md)：PK 图表、活动统计、数据边界与验证。
 - [发布流程](development/release-process.zh-CN.md)：dev / main 分支与版本发布。

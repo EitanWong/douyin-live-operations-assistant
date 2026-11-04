@@ -14,7 +14,7 @@ function replyChecks(result,config,testCase){
  const checked=cleanMessage(result.answer,config),skip=result.answer==='[SKIP]';
  const checks=[{label:skip ? '模型选择不回复' : checked.ok ? '回复通过公屏格式与长度检查' : checked.reason,pass:skip || checked.ok},
   {label:'没有代主持或劝留表达',pass:!isIntrusiveReply(result.answer)}];
- if(result.intent==='web-search' || result.intent==='knowledge'){
+ if(['web-search','knowledge','weather','public-data'].includes(result.intent)){
   const citations=result.citationIndices;
   checks.push({label:'答案引用本次提供的有效来源',pass:!result.searchError && citations.length>0 && citations.every(index=>result.sources.some(source=>source.index===index))});
  }
@@ -70,9 +70,10 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
    catch(error){record('sources','搜索未完成',error.message,'warning');throw error;}
   } : undefined;
   const cloud=createAIClient({getKey,search:lookup,knowledge:readOnlyKnowledge,onIntent,onSearch,request:details=>{
+   if(['weather','public-data'].includes(details.operation))return request(details);
    if(!current())throw cancelled();reserve('cloud',config.ai.maxPerHour);result.calls.cloud++;record('model',result.intent ? '根据资料整理答案' : '调用回复模型',reply.model,'running');return request(details);
   }});
-  const local=edge && {...edge,reply:createLocalReply({edge,search:lookup,knowledge:readOnlyKnowledge,onSearch,onIntent})};
+  const local=edge && {...edge,reply:createLocalReply({edge,request,search:lookup,knowledge:readOnlyKnowledge,onSearch,onIntent})};
   const client=createResilientAI({cloud,edge:local,now,onTrace:row=>{result.provider=row.provider;if(row.provider==='edge')result.model=`本地 · ${config.ai.edge.textModel}`;record('provider','模型执行结果',`${row.provider==='edge' ? '本地' : '云端'} · ${{ok:'已完成',timeout:'超时',unavailable:'不可用'}[row.status] || row.status}`,row.status==='ok' ? 'succeeded' : 'warning');}});
   try{
    if(!current())throw cancelled();

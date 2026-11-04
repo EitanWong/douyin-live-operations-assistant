@@ -5,19 +5,21 @@ import {readPublicPage,validatePublicURL} from '../src/ai/public-sources.js';
 import {validateEndpoint} from '../src/services/ai.js';
 import {validateSearchEndpoint,validateSearchBody} from '../src/services/search.js';
 import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
+import {validateWeatherURL} from '../src/services/weather.js';
+import {validatePublicDataURL} from '../src/services/public-data.js';
 export function createBackgroundAI({chrome,readRecord,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
  const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
  const request=details=>{
   const controller=new AbortController();let timeout;
   void (async()=>{try{
-   const searching=details.operation==='search',provider=details.searchProvider;
-   const url=searching ? validateSearchEndpoint(details.url,provider) : validateEndpoint(details.url);
+   const searching=details.operation==='search',weather=['weather','public-data'].includes(details.operation),provider=details.searchProvider;
+   const url=weather ? details.operation==='weather' ? validateWeatherURL(details.url) : validatePublicDataURL(details.url) : searching ? validateSearchEndpoint(details.url,provider) : validateEndpoint(details.url);
    if(!await authorized(new URL(url).origin))throw new Error('请先在扩展图标中授权模型或搜索域名');
    if(controller.signal.aborted)throw new Error('请求已取消');
-   if(typeof details.data!=='string' || details.data.length>100000)throw new Error('后台请求超过容量');
+   if(!weather && (typeof details.data!=='string' || details.data.length>100000))throw new Error('后台请求超过容量');
    if(searching)validateSearchBody(provider==='searxng' ? Object.fromEntries(new URLSearchParams(details.data)) : JSON.parse(details.data),provider);
    timeout=setTimeout(()=>controller.abort(),Math.min(details.timeout || 25000,searching ? 30000 : 25000));
-   const response=await fetcher(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:details.headers,body:details.data});
+   const response=await fetcher(url,{method:weather ? 'GET' : 'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:weather ? {} : details.headers,body:weather ? undefined : details.data});
    const text=await response.text();if(text.length>200000)throw new Error('后台模型响应超过容量');details.onload({status:response.status,responseText:text,finalUrl:response.url});
   }catch(error){details.onerror?.(error);}finally{clearTimeout(timeout);}})();
   return {abort(){controller.abort();details.onabort?.();}};

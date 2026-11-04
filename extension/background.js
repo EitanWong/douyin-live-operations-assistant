@@ -11,6 +11,8 @@ import { ProtocolCache } from './protocol-cache.js';
 import { fanclubFrameContext, cleanFanclubSnapshot } from '../src/data/fanclub.js';
 import { validateEndpoint } from '../src/services/ai.js';
 import { validateSearchEndpoint, validateSearchBody } from '../src/services/search.js';
+import {validateWeatherURL} from '../src/services/weather.js';
+import {validatePublicDataURL} from '../src/services/public-data.js';
 import {validateMediaRequest,MEDIA_REQUEST_LIMIT} from '../src/services/media.js';
 import { GiftStore } from '../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
@@ -288,20 +290,20 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           value={status:response.status,responseText:response.status>=200 && response.status<300 ? text : '',finalUrl:response.url};
         }finally{clearTimeout(timeout);}
       }
-      else if (['ai','search','media'].includes(message.type) && isRoom(sender)) {
-        const searching=message.type==='search';
+      else if (['ai','search','media','weather','public-data'].includes(message.type) && isRoom(sender)) {
+        const searching=message.type==='search',weather=['weather','public-data'].includes(message.type);
         const provider=message.provider || (String(message.url).endsWith('/web-search') ? 'bocha' : 'tavily');
-        const url = searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
+        const url = weather ? message.type==='weather' ? validateWeatherURL(message.url) : validatePublicDataURL(message.url) : searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
         if (!await chrome.permissions.contains({origins:[`${new URL(url).protocol}//${new URL(url).hostname}/*`]})) throw new Error(`请点击扩展图标，授权当前${searching ? '搜索' : ' AI '}服务域名后重试`);
-        if (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : 100000)) throw new Error('AI请求过大');
+        if (!weather && (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : 100000))) throw new Error('AI请求过大');
         const form=searching && provider==='searxng';
-        const body = form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
-        if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!Array.isArray(body.messages) || typeof body.model !== 'string') throw new Error('AI请求无效');
+        const body = weather ? null : form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
+        if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!weather && (!Array.isArray(body.messages) || typeof body.model !== 'string')) throw new Error('AI请求无效');
         const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 30000 : 25000);
         const requestKey=typeof message.requestId==='string' && /^[a-z\d-]{16,80}$/iu.test(message.requestId) ? `${sender.tab.id}:${message.requestId}` : null;
         if(requestKey){activeAIRequests.set(requestKey,controller);if(cancelledAIRequests.delete(requestKey))controller.abort();}
         try {
-          const response = await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:message.data});
+          const response = await fetch(url,{method:weather ? 'GET' : 'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:weather ? {} : {'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:weather ? undefined : message.data});
           const text = await response.text();
           value={status:response.status,responseText:text.slice(0,200000),finalUrl:response.url};
         } finally { clearTimeout(timeout);if(requestKey)activeAIRequests.delete(requestKey); }

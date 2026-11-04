@@ -85,7 +85,7 @@ async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{
 }
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
-  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*']);
+  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*','https://geocoding-api.open-meteo.com/*','https://api.open-meteo.com/*','https://air-quality-api.open-meteo.com/*','https://api.frankfurter.dev/*','https://raw.githubusercontent.com/*','https://date.nager.at/*']);
   for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
   assert.match(m.content_security_policy.extension_pages,/wasm-unsafe-eval/u);
@@ -395,6 +395,23 @@ test('AI网络需指定域名权限且不携带Cookies、不跟随跳转', async
   const w=await worker(); const m={type:'ai',url:'https://ai.example/v1/chat/completions',data:JSON.stringify({model:'model',messages:[]}),headers:{Authorization:'Bearer dummy',Cookie:'not-forwarded'}};
   assert.equal((await w.send(m)).ok,true); assert.equal(w.requests[0].opts.credentials,'omit'); assert.equal(w.requests[0].opts.redirect,'error'); assert.equal(w.requests[0].opts.headers.Cookie,undefined);
   w.deny(); assert.equal((await w.send(m)).ok,false); assert.equal(w.requests.length,1);
+});
+test('天气GET经过后台固定接口和域名验证，不携带AI密钥或Cookie并支持实际取消',async()=>{
+ const w=await worker(),url='https://geocoding-api.open-meteo.com/v1/search?name=横店&count=20&language=zh&format=json';
+ const result=await w.send({type:'weather',url,headers:{Authorization:'Bearer must-not-forward'}});
+ assert.equal(result.ok,true);assert.equal(w.requests[0].opts.method,'GET');assert.equal(w.requests[0].opts.body,undefined);assert.equal(w.requests[0].opts.credentials,'omit');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.headers.Authorization,undefined);
+ assert.equal((await w.send({type:'weather',url:url.replace('open-meteo.com','evil.test')})).ok,false);assert.equal(w.requests.length,1);
+ assert.equal((await w.send({type:'weather',url},{tab:{url:'https://example.org/'}})).ok,false);w.deny();assert.equal((await w.send({type:'weather',url})).ok,false);
+ let signal;const delayed=await worker({},new IDBFactory(),'{}',{fetch:async(_url,options)=>{signal=options.signal;return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(Error('cancel'),{name:'AbortError'}))));}});
+ const pending=delayed.send({type:'weather',url,requestId:'abcdefab-1234-1234-1234-abcdefabcdef'},{frameId:0,tab:{id:1,url:'https://live.douyin.com/1'}});
+ for(let i=0;i<100 && !signal;i++)await new Promise(r=>setTimeout(r,5));assert.ok(signal);
+ await delayed.send({type:'ai-request-cancel',id:'abcdefab-1234-1234-1234-abcdefabcdef'},{frameId:0,tab:{id:1,url:'https://live.douyin.com/1'}});assert.equal(signal.aborted,true);assert.equal((await pending).ok,false);
+});
+test('公共工具走同一无密钥GET通道，仅接受已登记的路径和参数',async()=>{
+ const w=await worker(),urls=['https://api.frankfurter.dev/v2/rate/CNY/USD','https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/2026.json','https://date.nager.at/api/v3/PublicHolidays/2026/US','https://air-quality-api.open-meteo.com/v1/air-quality?latitude=29.15698&longitude=120.31478&timezone=auto&current=us_aqi,pm2_5,pm10'];
+ for(const url of urls){assert.equal((await w.send({type:'public-data',url,headers:{Authorization:'Bearer do-not-forward'}})).ok,true);const {opts}=w.requests.at(-1);assert.equal(opts.method,'GET');assert.equal(opts.headers.Authorization,undefined);assert.equal(opts.body,undefined);}
+ for(const url of [urls[0]+'?key=secret',urls[1].replace('NateScarlet','other'),'https://api.frankfurter.dev:444/v2/rate/CNY/USD'])assert.equal((await w.send({type:'public-data',url})).ok,false);
+ assert.equal(w.requests.length,4);
 });
 test('音视频后台接收有界媒体包，拒绝网页伪造、远程图片与权限缺失，并持久保存独立密钥',async()=>{
   const w=await worker(),body={model:'vision-test',stream:false,temperature:0,max_tokens:500,messages:[{role:'system',content:'描述画面'},{role:'user',content:[{type:'text',text:'这一帧'},{type:'image_url',image_url:{url:`data:image/jpeg;base64,${'A'.repeat(120000)}`}}]}]};
