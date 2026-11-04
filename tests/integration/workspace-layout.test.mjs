@@ -62,12 +62,15 @@ test('抽奖的弹幕与礼物参与独立分组，礼物长目录不撑高奖�
   for(const selector of ['[data-giveaway=announcePrizeNames]','[data-action=giveaway-start]','[data-giveaway-status]'])assert.ok(live.contains(page.querySelector(selector)),'本轮操作与反馈不另撑一列');
  }finally{f.close();}
 });
-test('功能开关以单功能标准块排列，所有原开关及分类说明保留',()=>{
+test('功能开关按用途分组直接操作，不为单个开关创建卡片',()=>{
  const f=fixture();try{
-  const page=f.panel.node('[data-page=features]'),tiles=page.querySelectorAll('.feature-tile');
-  assert.equal(tiles.length,11);assert.ok([...tiles].every(tile=>tile.querySelectorAll('.feature-row input').length===1));
-  assert.ok([...tiles].every(tile=>tile.querySelector('.group-note')?.textContent));
-  assert.match(page.querySelector('[data-feature-explanations]').textContent,/礼物与进场.*计划互动.*礼物账本/u);
+  const page=f.panel.node('[data-page=features]'),sections=[...page.querySelectorAll('.feature-section')];
+  assert.deepEqual(sections.map(section=>section.querySelector('h3').textContent),['直播互动','AI 互动','治理与统计']);
+  assert.deepEqual(sections.map(section=>section.querySelectorAll('.feature-row input').length),[6,3,2]);
+  assert.equal(page.querySelectorAll('.workspace-card,.feature-tile').length,0);
+  assert.equal(page.querySelectorAll('.feature-row input[role=switch]').length,11);
+  assert.ok(page.querySelector('[data-go=ai]'),'配置入口在 AI 分组直接可用');
+  assert.match(page.textContent,/关闭后停止采集，历史数据仍保留/u);
   const input=page.querySelector('[data-field="bot.enabled"]');input.closest('label').click();assert.equal(input.checked,false);assert.equal(f.panel.dirty,true);
  }finally{f.close();}
 });
