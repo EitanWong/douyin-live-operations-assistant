@@ -9,6 +9,7 @@
 
 ## 开发
 
+- [Agent 导航与可维护索引](development/agent-guide.zh-CN.md)：按任务定位、符号与资源查询、依赖影响、测试入口、术语及自动过期校验。
 - [项目结构与架构](development/architecture.zh-CN.md)：模块职责、消息流和持久化边界。
 - [包内工具插件开发](development/tool-plugins.zh-CN.md)：统一注册、Cordis 运行时适配、资源回收、操作网关及自动点赞／福袋红包接入。
 - [公共数据工具与免费接口](development/public-data-tools.zh-CN.md)：时间、天气、地名、空气质量、汇率、节假日的 Agent 调用契约、实际接口与免费使用范围。

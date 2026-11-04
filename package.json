@@ -7,6 +7,11 @@
     "build": "node scripts/build.mjs",
     "test": "node --test tests",
     "benchmark:runtime": "node --expose-gc scripts/benchmark-runtime.mjs",
+    "benchmark:workspace": "node --expose-gc scripts/benchmark-workspace.mjs",
+    "agent:index": "node scripts/agent-index.mjs build",
+    "agent:check": "node scripts/agent-index.mjs check",
+    "agent:find": "node scripts/agent-index.mjs find",
+    "agent:impact": "node scripts/agent-index.mjs impact",
     "check": "node scripts/check.mjs",
     "demo": "node scripts/serve.mjs",
     "native:install": "node scripts/install-native.mjs",
@@ -19,6 +24,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "acorn": "8.15.0",
     "esbuild": "^0.25.12",
     "fake-indexeddb": "^6.2.6",
     "jsdom": "^26.1.0"

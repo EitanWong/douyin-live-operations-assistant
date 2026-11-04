@@ -156,6 +156,7 @@ Every time you are asked to make a change follow:
 # 项目执行约定
 
 * 原则以本文件为唯一来源；新增或调整原则时在此维护。
+* 开发入口见 [Agent 导航与术语](docs/development/agent-guide.zh-CN.md)。先用 `npm run agent:find -- 关键词` 和 `npm run agent:impact -- 文件路径` 定位符号、资源与关联测试；查询的是上次生成的快照，修改后运行 `npm run agent:index` 并提交索引差异。`npm run check` 会拒绝过期索引；索引不替代源码确认与完整回归。
 * 每次任务在[行动日志](docs/development/action-log.zh-CN.md)追加执行动作、原因、验证结果及未完成项，完成时报告日志，并补充最终提交与推送结果。
 * 按[开发和发布流程](docs/development/release-process.zh-CN.md)执行提交与推送：日常集成线为 `dev`，稳定分支 `main` 通过 CI 和 PR 合入。
 * 使用 `crapper`、`dryer`、`mutator` 前核实工具是否可用；不可用时在行动日志和完成报告中说明未执行的检查，不把其他检查视为这些工具的通过结果。
