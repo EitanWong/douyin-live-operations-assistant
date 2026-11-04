@@ -91,7 +91,7 @@ export const PRODUCT_CSS=`
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-status{padding:6px 12px;max-height:calc(var(--product-control-height) + 12px)}
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-switch{padding-block:2px}
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-disclosure:has(>.product-disclosure-heading>button[aria-expanded=false]){padding-block:4px}
-.product-masonry{position:relative;display:block;width:100%;min-width:0}.product-card-slot{min-width:0;max-width:100%;margin-bottom:var(--product-section-gap)!important}.product-card-slot>.mantine-Paper-root{height:auto}
+.product-card-grid{display:block!important;gap:0!important}.product-masonry{position:relative;display:block;width:100%;min-width:0}.product-card-slot{min-width:0;max-width:100%;margin-bottom:var(--product-section-gap)!important}.product-card-slot>.mantine-Paper-root{height:auto}
 .product-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex:none;min-width:0;padding:var(--product-card-padding);border-bottom:1px solid var(--product-line)}
 .product-card-heading h3{min-height:var(--product-heading-height);display:flex;align-items:center}
 .product-card-body{min-height:0;min-width:0;padding:var(--product-card-padding);overflow:visible;overscroll-behavior:auto;scroll-padding:var(--product-card-padding);flex:1 1 auto}

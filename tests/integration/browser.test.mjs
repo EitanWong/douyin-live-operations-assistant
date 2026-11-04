@@ -537,7 +537,8 @@ test('调试发送经应用队列保留两种通道，管理员测试不依赖�
     assert.equal(engine.queue.length,0);
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 });
-test('稳定刷新不重建节点，收起后日志不渲染，记录限制200条',async()=>{
+test('稳定刷新不重建节点，收起后日志不渲染，记录限制200条',async t=>{
+  t.mock.timers.enable({apis:['Date'],now:1793764800000});
   const dom=setup();const p=new Panel({config:{...copy(DEFAULTS), mode:'preview'},room:'1',callbacks:{}}),e=new Engine({config:{...copy(DEFAULTS), mode:'preview'}});e.start();p.refresh(e);
   const observer=new dom.window.MutationObserver(()=>{});observer.observe(p.root,{subtree:true,childList:true,attributes:true,characterData:true});
   for(let i=0;i<100;i++)p.refresh(e);assert.equal(observer.takeRecords().length,0);
