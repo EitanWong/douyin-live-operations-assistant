@@ -1992,3 +1992,11 @@ Promptfoo接入首轮完整保留：评分脚本单行返回被框架按表达�
 原行动日志“无新增工作树/两个服务已停止”为首次验收时状态；本次后续重新启动验收并创建独立工作树，最终清理及验证回执随后追加。保留本工作树供构建、证据复查和交付；其他工作树是否仍在使用无法确定，未擅自清理。
 
 crapper、dryer、mutator 在本会话已核实均不可用，三项未执行；不将其他检查作为它们的通过结果。原生代码未修改，本轮不重复原生检查。完整验证、构建产物位置、提交与推送结果随后追加。
+
+最终集成验证：**1387/1387**，0 失败、取消、跳过（packing-final-full-test.log；`node --test --test-concurrency=8 tests`，与 npm test 相同完整集合）。最新运行时专项 1/1（packing-final-runtime.log），包含原草稿节点复用；构建（packing-final-build-isolated.log）、构建后语法检查（packing-final-check.log）、npm ci 与 git diff --check 均通过。原始 111 项、29 项专项及失败证据保留，不将中止或失败的中间批次记为通过。
+
+浏览器最终证据为 packing-browser.json、packing-final.png、packing-models-final.png；控制台 error 为空。自动送礼的工具管理和使用说明填入右侧短列；连接检查和说明不再在最长模型卡片之后另起整行。桌面四页、最小窗口五页、宽屏恢复和弹窗均已验证。保留统一可读性间距与自然内容高度，不使用空白填充伪造满屏。关于焦点的验收以此前缩放、编辑与弹窗关闭恢复为准；规则重排补充回归验证的是节点复用，并不声称 DOM 移动自身一定维持焦点。
+
+本轮所有临时浏览器标签已关闭、viewport 覆盖已恢复，4188 演示服务已退出；4189 未重启。本轮没有操作用户实播页或发送真实弹幕/礼物。独立工作树及 ignored 构建、证据保留于 `/Users/eitan/.codex/worktrees/dense-tool-layout/douyin-live-operations-assistant`；原工作区其他任务改动保留。正式使用时更新原有扩展加载目录的构建并重新加载扩展、刷新直播页，保持原扩展路径和身份。
+
+代码提交：f977f9c（自然卡片、放大、AI 分组与自然回答）与 7001500（消除重复放大和通栏断层）。本段验证作为独立文档提交推送 dev；随后追加远端核对回执。main、版本号、标签不变；crapper/dryer/mutator 不可用，三项未执行。
