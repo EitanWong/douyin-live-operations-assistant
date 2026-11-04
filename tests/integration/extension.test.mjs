@@ -85,7 +85,7 @@ async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{
 }
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
-  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*','https://geocoding-api.open-meteo.com/*','https://api.open-meteo.com/*','https://air-quality-api.open-meteo.com/*','https://api.frankfurter.dev/*','https://raw.githubusercontent.com/*','https://date.nager.at/*']);
+  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*','https://geocoding-api.open-meteo.com/*','https://api.open-meteo.com/*','https://wttr.in/*','https://air-quality-api.open-meteo.com/*','https://api.frankfurter.dev/*','https://raw.githubusercontent.com/*','https://date.nager.at/*']);
   for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
   assert.match(m.content_security_policy.extension_pages,/wasm-unsafe-eval/u);
@@ -1100,4 +1100,14 @@ test('扩展搜索超过8秒仍等待结果，与服务30秒查证预算一致',
  const pending=w.send({type:'search',url:'https://api.bochaai.com/v1/web-search',data:JSON.stringify({query:'抖音PK规则',count:3,summary:true,freshness:'noLimit'})});
  await new Promise(setImmediate);
  try{for(const timer of timers)if(timer.ms<=8000)timer.fn();assert.equal(signal.aborted,false);assert.ok(timers.some(t=>t.ms===30000));}finally{release();await pending;}
+});
+
+test('天气备用接口通过扩展固定GET通道，拒绝任意路径和敏感参数',async()=>{
+ const w=await worker(),url='https://wttr.in/29.15698,120.31478?format=j1';
+ assert.equal((await w.send({type:'weather',url,headers:{Authorization:'Bearer secret'},body:'private'})).ok,true);
+ assert.equal(w.requests[0].opts.method,'GET');
+ assert.equal(w.requests[0].opts.body,undefined);
+ assert.equal(w.requests[0].opts.headers.Authorization,undefined);
+ for(const bad of [url+'&key=secret',url.replace('/29.15698,120.31478','/London'),url.replace('https:','http:'),url.replace('29.15698','99')])assert.equal((await w.send({type:'weather',url:bad})).ok,false);
+ assert.equal(w.requests.length,1);
 });

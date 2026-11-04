@@ -43,3 +43,37 @@ test('公共天气能力只接受固定HTTPS接口和有界参数，工具计划
  for(const url of [valid.replace('https:','http:'),valid.replace('open-meteo.com','open-meteo.com.evil.test'),valid+'&key=secret',valid+'&name=上海',valid+'#x',valid.replace('count=20','count=999')])assert.throws(()=>validateWeatherURL(url));
  for(const value of [{intent:'clock',timeZone:'fake/timezone'},{...plan,date:'2026-02-30'},{...plan,location:''}])assert.throws(()=>parseAIIntent(JSON.stringify(value),80));
 });
+test('所问日期有效时，远期空值和其他日期的坏数据不应阻断今天预报',async()=>{
+ const data=structuredClone(forecast);
+ data.daily.time.push('2026-11-07');
+ for(const key of ['weather_code','temperature_2m_min','temperature_2m_max','precipitation_probability_max'])data.daily[key].push(null);
+ assert.match((await fixture({data}).weather(plan,{now:at})).results[0].content,/15至21℃/u);
+ data.daily.weather_code[0]=null;
+ await assert.rejects(fixture({data}).weather(plan,{now:at}));
+});
+test('主预报不可用时按已核验坐标查询wttr备用预报，保留日期与来源',async()=>{
+ const calls=[];
+ const weather=createWeatherClient({request:d=>{
+  calls.push(d);const host=new URL(d.url).hostname;
+  const data=host.startsWith('geocoding') ? {results:[place]} : host==='wttr.in' ? {nearest_area:[{latitude:'29.158',longitude:'120.310'}],weather:[{date:'2026-11-05',mintempC:'15',maxtempC:'23',hourly:[{time:'1200',weatherCode:'119',chanceofrain:'43'}]}]} : {error:true};
+  d.onload({status:200,responseText:JSON.stringify(data),finalUrl:d.url});
+ }});
+ const found=await weather(plan,{now:at});assert.equal(found.provider,'wttr');assert.match(found.results[0].content,/2026-11-05.*阴.*15至23℃/u);
+ assert.equal(new URL(calls[2].url).pathname,'/29.15698,120.31478');
+});
+test('备用预报拒绝错坐标、过期日期、空温度和未知天气码，不以坏资料回答',async()=>{
+ for(const mutate of [d=>d.nearest_area[0].latitude='30.85',d=>d.weather[0].date='2026-11-04',d=>d.weather[0].mintempC=null,d=>d.weather[0].hourly[0].weatherCode='999']){
+  const data={nearest_area:[{latitude:'29.158',longitude:'120.310'}],weather:[{date:'2026-11-05',mintempC:'15',maxtempC:'23',hourly:[{time:'1200',weatherCode:'119',chanceofrain:'43'}]}]};mutate(data);
+  const weather=createWeatherClient({request:d=>{const host=new URL(d.url).hostname;d.onload({status:200,responseText:JSON.stringify(host.startsWith('geocoding') ? {results:[place]} : host==='wttr.in' ? data : {}),finalUrl:d.url});}});
+  await assert.rejects(weather(plan,{now:at}),/wttr.in/u);
+ }
+});
+test('主源超时会留出备用时间，取消不启动备用，不用缺观测日期的备用数据回答实时天气',async()=>{
+ const calls=[];
+ const weather=createWeatherClient({request:d=>{calls.push(d);if(calls.length===1)d.onload({status:200,responseText:JSON.stringify({results:[place]}),finalUrl:d.url});else d.ontimeout();}});
+ await assert.rejects(weather(plan,{now:at}));assert.equal(calls.length,3);assert.ok(calls[1].timeout<calls[2].timeout);
+ calls.length=0;await assert.rejects(weather({...plan,period:'current'},{now:at}));assert.equal(calls.length,2);
+ const controller=new AbortController();let count=0;
+ const cancelled=createWeatherClient({request:d=>{count++;if(count===1)d.onload({status:200,responseText:JSON.stringify({results:[place]}),finalUrl:d.url});else controller.abort();}});
+ await assert.rejects(cancelled(plan,{now:at,signal:controller.signal}),/取消/u);assert.equal(count,2);
+});
