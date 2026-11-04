@@ -54,11 +54,17 @@ export class RoomMonitor {
     return {state:'waiting',due:now-this.startedAt>=IDLE_REFRESH_MS,reason:'等待开播，刷新直播间'};
   }
   async run() {
+    if(this.closed)return;
     let c=this.context();
     if(!this.available(c)) {this.publish(c.suspended?'suspended':'stopped');return;}
     if(this.page.navigator?.onLine===false) {this.publish('offline',Boolean(c.enabled));return;}
     if(this.reloading)return;
-    await this.check();c=this.context();
+    // The monitoring lease belongs to the enabled lifecycle, not to the room
+    // request. A slow request must not leave a waiting tab without protection.
+    this.publish(c.enabled ? this.recovery(c).state : 'stopped',Boolean(c.enabled));
+    await this.check();
+    if(this.closed)return;
+    c=this.context();
     if(!this.available(c)) {this.publish(c.suspended?'suspended':'stopped');return;}
     if(!c.enabled) {this.disconnectedAt=null;this.publish('stopped');return;}
     const recovery=this.recovery(c);this.publish(recovery.state,true);
@@ -68,6 +74,7 @@ export class RoomMonitor {
   async reload(reason) {
     try {
       await this.checkpoint();
+      if(this.closed)return;
       const c=this.context();
       if(!this.available(c) || !c.enabled || c.dirty || this.page.navigator?.onLine===false)return;
       // Recheck after async storage: the original site may already have reconnected.

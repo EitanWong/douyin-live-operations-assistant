@@ -509,7 +509,7 @@ export function boot(options = {}) {
     adapter.sync?.();await roomMonitor?.wake();await tryAutoStart();
   };
   // 首屏渲染前安装，不重建连接、不改变 binaryType、不发送 ACK 或心跳。
-  if (!demo) { adapter.restoreCollection?.(runtimeSnapshot?.collection); adapter.hook(); }
+  if (!demo) { adapter.restoreCollection?.(runtimeSnapshot?.collection); adapter.hook(); void roomMonitor.tick(); }
   else network = adapter.status = { hook: true, sockets: 1, frames: 1, events: 0, errors: 0, connected: true, lastFrame: Date.now() };
   async function keepKey(c, key, remember) {
     if (!key) return;

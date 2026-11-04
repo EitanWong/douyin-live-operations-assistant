@@ -26,6 +26,20 @@ test('未开播页持续检测，保存状态后才刷新，刷新冷却跨页�
   next.advance(5000);await next.monitor.tick();assert.equal(next.reloads,0,'跨刷新不形成刷新风暴');
 });
 
+test('房间查询未返回时即建立监控租约，关闭后迟到查询不能恢复租约',async()=>{
+  const f=fixture();let finish;
+  f.monitor.read=()=>new Promise(resolve=>{finish=resolve;});f.advance(15000);
+  const pending=f.monitor.tick();
+  try {
+    assert.equal(f.statuses.at(-1)?.active,true,'监控运行权不应等待网络完成');
+    assert.equal(f.statuses.at(-1).state,'waiting');
+  } finally {
+    f.monitor.close();f.monitor.context=()=>{throw new Error('已销毁页面不应读取');};finish();await pending;
+  }
+  assert.equal(f.statuses.at(-1).active,false);assert.equal(f.reloads,0);
+  await f.monitor.wake();
+});
+
 test('全天候24小时等待没有重试次数上限，失败退避且后续成功恢复正常检测频率',async()=>{
   const f=fixture();f.failRead(true);f.advance(15000);await f.monitor.tick();
   f.advance(15000);await f.monitor.tick();assert.equal(f.reads,1);
