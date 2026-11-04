@@ -9,6 +9,20 @@ import {autoLikeTool} from '../../src/tools/auto-like/index.js';
 const flush = () => new Promise(setImmediate);
 const deferred = () => { let resolve; const promise=new Promise(done=>{resolve=done;}); return {promise,resolve}; };
 const definition = (id,mount,capabilities=[]) => ({id,mount,capabilities,label:id,icon:'heart',version:'1.0.0',apiVersion:1,view:{template:()=>'',update(){}}});
+test('长期开启的工具及时释放一次性和外部取消的监听，不积累已结束资源',async()=>{
+  const scope=new ToolScope(),target=new EventTarget();let calls=0;
+  for(let i=0;i<100;i++){
+    scope.listen(target,'once',()=>{calls++;target.dispatchEvent(new Event('once'));},{once:true});
+    target.dispatchEvent(new Event('once'));
+    const controller=new AbortController();
+    scope.listen(target,'abort',()=>assert.fail('取消后不能回调'),{signal:controller.signal});controller.abort();
+    scope.listen(target,'never',()=>assert.fail('已取消的信号不能注册'),{signal:controller.signal});
+  }
+  target.dispatchEvent(new Event('abort'));target.dispatchEvent(new Event('never'));
+  await scope.drain();assert.equal(calls,100);
+  assert.equal(scope.cleanups.size,0,'已触发/取消的监听不能持续强引用目标与闭包');
+  await scope.close();
+});
 function locks() {
   const instances=[];
   const createLock=key=>{const lock={key,held:false,acquire:async()=>{lock.held=true;return true;},release:()=>{lock.held=false;}};instances.push(lock);return lock;};
