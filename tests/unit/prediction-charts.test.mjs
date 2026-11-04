@@ -31,3 +31,30 @@ test('comparison charts align original prediction, published prediction and late
  assert.deepEqual(c.onlineComparison.series.map(s=>s.data),[[[900000,100]],[[900000,120]],[[900000,130]]]);
  assert.deepEqual(c.diamondsComparison.series.at(-1).data,[[920000,0]]);
 });
+
+test('hourly earnings show partial observed sessions separately and keep unobserved hours empty',()=>{
+ const startAt=Date.parse('2026-11-05T12:00:00Z');
+ const c=predictionChartOptions({asOf:startAt+3600000,sessions:[
+  {startAt,endAt:0,coverageMs:1800000,diamonds:300,complete:false,startKnown:false},
+  {startAt,endAt:startAt+3600000,coverageMs:3600000,diamonds:900,complete:true},
+  {startAt:startAt+3600000,endAt:0,coverageMs:0,diamonds:200,complete:false}
+ ]});
+ assert.equal(c.hourly.series[0].data[20].value,900);
+ assert.equal(c.hourly.series[1].data[20].value,600);
+ assert.match(c.hourly.series[1].data[20].name,/采集/);
+ assert.equal(c.hourly.series[1].data[21],null);
+ assert.equal(c.hourly.series[0].data[19],null);
+ const sem=predictionChartOptions({semantics:{intents:{greeting:2,request:3,engagement:4,complaint:1}}}).semantics;
+ assert.ok(sem.xAxis.data.includes('问候欢迎'));assert.ok(sem.xAxis.data.includes('内容点播'));
+ assert.equal(sem.series[0].data.reduce((a,b)=>a+b,0),10);
+});
+
+test('hourly collection rates are duration weighted, retain observed zero and reject missing or future evidence',()=>{
+ const startAt=Date.parse('2026-11-05T12:00:00Z'),asOf=startAt+3600000;
+ const partial=(extra={})=>({startAt,endAt:0,complete:false,coverageMs:900000,diamonds:100,...extra});
+ const c=predictionChartOptions({asOf,sessions:[partial(),partial({coverageMs:2700000,diamonds:500}),partial({startAt:startAt-3600000,diamonds:0}),partial({startAt:startAt+3600000,coverageMs:0}),partial({unknownCount:1}),partial({startAt:asOf+1}),partial({diamonds:NaN})]});
+ assert.equal(c.hourly.series[1].data[20].value,600);
+ assert.equal(c.hourly.series[1].data[19].value,0);
+ assert.equal(c.hourly.series[1].data[21],null);
+ assert.ok(c.hourly.series[0].data.every(row=>row===null));
+});

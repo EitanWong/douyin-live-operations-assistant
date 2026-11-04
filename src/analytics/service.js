@@ -40,7 +40,7 @@ export class PredictionService {
   report.forecastHistory=data.forecasts.filter(f=>f.target!=='snapshot').slice(0,60).map(comparison);
   report.comparisons=(data.feedback || []).filter(f=>f.evaluation?.status==='scored' && f.dueAt<=now && f.evaluation.at<=now).sort((a,b)=>b.dueAt-a.dueAt).slice(0,120).map(comparison);
   report.timeline=data.minutes.filter(m=>m.sessionId===data.session?.key).slice(-90).map(m=>({at:m.at,diamonds:m.diamonds,online:m.online ?? null,onlineAt:m.onlineAt ?? null,coverageMs:m.coverageMs,chats:m.chats || 0,enters:m.enters || 0,giftUnits:m.giftUnits || 0}));
-  report.sessions=data.sessions.filter(s=>s.endAt && s.complete).slice(0,100).map(s=>({startAt:s.startAt,endAt:s.endAt,diamonds:s.diamonds,complete:true}));
+  report.sessions=data.sessions.slice(0,100).map(s=>({startAt:s.startAt,endAt:s.endAt,diamonds:s.diamonds,complete:s.complete,startKnown:s.startKnown,coverageMs:s.coverageMs,unknownCount:s.unknownCount}));
   const sessionUsers=data.users.filter(u=>u.sessionId===data.session?.key && !u.minor),payers=sessionUsers.filter(u=>(u.sessionGiftGroups || 0)>0).length;
   report.statistics={observedUsers:sessionUsers.length,payers,payerRatio:sessionUsers.length?payers/sessionUsers.length:null,basis:'有界的本机已识别互动样本，非全房间转化率'};
   report.samples=data.minutes.flatMap(m=>m.samples || []).slice(-8).map(s=>({text:s.text,at:s.at}));

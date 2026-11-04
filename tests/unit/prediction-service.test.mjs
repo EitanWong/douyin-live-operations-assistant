@@ -40,3 +40,16 @@ test('explicit demo provides simulated comparisons and persists issued calibrati
   assert.equal((await archive.read(context,at)).feedback.length,0);
  }finally{service.close();}
 });
+
+test('real collection reaches hourly charts before a complete session has ended',async()=>{
+ const archive=new AnalyticsArchive({indexedDB:new IDBFactory(),IDBKeyRange});let now=at;
+ const service=new PredictionService({archive,now:()=>now});
+ try{
+  await service.call(context,'event',{type:'gift',id:'partial',count:1,unitValue:100,receivedAt:now});
+  await service.call(context,'pulse',{connected:true});
+  now+=5000;await service.call(context,'pulse',{connected:true});
+  const report=await service.call(context,'report');
+  assert.equal(report.sessions.length,1);assert.equal(report.sessions[0].complete,false);
+  assert.equal(report.sessions[0].coverageMs,5000);assert.equal(report.sessions[0].diamonds,100);
+ }finally{service.close();}
+});

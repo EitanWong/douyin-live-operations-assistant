@@ -17,3 +17,15 @@ test('next-comment intent learns transitions and scores before learning its targ
  assert.ok(model.scored>20);assert.ok(Number.isFinite(model.logLoss/model.scored));
  assert.equal(nextChatIntent(null).length,0);
 });
+
+test('new intent labels share the same AI vocabulary and transition probabilities stay normalized',async()=>{
+ const {CHAT_INTENT_LABELS,updateChatModel,nextChatIntent}=await import('../../src/analytics/semantics.js');
+ for(const intent of Object.keys(CHAT_INTENT_LABELS)){
+  assert.equal(parseSemanticLabels(`${intent}|uncertain|other`).intent,intent);
+  assert.ok(semanticMessages('测试')[0].content.includes(intent));
+ }
+ let model;for(let i=0;i<60;i++)model=updateChatModel(model,i%2?'request':'greeting',i*1000);
+ const prediction=nextChatIntent(model);
+ assert.equal(prediction[0].intent,'greeting');
+ assert.ok(Math.abs(prediction.reduce((sum,row)=>sum+row.probability,0)-1)<1e-10);
+});
