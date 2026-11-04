@@ -49,7 +49,9 @@ test('原生任务跨页面缓存、刷新继续采集；无持久密钥也恢�
     page=await launch(values,native);await wait(()=>page.api.media.state==='running');
     assert.equal(native.hosts.length,1);assert.equal(page.api.engine.running,false);
     assert.deepEqual(page.api.engine.aiContext().mediaContext.observations.map(row=>row.text),['离开页面仍在观察'],JSON.stringify(native.trace));
-    assert.doesNotMatch(JSON.stringify([...values]),/memory-only-secret|离开页面仍在观察/);
+    await page.api.panel.callbacks.acknowledgeRuntimeAlert();
+    assert.doesNotMatch(JSON.stringify([...values]),/memory-only-secret/);
+    assert.match(JSON.stringify(values.get('live-assistant:live-memory:123456:123')),/离开页面仍在观察/);
     page.api.panel.callbacks.stopMedia();await wait(()=>host.closed===1);page.close();
     page=await launch(values,native);await page.api.panel.callbacks.start();await new Promise(resolve=>setTimeout(resolve,350));
     assert.equal(page.api.media.state,'idle');assert.equal(native.hosts.length,1);

@@ -69,3 +69,16 @@ test('手动停止标记在MV3后台回收后仍阻止自动重启，不保存�
   installNativePerceptionBridge(chrome);const restored=client();restored.emit({type:'status'});await new Promise(setImmediate);
   assert.deepEqual(restored.sent,[{type:'session',stopped:true}]);assert.doesNotMatch(JSON.stringify(saved),/memory-secret|realtimeEndpoint/);
 });
+
+test('离页后超过20条的感知仍全部存档，存储失败会保留重试，不重启模型',async()=>{
+ let connected,fail=true;const hosts=[],saved=[];
+ const chrome={runtime:{onConnect:{addListener:f=>connected=f},connectNative:()=>{const host=port();hosts.push(host);return host;}}};
+ installNativePerceptionBridge(chrome,{memoryRetryMs:5,onObservation:async(room,row)=>{assert.equal(room,'123456');if(fail)throw Error('disk full');saved.push(row);}});
+ const client=port();Object.assign(client,{name:'native-perception',sender:{frameId:0,url:'https://live.douyin.com/123456',tab:{id:1,url:'https://live.douyin.com/123456'}}});connected(client);
+ client.emit({type:'start',room:'123456',config,key:'secret'});client.lost();const at=Date.now();
+ for(let i=0;i<45;i++)hosts[0].emit({type:'observation',row:{id:'history'+i,kind:'omni',at,endedAt:at,text:'后台原文'+i}});
+ await new Promise(setImmediate);fail=false;
+ for(let i=0;i<100 && saved.length<45;i++)await new Promise(r=>setTimeout(r,5));
+ assert.equal(saved.length,45);assert.equal(hosts.length,1);assert.equal(hosts[0].closed,0);
+ const resumed=port();Object.assign(resumed,{name:'native-perception',sender:client.sender});connected(resumed);resumed.emit({type:'resume',room:'123456'});resumed.emit({type:'stop'});
+});

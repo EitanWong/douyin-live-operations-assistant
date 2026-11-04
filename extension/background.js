@@ -17,9 +17,11 @@ import { DurableStorage, isDurableKey } from './durable-storage.js';
 import { installCollectionKeeper } from './collection-keeper.js';
 import {parseGiveawayState} from '../src/core/giveaway.js';
 import {createPredictionBackground} from './prediction-background.js';
+import {mergeLiveMemory} from '../src/ai/live-memory.js';
+import {persistNativeMemory} from './live-memory.js';
 
 const collectionKeeper = installCollectionKeeper(chrome);
-installNativePerceptionBridge(chrome);
+installNativePerceptionBridge(chrome,{onStart:async room=>{await storageReady;return readRecord(`live-assistant:config:${room}`);},onObservation:async(room,row,scope)=>{await storageReady;await persistNativeMemory({room,row,scope,read:readRecord,write:writeRecord,transaction:work=>giftStore.transaction(work)});}});
 installEdgeBridge(chrome);
 installNativeASRBridge(chrome);
 const accountCollections=new Map();
@@ -56,7 +58,7 @@ const roomFromUrl = value => {
   } catch { return null; }
 };
 const isRoom = sender => sender.frameId === 0 && Boolean(roomFromUrl(sender.tab?.url)) && (!sender.url || roomFromUrl(sender.url) === roomFromUrl(sender.tab.url));
-const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|income-calibration:\d+|event:\d+:[a-z\d-]+|(?:api-key|search-key|media-key):https?:\/\/[^\s/]+)$/.test(key);
+const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|live-memory:\d+:(?:\d{1,40}|unknown)|income-calibration:\d+|event:\d+:[a-z\d-]+|(?:api-key|search-key|media-key):https?:\/\/[^\s/]+)$/.test(key);
 const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
@@ -174,7 +176,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         try{value=await collectAccount(chrome,message.url,{signal:controller.signal});}finally{accountCollections.delete(key);}
       }else if(message.type==='account-cancel' && isRoom(sender)){accountCollections.get(sender.tab.id)?.abort();value=true;}
       else if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
-      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
+      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:',`live-assistant:live-memory:${roomFromUrl(sender.tab.url)}:`,'live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
       else if (['rewards-read','rewards-write'].includes(message.type) && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
         if (typeof message.key !== 'string' || !new RegExp(`^live-assistant:rewards:${room}:[1-9]\\d{0,24}$`).test(message.key)) throw new Error('活动记录范围无效');
@@ -210,10 +212,15 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         // Database failures retain the event journal for recovery.
         const size = jsonLength(message.value);
         if (size == null) throw Object.assign(new Error('设置无法序列化'),{code:'INVALID_CONFIG'});
-        if (!message.key.startsWith('live-assistant:runtime:') && size > 1024*1024) throw new Error('设置过大');
-        await giftStore.transaction(() => writeRecord(message.key,message.value)); value=true;
+        if (!message.key.startsWith('live-assistant:runtime:') && !message.key.startsWith('live-assistant:live-memory:') && size > 1024*1024) throw new Error('设置过大');
+        if(message.key.startsWith('live-assistant:live-memory:') && !message.key.startsWith(`live-assistant:live-memory:${roomFromUrl(sender.tab.url)}:`))throw new Error('直播记忆范围无效');
+        if(message.key.startsWith('live-assistant:live-memory:') && message.key.split(':').at(-1)!==(message.value?.anchor || 'unknown'))throw new Error('直播记忆归属无效');
+        await giftStore.transaction(async() => writeRecord(message.key,message.key.startsWith('live-assistant:live-memory:') ? mergeLiveMemory(await readRecord(message.key),message.value) : message.value)); value=true;
       }
-      else if (message.type === 'delete' && keyAllowed(message.key) && isRoom(sender)) { await deleteRecord(message.key); value=true; }
+      else if (message.type === 'delete' && keyAllowed(message.key) && isRoom(sender)) {
+        if(message.key.startsWith('live-assistant:live-memory:'))throw new Error('请通过记忆管理清空内容，保留删除标记');
+        await deleteRecord(message.key); value=true;
+      }
       else if (message.type === 'event-append' && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url), event = message.event;
         if (!validEvent(event, 12000)) throw Object.assign(new Error('直播事件无效'),{code:'INVALID_EVENT'});

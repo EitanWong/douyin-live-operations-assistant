@@ -3,6 +3,7 @@ import {hostSpeechInstruction,EVERY_TURN_INSTRUCTION,DIRECT_TURN_INSTRUCTION} fr
 import {freshObservations,liveMoment,awaitingVisual,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
 import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
+import {offlineReply} from '../ai/offline-reply.js';
 import { IDIOM_GAME_DEFAULTS } from './idiom-game.js';
 import { Moderation, MODERATION_DEFAULTS } from './moderation.js';
 import { addressedToSelf, RoomBot } from './bot.js';
@@ -261,8 +262,8 @@ function cloneRuntime(value) {
 const keyFor = u => u.id || u.secUid || `name:${u.name}`;
 
 export class Engine {
-  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, accountContext=()=>[], evidenceVersion=()=>0, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
-    this.viewerMemory=viewerMemory;this.accountContext=accountContext;this.evidenceVersion=evidenceVersion;
+  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, perceptionMemory=()=>null, accountContext=()=>[], evidenceVersion=()=>0, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
+    this.viewerMemory=viewerMemory;this.perceptionMemory=perceptionMemory;this.accountContext=accountContext;this.evidenceVersion=evidenceVersion;
     this.config = validateConfig(mergeConfig(config)); this.now = now; this.send = send; this.ai = ai; this.log = log; this.changed = changed; this.checkpoint = checkpoint; this.onStop = onStop;
     this.queue = []; this.giftJobs = new Map(); this.history = []; this.seen = new Map(); this.cooldowns = new Map(); this.gifts = new Map(); this.duplicates = new Map();
     this.claimGiveaway=claimGiveaway;this.giveawayInstance=crypto.randomUUID();this.giveawayCurrent=giveawayCurrent;this.giveawayReceipts=new Map();this.lastGiveawaySend=-Infinity;
@@ -866,7 +867,7 @@ export class Engine {
     if(this.activeAI?.current && !this.activeAI.current())this.cancelAI({includeResearch:false});
     const ai=this.config.ai;
     if(!ai.enabled || this.aiBusy || this.researchAI.size || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
-      || now-this.lastAI<ai.intervalSec*1000 || !this.hasAIQuota(now))return false;
+      || now-this.lastAI<ai.intervalSec*1000)return false;
     const candidate=this.proactiveCandidate(now);if(!candidate)return false;
     const {mode,row}=candidate,speech=mode==='speech',pacingMode=speech ? 'speech' : 'proactive';
     const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row),...(speech ? {speechKey:sceneKey(row)} : {})};
@@ -901,7 +902,7 @@ export class Engine {
     const valid = item => item.epoch === this.epoch && item.contextKey===this.chatContextKey() && now - item.at < (item.addressed ? RESEARCH_TIMEOUT_MS : 45000);
     this.chatAIQueue = this.chatAIQueue.filter(valid);
     if (this.chatAIBackground && !valid(this.chatAIBackground)) this.chatAIBackground = null;
-    if (!this.running || !a.enabled || a.replyFrequency==='off' || this.aiBusy || !this.hasAIQuota(now)) return;
+    if (!this.running || !a.enabled || a.replyFrequency==='off' || this.aiBusy) return;
     const pending = this.chatAIQueue[0] || this.chatAIBackground;
     if (!pending) return;
     if(!pending.addressed && now-this.lastAI<a.intervalSec*1000)return;
@@ -1125,7 +1126,7 @@ export class Engine {
       const liveContext=liveReplyContext(this,this.now(),config);
       return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8),mediaContext:this.mediaContext(config)};
     };
-    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getAccountContext:query=>config.ai.contextSources.accounts ? this.accountContext(query) : []};
+    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getPerceptionMemory:query=>config.ai.assistant.memoryEnabled ? this.perceptionMemory(query) : null,getAccountContext:query=>config.ai.contextSources.accounts ? this.accountContext(query) : []};
   }
   cancelAI({includeResearch=true}={}){const active=this.activeAI;this.activeAI=null;this.aiBusy=false;active?.controller.abort();if(includeResearch){for(const job of this.researchAI)job.controller.abort();this.researchAI.clear();}}
   researchNotices() {
@@ -1135,12 +1136,25 @@ export class Engine {
     }
   }
   hasAIQuota(now=this.now()){const a=this.config.ai;return !a.edge.localOnly && this.calls.filter(at=>now-at<3600000).length<a.maxPerHour || a.edge.enabled && this.localCalls.filter(at=>now-at<3600000).length<a.edge.maxPerHour;}
+  replyOffline(event,task,unavailable=false){
+    if(task.kind!=='ai' || !event?.text)return false;
+    if(task.data?.proactive && (!task.extra?.aiProactive || !this.validProactive(task.extra.aiProactive)))return false;
+    if(task.data?.replyMode && !(task.data.replyMode==='direct' ? this.config.ai.chatEnabled || this.config.bot.enabled : this.config.ai.chatEnabled))return false;
+    const liveContext=this.aiContext().liveContext,result=offlineReply({event,task,config:this.config,liveContext,unavailable});
+    if(!result)return false;
+    const aiChat=task.data?.replyMode ? {contextKey:this.chatContextKey(),observedAt:this.now(),replyMode:task.data.replyMode,pacingMode:task.data.pacingMode || task.data.replyMode,userKey:turnViewerKey(event?.user),facts:result.usesLiveFacts ? liveFactFingerprint(liveContext) : null} : null;
+    const limit=task.maxLength ?? this.config.sending.maxLength;
+    const text=[...result.text].length<=limit ? result.text : result.shortText || (event.type==='speech' ? '提问已收到。' : 'AI暂时不可用。');
+    const accepted=this.enqueue('ai',text,{...task.extra,...(aiChat ? {aiChat} : {}),...(task.data?.replyMode==='direct' ? {priority:95} : {})});
+    if(accepted){this.lastAI=this.now();this.log('ai','本地规则回复，未调用模型');}return accepted;
+  }
   async requestAI(event = null, task = { kind: 'ai', instruction: '只简短回答目标弹幕中需要回答的问题，没有必要回复时输出 [SKIP]，不主动发起话题。' }) {
     const a = this.config.ai, now = this.now(), epoch = this.epoch;
     const proactiveCurrent=()=>!task.data?.proactive || Boolean(task.extra?.aiProactive && this.validProactive(task.extra.aiProactive));
     const chatContext=task.kind==='ai' && task.data?.replyMode ? this.chatContextKey() : null;
     const currentJob = () => task.targetJob && this.queue.includes(task.targetJob) && task.targetJob.revision === task.revision && task.targetJob.aiPending;
-    const fallback = reason => {
+    const fallback = (reason,unavailable=false) => {
+      if(task.kind==='ai'){if(unavailable && this.running && epoch===this.epoch && this.config.ai.enabled && proactiveCurrent())this.replyOffline(event,task,true);return;}
       if (this.running && epoch === this.epoch && task.kind !== 'ai' && task.fallback) {
         if (task.targetJob) {
           if (currentJob()) { task.targetJob.readyAt = this.now(); task.targetJob.aiPending = false; }
@@ -1153,17 +1167,19 @@ export class Engine {
     this.calls = this.calls.filter(t => now - t < 3600000);
     if (!this.running) return;
     if (!a.enabled) { fallback('AI 服务未启用'); return; }
+    if(this.replyOffline(event,task))return;
     const cloudAllowed=!a.edge.localOnly && this.calls.length<a.maxPerHour;
     this.localCalls=this.localCalls.filter(at=>now-at<3600000);
     const direct=task.kind==='ai' && task.data?.replyMode==='direct';
-    if (this.aiBusy || (task.kind === 'gift' && task.targetJob && this.queue.filter(q => q.kind === 'gift').length >= 3) || !direct && now - this.lastAI < a.intervalSec * 1000 || !cloudAllowed && (!a.edge.enabled || this.localCalls.length>=a.edge.maxPerHour)) { fallback('AI 调用频率或额度已达上限'); return; }
+    if (this.aiBusy || (task.kind === 'gift' && task.targetJob && this.queue.filter(q => q.kind === 'gift').length >= 3) || !direct && now - this.lastAI < a.intervalSec * 1000) { fallback('AI 调用频率已达上限'); return; }
+    if(!cloudAllowed && (!a.edge.enabled || this.localCalls.length>=a.edge.maxPerHour)){fallback('AI 额度已达上限',true);return;}
     if (!direct && event?.user && !this.cooldown(`ai-user:${task.kind}:${keyFor(event.user)}`, a.userCooldownSec)) { fallback('该用户 AI 回复冷却中'); return; }
     this.aiBusy = true; this.lastAI = now;if(cloudAllowed)this.calls.push(now);this.stats.aiCalls++;
     const active={controller:new AbortController(),background:Boolean(task.data?.proactive || task.data?.replyMode==='contextual')};this.activeAI=active;
     const prompt = {
       signal:active.controller.signal,cloudAllowed,
       persona: a.persona, knowledge: a.knowledge, ...this.aiContext(),
-      target: event?.type==='speech' ? {type:'speech',text:event.text,source:'live-audio',speaker:'unverified'} : event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user) : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
+      target: event?.type==='speech' ? {type:'speech',text:event.text,source:'live-audio',speaker:'unverified'} : event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user,event.text || '') : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };
     let replyFacts=null;prompt.onLiveFacts=value=>{replyFacts=value;};
@@ -1226,7 +1242,7 @@ export class Engine {
         if (output.trim() === '[SKIP]') { this.log('ai', 'AI 判断无需回复');if(active.lookup)active.notice('查到的资料不足，暂时无法确认。');else if (task.kind !== 'timer') fallback('AI 未生成回复'); }
         else if (!this.enqueue(task.kind, active.lookup ? noticeText(output) : output, replyExtra())) {if(active.lookup)active.notice('查询结果暂时无法发送，请稍后再试。');else fallback('AI 回复未通过检查');}
       }
-    } catch (error) { if(error.name!=='AbortError'){this.log('error', `AI 调用失败：${error.message}`);if(prompt.isCurrent() && (direct || active.lookup || error.code==='LOOKUP_BUSY'))active.notice(error.code==='LOOKUP_BUSY' ? '当前查询较多，请稍后再试。' : active.lookup ? '查询未成功，请稍后再试。' : '暂时没能回答，请稍后再试。');else fallback('AI 调用失败');} }
+    } catch (error) { if(error.name!=='AbortError'){this.log('error', `AI 调用失败：${error.message}`);if(prompt.isCurrent()){if(active.lookup || error.code==='LOOKUP_BUSY')active.notice(error.code==='LOOKUP_BUSY' ? '当前查询较多，请稍后再试。' : '查询未成功，请稍后再试。');else fallback('AI 调用失败',true);}} }
     finally {
       this.researchAI.delete(active);
       if(active.lookup)this.queue=this.queue.filter(job=>job.lookupNotice!==active.lookupId);

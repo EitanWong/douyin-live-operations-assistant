@@ -30,9 +30,9 @@ test('应用将当前场次账本、暂停时弹幕和观众数据传给话术�
     assert.deepEqual(await api.panel.callbacks.generatePhrases(c,'',false,{kind:'welcome'}),['欢迎{user}']);
     await api.panel.callbacks.testAI(c,'',false);
     for(const request of requests){
-      const context=JSON.parse(request.messages[1].content).live_context;
+      const data=JSON.parse(request.messages[1].content),context=data.live_context;
       assert.equal(context.income.totalDiamonds,30);assert.equal(context.income.estimatedIncome,1.5);
-      assert.equal(context.audience.online,15);assert.equal(context.recentChat.at(-1).text,'今天聊旅行');
+      assert.equal(context.audience.online,15);assert.equal(data.recent_chat.at(-1).text,'今天聊旅行');assert.equal(request.messages[1].content.split('今天聊旅行').length-1,1);
       assert.ok(!JSON.stringify(context).includes('viewer-private'));assert.ok(!JSON.stringify(context).includes('broadcast-private'));
     }
     assert.equal(requests.length,2);

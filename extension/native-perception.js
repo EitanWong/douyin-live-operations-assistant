@@ -17,7 +17,7 @@ function nativeSettings(message,room){
 
 // The native connection belongs to the room, not to a page or settings module.
 // A live native port keeps the MV3 worker alive while pages detach and return.
-export function installNativePerceptionBridge(chrome){
+export function installNativePerceptionBridge(chrome,{onObservation,onStart=()=>null,memoryRetryMs=1000}={}){
   const rooms=new Map();
   const stopKey=room=>`live-assistant:native-stopped:${room}`;
   let stopWrites=Promise.resolve();
@@ -32,6 +32,21 @@ export function installNativePerceptionBridge(chrome){
   };
   const disconnect=channel=>{detach(channel);try{channel.client.disconnect();}catch{}};
   const send=(channel,value)=>{if(channel && !channel.closed)try{channel.client.postMessage(value);}catch{disconnect(channel);}};
+  const saveMemory=async session=>{
+    if(session.memoryWriting || !session.pendingMemory.length)return;
+    session.memoryWriting=true;
+    try{
+      while(session.pendingMemory.length){
+        session.memoryScope ||= Promise.resolve().then(()=>onStart(session.room));
+        let scope;try{scope=await session.memoryScope;}catch(error){session.memoryScope=null;throw error;}
+        await onObservation(session.room,session.pendingMemory[0],scope);session.pendingMemory.shift();
+      }
+      session.memoryFailed=false;
+    }catch{
+      if(!session.memoryFailed)send(session.channel,{type:'memory-warning'});
+      session.memoryFailed=true;setTimeout(()=>void saveMemory(session),memoryRetryMs);
+    }finally{session.memoryWriting=false;}
+  };
   const finish=(session,code)=>{
     if(session.closed)return;session.closed=true;
     // Remember a manual stop or terminal failure across reloads, without secrets.
@@ -48,6 +63,7 @@ export function installNativePerceptionBridge(chrome){
     channel.session=session;session.channel=channel;
     if(session.ready)send(channel,{type:'ready'});
     if(session.state)send(channel,session.state);
+    if(session.memoryFailed)send(channel,{type:'memory-warning'});
     for(const row of session.rows)if(row.endedAt>=Date.now()-180000)send(channel,{type:'observation',row});
     return true;
   };
@@ -64,6 +80,7 @@ export function installNativePerceptionBridge(chrome){
     const r=event?.row;
     if(event?.type==='observation' && ['audio','omni'].includes(r?.kind) && typeof r.text==='string' && r.text.length<=1800 && typeof r.id==='string' && r.id.length<=300 && Number.isFinite(r.at) && Number.isFinite(r.endedAt) && r.endedAt>=r.at){
       const row={kind:r.kind,id:r.id,at:r.at,endedAt:r.endedAt,text:r.text};
+      if(onObservation){session.pendingMemory.push({...row,inputSource:'native'});void saveMemory(session);}
       session.rows.push(row);if(session.rows.length>20)session.rows.shift();
       send(session.channel,{type:'observation',row});
     }
@@ -73,7 +90,8 @@ export function installNativePerceptionBridge(chrome){
     if(rooms.get(channel.room)?.host){fail(channel,'BUSY');return;}
     try{
       const host=chrome.runtime.connectNative(NATIVE_HOST);
-      const session={room:channel.room,host,config,channel:null,rows:[],ready:false,closed:false};
+      const memoryScope=Promise.resolve().then(()=>onStart(channel.room));void memoryScope.catch(()=>{});
+      const session={room:channel.room,host,config,channel:null,rows:[],ready:false,closed:false,pendingMemory:[],memoryWriting:false,memoryFailed:false,memoryScope};
       rooms.set(channel.room,session);subscribe(channel,session);
       rememberStop(channel.room,false);
       host.onDisconnect.addListener(()=>{void chrome.runtime.lastError;finish(session,'NOT_INSTALLED');});

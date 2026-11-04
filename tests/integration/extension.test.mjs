@@ -511,6 +511,18 @@ test('积压运行快照超过1MiB仍保存，普通配置保留大小校验', a
   assert.equal((await w.durable().get('live-assistant:runtime:1')).queue[0].text.length, 1100000);
   assert.equal((await w.send({type:'set',key:'live-assistant:config:1',value:payload})).ok, false);
 });
+test('直播记忆独立持久化并按房间加载，缓存清理及后台重启不删除记忆',async()=>{
+ const w=await worker(),key='live-assistant:live-memory:1:10',otherKey='live-assistant:live-memory:2:20';
+ const payload={version:1,anchor:'10',audience:{version:2,anchor:'10',viewers:[]},perception:{observations:Array.from({length:120},(_,i)=>({id:String(i),kind:'audio',text:'原文'.repeat(5000),at:10+i,endedAt:11+i,inputSource:'native'}))}};
+ assert.equal((await w.send({type:'set',key,value:payload})).ok,true);
+ const other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
+ assert.equal((await w.send({type:'set',key,value:payload},other)).ok,false);
+ assert.equal((await w.send({type:'set',key:otherKey,value:{...payload,anchor:'20',audience:{version:2,anchor:'20',viewers:[]}}},other)).ok,true);
+ assert.equal((await w.send({type:'init'})).value[otherKey],undefined);
+ await w.send({type:'storage-clear-cache'});
+ const restored=await worker(w.values,w.indexedDB);
+ assert.equal((await restored.send({type:'init'})).value[key].perception.observations.length,120);
+});
 test('内容脚本持续突发按序交接并回收已消费槽位，回放不会覆盖在途任务', async () => {
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter, release, replayRelease, blocked = false; const handled = [];

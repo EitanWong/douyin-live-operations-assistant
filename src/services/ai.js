@@ -30,6 +30,7 @@ export function makeAIRequest(prompt, config) {
   if (new URL(config.endpoint).hostname==='api.deepseek.com' && ['deepseek-flash','deepseek-v4-pro'].includes(config.model)) request.thinking={type:'disabled'};
   if(!prompt.searchResults && !isSpeechRouting(prompt))request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {})};
+  if(data.live_context && data.recent_chat)delete data.live_context.recentChat;
   request.messages[0].content='context_meta.budget.omissions 列出按预算省略的资料；缺少明细不等于没有发生，不能将截取明细求和冒充完整汇总。\n'+request.messages[0].content;
   request.messages[1].content='';
   const wireBudget=Math.floor((98000-JSON.stringify(request).length)/2);

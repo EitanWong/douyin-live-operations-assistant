@@ -8,7 +8,7 @@ import {predictionPulse} from './analytics/page.js';
 import {AccountContext} from './ai/account-context.js';
 import {createResilientAI} from './services/ai-resilience.js';
 import {FoundationSettings} from './ui/foundation-settings.js';
-import {AudienceMemory} from './ai/audience-memory.js';
+import {LiveMemoryArchive} from './ai/live-memory.js';
 import {aiDiagnostics} from './ai/diagnostics.js';
 import {AIWorkbench} from './ui/ai-workbench.js';
 import {AIPlayground} from './ui/ai-playground.js';
@@ -55,12 +55,14 @@ export function boot(options = {}) {
   catch (e) { config = copy(DEFAULTS); configError = `旧配置无效，已使用默认值：${e.message}`; }
   if (!config.anchorId) config.anchorId = new URLSearchParams(location.search).get('anchor_id')?.match(/^\d+$/)?.[0] || '';
   const accounts=new AccountContext({snapshot:runtimeSnapshot?.accountSources});let accountRevision=0,foundationSettings;
-  let audienceMemory=new AudienceMemory({anchor:config.anchorId,state:runtimeSnapshot?.audienceMemory}),workbench,playground,localAgentTasks,localAgentReady;
-  const currentMemory=()=>{if(audienceMemory.anchor!==String(engine?.config.anchorId || config.anchorId))audienceMemory=new AudienceMemory({anchor:engine?.config.anchorId || config.anchorId});return audienceMemory;};
+  const liveMemory=new LiveMemoryArchive({room,get,set,all:options.all || (()=>Object.fromEntries((typeof GM_listValues==='function' ? GM_listValues() : []).filter(key=>key.startsWith(`live-assistant:live-memory:${room}:`)).map(key=>[key,get(key,null)]))),legacy:runtimeSnapshot?.audienceMemory});
+  let workbench,playground,localAgentTasks,localAgentReady;
+  const memoryScope=()=>liveMemory.current(engine?.config.anchorId ?? config.anchorId);
+  const currentMemory=()=>memoryScope().audience;
   const sessionKeys = new Map(); let panel, engine, tools, network = {}, logBacklog = [], starting = false, pickCleanup, renderTimer, viewerTimer, giftTimer, incomeTimer, incomeRequest = 0, runtimeSaveTimer, profileSignature = '', closed = false, suspended = false, persistenceDisabled = false;
   let predictionIdentityWrite=Promise.resolve();
   const predictions=createPredictionClient({transport:options.predictions ? async(...args)=>{await predictionIdentityWrite;return options.predictions(...args);} : undefined,context:()=>({room,anchor:String(engine?.config.anchorId || config.anchorId || '')})});
-  const runtimeWriter = new RuntimeWriter(snapshot => set(runtimeKey, snapshot));
+  const runtimeWriter = new RuntimeWriter(async batch => {await liveMemory.persist(batch.memories);await set(runtimeKey,batch.snapshot);});
   // 等待开播和跨场次继续武装；用户明确暂停后本页不再自动启动或刷新。
   let autoStartArmed = true, resumeAutoStart = false, manualPause = false, autoStartNext = 0, autoStartError = '';
   let roomMonitor;
@@ -94,8 +96,9 @@ export function boot(options = {}) {
     if (runtimeWriter.failure || adapter.persistenceUnavailable?.()) return immediate ? Promise.reject(runtimeWriter.failure || contextFailure()) : Promise.resolve();
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
     const save = () => {
-      const snapshot = { ...engine.snapshot(), audienceMemory:currentMemory().snapshot(),accountSources:accounts.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),acknowledgedRuntimeAlert} };
-      const write = runtimeWriter.save(snapshot);
+      currentMemory();
+      const snapshot = { ...engine.snapshot(),accountSources:accounts.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),acknowledgedRuntimeAlert} };
+      const write = runtimeWriter.save({snapshot,memories:liveMemory.capture()});
       const reported = write.catch(error => reportPersistenceError(error, '运行状态保存失败'));
       return immediate ? write : reported;
     };
@@ -280,8 +283,8 @@ export function boot(options = {}) {
   const exchange=createSDPExchange({request,getKey:mediaKey});
   const realtimeCapture=createRealtimeCapture({exchange,env:window,sourceFactory:directSource});
   const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config),vadFactory:options.vadFactory},window)),
-    realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room}),recognize:createSpeechRecognizer({cloud:recognizeMedia,edge,config:()=>engine.config.ai.edge}),
-    onObservation:row=>{mediaEvidence.add(row);panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
+    realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room,onMemoryWarning:message=>{log('error',message);panel?.aiSettings.showError(message);}}),recognize:createSpeechRecognizer({cloud:recognizeMedia,edge,config:()=>engine.config.ai.edge}),
+    onObservation:row=>{mediaEvidence.add(row);if(engine?.config.ai.assistant.memoryEnabled && memoryScope().perception.observe(row))persistRuntime();panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
   });
@@ -335,7 +338,7 @@ export function boot(options = {}) {
         if (journalKey) await options.journal.ack(journalKey);
         return;
       }
-      if(engine.config.ai.enabled && engine.config.ai.assistant.memoryEnabled && currentMemory().observe(liveEvent))persistRuntime();
+      if(engine.config.ai.assistant.memoryEnabled && currentMemory().observe(liveEvent))persistRuntime();
       let journalWrite = null;
       const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','link-state','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
       if ((engine.running || predictions.enabled() || tools?.state('giveaway')?.receiving || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
@@ -411,7 +414,7 @@ export function boot(options = {}) {
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
-    config, log, ai: client, viewerMemory:user=>currentMemory().context(user),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
+    config, log, ai: client, viewerMemory:(user,query)=>currentMemory().context(user,query),perceptionMemory:query=>memoryScope().perception.context(query),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;
@@ -711,7 +714,7 @@ export function boot(options = {}) {
         let collection;
         try { collection = adapter.exportEvents ? await adapter.exportEvents() : network; }
         catch (error) { collection = {error:error.message}; }
-        download(`douyin-recovery-${room}.json`,JSON.stringify({room,savedAt:Date.now(),runtime:engine.snapshot(),incomePending:[...incomePending],collection},null,2));
+        download(`douyin-recovery-${room}.json`,JSON.stringify({room,savedAt:Date.now(),runtime:engine.snapshot(),liveMemory:liveMemory.export(),incomePending:[...incomePending],collection},null,2));
       },
       importIncome: async data => {
         if (!engine.config.incomeEnabled) throw new Error('请先启用收入统计');
@@ -864,7 +867,7 @@ export function boot(options = {}) {
       describe:()=>{const ai=resolveReplyConfig(engine.config.ai);return `已保存 · ${ai.model} · 联网${ai.search.enabled ? '开启' : '关闭'} · 每条最多${engine.config.sending.maxLength}字`;},
       exportReport:report=>download(`douyin-ai-tests-${room}-${giftDate()}.json`,JSON.stringify(report,null,2))
     });
-    workbench=new AIWorkbench(panel.root,{memory:currentMemory,saveMemory:()=>persistRuntime(true),onError:error=>panel.toast(error.message,true),tasks:{
+    workbench=new AIWorkbench(panel.root,{memory:currentMemory,perceptionMemory:()=>memoryScope().perception,saveMemory:()=>persistRuntime(true),onError:error=>panel.toast(error.message,true),tasks:{
       submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
       list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
     }});
