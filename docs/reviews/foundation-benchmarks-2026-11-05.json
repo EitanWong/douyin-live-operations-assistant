@@ -1,0 +1,194 @@
+{
+  "date": "2026-11-05",
+  "scope": "Local Node/jsdom diagnostics; not browser FPS, RSS or an all-day live test",
+  "workspace": {
+    "before": {
+      "node": "v26.12.1",
+      "platform": "darwin",
+      "arch": "arm64",
+      "fixture": {
+        "charts": 6,
+        "pointsPerChart": 1000,
+        "iterations": 100
+      },
+      "statusRefresh": {
+        "medianMs": 0.44966700000003357,
+        "p95Ms": 0.7258749999999736,
+        "contentChanges": 100,
+        "retainedHeapDeltaBytes": 734824
+      },
+      "hiddenPageUpdates": {
+        "optionReads": 600,
+        "totalMs": 43.40908400000001
+      }
+    },
+    "after": {
+      "node": "v26.12.1",
+      "platform": "darwin",
+      "arch": "arm64",
+      "fixture": {
+        "charts": 6,
+        "pointsPerChart": 1000,
+        "iterations": 100
+      },
+      "statusRefresh": {
+        "medianMs": 0.46458300000000463,
+        "p95Ms": 0.617666000000014,
+        "contentChanges": 0,
+        "retainedHeapDeltaBytes": 313368
+      },
+      "hiddenPageUpdates": {
+        "optionReads": 0,
+        "totalMs": 1.1757920000000013
+      }
+    }
+  },
+  "runtime": {
+    "before": {
+      "node": "v26.12.1",
+      "platform": "darwin",
+      "arch": "arm64",
+      "selection5000Jobs": [
+        {
+          "reference": {
+            "medianMs": 0.29579100000000835,
+            "p95Ms": 0.43745900000004667
+          },
+          "scan": {
+            "medianMs": 0.019750000000044565,
+            "p95Ms": 0.02549999999996544
+          }
+        },
+        {
+          "scan": {
+            "medianMs": 0.019667000000026746,
+            "p95Ms": 0.024415999999973792
+          },
+          "reference": {
+            "medianMs": 0.2937920000000531,
+            "p95Ms": 0.5231249999999363
+          }
+        },
+        {
+          "reference": {
+            "medianMs": 0.2904580000001715,
+            "p95Ms": 0.44966599999997925
+          },
+          "scan": {
+            "medianMs": 0.019708000000036918,
+            "p95Ms": 0.023083999999926164
+          }
+        },
+        {
+          "scan": {
+            "medianMs": 0.019708999999920707,
+            "p95Ms": 0.02341599999999744
+          },
+          "reference": {
+            "medianMs": 0.29920799999990777,
+            "p95Ms": 0.6311660000001211
+          }
+        },
+        {
+          "reference": {
+            "medianMs": 0.3007920000000013,
+            "p95Ms": 0.5102920000001632
+          },
+          "scan": {
+            "medianMs": 0.01974999999993088,
+            "p95Ms": 0.025375000000167347
+          }
+        }
+      ],
+      "idleTicks": 1000,
+      "idleChangeCallbacks": 0,
+      "gifts": {
+        "events": 1200,
+        "credited": 1200,
+        "ingestMs": 12.458000000000084,
+        "drainCpuMs": 61.277500000000146,
+        "simulatedSendTicks": 300,
+        "pendingHeapDeltaBytes": 2496208,
+        "pendingSnapshotBytes": 1066454,
+        "finalSnapshotBytes": 93076
+      },
+      "slowStorage": {
+        "snapshotRequests": 1001,
+        "actualWrites": 2
+      }
+    },
+    "after": {
+      "node": "v26.12.1",
+      "platform": "darwin",
+      "arch": "arm64",
+      "selection5000Jobs": [
+        {
+          "reference": {
+            "medianMs": 0.28983400000001325,
+            "p95Ms": 0.3451249999999959
+          },
+          "scan": {
+            "medianMs": 0.01912499999997408,
+            "p95Ms": 0.028416999999990367
+          }
+        },
+        {
+          "scan": {
+            "medianMs": 0.019000000000005457,
+            "p95Ms": 0.02445799999998144
+          },
+          "reference": {
+            "medianMs": 0.2856249999999818,
+            "p95Ms": 0.3046669999999949
+          }
+        },
+        {
+          "reference": {
+            "medianMs": 0.287708000000066,
+            "p95Ms": 0.3697909999999638
+          },
+          "scan": {
+            "medianMs": 0.019209000000046217,
+            "p95Ms": 0.02200000000016189
+          }
+        },
+        {
+          "scan": {
+            "medianMs": 0.018917000000101325,
+            "p95Ms": 0.021041999999852123
+          },
+          "reference": {
+            "medianMs": 0.29254199999991215,
+            "p95Ms": 0.3766250000001037
+          }
+        },
+        {
+          "reference": {
+            "medianMs": 0.2874170000000049,
+            "p95Ms": 0.3113749999999982
+          },
+          "scan": {
+            "medianMs": 0.018917000000101325,
+            "p95Ms": 0.024208000000044194
+          }
+        }
+      ],
+      "idleTicks": 1000,
+      "idleChangeCallbacks": 0,
+      "gifts": {
+        "events": 1200,
+        "credited": 1200,
+        "ingestMs": 9.777624999999944,
+        "drainCpuMs": 31.923457999999982,
+        "simulatedSendTicks": 300,
+        "pendingHeapDeltaBytes": 2500808,
+        "pendingSnapshotBytes": 1066454,
+        "finalSnapshotBytes": 93076
+      },
+      "slowStorage": {
+        "snapshotRequests": 1001,
+        "actualWrites": 2
+      }
+    }
+  }
+}

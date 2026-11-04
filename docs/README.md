@@ -23,6 +23,7 @@
 - [验证记录](reviews/validation.zh-CN.md)：当前测试结果与待验收项目。
 - [稳定性审查](reviews/stability-review.zh-CN.md)：故障原因、修复及历史验证。
 - [性能审查](reviews/performance-review.zh-CN.md)：运行时重构、基准条件和结果。
+- [运行基础与开发索引优化（2026-11-05）](reviews/foundation-performance-2026-11-05.zh-CN.md)：主线程让出、视图复用、关闭释放、监控启动和可复现基准。
 
 ## 调研资料
 
