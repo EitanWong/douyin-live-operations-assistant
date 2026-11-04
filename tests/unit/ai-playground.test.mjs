@@ -28,9 +28,13 @@ test('搜索后的最终答案、查询、来源、缓存标记与用量同时�
  const f=fixture({knowledge:{revision:async()=>0,candidates:async()=>[],find:async()=>null,remember:async()=>remembers++},search:async()=>found,
   request:d=>respond(d,++calls===1 ? plan('web-search','','赤鹤星周期') : '周期73天。[1]')});
  const result=await f.service.run({question:'周期是多少',onProgress:r=>progress.push(r)});
- assert.equal(result.answer,'周期73天。[1]');assert.equal(result.query,'赤鹤星周期');assert.deepEqual(result.sources,found.results);
+ assert.equal(result.answer,'周期73天。');assert.deepEqual(result.citationIndices,[1]);assert.equal(result.query,'赤鹤星周期');assert.deepEqual(result.sources,found.results);
  assert.equal(result.calls.cloud,2);assert.equal(result.cached,false);assert.equal(remembers,0);assert.ok(progress.some(r=>r.stage==='search'));
  assert.equal(result.checks.every(c=>c.pass),true);
+ assert.deepEqual(result.trace.map(row=>row.stage),['context','model','intent','search','sources','model','provider','checks','complete']);
+ assert.ok(result.trace.every(row=>typeof row.label==='string' && row.elapsedMs>=0));
+ assert.ok(progress.some(row=>row.trace?.some(event=>event.stage==='search')),'进行中也投影真实链路');
+ assert.ok(!JSON.stringify(result.trace).includes('test-key'),'链路不包含请求凭据或完整提示词');
 });
 test('可绕过缓存重查，有效缓存也可复用且标原采集时间',async()=>{
  let searches=0,calls=0;const found={id:'00000000-0000-4000-8000-000000000000',cached:true,query:'规则',searchedAt:123,results:[{index:1,content:'已核实规则',url:'https://rules.example/'}]};
@@ -45,6 +49,7 @@ test('重复运行串行限制；取消中止请求，迟到成功不能变成�
  await assert.rejects(f.service.run({question:'重复'}),/进行中/u);
  await new Promise(setImmediate);controller.abort();const result=await running;
  respond(pending,'迟到回复');assert.equal(result.status,'cancelled');assert.equal(result.answer,'');assert.equal(aborts,1);
+ assert.equal(result.trace.at(-1).stage,'cancelled');assert.ok(!result.trace.some(row=>row.stage==='complete'));
 });
 test('配置切换后迟到结果失效，失败原因与联网异常可见',async()=>{
  let pending;const f=fixture({request:d=>{pending=d;}});

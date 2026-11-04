@@ -6,7 +6,7 @@ const base={query:empty.default(''),reply:z.string().trim()};
 // Model intent determines the legal payload, rather than independent flags.
 export const intentSchema=z.discriminatedUnion('intent',[
  z.strictObject({intent:z.literal('web-search'),query:z.string().trim().min(1),reply:empty.default(''),freshness:z.enum(['realtime','rules','stable','short']).optional()}),
- z.strictObject({intent:z.literal('knowledge'),query:z.string().uuid(),reply:z.string().trim().min(1)}),
+ z.strictObject({intent:z.literal('knowledge'),query:z.string().uuid(),reply:z.string().trim().min(1),sources:z.array(z.number().int().positive()).max(5).optional()}),
  z.strictObject({intent:z.literal('skip'),query:empty.default(''),reply:empty.default('')}),
  ...['live-data','chat','clarify'].map(intent=>z.strictObject({...base,intent:z.literal(intent)}))
 ]);

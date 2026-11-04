@@ -29,7 +29,7 @@ test('搜索服务正文经过长上下文和真实调度后成为公屏回复�
   engine.ingest({type:'chat',id:'period',user:{id:'viewer',name:'小鱼'},text:'赤鹤星观测周期是多少？'});
   for(let tries=0;tries<20 && !engine.queue.length;tries++)await flush();
   await engine.tick();
-  assert.deepEqual(spoken,['赤鹤星周期为73天。[3]']);
+  assert.deepEqual(spoken,['赤鹤星周期为73天。']);assert.deepEqual(records[0].citationIndices,[3]);
   assert.equal(records[0].answer,spoken[0]);assert.match(records[0].results[2].content,/73天/u);
   assert.equal(modelCalls,2);assert.equal(searchCalls,1);assert.equal(engine.researchAI.size,0);
  }finally{engine.stop();}
@@ -51,7 +51,7 @@ test('真实问答调度经语义路由与搜索完成后自动回复，期间�
   engine.ingest({type:'chat',id:'weather',user:{id:'a',name:'甲'},text:'@助手 上海明天天气怎么样'});await flush();assert.equal(searches,1);
   engine.ingest({type:'chat',id:'greeting',user:{id:'b',name:'乙'},text:'@助手 你好'});await flush();await engine.tick();assert.deepEqual(spoken,['你好。']);
   now+=60000;finishSearch();await flush();await engine.tick();
-  assert.ok(spoken.includes('上海明天晴。[1]'));assert.equal(searches,1);assert.equal(local,0);assert.equal(sources.length,1);
+  assert.ok(spoken.includes('上海明天晴。'));assert.equal(searches,1);assert.equal(local,0);assert.equal(sources.length,1);
   assert.equal(requests.length,3);assert.equal(engine.calls.length,3);assert.equal(engine.researchAI.size,0);
  }finally{engine.stop();}
 });

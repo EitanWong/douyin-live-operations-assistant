@@ -93,9 +93,9 @@ export async function runAgentCase(scenario,{key,workspaceId,request=fetchTransp
    pending:Number(Boolean(engine.activeAI))+engine.researchAI.size+engine.queue.length,
    aborted,faultInjected:Boolean(scenario.fault),intents,lookups,diagnostics};
   result.checks=assessAgentResult(result,scenario);
-  if(scenario.criteria)result.checks.push(...evaluateReply({status:replies.length ? 'succeeded' : 'failed',answer:result.output},scenario));
+  if(scenario.criteria)result.checks.push(...evaluateReply({status:replies.length ? 'succeeded' : 'failed',answer:result.output,citationIndices:lookups.at(-1)?.citationIndices || []},scenario));
   if(scenario.intents)result.checks.push({label:'意图符合问题类型',pass:intents.some(intent=>scenario.intents.includes(intent))});
-  if(scenario.sources===true)result.checks.push({label:'实际查证且有有效引用',pass:lookups.some(row=>row.results?.length && /\[\d+\]/u.test(row.answer) && !row.citationWarning)});
+  if(scenario.sources===true)result.checks.push({label:'实际查证且有有效引用',pass:lookups.some(row=>row.results?.length && row.citationIndices?.length && !row.citationWarning)});
   result.passed=result.checks.every(row=>row.pass);return result;
  }finally{engine.stop();knowledge.close();}
 }
@@ -120,9 +120,9 @@ async function runResearchCase(scenario,{key,workspaceId,request}){
   const output=row.result?.answer || '',stored=values.get(`live-assistant:ai-tasks:${room}`) || [];
   const result={id:scenario.id,label:scenario.label,question:scenario.question,output,replies:output ? [{text:output,valid:output.length<=1000}] : [],calls,searches,sent:0,
    pending:(await tasks.list()).filter(r=>['queued','running'].includes(r.status)).length,aborted:0,faultInjected:false,taskCount:stored.length,
-   secretStored:JSON.stringify(stored).includes(key),status:row.status,trace:row.trace,sources:row.result?.sources || [],diagnostics:row.error ? [{kind:'error',text:row.error}] : []};
+   secretStored:JSON.stringify(stored).includes(key),status:row.status,trace:row.trace,citationIndices:row.result?.citationIndices || [],sources:row.result?.sources || [],diagnostics:row.error ? [{kind:'error',text:row.error}] : []};
   result.checks=[...assessAgentResult(result,scenario),{label:'后台任务持久保存成功',pass:row.status==='succeeded' && stored.length===1},
-   {label:'密钥不写入任务记录',pass:!result.secretStored},{label:'来源贯通后台结果',pass:result.sources.length>0 && /\[1\]/u.test(output)}];
+   {label:'密钥不写入任务记录',pass:!result.secretStored},{label:'来源贯通后台结果',pass:result.sources.length>0 && result.citationIndices.includes(1)}];
   result.passed=result.checks.every(r=>r.pass);return result;
  }finally{tasks.close();}
 }

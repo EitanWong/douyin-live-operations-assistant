@@ -1,19 +1,19 @@
 // Translate legacy presentation once at the boundary. The visible workspace
 // uses these roles, never a second set of source-DOM layout selectors.
-export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36,textareaMinHeight:96,cardMinWidth:320,cardMaxHeight:560,contentPadding:20,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
+export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36,textareaMinHeight:96,cardMinWidth:320,contentPadding:20,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
 export const PRODUCT_COMPACT_DIMENSIONS=Object.freeze({...PRODUCT_DIMENSIONS,controlHeight:32,headingHeight:24,textareaMinHeight:72,cardMinWidth:280,contentPadding:12,gap:6,sectionGap:8,cardPadding:8,metricMinHeight:52,chartHeight:180});
 const transparent='.ai-settings,.ai-service-grid,[data-workspace-contents],[data-ai-modes],[data-custom-media],[data-perception-active],.workspace-metrics';
 const cards='.pred-visual-grid,.workspace-grid,.settings-workspace,.income-workspace,.pk-workspace,.pk-overview,.pk-analysis,.anchor-analytics,[data-list],[data-memory-list]';
 const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times';
 const metrics='.knowledge-metrics,.pred-metrics,.anchor-session-times,.anchor-metrics,.stats,.overview-metrics,.anchor-exhibition-grid,.income-meta,.pk-prob,.pk-reading,.anchor-kpis';
-const rows='.knowledge-heading,.knowledge-section-heading,.row,.actions,.ai-key-actions,.ai-test-row,.ai-card-heading,.anchor-periods,.workspace-filter-controls,.workspace-filter-actions,.workspace-filter-heading,.status,.anchor-pagination,.anchor-section-head,.pk-chart-head,.giveaway-actions,.pk-page-heading,.pk-broadcast-master,.pk-broadcast-option,.row-head,.row-head>div,.inline,.feature-row';
+const rows='.knowledge-heading,.knowledge-section-heading,.row,.actions,.ai-key-actions,.ai-test-row,.ai-card-heading,.ai-result-heading,.ai-result-meta,.anchor-periods,.workspace-filter-controls,.workspace-filter-actions,.workspace-filter-heading,.status,.anchor-pagination,.anchor-section-head,.pk-chart-head,.giveaway-actions,.pk-page-heading,.pk-broadcast-master,.pk-broadcast-option,.row-head,.row-head>div,.inline,.feature-row';
 const surfaces='.knowledge-toolbar,.knowledge-section,.pred-card,.workspace-card,.settings-group,.ai-card,.anchor-section,.pk-visual,.pk-overview-main,.pk-outlook,.pk-analysis>details,.giveaway-config,.giveaway-live,.editor-row';
 const blocks='div,section,article,main,header,footer,form,fieldset,nav,ul,ol,li,dl';
 
 export const isTransparentLayout=node=>node.matches(transparent);
 export function describeCollection(node) {
  if(node.matches('[data-list],[data-memory-list],.anchor-gifts,[data-anchor-fanclub-activities]'))return {mode:'scroll'};
- for(const [selector,label] of [['[data-logs]','运行记录'],['[data-profiles]','主播列表'],['[data-agent-results]','研究任务'],['[data-playground-results]','AI测试记录'],['[data-account-records]','账号资料'],['[data-search-history]','问答来源'],['[data-skill-list]','回复技能']]){
+ for(const [selector,label] of [['[data-logs]','运行记录'],['[data-profiles]','主播列表'],['[data-agent-results]','研究任务'],['[data-account-records]','账号资料'],['[data-search-history]','问答来源'],['[data-skill-list]','回复技能']]){
   if(node.matches(selector))return {mode:'records',label};
  }
 }

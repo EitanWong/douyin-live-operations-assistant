@@ -11,7 +11,7 @@ test('受限Agent按计划实际搜索并带来源综合，最多两次模型，
  else{models++;data={choices:[{message:{content:models===1 ? '{"intent":"web-search","query":"北京明天天气","reply":""}' : '明天小雨[1]'}}]};}
  details.onload({status:200,responseText:JSON.stringify(data)});}});
  const result=await execute(job,{signal:new AbortController().signal,checkpoint:async step=>steps.push(step)});
- assert.deepEqual(requests,['ai','search','ai']);assert.equal(result.answer,'明天小雨[1]');assert.equal(result.sources[0].url,'https://weather.example/tomorrow');assert.equal(models,2);assert.equal(reserved,2);assert.ok(steps.includes('plan'));
+ assert.deepEqual(requests,['ai','search','ai']);assert.equal(result.answer,'明天小雨');assert.deepEqual(result.citationIndices,[1]);assert.equal(result.sources[0].url,'https://weather.example/tomorrow');assert.equal(models,2);assert.equal(reserved,2);assert.ok(steps.includes('plan'));
 });
 test('Agent输入不携带额外密钥字段，取消不会发模型请求',async()=>{
  let sent=0;const execute=createResearchAgent({getKey:()=> 'test',request:()=>{sent++;},readPublicPage:async()=>{}});const c=new AbortController();c.abort();

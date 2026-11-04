@@ -14,7 +14,7 @@ function page(){
  for(const key of ['document','window','location','MutationObserver','HTMLElement'])globalThis[key]=dom.window[key];
  globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};return dom;
 }
-const result=(question,extra={})=>({question,status:'succeeded',answer:'答案。[1]',intent:'web-search',provider:'cloud',model:'test-model',calls:{cloud:2,local:0},elapsedMs:321,checks:[{label:'有效来源',pass:true}],sources:[{index:1,title:'公开资料',url:'https://source.example/',content:'依据正文'}],query:'问题检索',searchedAt:1800000000000,...extra});
+const result=(question,extra={})=>({question,status:'succeeded',answer:'答案。',citationIndices:[1],intent:'web-search',provider:'cloud',model:'test-model',calls:{cloud:2,local:0},elapsedMs:321,checks:[{label:'有效来源',pass:true}],sources:[{index:1,title:'公开资料',url:'https://source.example/',content:'依据正文'}],query:'问题检索',searchedAt:1800000000000,...extra});
 function fixture(service){
  const dom=page(),panel=new Panel({room:'123',config:copy(DEFAULTS),callbacks:{}});let exported;
  const ui=new AIPlayground(panel.root,{service,describe:()=> '已保存 · test-model',exportReport:value=>exported=value});
@@ -65,6 +65,22 @@ test('服务失败可重试，恶意模型内容按纯文本显示，危险来�
   assert.equal(results.querySelector('img,script,a'),null);assert.match(results.textContent,/<img/u);assert.equal(f.ui.records.length,2);
  }finally{f.close();}
 });
+test('本次最终答案、实际处理链路、来源和检查分区展示，旧回答折叠归档',async()=>{
+ const f=fixture({run:async({question,onProgress})=>{onProgress({stage:'search',trace:[{stage:'search',label:'联网查证',detail:'正在查找资料',status:'running',elapsedMs:12}]});return result(question,{trace:[{stage:'context',label:'准备上下文',detail:'1 条对话',status:'succeeded',elapsedMs:0},{stage:'search',label:'联网查证',detail:'1 条来源',status:'succeeded',elapsedMs:20}]});}});
+ try{
+  f.panel.node('[data-playground-question]').value='第一问';await f.ui.run();
+  f.panel.node('[data-playground-question]').value='第二问';await f.ui.run();
+  const target=f.panel.node('[data-playground-results]'),latest=target.querySelector('[data-playground-latest]');assert.ok(latest);
+  assert.equal(latest.querySelector('[data-playground-answer]').textContent,'答案。');
+  assert.match(latest.querySelector('[aria-label="处理链路"]').textContent,/准备上下文.*联网查证/u);
+  assert.ok(latest.querySelector('[data-playground-checks]'));assert.ok(latest.querySelector('[data-playground-sources]'));
+  const history=target.querySelector('details[data-playground-history]');assert.ok(history);assert.equal(history.open,false);assert.match(history.textContent,/第一问/u);assert.doesNotMatch(latest.textContent,/第一问/u);
+  f.panel.tab('ai');f.panel.node('[data-ai-section-tab="playground"]').click();const bridge=createWorkspaceBridge(f.panel);
+  try{const projected=walk(bridge.getSnapshot().content);for(const name of ['ai-result-heading','ai-result-meta'])assert.equal(projected.find(node=>node.classes?.split(' ').includes(name))?.layout,'row','标题与用量以横排呈现，不把宽度基准变成空白高度');
+   assert.ok(projected.find(node=>node.classes?.includes('ai-final-answer'))?.inspectable,'最终答案可独立放大');
+  }finally{bridge.destroy();}
+ }finally{f.close();}
+});
 
 test('关闭工具中止在途测试，取消场景组不再启动后续付费调用',async()=>{
  let finish,calls=0,signal;const f=fixture({run:options=>{calls++;signal=options.signal;return new Promise(resolve=>finish=()=>resolve(result(options.question)));}});
@@ -97,7 +113,7 @@ test('应用内入口贯通当前密钥、搜索、模型与预览，暂停场�
   for(let i=0;i<50 && !api;i++)await flush();assert.ok(api);api.panel.tab('ai');api.panel.node('[data-ai-section-tab="playground"]').click();
   api.panel.node('[data-playground-question]').value='赤鹤星周期是多少？';api.panel.node('[data-playground-run]').click();
   for(let i=0;i<100 && !api.panel.node('[data-playground-results]').textContent.includes('73天');i++)await flush();
-  assert.match(api.panel.node('[data-playground-results]').textContent,/赤鹤星周期73天。\[1\]/u);
+  assert.equal(api.panel.node('[data-playground-answer]').textContent,'赤鹤星周期73天。');
   assert.equal(calls,2);assert.equal(searches,1);assert.equal(api.engine.running,false);assert.equal(api.engine.queue.length,0);assert.deepEqual(sent,[]);
   assert.equal(api.engine.calls.length,0);assert.equal(api.engine.config.ai.enabled,false);
  }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}

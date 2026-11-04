@@ -23,7 +23,7 @@ export function evaluateReply(result,testCase){
  const answer=result.answer || '';
  return [
   {label:'实际生成答案，未以通用拒答替代',pass:result.status==='succeeded' && Boolean(answer.trim()) && !/^(?:搜索资料不足，)?暂时无法确认[。.]?$|^\[SKIP\]$/u.test(answer)},
-  ...(testCase.citationIndices ? [{label:'引用实际支持结论的来源',pass:JSON.stringify([...answer.matchAll(/\[(\d+)\]/gu)].map(row=>Number(row[1])).sort())===JSON.stringify(testCase.citationIndices)}] : []),
+  ...(testCase.citationIndices ? [{label:'引用实际支持结论的来源',pass:JSON.stringify([...(result.citationIndices || [])].sort((a,b)=>a-b))===JSON.stringify(testCase.citationIndices)}] : []),
   ...testCase.criteria.map(row=>({label:row.label,pass:new RegExp(row.pattern,'iu').test(answer)})),
   ...(testCase.forbidden || []).map(row=>({label:row.label,pass:!new RegExp(row.pattern,'iu').test(answer)}))
  ];

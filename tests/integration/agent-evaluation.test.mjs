@@ -7,7 +7,7 @@ const reply=(d,text)=>d.onload({status:200,responseText:JSON.parse(d.data).strea
 test('开源评测入口跑真实Engine→搜索客户端→AI→队列→预览，原始模型错误不能由评测器修饰',async()=>{
  const scenario=AGENT_EVAL_CASES.find(r=>r.id==='weather');let calls=0;
  const result=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,++calls===1 ? '{"intent":"web-search","query":"上海天气"}' : '{"answer":"上海11月5日小雨，18至23℃。","sources":[2]}')});
- assert.equal(result.passed,true);assert.equal(result.calls,2);assert.equal(result.searches,1);assert.match(result.output,/18至23℃。\[2\]/u);assert.equal(result.sent,0);assert.equal(result.pending,0);
+ assert.equal(result.passed,true);assert.equal(result.calls,2);assert.equal(result.searches,1);assert.match(result.output,/18至23℃。/u);assert.doesNotMatch(result.output,/\[\d+\]/u);assert.deepEqual(result.lookups.at(-1).citationIndices,[2]);assert.equal(result.sent,0);assert.equal(result.pending,0);
  const wrong=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,JSON.parse(JSON.parse(d.data).messages[1].content).web_search ? '{"answer":"上海11月5日晴，35至40℃。","sources":[1]}' : '{"intent":"web-search","query":"上海天气"}')});
  assert.equal(wrong.passed,false);assert.match(wrong.output,/35至40/u);assert.ok(wrong.checks.some(c=>!c.pass));
 });
@@ -65,7 +65,7 @@ test('未知价格和搜索故障的口语表达通过，通用发送失败不�
  const assess=(id,text)=>assessAgentResult({sent:0,pending:0,replies:[{text,valid:true}],output:text},AGENT_EVAL_CASES.find(r=>r.id===id)).every(c=>c.pass);
  assert.equal(assess('price-unknown','杯子价格这边没查到，具体得看主播怎么说了。'),true);
  assert.equal(assess('price-unknown','售价128元。'),false);
- for(const text of ['未查到上海明天天气，接口报错，建议稍后查询。','搜索失败，缺上海明日预报，建议查气象网站。','搜索报错，暂无上海明日降雨数据。'])assert.equal(assess('weather-rate-limit',text),true);
+ for(const text of ['上海明天天气暂时没查到，晚点再看看。','上海明天会不会下雨还不确定。','暂无上海明日降雨数据。'])assert.equal(assess('weather-rate-limit',text),true);
  assert.equal(assess('weather-rate-limit','查询结果暂时无法发送，请稍后再试。'),false);
 });
 test('后台Agent真实任务宿主贯通持久任务、研究路由、来源和幂等提交',async()=>{

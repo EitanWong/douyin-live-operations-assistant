@@ -22,7 +22,7 @@ test('长直播资料下搜索正文仍进入最终请求，回复使用仅存�
     }
     details.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:output}}]})});
   }});
-  assert.equal(await client(prompt,config),'观测周期为73天。[3]');
+  assert.equal(await client(prompt,config),'观测周期为73天。');
   assert.deepEqual(answerInput.web_search,found);
   assert.ok(JSON.stringify(answerInput).length<=16000);
   assert.equal(answerInput.evidence_context,undefined,'查证阶段不再发送无关直播背景，完整来源无需挤占裁剪预算');

@@ -6,7 +6,7 @@ const answers={greeting:'你好。','live-data':'本场已采集80钻。','web-s
 test('质量评测覆盖12项，并对事实、计算、上下文、缺失与矛盾资料逐项验收',()=>{
  assert.equal(AI_TEST_CASES.length,12);
  for(const row of AI_TEST_CASES){
-  const good=evaluateReply({status:'succeeded',answer:answers[row.id],intent:row.intents[0]},row);
+  const good=evaluateReply({status:'succeeded',answer:answers[row.id].replace(/\[\d+\]/gu,''),citationIndices:row.id==='weather' ? [2] : [1],intent:row.intents[0]},row);
   assert.ok(good.length>=1);assert.ok(good.every(c=>c.pass),`${row.id}: ${JSON.stringify(good)}`);
   for(const answer of ['', '搜索资料不足，暂时无法确认。','你好，很高兴为你服务。']){
    if(row.id==='greeting' && answer.startsWith('你好'))continue;
@@ -37,4 +37,10 @@ test('澄清城市接受口语市，编造天气仍不通过',()=>{
  const scenario=AI_TEST_CASES.find(r=>r.id==='clarify');
  assert.ok(evaluateReply({status:'succeeded',answer:'查天气得知道城市，你在哪个市呀？'},scenario).every(r=>r.pass));
  assert.ok(evaluateReply({status:'succeeded',answer:'你在哪个市呀？明天晴，20℃。'},scenario).some(r=>!r.pass));
+});
+
+test('答案没有公屏角标时仍校验来源元数据，错误或缺失依据不能通过',()=>{
+ const row=AI_TEST_CASES.find(r=>r.id==='weather'),answer='上海11月5日小雨，18至23℃。';
+ assert.ok(evaluateReply({status:'succeeded',answer,citationIndices:[2]},row).every(c=>c.pass));
+ for(const citationIndices of [[],[1],[99]])assert.ok(evaluateReply({status:'succeeded',answer,citationIndices},row).some(c=>!c.pass));
 });

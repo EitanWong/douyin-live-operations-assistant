@@ -15,7 +15,7 @@ function replyChecks(result,config,testCase){
  const checks=[{label:skip ? '模型选择不回复' : checked.ok ? '回复通过公屏格式与长度检查' : checked.reason,pass:skip || checked.ok},
   {label:'没有代主持或劝留表达',pass:!isIntrusiveReply(result.answer)}];
  if(result.intent==='web-search' || result.intent==='knowledge'){
-  const citations=[...result.answer.matchAll(/\[(\d+)\]/gu)].map(row=>Number(row[1]));
+  const citations=result.citationIndices;
   checks.push({label:'答案引用本次提供的有效来源',pass:!result.searchError && citations.length>0 && citations.every(index=>result.sources.some(source=>source.index===index))});
  }
  if(testCase){
@@ -45,36 +45,46 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
   if(version!==configVersion){configVersion=version;contextRevision++;}
   busy=true;
   const result={question:question.trim(),mode,contextRevision,status:'running',answer:'',error:'',at:started,elapsedMs:0,intent:'',provider:'',model:reply.model,controlled:Boolean(controlled),
-   query:'',cached:false,searchedAt:null,sources:[],searchError:'',citationWarning:'',calls:{cloud:0,local:0},checks:[]};
+   query:'',cached:false,searchedAt:null,sources:[],citationIndices:[],searchError:'',citationWarning:'',calls:{cloud:0,local:0},checks:[],trace:[]};
   const current=()=>!signal?.aborted && isCurrent() && version===fingerprint(getConfig());
-  const emit=progress=>{if(current())try{onProgress(progress);}catch{}};
+  const emit=progress=>{if(current())try{onProgress({...progress,trace:structuredClone(result.trace)});}catch{}};
+  const record=(stage,label,detail='',status='succeeded')=>{
+   result.trace.push({stage,label,detail,status,elapsedMs:now()-started});
+   emit({stage,intent:result.intent,query:result.query});
+  };
   const context=()=>{
    const live=controlled ? structuredClone(controlled.context) : getContext(config),history=controlled ? [] : turns.filter(row=>row.contextRevision===contextRevision).slice(-6);
    return {...live,context:[...(live.context || []),...history.map(row=>({name:'测试提问',text:row.question,at:started}))],
     recentReplies:[...(live.recentReplies || []),...history.map(row=>row.answer)].slice(-10)};
   };
-  const onIntent=row=>{result.intent=row.intent;emit({stage:'intent',intent:row.intent});};
-  const onSearch=row=>{Object.assign(result,{query:row.query,cached:Boolean(row.cached),searchedAt:row.searchedAt ?? null,sources:structuredClone(row.results || []),searchError:row.error || '',citationWarning:row.citationWarning || ''});};
-  const localReserve=()=>{reserve('local',config.ai.edge.maxPerHour);result.calls.local++;return true;};
-  const readOnlyKnowledge=knowledge ? {revision:()=>knowledge.revision(),candidates:(...args)=>knowledge.candidates(...args),find:(...args)=>knowledge.find(...args),remember:async()=>{}} : undefined;
-  const lookup=controlled ? async query=>({query,searchedAt:now(),results:structuredClone(controlled.sources)}) : search;
+  const onIntent=row=>{result.intent=row.intent;record('intent','识别提问意图',row.intent);};
+  const onSearch=row=>{Object.assign(result,{query:row.query,cached:Boolean(row.cached),searchedAt:row.searchedAt ?? null,sources:structuredClone(row.results || []),citationIndices:[...(row.citationIndices || [])],searchError:row.error || '',citationWarning:row.citationWarning || ''});};
+  const sources=found=>{if(found)record('sources',found.cached ? '读取有效缓存' : '取得搜索资料',`${found.results?.length || 0} 条来源${found.error ? ` · ${found.error}` : ''}`,found.error ? 'warning' : 'succeeded');return found;};
+  const localReserve=()=>{reserve('local',config.ai.edge.maxPerHour);result.calls.local++;record('model','调用本地模型',config.ai.edge.textModel,'running');return true;};
+  const readOnlyKnowledge=knowledge ? {revision:()=>knowledge.revision(),candidates:(...args)=>knowledge.candidates(...args),find:async(...args)=>sources(await knowledge.find(...args)),remember:async()=>{}} : undefined;
+  const lookup=controlled || search ? async(...args)=>{
+   try{return sources(controlled ? {query:args[0],searchedAt:now(),results:structuredClone(controlled.sources)} : await search(...args));}
+   catch(error){record('sources','搜索未完成',error.message,'warning');throw error;}
+  } : undefined;
   const cloud=createAIClient({getKey,search:lookup,knowledge:readOnlyKnowledge,onIntent,onSearch,request:details=>{
-   if(!current())throw cancelled();reserve('cloud',config.ai.maxPerHour);result.calls.cloud++;return request(details);
+   if(!current())throw cancelled();reserve('cloud',config.ai.maxPerHour);result.calls.cloud++;record('model',result.intent ? '根据资料整理答案' : '调用回复模型',reply.model,'running');return request(details);
   }});
   const local=edge && {...edge,reply:createLocalReply({edge,search:lookup,knowledge:readOnlyKnowledge,onSearch,onIntent})};
-  const client=createResilientAI({cloud,edge:local,now,onTrace:row=>{result.provider=row.provider;if(row.provider==='edge')result.model=`本地 · ${config.ai.edge.textModel}`;}});
+  const client=createResilientAI({cloud,edge:local,now,onTrace:row=>{result.provider=row.provider;if(row.provider==='edge')result.model=`本地 · ${config.ai.edge.textModel}`;record('provider','模型执行结果',`${row.provider==='edge' ? '本地' : '云端'} · ${{ok:'已完成',timeout:'超时',unavailable:'不可用'}[row.status] || row.status}`,row.status==='ok' ? 'succeeded' : 'warning');}});
   try{
    if(!current())throw cancelled();
    const initial=context();result.context={chat:initial.context?.length || 0,media:initial.mediaContext?.observations?.length || 0,knowledge:config.ai.memory.enabled};
-   emit({stage:'model'});
+   record('context','准备测试上下文',`${result.context.chat} 条对话 · ${result.context.media} 条音画观察 · 知识库${result.context.knowledge ? '开启' : '关闭'}`);
    const output=await client({...initial,getAIContext:context,persona:config.ai.persona,knowledge:config.ai.knowledge,signal,isCurrent:current,
     target:{type:'chat',name:'测试提问',address:'测试提问',text:result.question},task:{kind:'ai',instruction:mode==='direct' ? DIRECT_TURN_INSTRUCTION : TURN_TAKING_INSTRUCTION,data:{replyMode:mode}},
     maxLength:config.sending.maxLength,reserveLocal:localReserve,
-    onLookup:row=>{result.query=row.query;emit({stage:'search',query:row.query});}
+    onLookup:row=>{result.query=row.query;record('search',controlled ? '读取固定评测资料' : '联网查证',row.query,'running');}
    },fresh ? {...config.ai,search:{...config.ai.search,rememberKnowledge:false}} : config.ai);
    if(!current())throw cancelled();
    result.answer=output;result.status=output==='[SKIP]' ? 'skipped' : 'succeeded';result.checks=replyChecks(result,config,testCase);
-  }catch(error){result.status=error.name==='AbortError' || !current() ? 'cancelled' : 'failed';result.error=error.message;}
+   record('checks','格式与来源检查',`${result.checks.filter(row=>row.pass).length}/${result.checks.length} 项通过`,result.checks.every(row=>row.pass) ? 'succeeded' : 'warning');
+   record('complete',result.status==='skipped' ? '本次选择不回复' : '生成最终答案','仅展示在测试页，不发送公屏');
+  }catch(error){result.status=error.name==='AbortError' || !current() ? 'cancelled' : 'failed';result.error=error.message;record(result.status,result.status==='cancelled' ? '测试已取消' : '测试未完成',error.message,result.status);}
   finally{result.elapsedMs=now()-started;busy=false;}
   return result;
  }};

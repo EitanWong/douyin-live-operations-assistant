@@ -70,7 +70,7 @@ test('语音问题沿用现有联网和知识库路由；音画时间不重叠�
  f.advance(22000);f.visual('此前手中有红色的杯子。',20000);f.speech('蓝色茶杯怎么配色，帮我查查？');await f.assess();await f.tick();
  assert.equal(queries.length,1);assert.equal(requests.length,2);const input=JSON.parse(requests[0].messages[1].content);
  assert.equal(input.target.type,'speech');assert.equal(input.media_context.moment.alignment,'separate');assert.ok(input.evidence_context.memories.some(row=>row.id==='color'));
- assert.deepEqual(f.spoken,['蓝白搭配挺清爽。[1]']);f.engine.stop();
+ assert.deepEqual(f.spoken,['蓝白搭配挺清爽。']);f.engine.stop();
 });
 
 

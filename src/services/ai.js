@@ -4,13 +4,13 @@ import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
 import {RESEARCH_TIMEOUT_MS} from './ai-resilience.js';
 import { parseAIIntent } from './intent.js';
-import {searchAnswer,unavailableCurrentAnswer} from './search-answer.js';
+import {searchAnswer,spokenAnswer,unavailableCurrentAnswer} from './search-answer.js';
 import {requiresCurrentSources} from './web-knowledge.js';
 import {calculateQuestion} from './question-math.js';
 import { assembleAIContext,currentAIPrompt,applyPromptSources,applyContextBudget,liveFactFingerprint } from './ai-context.js';
 import {resolveReplyConfig,pipelineConfig} from './ai-pipeline.js';
 import { GROUNDING_INSTRUCTION } from '../data/douyin-rules.js';
-import { ANSWER_QUALITY_INSTRUCTION,CONVERSATION_INSTRUCTION,FACTUAL_LOOKUP_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,TURN_TAKING_INSTRUCTION,DIRECT_TURN_INSTRUCTION,EVERY_TURN_INSTRUCTION,NATURAL_STYLE_INSTRUCTION,SUPPORTER_INSTRUCTION } from '../ai/conversation-policy.js';
+import { SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,CONVERSATION_INSTRUCTION,FACTUAL_LOOKUP_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,TURN_TAKING_INSTRUCTION,DIRECT_TURN_INSTRUCTION,EVERY_TURN_INSTRUCTION,NATURAL_STYLE_INSTRUCTION,SUPPORTER_INSTRUCTION } from '../ai/conversation-policy.js';
 
 export function validateEndpoint(value) {
   let url; try { url = new URL(value); } catch { throw new Error('AI 接口地址无效'); }
@@ -38,7 +38,7 @@ export function makeAIRequest(prompt, config) {
   return request;
 }
 function isSpeechRouting(prompt){return prompt.intentRouting && !prompt.searchResults && prompt.target?.type==='speech';}
-function intentRoutingInstruction(prompt){return `唯一输出格式为 {"intent":"live-data|web-search|knowledge|chat|clarify|skip","query":"","reply":""}，intent 必须是其中一个实际值。live-data 使用现场数据直接回答，chat 直接回答，clarify 只问一句必要条件，这三者query为空；skip 的 reply 与 query 为空。knowledge 只使用提供的候选id和来源引用。web-search 只生成不超过300字的搜索词，reply 为空，可附 freshness=realtime|rules|stable|short；搜索词只含完成当前问题必要的信息，不附带直播上下文、观众昵称、UID或私密资料。当前联网搜索${prompt.searchAvailable ? '可用，需要外部资料或观众要求核实时选择 web-search' : '未启用，仍可使用有效缓存，需要新资料则在 reply 坦诚说明当前无法联网，不假装查过'}。`;}
+function intentRoutingInstruction(prompt){return `唯一输出格式为 {"intent":"live-data|web-search|knowledge|chat|clarify|skip","query":"","reply":""}，intent 必须是其中一个实际值。live-data 使用现场数据直接回答，chat 直接回答，clarify 只问一句必要条件，这三者query为空；skip 的 reply 与 query 为空。knowledge 只使用提供的候选id，reply不带角标，另附sources整数数组记录实际依据。web-search 只生成不超过300字的搜索词，reply 为空，可附 freshness=realtime|rules|stable|short；搜索词只含完成当前问题必要的信息，不附带直播上下文、观众昵称、UID或私密资料。当前联网搜索${prompt.searchAvailable ? '可用，需要外部资料或观众要求核实时选择 web-search' : '未启用，仍可使用有效缓存，需要新资料则在 reply 坦诚说明具体什么资料还没查到，不假装查过'}。`;}
 function makeBaseAIRequest(prompt, config) {
   if(isSpeechRouting(prompt))return {
     model:config.model,stream:false,temperature:config.temperature,max_tokens:400,
@@ -56,8 +56,8 @@ function makeBaseAIRequest(prompt, config) {
   if(prompt.searchResults)return {
     model:config.model,stream:false,temperature:config.temperature,max_tokens:prompt.task?.kind==='agent' ? 1600 : 300,
     messages:[{role:'system',content:[
-      `你是直播间问答助手，查询已接受，必须回答当前问题。最终含引用最多${prompt.maxLength}字，为引用预留15字，answer正文最多${Math.max(5,prompt.maxLength-15)}字。先给核心事实，再说必要缺口；不用道歉、称呼和客套。`,
-      ANSWER_QUALITY_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,
+      `你是直播间问答助手，查询已接受，必须回答当前问题。answer正文最多${prompt.maxLength}字，sources字段不占正文字数。先给核心事实，再说必要缺口；不用道歉、称呼和客套。`,
+      SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,
       '来源明确给出虚构设定或作品内事实时，按资料说明该设定，不以现实中不存在否定资料给定的数值；可用“按资料设定”限定，不冒充现实观测。',
       '来源有冲突时，明确说“资料不一致，暂不能确定”，再简述差异，不能只列出两个数字。',
       '最终只返回JSON对象：{"answer":"回答正文","sources":[1]}。answer直接回答，不附网址、Markdown或引用括号；sources填真正支持结论的web_search.results.index整数数组。多来源可填[1,2]，只用第2条就填[2]；不能因回复简短而省略sources。没有有效来源则sources为[]，正文说明具体缺口或直接回答稳定常识，绝不编造实时值。',
@@ -220,12 +220,12 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
     if(plan.intent==='skip')return '[SKIP]';
     if(plan.intent==='knowledge'){
       const candidate=knowledgeCandidates.find(row=>row.id===plan.query);
-      if(!candidate)return '缓存资料不足，暂时无法确认。';
+      if(!candidate)return '这部分资料暂时没找到，还不能确定。';
       const found=await cached('find',candidate.query,config.search,{question:prompt.target.text});
       if(!current())return '[SKIP]';
       if(found?.id===candidate.id){
-        const {answer,grounded}=searchAnswer(plan.reply,found);
-        notify(onSearch,{...found,question:prompt.target.text,answer,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});return answer;
+        const {answer,grounded,citationIndices}=searchAnswer(plan.sources ? JSON.stringify({answer:plan.reply,sources:plan.sources}) : plan.reply,found);
+        notify(onSearch,{...found,question:prompt.target.text,answer,citationIndices,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});return answer;
       }
       // Evidence may expire while the model runs. Refresh it through the normal
       // lookup lifecycle, rather than delivering an answer based on stale data.
@@ -234,9 +234,9 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
     if(plan.intent==='live-data')prompt.onLiveFacts?.(factVersion);
     if(plan.intent!=='web-search'){
       if(!plan.reply.trim() || [...plan.reply].length>prompt.maxLength)throw new Error('AI 回复为空或超过字数限制');
-      return plan.reply.trim();
+      return spokenAnswer(plan.reply);
     }
-    if(prompt.canFollowup && !prompt.canFollowup())return 'AI调用额度已用完，暂时无法整理搜索结果。';
+    if(prompt.canFollowup && !prompt.canFollowup())return '这次暂时还答不了，晚点再问我吧。';
     if(!plan.query.trim() || [...plan.query].length>300)throw new Error('AI 搜索词无效');
     let found=await cached('find',plan.query,config.search,{question:prompt.target.text});
     if(!found){
@@ -249,14 +249,14 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
     }
     if(!current())return '[SKIP]';
     if(!found.results.length && !found.error)found={...found,error:'搜索没有返回相关资料'};
-    if(prompt.reserveFollowup && !prompt.reserveFollowup())return 'AI调用额度已用完，暂时无法整理搜索结果。';
+    if(prompt.reserveFollowup && !prompt.reserveFollowup())return '这次暂时还答不了，晚点再问我吧。';
     let parsed;
     try{parsed=searchAnswer(await complete({...prompt,searchResults:found}),found);}
     catch(error){notify(onSearch,{...found,question:prompt.target.text,error:found.error || error.message});throw error;}
     const unsupportedCurrent=!found.results.length && requiresCurrentSources(`${prompt.target.text} ${plan.query}`,plan.freshness);
     const answer=unsupportedCurrent ? unavailableCurrentAnswer({...found,query:found.query || plan.query},prompt.maxLength) : parsed.answer,grounded=!unsupportedCurrent && parsed.grounded;
     if(current() && grounded && !found.error && !found.cached && revision!==null)await cached('remember',found,config.search,{freshness:plan.freshness,question:prompt.target.text,revision});
-    notify(onSearch,{...found,question:prompt.target.text,answer,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});
+    notify(onSearch,{...found,question:prompt.target.text,answer,citationIndices:unsupportedCurrent ? [] : parsed.citationIndices,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});
     return answer;
   };
   return async (prompt, config) => {

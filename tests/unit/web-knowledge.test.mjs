@@ -49,9 +49,9 @@ test('并发实例独立写入、容量有界；非法或未来来源不保存�
 test('云端首次主动查询并学习；重启后改写提问复用来源，搜索和后续调用均不发生',async()=>{
  const env=setup();let cache=env.open(),searches=0;const history=[];
  let ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音直播PK规则','','rules') : '规则以活动页公布的信息为准。[1]',search:async query=>{searches++;return sources(query,env.now());},onSearch:r=>history.push(r)});
- assert.match(await ai(prompt,settings),/\[1\]/);assert.equal(searches,1);assert.equal((await cache.list()).length,1);cache.close();
+ assert.equal(await ai(prompt,settings),'规则以活动页公布的信息为准。');assert.deepEqual(history.at(-1).citationIndices,[1]);assert.equal(searches,1);assert.equal((await cache.list()).length,1);cache.close();
  cache=env.open();ai=createAIClient({knowledge:cache,generate:async p=>{assert.ok(p.knowledgeCandidates[0].results.length);return plan('knowledge',p.knowledgeCandidates[0].id,'规则以活动页为准。[1]');},search:()=>assert.fail('不应重复搜索'),onSearch:r=>history.push(r)});
- try{assert.equal(await ai({...prompt,target:{text:'直播PK机制是什么？'},reserveFollowup:()=>assert.fail('命中无第二次模型调用')},settings),'规则以活动页为准。[1]');assert.equal(history.at(-1).cached,true);assert.deepEqual(settings.memory.entries,[]);}finally{cache.close();}
+ try{assert.equal(await ai({...prompt,target:{text:'直播PK机制是什么？'},reserveFollowup:()=>assert.fail('命中无第二次模型调用')},settings),'规则以活动页为准。');assert.equal(history.at(-1).cached,true);assert.deepEqual(settings.memory.entries,[]);}finally{cache.close();}
 });
 
 test('精确命中不消耗搜索额度；强制更新确实重查；停用学习不读写缓存',async()=>{
@@ -70,16 +70,16 @@ test('未引用的答案、空结果、失败不学习；伪造缓存ID与引用
    const ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : answer,search:async q=>sources(q,env.now())});await ai(prompt,settings);
   }
   assert.deepEqual(await cache.list(),[]);
-  const ai=createAIClient({knowledge:cache,generate:async()=>plan('knowledge','00000000-0000-4000-8000-000000000000','编造结论。[1]')});assert.match(await ai(prompt,settings),/无法确认/);
+  const ai=createAIClient({knowledge:cache,generate:async()=>plan('knowledge','00000000-0000-4000-8000-000000000000','编造结论。[1]')});assert.match(await ai(prompt,settings),/还不能确定/);
  }finally{cache.close();}
 });
 
 test('本地模型使用同一份长期资料，知识存储失败不会吞掉已完成回复',async()=>{
  const env=setup(),cache=env.open();try{
   await cache.remember(sources('抖音PK规则',env.now()),settings.search,{freshness:'rules'});
-  const local=createLocalReply({knowledge:cache,edge:{reply:async p=>plan('knowledge',p.knowledgeCandidates[0].id,'以活动页为准。[1]')},search:()=>assert.fail()});assert.equal(await local(prompt,settings),'以活动页为准。[1]');
+  const local=createLocalReply({knowledge:cache,edge:{reply:async p=>plan('knowledge',p.knowledgeCandidates[0].id,'以活动页为准。[1]')},search:()=>assert.fail()});assert.equal(await local(prompt,settings),'以活动页为准。');
   const broken={revision:async()=>{throw Error('storage denied');},candidates:async()=>{throw Error('storage denied');},find:async()=>{throw Error('storage denied');},remember:async()=>{throw Error('storage denied');}};
-  const ai=createAIClient({knowledge:broken,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : '以活动页为准。[1]',search:async q=>sources(q,env.now())});assert.equal(await ai(prompt,settings),'以活动页为准。[1]');
+  const ai=createAIClient({knowledge:broken,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : '以活动页为准。[1]',search:async q=>sources(q,env.now())});assert.equal(await ai(prompt,settings),'以活动页为准。');
  }finally{cache.close();}
 });
 
@@ -88,10 +88,10 @@ test('路由期间过期的缓存自动重查，停用搜索时仍可使用有�
  try{
   await cache.remember(sources('抖音PK规则',env.now()),settings.search,{freshness:'rules'});
   const generate=async p=>p.intentRouting ? plan('knowledge',p.knowledgeCandidates[0].id,'以活动页为准。[1]') : '更新后以活动页为准。[1]';
-  const offline=createAIClient({knowledge:cache,generate});assert.equal(await offline(prompt,{...settings,search:{...settings.search,enabled:false}}),'以活动页为准。[1]');
+  const offline=createAIClient({knowledge:cache,generate});assert.equal(await offline(prompt,{...settings,search:{...settings.search,enabled:false}}),'以活动页为准。');
   const invalid=createAIClient({knowledge:cache,generate:async p=>plan('knowledge',p.knowledgeCandidates[0].id,'错误引用。[99]')});assert.equal(await invalid(prompt,settings),'错误引用。');
   const expires=createAIClient({knowledge:cache,generate:async p=>{if(p.intentRouting)env.advance(86400000);return generate(p);},search:async q=>{searches++;return sources(q,env.now());}});
-  assert.equal(await expires(prompt,settings),'更新后以活动页为准。[1]');assert.equal(searches,1);
+  assert.equal(await expires(prompt,settings),'更新后以活动页为准。');assert.equal(searches,1);
  }finally{cache.close();}
 });
 

@@ -24,7 +24,7 @@ test('纯 Omni 组合从独立密钥和实时观察贯通 RAG、搜索与回复�
     await api.panel.callbacks.testAI(c,'',false);
     let body=JSON.parse(requests.at(-1).data),input=JSON.parse(body.messages[1].content);
     assert.equal(body.model,'qwen3.8-omni-flash');assert.equal(requests.at(-1).headers.Authorization,'Bearer ali-private');assert.equal(input.media_context.coverage,'realtime-vad-shared-media');assert.equal(input.evidence_context.memories[0].entryId,'tea');
-    const output=await api.engine.ai({...api.engine.aiContext(),maxLength:30,target:{text:'北京天气'},task:{kind:'ai'}},c.ai);assert.equal(output,'北京今天晴。[1]');
+    const output=await api.engine.ai({...api.engine.aiContext(),maxLength:30,target:{text:'北京天气'},task:{kind:'ai'}},c.ai);assert.equal(output,'北京今天晴。');
     assert.equal(requests.at(-2).headers.Authorization,'Bearer search-private');assert.equal(JSON.parse(requests.at(-2).data).query,'北京今天的天气');assert.equal(requests.at(-1).headers.Authorization,'Bearer ali-private');
     const next=structuredClone(c);next.ai.pipeline.mode='text';await api.panel.callbacks.save(next,'',false,{},{});assert.equal(stopped,1);assert.equal(api.engine.aiContext().mediaContext,null);
     capture.onObservation({kind:'omni',id:'late',at:Date.now(),text:'迟到结果',transport:'webrtc'});assert.equal(api.media.state,'idle');assert.equal(api.engine.aiContext().mediaContext,null);

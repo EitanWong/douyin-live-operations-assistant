@@ -36,7 +36,7 @@ test('长短卡片使用同一积木规格，折叠操作独占完整行而不�
  assert.ok(children.every(node=>node.size===undefined && node.span===undefined));
 });
 
-test('显式通栏配置使用紧凑区块规格，普通卡片仍保持统一行高',()=>{
+test('显式通栏配置与普通卡片保留宽度角色，高度由自然内容决定',()=>{
  const result=layoutChildren('cards',[{surface:'card',span:'full'},{surface:'card'},{surface:'card'}]);
  assert.deepEqual(result.map(node=>node.size),['section','tile','tile']);
 });

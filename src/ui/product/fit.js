@@ -9,15 +9,16 @@ export function chooseWorkspaceFit(measure) {
 }
 
 export class WorkspaceFit {
-  constructor(content) {
+  constructor(content,{reflow=()=>{}}={}) {
     this.content=content;this.owner=content.closest('.product-main');
+    this.reflow=()=>reflow(content);
     this.view=content.ownerDocument.defaultView;this.frame=0;this.observed=new Set();
     this.schedule=()=>{if(!this.frame)this.frame=this.view.requestAnimationFrame(()=>{this.frame=0;this.layout();});};
     this.observer=new this.view.ResizeObserver(this.schedule);
     this.refresh();
   }
   refresh() {
-    const nodes=new Set([this.content,...this.content.querySelectorAll('.product-page,.product-card-content')]);
+    const nodes=new Set([this.content,...this.content.querySelectorAll('.product-page,.product-card-slot,.product-card-content')]);
     for(const node of this.observed)if(!nodes.has(node))this.observer.unobserve(node);
     for(const node of nodes)if(!this.observed.has(node))this.observer.observe(node);
     this.observed=nodes;this.schedule();
@@ -29,10 +30,11 @@ export class WorkspaceFit {
     const positions=[this.content,...this.content.querySelectorAll('.product-card-body')].map(node=>({node,top:node.scrollTop,left:node.scrollLeft}));
     const fit=chooseWorkspaceFit(density=>{
       this.owner.dataset.fit=density;
+      this.reflow();
       const style=this.view.getComputedStyle(this.content);
       return {required:page.getBoundingClientRect().height+Number.parseFloat(style.paddingTop)+Number.parseFloat(style.paddingBottom),available:this.content.clientHeight};
     });
-    if(fit)this.owner.dataset.fit=fit;
+    if(fit){this.owner.dataset.fit=fit;this.reflow();}
     for(const {node,top,left} of positions){if(node.scrollTop!==top)node.scrollTop=top;if(node.scrollLeft!==left)node.scrollLeft=left;}
   }
   destroy() {this.observer.disconnect();this.view.cancelAnimationFrame(this.frame);}

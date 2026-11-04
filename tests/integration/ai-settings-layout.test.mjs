@@ -15,23 +15,33 @@ function setup(callbacks={}){
 }
 function visible(el){for(let node=el;node;node=node.parentElement)if(node.hidden)return false;return true;}
 
-test('AI 设置分成五个页签，切换不修改配置、不丢草稿或密钥，键盘可导航',async()=>{
+test('AI 设置按用途归类，切换不修改配置、不丢草稿或密钥，键盘可导航',async()=>{
   let saved;const s=setup({save:async config=>saved=config});
   try{
     const {panel,section,dom}=s,tabs=[...panel.root.querySelectorAll('[data-ai-section-tab]')];
-    assert.deepEqual(tabs.map(t=>t.textContent),['连接与模型','直播感知','知识与搜索','问答测试','高级设置']);
+    assert.deepEqual(tabs.map(t=>t.textContent),['连接与模型','直播感知','知识与搜索','观众与研究','问答测试','本地与性能','高级设置']);
     assert.ok(section('models'));assert.equal(section('models').hidden,false);
     tabs[1].click();assert.equal(section('models').hidden,true);assert.equal(section('perception').hidden,false);assert.equal(panel.dirty,false);
     tabs[2].click();const knowledge=panel.node('[data-field="ai.knowledge"]');knowledge.value='周六八点开播';knowledge.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
-    tabs[0].click();panel.node('[data-api-key]').value='draft-secret';tabs[4].click();tabs[0].click();
+    tabs[0].click();panel.node('[data-api-key]').value='draft-secret';tabs.at(-1).click();tabs[0].click();
     assert.equal(knowledge.value,'周六八点开播');assert.equal(panel.node('[data-api-key]').value,'draft-secret');
     tabs[0].focus();tabs[0].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'End',bubbles:true}));
-    assert.equal(panel.root.activeElement,tabs[4]);assert.equal(section('advanced').hidden,false);
-    tabs[4].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(panel.root.activeElement,tabs[0]);
+    assert.equal(panel.root.activeElement,tabs.at(-1));assert.equal(section('advanced').hidden,false);
+    tabs.at(-1).dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));assert.equal(panel.root.activeElement,tabs[0]);
     assert.equal(tabs.filter(t=>t.tabIndex===0).length,1);assert.equal(tabs[0].getAttribute('aria-selected'),'true');
     panel.node('[data-action="save"]').click();await new Promise(setImmediate);assert.equal(saved.ai.knowledge,'周六八点开播');
     assert.ok(!JSON.stringify(saved).includes('draft-secret'));
   }finally{s.close();}
+});
+test('本地模型与观众研究从连接页和知识页独立归组，字段仍唯一且错误能定位',()=>{
+ const s=setup();try{
+  const {panel,section}=s;
+  for(const path of ['ai.edge.enabled','ai.edge.textModel','ai.latency.cloudMs'])assert.equal(panel.node(`[data-field="${path}"]`).closest('[data-ai-section]'),section('local'));
+  for(const path of ['ai.assistant.memoryEnabled','ai.accountCollection.enabled'])assert.equal(panel.node(`[data-field="${path}"]`).closest('[data-ai-section]'),section('audience'));
+  assert.ok(panel.node('[data-agent-question]').closest('[data-ai-section="audience"]'));
+  const field=panel.node('[data-field="ai.latency.cloudMs"]');field.value='';assert.throws(()=>panel.read(),/不能为空/);assert.equal(section('local').hidden,false);assert.equal(panel.root.activeElement,field);
+  assert.equal(panel.root.querySelectorAll('[data-field="ai.edge.textModel"]').length,1);
+ }finally{s.close();}
 });
 
 test('每个组合只展示使用中的模型，切换组合保留全部已有模型值',()=>{
