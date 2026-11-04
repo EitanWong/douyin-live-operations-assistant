@@ -74,7 +74,7 @@ function Chart({node}) {
   return h(Inspectable,{node},h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'}));
 }
 function CardRun({nodes,bridge}) {
-  return h(Group,{className:'product-card-run','data-card-run':nodes[0]?.span==='full' ? 'full' : nodes[0]?.kind==='details' ? 'disclosures' : nodes[0]?.band || 'cards',wrap:'wrap',align:'stretch',gap:'var(--product-section-gap)'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot'},h(View,{node:child,bridge}))));
+  return h(Group,{className:'product-card-run','data-card-run':nodes[0]?.span==='full' ? 'full' : nodes[0]?.kind==='details' ? 'disclosures' : nodes[0]?.band || 'cards',wrap:'wrap',align:'flex-start',gap:'var(--product-section-gap)'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot'},h(View,{node:child,bridge}))));
 }
 function CardGrid({node,bridge,props}) {
   // A run keeps its identity when its first card moves; cards have their own IDs.

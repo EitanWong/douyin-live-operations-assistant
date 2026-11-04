@@ -1,11 +1,11 @@
-// Find the largest readable scale that fits, then fall back to page scrolling.
+// Keep standard spacing when it fits; shrink only when the content needs it.
 // Column widths are stable during the probes so the required height is monotone.
 export function chooseWorkspaceFit(measure) {
   const fits=scale=>{const {required,available}=measure(scale);return available<=0 ? null : required<=available+1;};
   const comfortable=fits(1);if(comfortable===null)return null;
-  let low=0,high=2;
-  if(comfortable){low=1;if(fits(2))return {scale:2,density:'comfortable'};}
-  else {high=1;if(!fits(0))return {scale:0,density:'scroll'};}
+  if(comfortable)return {scale:1,density:'comfortable'};
+  let low=0,high=1;
+  if(!fits(0))return {scale:0,density:'scroll'};
   for(let i=0;i<6;i++){const middle=(low+high)/2;if(fits(middle))low=middle;else high=middle;}
   return {scale:low,density:comfortable ? 'comfortable' : 'compact'};
 }

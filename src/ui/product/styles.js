@@ -85,15 +85,11 @@ export const PRODUCT_CSS=`
 .product-status{background:var(--mantine-color-body);overflow:visible;line-height:1.6}.product-state>span{min-width:0;overflow-wrap:anywhere}.product-state>span:first-child{color:var(--mantine-color-text);font-weight:550}.product-state small{white-space:normal;overflow-wrap:anywhere}.product-messages{max-height:clamp(64px,20cqh,160px);overflow:auto;scrollbar-gutter:stable;overscroll-behavior:contain}.product-messages .mantine-Alert-message{overflow-wrap:anywhere;white-space:normal;line-height:1.65}.product-messages:focus-visible{outline:2px solid var(--sg-focus);outline-offset:2px}
 @container assistant (max-height:520px){.product-toolbar{padding-block:6px}.product-subviews{padding-block:4px;max-height:25%;overflow:auto;flex-wrap:nowrap}.product-subview-tabs{flex:1;min-width:0}.product-subview-tabs .mantine-Tabs-list{flex-wrap:nowrap;overflow-x:auto}.product-subview-tabs .mantine-Tabs-tab{flex-shrink:0}.product-subviews>.mantine-InputWrapper-root{flex:0 1 var(--product-inline-control-width)}.product-status{padding-block:6px}.product-content{padding-block:8px}}
 @container product (max-width:400px){.product-toolbar{gap:6px}.product-heading{gap:6px}.product-toolbar-actions{gap:4px}.product-page button{max-width:100%}}
-/* Rows align and stretch together; the page owns vertical scrolling. */
+/* Keep settings at their natural height; extra window space stays below them. */
  .product-main{--product-density:1;${fluidDimensions}}
 .product-main .product-toolbar{padding:calc(8px + 3px * var(--product-density)) calc(12px + 4px * var(--product-density))}
 .product-main .product-subviews{padding:calc(6px + 2px * var(--product-density)) calc(12px + 4px * var(--product-density))}
 .product-main .product-status{padding:8px 12px}
-.product-main:not([data-measuring]):not([data-fit=scroll]) .product-content>.product-page-entrance{display:flex;flex-direction:column;min-height:100%}
-.product-main:not([data-measuring]):not([data-fit=scroll]) :is(.product-page,.product-full,.product-layout[data-layout=stack]):has(>.product-card-grid,>.product-full>.product-card-grid){display:flex;flex-direction:column;flex:1}
-.product-main:not([data-measuring]):not([data-fit=scroll]) .product-card-grid{flex:1}
-.product-main:not([data-measuring]):not([data-fit=scroll]) .product-card-run[data-card-run=cards]{flex:1;align-content:stretch}
 .product-card-run{width:100%;min-width:0}.product-card-slot{display:flex;flex:1 1 min(100%,var(--product-card-min-width));min-width:0;max-width:100%}.product-card-slot>*{flex:1;min-width:0;max-width:100%;margin:0}.product-card-slot>.mantine-Paper-root{display:flex;flex-direction:column;align-self:stretch}
 .feature-settings{gap:var(--product-section-gap)}.feature-section{padding-block:var(--product-card-padding);border-bottom:1px solid var(--product-line)}.feature-section:first-child{padding-top:0}.feature-section:last-child{border-bottom:0;padding-bottom:0}.feature-section>.group-note{margin-bottom:var(--product-metric-padding)}
 .feature-settings .feature-list{align-items:stretch}.feature-settings .product-switch{border:0;padding:var(--product-metric-padding) 0}.feature-settings .mantine-Switch-body{flex-direction:row-reverse;justify-content:space-between;gap:12px;align-items:flex-start}.feature-settings .mantine-Switch-labelWrapper{padding:0;flex:1;min-width:0}.feature-settings .mantine-Switch-label{font-weight:550}.feature-settings .mantine-Switch-track{flex-shrink:0;margin-top:2px}.feature-section>button{align-self:flex-start}
@@ -101,12 +97,8 @@ export const PRODUCT_CSS=`
 .product-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex:none;min-width:0;padding:var(--product-card-padding);border-bottom:1px solid var(--product-line)}
 .product-card-heading h3{min-height:var(--product-heading-height);display:flex;align-items:center}
 .product-card-body{min-height:0;min-width:0;display:flex;flex-direction:column;padding:var(--product-card-padding);overflow:visible;overscroll-behavior:auto;scroll-padding:var(--product-card-padding);flex:1 1 auto}
-.product-card-content{min-width:0;flex:1;justify-content:space-between}.product-card-content>*{flex-shrink:0}
-.product-card-content>:is(.feature-list,.product-layout[data-layout=fields]){flex:1;align-content:space-between}
-.product-card-content>.feature-list{justify-content:space-evenly}
+.product-card-content{min-width:0;justify-content:flex-start}.product-card-content>*{flex-shrink:0}
 .product-card-content>.product-layout[data-layout=fields]{row-gap:var(--product-gap)}
-.product-main[data-fit=scroll] .product-card-content{justify-content:flex-start}
-.product-main[data-fit=scroll] .product-card-content>:is(.feature-list,.product-layout[data-layout=fields]){flex:0 1 auto}
 .product-card-heading{align-items:center}
 .product-card-heading>.product-layout{min-height:var(--product-heading-height)}
 /* Dashboard tiles share a bounded height; expanded evidence scrolls locally. */
@@ -115,6 +107,7 @@ export const PRODUCT_CSS=`
 .anchor-section[data-card-size=tile]>.product-card-body>.product-card-content{flex:0 0 auto;justify-content:flex-start}
 .product-inspection-view .anchor-section[data-card-size=tile]{block-size:auto}
 .product-inspection-view .anchor-section[data-card-size=tile]>.product-card-body{overflow:visible}
+.delivery-records{max-block-size:280px;overflow:auto;overscroll-behavior:contain}
 .product-card-body:focus-visible{outline:2px solid var(--sg-focus);outline-offset:-3px}
 
 .product-table-scroll,.product-record-scroll,.product-edit-scroll{max-block-size:none;overscroll-behavior:auto;scroll-padding-block:8px}
