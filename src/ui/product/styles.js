@@ -109,6 +109,12 @@ export const PRODUCT_CSS=`
 .product-main[data-fit=scroll] .product-card-content>:is(.feature-list,.product-layout[data-layout=fields]){flex:0 1 auto}
 .product-card-heading{align-items:center}
 .product-card-heading>.product-layout{min-height:var(--product-heading-height)}
+/* Dashboard tiles share a bounded height; expanded evidence scrolls locally. */
+.product-card-slot>.anchor-section[data-card-size=tile]{block-size:calc(var(--product-chart-height) + var(--product-heading-height) + 4 * var(--product-card-padding) + 3 * var(--product-gap));min-block-size:0}
+.anchor-section[data-card-size=tile]>.product-card-body{overflow:auto;overscroll-behavior:contain}
+.anchor-section[data-card-size=tile]>.product-card-body>.product-card-content{flex:0 0 auto;justify-content:flex-start}
+.product-inspection-view .anchor-section[data-card-size=tile]{block-size:auto}
+.product-inspection-view .anchor-section[data-card-size=tile]>.product-card-body{overflow:visible}
 .product-card-body:focus-visible{outline:2px solid var(--sg-focus);outline-offset:-3px}
 
 .product-table-scroll,.product-record-scroll,.product-edit-scroll{max-block-size:none;overscroll-behavior:auto;scroll-padding-block:8px}
