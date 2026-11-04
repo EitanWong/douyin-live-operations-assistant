@@ -66,3 +66,9 @@ test('没有来源的PK问题仍保留事实边界，普通天气不附带无关
  assert.match(make('抖音PK规则是什么'),/首翻\/首送加成/);
  assert.doesNotMatch(make('上海明天天气'),/首翻\/首送加成/);
 });
+
+test('提问省略PK时仍从实际来源识别玩法，不能绕过规则校验；天气不误加PK规则',()=>{
+ const found=reviewResearch('100基础分首送与任务各算多少？',{query:'首送积分',results:[source('https://example.org/rules','测试活动不是通用规则：PK自选3或5分钟，首送双倍，任务1.5倍，不能叠加。')]});
+ assert.equal(found.topic,'live-pk');
+ assert.equal(reviewResearch('上海天气',{query:'上海天气',results:[{title:'天气',url:'https://example.org/weather',content:'上海今天晴，22度。'}]}).topic,null);
+});

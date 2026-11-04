@@ -18,7 +18,7 @@ function sourceEvidence(row){
   caution:official ? '官方文档也仅证明正文实际支持的玩法与操作，不能补出时长、计分或倍率。' : userContent ? '用户作品、评论或搜索聚合，不等于官方；摘要可能来自评论，发布日期不一定是该说法的日期。' : '第三方摘要，须核对对象、日期、玩法和结论，不能仅凭标题或自称官方采信。'};
 }
 export function reviewResearch(question,found){
- const pk=livePK(`${question} ${found.query || ''}`);
+ const pk=livePK(`${question} ${found.query || ''} ${found.results.map(row=>`${row.title} ${row.content}`).join(' ')}`);
  const excluded=[...(found.excluded || [])],results=[];
  for(const row of found.results){
   if(pk && videoMetricClaim(row.content)){

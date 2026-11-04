@@ -4,14 +4,14 @@ import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
 import {RESEARCH_TIMEOUT_MS} from './ai-resilience.js';
 import { parseAIIntent } from './intent.js';
-import {searchAnswer,spokenAnswer,unavailableCurrentAnswer,compactAnswerMessages} from './search-answer.js';
+import {searchAnswer,spokenAnswer,unavailableCurrentAnswer,compactAnswerMessages,ruleAnswerIssues} from './search-answer.js';
 import {requiresCurrentSources} from './web-knowledge.js';
 import {collectResearch,reviewResearch} from './web-research.js';
 import {calculateQuestion} from './question-math.js';
 import { assembleAIContext,currentAIPrompt,applyPromptSources,applyContextBudget,liveFactFingerprint } from './ai-context.js';
 import {resolveReplyConfig,pipelineConfig} from './ai-pipeline.js';
 import { GROUNDING_INSTRUCTION } from '../data/douyin-rules.js';
-import { RULES_EVIDENCE_INSTRUCTION,SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,CONVERSATION_INSTRUCTION,FACTUAL_LOOKUP_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,TURN_TAKING_INSTRUCTION,DIRECT_TURN_INSTRUCTION,EVERY_TURN_INSTRUCTION,NATURAL_STYLE_INSTRUCTION,SUPPORTER_INSTRUCTION } from '../ai/conversation-policy.js';
+import { SOURCE_SCOPE_INSTRUCTION,RULES_EVIDENCE_INSTRUCTION,SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,CONVERSATION_INSTRUCTION,FACTUAL_LOOKUP_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,TURN_TAKING_INSTRUCTION,DIRECT_TURN_INSTRUCTION,EVERY_TURN_INSTRUCTION,NATURAL_STYLE_INSTRUCTION,SUPPORTER_INSTRUCTION } from '../ai/conversation-policy.js';
 const generationConfig=(config,searchResults)=>searchResults ? {...config,temperature:Math.min(config.temperature ?? 0.2,0.2)} : config;
 
 export function validateEndpoint(value) {
@@ -62,8 +62,8 @@ function makeBaseAIRequest(prompt, config) {
   if(prompt.searchResults)return {
     model:config.model,stream:false,temperature:config.temperature,max_tokens:prompt.task?.kind==='agent' ? 1600 : 300,
     messages:[{role:'system',content:[
-      `你是直播间问答助手，查询已接受，必须回答当前问题。answer正文最多${prompt.maxLength}字，sources字段不占正文字数。先给核心事实，再说必要缺口；资料限定测试或某玩法时，开头保留“本玩法”等范围，不能说成抖音通用规则。不用道歉、称呼和客套。`,
-      SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,
+      `你是直播间问答助手，查询已接受，必须回答当前问题。answer正文最多${prompt.maxLength}字，sources字段不占正文字数。先给核心事实，再说必要缺口。不用道歉、称呼和客套。`,
+      SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,SOURCE_SCOPE_INSTRUCTION,
       prompt.searchResults.topic==='live-pk' ? RULES_EVIDENCE_INSTRUCTION : '',
       '来源明确给出虚构设定或作品内事实时，按资料说明该设定，不以现实中不存在否定资料给定的数值；可用“按资料设定”限定，不冒充现实观测。',
       '只有同一对象、时期、条件下明确给出的事实结论互不兼容才算冲突；一份资料未测量或未提及，另一份给出结果，不构成冲突，应使用真正给出结果的来源。不同玩法的时长或倍率也不构成矛盾。确有冲突时，必须说还不能确定，再简述差异，不能只并列两个数值。',
@@ -210,6 +210,16 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
       if(typeof output!=='string' || !output.trim())throw new Error('模型未返回文本，请使用 Chat Completions 兼容接口');
       return output.trim();
     };
+    const refineAnswer=async(found,parsed)=>{
+      const maxLength=prompt.searchMaxLength ?? prompt.maxLength;
+      const issues=ruleAnswerIssues(parsed.answer,found,parsed.citationIndices);
+      if([...parsed.answer].length<=maxLength && !issues.length)return parsed;
+      if(prompt.reserveFollowup && !await prompt.reserveFollowup())throw new Error('答案压缩或修订额度不足');
+      const revised=searchAnswer(await complete({...prompt,maxLength,searchResults:found,answerDraft:parsed.answer,answerIssues:issues}),found);
+      if([...revised.answer].length>maxLength)throw new Error('压缩后答案仍超过公屏字数');
+      if(ruleAnswerIssues(revised.answer,found,revised.citationIndices).length)throw new Error('修订后答案仍有无依据的规则断言');
+      return revised;
+    };
     if(!['ai','agent'].includes(prompt.task?.kind) || !prompt.target?.text)return complete(prompt);
     const calculation=calculateQuestion(prompt.target.text);prompt={...prompt,calculation};
     const useKnowledge=knowledge && prompt.task.kind==='ai' && config.search?.rememberKnowledge!==false;
@@ -232,7 +242,7 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
       const found=record && reviewResearch(prompt.target.text,record);
       if(!current())return '[SKIP]';
       if(found?.id===candidate.id){
-        const {answer,grounded,citationIndices}=searchAnswer(plan.sources ? JSON.stringify({answer:plan.reply,sources:plan.sources}) : plan.reply,found);
+        const {answer,grounded,citationIndices}=await refineAnswer(found,searchAnswer(plan.sources ? JSON.stringify({answer:plan.reply,sources:plan.sources}) : plan.reply,found));
         notify(onSearch,{...found,question:prompt.target.text,answer,citationIndices,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});return answer;
       }
       // Evidence may expire while the model runs. Refresh it through the normal
@@ -264,12 +274,7 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
     let parsed;const answerLimit=prompt.searchMaxLength ?? prompt.maxLength;
     try{
       const answerPrompt={...prompt,maxLength:answerLimit,searchResults:found};
-      parsed=searchAnswer(await complete(answerPrompt),found);
-      if([...parsed.answer].length>answerLimit){
-        if(prompt.reserveFollowup && !await prompt.reserveFollowup())throw new Error('答案压缩额度不足');
-        parsed=searchAnswer(await complete({...answerPrompt,answerDraft:parsed.answer}),found);
-        if([...parsed.answer].length>answerLimit)throw new Error('压缩后答案仍超过公屏字数');
-      }
+      parsed=await refineAnswer(found,searchAnswer(await complete(answerPrompt),found));
     }
     catch(error){notify(onSearch,{...found,question:prompt.target.text,error:found.error || error.message});throw error;}
     const unsupportedCurrent=!found.results.length && requiresCurrentSources(`${prompt.target.text} ${plan.query}`,plan.freshness);

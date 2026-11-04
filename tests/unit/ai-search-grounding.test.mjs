@@ -89,3 +89,61 @@ test('端侧搜索保留所有来源正文及末尾事实，预算不足时明�
   assert.deepEqual(JSON.parse(fitted[1].content).web_search,data.web_search);
   await assert.rejects(fitEdgeMessages(messages,measure,1500),/预算/u);
 });
+
+test('生成与精简均保留多对象范围，复合问题不能为凑20字丢掉核心结论',()=>{
+ const input={...prompt,target:{text:'不同玩法时长和胜负怎么算？'},searchResults:{...found,topic:'live-pk'},maxLength:44};
+ for(const messages of [makeAIRequest(input,config).messages,makeEdgeMessages(input,config),makeAIRequest({...input,answerDraft:'玩法甲三分钟，玩法乙十分钟，均按PK分结算。'},config).messages]){
+  assert.doesNotMatch(messages[0].content,/开头保留“本玩法”|必须用“本玩法”|尽量20字/u);
+  assert.match(messages[0].content,/多个(?:对象|玩法)/u);
+  assert.match(messages[0].content,/逐项/u);
+ }
+});
+
+test('查证与缓存回复发现无依据的倍率优先级时共用一次修订额度，不能把不能叠加推成取高',async()=>{
+ const evidence={topic:'live-pk',query:'PK加成',results:[{index:1,title:'规则',url:'https://example.org/pk',content:'测试活动首送双倍，任务完成后1.5倍，不能叠加；未说明相遇时采用哪种加成。'}]};
+ for(const cached of [false,true]){
+  let calls=0,reserves=0,searches=0;
+  const candidate={...evidence,id:'4f73b1b7-eed2-4df2-843f-25ce93281ace',freshness:'rules'};
+  const knowledge=cached ? {revision:async()=>0,candidates:async()=>[candidate],find:async()=>candidate,remember:async()=>{}} : undefined;
+  const client=createAIClient({knowledge,search:async()=>{searches++;return evidence;},generate:async p=>{
+   calls++;if(p.intentRouting)return cached ? '{"intent":"knowledge","query":"4f73b1b7-eed2-4df2-843f-25ce93281ace","reply":"本活动不能叠加，取较高者200分。","sources":[1]}' : '{"intent":"web-search","query":"PK加成"}';
+   if(p.answerDraft){assert.match(p.answerIssues.join(' '),/优先级/);return '{"answer":"本测试活动不能叠加，同时触发如何处理未说明。","sources":[1]}';}
+   return '{"answer":"本活动不能叠加，取较高者200分。","sources":[1]}';
+  }});
+  const answer=await client({...prompt,target:{text:'PK加成同时触发怎么算？'},reserveFollowup:async()=>{reserves++;return true;}},config);
+  assert.match(answer,/未说明/);assert.doesNotMatch(answer,/取较高/);assert.equal(calls,cached ? 2 : 3);assert.equal(reserves,cached ? 1 : 2);assert.equal(searches,cached ? 0 : 2);
+ }
+});
+
+
+test('规则校验仅按实际引用来源判断高风险断言，支持明确优先级，拒绝跨玩法与无依据否定',async()=>{
+ const {ruleAnswerIssues}=await import('../../src/services/search-answer.js');
+ const found={topic:'live-pk',results:[{index:1,content:'测试玩法A为3/5分钟，玩法B为10分钟，不能叠加。'},{index:2,content:'另一个活动取较高倍率。'}]};
+ assert.ok(ruleAnswerIssues('不能叠加，取较高者。',found,[1]).length);
+ assert.deepEqual(ruleAnswerIssues('取较高倍率。',found,[2]),[]);
+ assert.ok(ruleAnswerIssues('本玩法可选3、5或10分钟。',found,[1]).length);
+ assert.deepEqual(ruleAnswerIssues('测试示例A为3/5分钟，B为10分钟。',found,[1]),[]);
+ assert.ok(ruleAnswerIssues('没有统一标准。',found,[1]).length);
+ assert.deepEqual(ruleAnswerIssues('没有统一标准。',{...found,results:[{index:1,content:'这个活动没有统一标准。'}]},[1]),[]);
+ assert.deepEqual(ruleAnswerIssues('本玩法可选3、5或10分钟。',{...found,topic:null},[1]),[]);
+});
+
+test('规则修订不能无限重试或透支额度，修订再次臆造时明确失败',async()=>{
+ for(const allow of [false,true]){
+  let calls=0,reserves=0;
+  const client=createAIClient({search:async()=>({query:'PK',results:[{index:1,content:'测试活动不能叠加。',url:'https://example.org/pk',title:'PK'}]}),generate:async p=>{calls++;return p.intentRouting ? '{"intent":"web-search","query":"直播PK规则"}' : '{"answer":"取较高倍率。","sources":[1]}';}});
+  await assert.rejects(client({...prompt,target:{text:'直播PK叠加规则'},reserveFollowup:async()=>++reserves===1 || allow},config),allow ? /仍有无依据/ : /额度不足/);
+  assert.equal(calls,allow ? 3 : 2);assert.equal(reserves,2);
+ }
+});
+
+test('测试规则必须保留来源范围，评论不能推出平台未公开或跨玩法倍率差异',async()=>{
+ const {ruleAnswerIssues}=await import('../../src/services/search-answer.js');
+ const example={topic:'live-pk',results:[{index:1,content:'对照测试资料，不是抖音通用规则：玩法A三分钟，玩法B十分钟，按PK分结算。'}]};
+ assert.ok(ruleAnswerIssues('时长可选三或十分钟，按PK分结算。',example,[1]).length);
+ assert.deepEqual(ruleAnswerIssues('按测试示例，两种玩法时长不同，均按PK分结算。',example,[1]),[]);
+ const comment={topic:'live-pk',results:[{index:1,content:'网友评论首翻2倍。'}]};
+ assert.ok(ruleAnswerIssues('抖音未公开此通用倍率细则。',comment,[1]).length);
+ assert.ok(ruleAnswerIssues('不同玩法倍率和概率各异。',comment,[1]).length);
+ assert.deepEqual(ruleAnswerIssues('网友评论不足以证明通用规则。',comment,[1]),[]);
+});
