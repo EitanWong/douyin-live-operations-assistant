@@ -211,7 +211,7 @@ export class Panel {
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime" hidden>
             <h2>运行规则</h2><p class="intro">符合规则的消息按优先级及时发送。</p>
             <div class="status"><strong data-state>已暂停</strong></div>
-            <section class="settings-group"><h3>互动发送</h3><p class="group-note">所有已接受的互动按优先级连续处理；发送控件就绪后立即提交，无需逐条审核。</p><div class="grid">${this.select('mode', '回复方式', [['auto', '自动发送'], ['preview', '仅预览，不发送']])}</div><label class="toggle"><input type="checkbox" data-field="automation.autoStart">进入此主播直播间后自动开始场控</label><p class="hint">仅当前主播生效；连接未就绪时等待恢复。手动暂停后本次页面不会自动重启。</p><div class="mode-note" data-mode-note>符合规则的回复会自动发送。</div></section>
+            <section class="settings-group"><h3>互动发送</h3><p class="group-note">所有已接受的互动按优先级连续处理；发送控件就绪后立即提交，无需逐条审核。</p><div class="grid">${this.select('mode', '回复方式', [['auto', '自动发送'], ['preview', '仅预览，不发送']])}</div><label class="toggle"><input type="checkbox" data-field="automation.monitorRoom">持续监控直播间，未开播时自动刷新</label><label class="toggle"><input type="checkbox" data-field="automation.autoStart">进入此主播直播间后自动开始场控</label><p class="hint">仅当前主播生效；未开播时持续检测并定期刷新，开播后按自动开始设置运行，下播后等待下一场。手动暂停后本页停止自动启动与刷新。</p><p class="hint" data-room-monitor role="status"></p><div class="mode-note" data-mode-note>符合规则的回复会自动发送。</div></section>
           </section>
           <section class="page" role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" data-page="appearance" hidden>
             <h2>外观</h2><p class="intro">选择适合当前环境的亮暗模式。</p>
@@ -370,15 +370,16 @@ export class Panel {
   hidden(selector, value) { const node = this.node(selector); if (node.hidden !== value) node.hidden = value; }
   syncFooter() {
     const running = Boolean(this.latest?.[0].running);
+    const active=running || Boolean(this.latest?.[1]?.roomMonitor?.active);
     const busy = ['start','save','test-ai'].some(action => this.busyActions.has(action));
     this.text('[data-save-state]', this.busyActions.has('save') ? '正在保存…' : this.busyActions.has('start') ? '正在开始…' : this.dirty ? '未保存，保存后继续运行' : '设置已保存');
     this.node('[data-save-state]').classList.toggle('dirty', this.dirty);
     this.hidden('[data-action=save]', !this.dirty);
     this.text('[data-action=save]', '保存设置');
-    this.hidden('[data-action=start]', running); this.hidden('[data-action=stop]', !running);
+    this.hidden('[data-action=start]', running); this.hidden('[data-action=stop]', !active);
     this.text('[data-action=start]', this.dirty ? '保存并开始' : '开始场控');
     this.disabled('[data-action=start]', running || busy); this.disabled('[data-action=save]', busy);
-    this.disabled('[data-action=stop]', !running);
+    this.disabled('[data-action=stop]', !active);
     for (const action of ['debug-send', 'debug-send-admin']) this.disabled(`[data-action=${action}]`, !running || this.latest?.[1]?.contextInvalidated || this.latest?.[0].config.mode !== 'auto' || this.busyActions.has(action));
     const form = this.node('form'); if (form.inert !== busy) form.inert = busy;
   }
@@ -1128,7 +1129,9 @@ export class Panel {
     const mode = { preview: '仅预览', auto: '自动发送' }[engine.config.mode];
     this.syncLauncher();
     if (!this.open) return;
-    this.text('[data-state]', network.contextInvalidated ? '扩展连接失效 · 待刷新' : engine.running ? `运行中 · ${mode}` : '已暂停');
+    const monitor=network.roomMonitor,monitorLabel=({waiting:'等待开播 · 持续监控中',connected:'直播已连接',reconnecting:'等待直播连接恢复',refreshing:'正在刷新直播间',offline:'网络离线 · 等待恢复'})[monitor?.state] || '';
+    this.text('[data-room-monitor]',monitor?.active ? monitorLabel : '');
+    this.text('[data-state]', network.contextInvalidated ? '扩展连接失效 · 待刷新' : engine.running ? `运行中 · ${mode}` : monitor?.active ? monitorLabel : '已暂停');
     this.text('[data-shell-state]', this.node('[data-state]').textContent);
     const receiving = Boolean(network.frames && (network.connected || network.lastPoll && Date.now()-network.lastPoll < 90000));
     this.text('[data-shell-network]', this.demo ? '模拟数据' : receiving ? '直播数据已连接' : '等待直播数据');

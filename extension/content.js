@@ -17,7 +17,8 @@ const room = roomFromURL(location);
 if (room) {
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
   const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint, activeAdapter;
-  let lastCollectionActive, collectionPower = {awake:false};
+  let lastCollectionActive, collectionPower = {awake:false}, monitorActive=false, roomWake;
+  const collectionActive=()=>!contextInvalidated && (monitorActive || liveStatus.collection?.active===true);
   let captureWrites = Promise.resolve(), capturePending = 0, capturePendingBytes = 0, captureSaved = 0, captureGaps = 0, captureErrors = 0;
   // 事件桥不传递密钥；发送桥只允许本房弹幕及经权限核对的禁言/拉黑票据。
   const receivePacket = data => {
@@ -49,7 +50,7 @@ if (room) {
     }
     if (data.type === 'status' && data.status) {
       liveStatus = { ...data.status };
-      void updateCollectionLease(liveStatus.collection?.active === true && !contextInvalidated);
+      void updateCollectionLease(collectionActive());
     }
   };
   let liveStatus = { hook:false, sockets:0, frames:0, events:0, errors:0, connected:false, lastFrame:0 };
@@ -118,8 +119,9 @@ if (room) {
     }
     if (request.type === 'collection-wake') {
       if (contextInvalidated) { reply({active:false}); return; }
+      void roomWake?.().catch(()=>{});
       void (async()=>{
-        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}});reply({active:active===true});void updateCollectionLease(active===true).catch(()=>{});}
+        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}})===true || collectionActive();reply({active});void updateCollectionLease(active).catch(()=>{});}
         catch {reply({active:false});}
       })();
       return true;
@@ -276,7 +278,7 @@ if (room) {
     recordContributionSnapshot: snapshot => message({type:'contribution-snapshot',...snapshot}),
     report: (room, month, {includeAllSessions = false} = {}) => message({ type:'income-report', room, month, includeAllSessions })
   };
-  boot({ page:window, predictions:(action,value,anchor)=>message({type:'prediction',action,value,anchor}), vadFactory:async args=>(await import(chrome.runtime.getURL('speech-vad.js'))).captureSpeech({...args,assets:chrome.runtime.getURL('vad/')}), nativeASR:createNativeASRClient({connect:()=>chrome.runtime.connect({name:'native-asr'})}), edge:createEdgeClient({connect:()=>chrome.runtime.connect({name:'edge-ai'})}), accountCollector:{search:query=>message({type:'account-search',query}),collect:url=>message({type:'account-collect',url}),cancel:()=>message({type:'account-cancel'})}, nativeConnect:()=>chrome.runtime.connect({name:'native-perception'}), nativeExtensionId:chrome.runtime.id, agentTasks:{submit:job=>message({type:'agent-submit',...job}),list:()=>message({type:'agent-list'}),cancel:id=>message({type:'agent-cancel',id})}, giveawayStorage:{get:key=>message({type:'giveaway-read',key}),set:(key,value)=>message({type:'giveaway-write',key,value})}, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>{try{return resolveReplyConfig({...panel.config.ai,endpoint:panel.root.querySelector('[data-field="ai.endpoint"]').value,pipeline:panel.readPipeline()}).endpoint;}catch{return panel.root.querySelector('[data-field="ai.endpoint"]').value;}};} });
+  boot({ page:window, predictions:(action,value,anchor)=>message({type:'prediction',action,value,anchor}), vadFactory:async args=>(await import(chrome.runtime.getURL('speech-vad.js'))).captureSpeech({...args,assets:chrome.runtime.getURL('vad/')}), nativeASR:createNativeASRClient({connect:()=>chrome.runtime.connect({name:'native-asr'})}), edge:createEdgeClient({connect:()=>chrome.runtime.connect({name:'edge-ai'})}), accountCollector:{search:query=>message({type:'account-search',query}),collect:url=>message({type:'account-collect',url}),cancel:()=>message({type:'account-cancel'})}, nativeConnect:()=>chrome.runtime.connect({name:'native-perception'}), nativeExtensionId:chrome.runtime.id, agentTasks:{submit:job=>message({type:'agent-submit',...job}),list:()=>message({type:'agent-list'}),cancel:id=>message({type:'agent-cancel',id})}, giveawayStorage:{get:key=>message({type:'giveaway-read',key}),set:(key,value)=>message({type:'giveaway-write',key,value})}, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onMonitorStatus:status=>{monitorActive=status.active;void updateCollectionLease(collectionActive());}, onReady:api=>{roomWake=api.wake;panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>{try{return resolveReplyConfig({...panel.config.ai,endpoint:panel.root.querySelector('[data-field="ai.endpoint"]').value,pipeline:panel.readPipeline()}).endpoint;}catch{return panel.root.querySelector('[data-field="ai.endpoint"]').value;}};} });
 }
 
 }

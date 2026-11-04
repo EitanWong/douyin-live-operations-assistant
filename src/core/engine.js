@@ -31,7 +31,7 @@ export { recognizeMilestone };
 export const DEFAULTS = {
   version: 2,
   mode: 'auto',
-  automation: { autoStart: false },
+  automation: { autoStart: false, monitorRoom: true },
   rewards: REWARDS_DEFAULTS,
   anchorId: '', selfId: '', ignored: [], blockedWords: [],
   identity: { autoAnchor: true, autoSelf: true },
@@ -701,7 +701,7 @@ export class Engine {
       return;
     }
     if (!this.running) return;
-    if (event.type === 'end') { this.log('system', '收到直播结束事件；场控保持运行，等待手动暂停'); return; }
+    if (event.type === 'end') { this.log('system', '收到直播结束事件'); return; }
     if (event.type === 'milestone') {
       if ((this.selfTexts.get(event.text) || 0) > now) return;
       this.queueMilestone(event.milestone);

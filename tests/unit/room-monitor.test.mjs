@@ -62,6 +62,9 @@ test('开播但原页没有连接时快速刷新；正常连接不刷新，断�
   const stale=fixture();stale.context.live='live';stale.context.healthy=true;stale.context.lastActivity=1000000;
   await stale.monitor.tick();stale.advance(120001);await stale.monitor.tick();
   stale.advance(30000);await stale.monitor.tick();assert.equal(stale.reloads,1);
+  const silent=fixture();silent.context.live='live';silent.context.healthy=true;
+  await silent.monitor.tick();silent.advance(120001);await silent.monitor.tick();
+  silent.advance(30000);await silent.monitor.tick();assert.equal(silent.reloads,1,'连接打开后始终没有第一帧也应恢复');
 });
 
 test('网络离线、手动暂停、切房、挂起及保存失败不刷新，恢复后可重试',async()=>{

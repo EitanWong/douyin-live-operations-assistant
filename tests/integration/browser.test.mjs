@@ -1405,7 +1405,7 @@ test('按主播配置自动开始场控；手动暂停后不会被定时器偷�
   let connected = false;
   const lock = new RoomLock({ room: '1234567890' });
   const adapter = {
-    status: {}, hook() {}, observeDOM() {}, stopDOM() {}, sync() {},
+    status: {}, hook() {}, observeDOM() {}, stopDOM() {}, sync() {}, dispatch:async()=>{},
     healthy: () => connected, findInput: () => ({}), findSend() {},
     send: async () => ({ submitted: true })
   };
@@ -1414,7 +1414,7 @@ test('按主播配置自动开始场控；手动暂停后不会被定时器偷�
     get: (key, fallback) => values.get(key) ?? fallback,
     set: (key, value) => values.set(key, value), del: key => values.delete(key),
     request: () => {}, adapterFactory: () => adapter,
-    identityFactory: () => ({ refresh: async () => {}, close() {} }),
+    identityFactory: onIdentity => ({ refresh: async () => onIdentity({live:{roomId:'999',status:'live',startAt:Date.now()-1000,observedAt:Date.now()}}), close() {} }),
     onReady: value => { api = value; }
   });
   try {

@@ -41,7 +41,8 @@ export class RoomMonitor {
   }
   recovery(c) {
     const now=this.now();
-    const connected=c.healthy && !(c.lastActivity>0 && now-c.lastActivity>STALE_CONNECTION_MS);
+    const lastActivity=c.lastActivity>0?c.lastActivity:this.startedAt;
+    const connected=c.healthy && now-lastActivity<=STALE_CONNECTION_MS;
     if(c.live==='live' && connected) {
       this.everConnected=true;this.disconnectedAt=null;return {state:'connected'};
     }

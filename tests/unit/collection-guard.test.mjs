@@ -74,16 +74,26 @@ test('缺少当前直播间身份时不发保活事件，不能把其他房间�
 });
 
 function keeperFixture(shared={}) {
-  let alarm,removed,updated;const power=[],sent=[],created=[];
+  let alarm,removed,updated;const power=[],sent=[],created=[],discardChanges=[];
   const tabs=[{id:1,url:'https://live.douyin.com/123'},{id:2,url:'https://live.douyin.com/456'},{id:3,url:'https://example.com/123'}];
   const active=new Set([1,2]);
   const chrome={storage:{session:{get:async key=>({[key]:structuredClone(shared[key])}),set:async value=>Object.assign(shared,structuredClone(value))}},
     alarms:{create:(...args)=>created.push(args),onAlarm:{addListener:f=>alarm=f}},
     power:{requestKeepAwake:level=>power.push(level),releaseKeepAwake:()=>power.push('release')},
-    tabs:{query:async()=>tabs,sendMessage:async(id,message)=>{sent.push([id,message]);return {active:active.has(id)};},onRemoved:{addListener:f=>removed=f},onUpdated:{addListener:f=>updated=f}}};
+    tabs:{query:async()=>tabs,get:async id=>tabs.find(tab=>tab.id===id),update:async(id,change)=>{discardChanges.push([id,change]);Object.assign(tabs.find(tab=>tab.id===id),change);},sendMessage:async(id,message)=>{sent.push([id,message]);return {active:active.has(id)};},onRemoved:{addListener:f=>removed=f},onUpdated:{addListener:f=>updated=f}}};
   const keeper=installCollectionKeeper(chrome);
-  return {keeper,shared,power,sent,created,active,tabs,alarm:()=>alarm({name:'live-assistant-collection'}),removed:id=>removed(id),updated:(id,change)=>updated(id,change)};
+  return {keeper,shared,power,sent,created,active,tabs,discardChanges,alarm:()=>alarm({name:'live-assistant-collection'}),removed:id=>removed(id),updated:(id,change)=>updated(id,change)};
 }
+
+test('等待开播与采集期间防止浏览器自动回收标签，停止或后台重启后恢复原设置',async()=>{
+  const f=keeperFixture();f.tabs[0].autoDiscardable=false;f.tabs[1].autoDiscardable=true;
+  await f.keeper.refresh();assert.equal(f.tabs[1].autoDiscardable,false);
+  assert.ok(f.discardChanges.some(([id,change])=>id===2 && change.autoDiscardable===false));
+  f.active.clear();await f.keeper.refresh();
+  assert.equal(f.tabs[0].autoDiscardable,false,'保留用户原先设置');assert.equal(f.tabs[1].autoDiscardable,true);
+  f.active.add(2);await f.keeper.refresh();const restarted=keeperFixture(f.shared);restarted.active.clear();
+  await restarted.keeper.refresh();assert.equal(restarted.tabs[1].autoDiscardable,true,'持久租约可在工作线程重建后撤销');
+});
 
 test('后台 30 秒唤醒仅作用于直播页；多房间共享系统待机保护，MV3 重启后重新核对',async()=>{
   const shared={},f=keeperFixture(shared);await f.keeper.refresh();
