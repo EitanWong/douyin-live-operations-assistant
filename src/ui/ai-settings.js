@@ -50,6 +50,7 @@ export class AISettings {
       const active=tab.dataset.aiSectionTab===key;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active ? 0 : -1;
     }
     for(const section of this.root.querySelectorAll('[data-ai-section]'))section.hidden=section.dataset.aiSection!==key;
+    for(const extra of this.root.querySelectorAll('[data-page=ai]>.rule-summary,[data-page=ai]>[data-workspace-help]'))extra.hidden=key==='playground';
     this.root.querySelector('.ai-section-tabs').scrollIntoView?.({block:'start',behavior:'instant'});
   }
   navigate(event){

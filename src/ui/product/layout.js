@@ -1,12 +1,12 @@
 // Translate legacy presentation once at the boundary. The visible workspace
 // uses these roles, never a second set of source-DOM layout selectors.
-export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36,textareaMinHeight:96,cardMinWidth:320,contentPadding:20,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
+export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36,textareaMinHeight:96,cardMinWidth:280,contentPadding:20,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
 export const PRODUCT_COMPACT_DIMENSIONS=Object.freeze({...PRODUCT_DIMENSIONS,controlHeight:32,headingHeight:24,textareaMinHeight:72,cardMinWidth:280,contentPadding:12,gap:6,sectionGap:8,cardPadding:8,metricMinHeight:52,chartHeight:180});
 const transparent='.ai-settings,.ai-service-grid,[data-workspace-contents],[data-ai-modes],[data-custom-media],[data-perception-active],.workspace-metrics';
 const cards='.pred-visual-grid,.workspace-grid,.settings-workspace,.income-workspace,.pk-workspace,.pk-overview,.pk-analysis,.anchor-analytics,[data-list],[data-memory-list]';
-const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times';
-const metrics='.knowledge-metrics,.pred-metrics,.anchor-session-times,.anchor-metrics,.stats,.overview-metrics,.anchor-exhibition-grid,.income-meta,.pk-prob,.pk-reading,.anchor-kpis';
-const rows='.knowledge-heading,.knowledge-section-heading,.row,.actions,.ai-key-actions,.ai-test-row,.ai-card-heading,.ai-result-heading,.ai-result-meta,.anchor-periods,.workspace-filter-controls,.workspace-filter-actions,.workspace-filter-heading,.status,.anchor-pagination,.anchor-section-head,.pk-chart-head,.giveaway-actions,.pk-page-heading,.pk-broadcast-master,.pk-broadcast-option,.row-head,.row-head>div,.inline,.feature-row';
+const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times,.giveaway-prize-row,.bot-game-options';
+const metrics='.knowledge-metrics,.pred-metrics,.anchor-session-times,.anchor-metrics,.stats,.overview-metrics,.anchor-exhibition-grid,.income-meta,.gift-total-grid,.pk-prob,.pk-reading,.anchor-kpis';
+const rows='.knowledge-heading,.knowledge-section-heading,.row,.actions,.ai-key-actions,.ai-test-row,.ai-card-heading,.ai-result-heading,.ai-result-meta,.anchor-periods,.workspace-filter-controls,.workspace-filter-actions,.workspace-filter-heading,.status,.anchor-pagination,.anchor-section-head,.pk-chart-head,.giveaway-actions,.pk-page-heading,.pk-broadcast-master,.pk-broadcast-option,.row-head,.row-head>div,.inline,.feature-row,.presets,.log-head,.giveaway-gift-selected';
 const surfaces='.knowledge-toolbar,.knowledge-section,.pred-card,.workspace-card,.settings-group,.ai-card,.anchor-section,.pk-visual,.pk-overview-main,.pk-outlook,.pk-analysis>details,.giveaway-config,.giveaway-live,.editor-row';
 const blocks='div,section,article,main,header,footer,form,fieldset,nav,ul,ol,li,dl';
 
@@ -22,7 +22,8 @@ export function describeLayout(node) {
  const dataGrid=node.matches('.grid') && !node.querySelector('input,textarea,select');
  const layout=node.matches('[data-memory-list],[data-web-knowledge-list]') ? 'stack' : node.matches('.pk-scoreboard') ? 'scoreboard' : node.matches(cards) ? 'cards' : dataGrid || node.matches(metrics) ? 'metrics' : node.matches(fields) ? 'fields' : node.matches(rows) ? 'row' : node.matches(blocks) ? 'stack' : undefined;
  const span=node.matches('.workspace-wide') ? 'full' : undefined;
- return {layout,surface,span};
+ const band=node.matches('.gift-totals,.recent-gifts') ? 'summary' : undefined;
+ return {layout,surface,span,band};
 }
 
 export function layoutChildren(layout,children) {
@@ -37,7 +38,7 @@ export function cardRuns(children) {
  const runs=[];
  for(const child of children){
   if(child.span==='full')runs.push([child]);
-  else if(!runs.length || runs.at(-1)[0].span==='full' || (runs.at(-1)[0].kind==='details')!==(child.kind==='details'))runs.push([child]);
+  else if(!runs.length || runs.at(-1)[0].span==='full' || (runs.at(-1)[0].kind==='details')!==(child.kind==='details') || runs.at(-1)[0].band!==child.band)runs.push([child]);
   else runs.at(-1).push(child);
  }
  return runs;

@@ -7,6 +7,10 @@ test('显式通栏与普通组件各自成排，不干扰相邻行',()=>{
  assert.deepEqual(cardRuns(items).map(run=>run.map(row=>row.id)),[['a','b'],['wide'],['c']]);
  assert.ok(items.every(row=>row.size===undefined));
 });
+test('礼物概况与配置分别成排，不让空记录随长表单撑高',()=>{
+ const items=[{id:'total',band:'summary'},{id:'recent',band:'summary'},{id:'rules'},{id:'copy'}];
+ assert.deepEqual(cardRuns(items).map(run=>run.map(item=>item.id)),[['total','recent'],['rules','copy']]);
+});
 test('页面说明接入同一布局，由短折叠区统一分排',()=>{
  const children=[{id:'intro',tag:'p'},{id:'grid',layout:'cards',children:[{id:'a',surface:'card'}]},{id:'help',kind:'details',classes:'workspace-help'}];
  const packed=packPageCards(children);

@@ -11,6 +11,14 @@ function setup(){
 }
 const find=(node,kind)=>node?.kind===kind ? node : node?.children?.map(n=>find(n,kind)).find(Boolean);
 
+test('抽奖字段组标题与普通卡片共用标题栏语义',()=>{
+ const f=setup();try{
+  f.root.querySelector('[data-page=ai]').innerHTML='<div class="workspace-grid"><fieldset class="giveaway-config"><legend>奖品与开奖时间</legend><input aria-label="秒数" value="300"></fieldset></div>';f.bridge.refresh();
+  const card=f.bridge.getSnapshot().content.children[0].children[0];
+  assert.equal(card.children[0].tag,'h3');assert.equal(card.children[0].children[0].text,'奖品与开奖时间');
+ }finally{f.close();}
+});
+
 test('成熟 UI 适配层仅使用一份表单状态，编辑保留数值并派发原事件一次',()=>{
  const f=setup();try{let changes=0;const source=f.root.querySelector('[data-field="ai.model"]');source.addEventListener('input',()=>changes++);
  const field=find(f.bridge.getSnapshot().content,'field');assert.equal(field.label,'模型名');assert.equal(field.value,'qwen-plus');f.bridge.change(field.id,'custom-model');assert.equal(source.value,'custom-model');assert.equal(changes,1);assert.equal(find(f.bridge.getSnapshot().content,'field').value,'custom-model');

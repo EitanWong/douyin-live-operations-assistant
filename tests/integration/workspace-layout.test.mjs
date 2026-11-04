@@ -50,6 +50,42 @@ test('互动设置与独立工具按有名分区组织，开关保留表单语�
   }finally{f.close();}
 });
 
+test('抽奖的弹幕与礼物参与独立分组，礼物长目录不撑高奖品与规则',()=>{
+ const f=fixture();try{
+  const page=f.panel.node('[data-page=giveaway]');
+  const chat=page.querySelector('[data-giveaway=keyword]').closest('.giveaway-config');
+  const gift=page.querySelector('[data-giveaway=gifts]').closest('.giveaway-config');
+  assert.notEqual(chat,gift);assert.match(chat.querySelector('legend').textContent,/弹幕/);assert.match(gift.querySelector('legend').textContent,/礼物/);
+  assert.ok(page.querySelector('[data-giveaway-gift-list]').closest('details'),'长礼物目录按需展开，手动填写保留在主卡片');
+  assert.equal(page.querySelector('[data-giveaway=anchorGuaranteed]').closest('.giveaway-config'),chat,'短中奖规则归入弹幕参与条件');
+  const live=page.querySelector('.giveaway-live');
+  for(const selector of ['[data-giveaway=announcePrizeNames]','[data-action=giveaway-start]','[data-giveaway-status]'])assert.ok(live.contains(page.querySelector(selector)),'本轮操作与反馈不另撑一列');
+ }finally{f.close();}
+});
+test('功能开关以单功能标准块排列，所有原开关及分类说明保留',()=>{
+ const f=fixture();try{
+  const page=f.panel.node('[data-page=features]'),tiles=page.querySelectorAll('.feature-tile');
+  assert.equal(tiles.length,11);assert.ok([...tiles].every(tile=>tile.querySelectorAll('.feature-row input').length===1));
+  assert.ok([...tiles].every(tile=>tile.querySelector('.group-note')?.textContent));
+  assert.match(page.querySelector('[data-feature-explanations]').textContent,/礼物与进场.*计划互动.*礼物账本/u);
+  const input=page.querySelector('[data-field="bot.enabled"]');input.closest('label').click();assert.equal(input.checked,false);assert.equal(f.panel.dirty,true);
+ }finally{f.close();}
+});
+test('礼物近期记录按需展开，机器人游戏选项横向分栏，不与长规则共用一排',()=>{
+ const f=fixture();try{
+  const recent=f.panel.node('[data-recent-gifts]');assert.ok(recent.closest('details'));
+  assert.ok(recent.closest('details').querySelector('[data-gift-count]'),'实时记录数量仍可见');
+  const games=f.panel.node('[data-page=bot] .bot-game-options');assert.ok(games);assert.ok(games.closest('.workspace-wide'));
+  assert.ok(f.panel.node('[data-field="bot.idiomGames"]').closest('.workspace-wide'));
+ }finally{f.close();}
+});
+test('点赞感谢的单项规则与话术合并，不为一个选项撑出整列空卡片',()=>{
+ const f=fixture();try{
+  const mode=f.panel.node('[data-field="like.responseMode"]').closest('.settings-group'),copy=f.panel.node('[data-field="like.templates"]').closest('.settings-group');
+  assert.equal(mode,copy);assert.match(mode.querySelector('h3').textContent,/感谢方式与话术/u);
+ }finally{f.close();}
+});
+
 test('本页分区跳转展开高级设置并聚焦标题，不丢失草稿或误保存',()=>{
   const f=fixture(),p=f.panel;
   try{

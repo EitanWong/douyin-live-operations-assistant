@@ -59,7 +59,7 @@ export function createWorkspaceBridge(panel) {
     const content=children(node);if(!content.length)return null;
     const classes=[node.className?.baseVal ?? node.className,node.dataset.aiSection ? `product-ai-${node.dataset.aiSection}` : '',node.hasAttribute('data-workspace-contents') ? 'workspace-contents' : ''].filter(Boolean).join(' ');
     const layout=describeLayout(node);
-    return {kind:'group',id:id(node),...layout,inspectable:node.matches('.ai-final-answer,.ai-result-section') || undefined,collection:describeCollection(node),tag:containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
+    return {kind:'group',id:id(node),...layout,inspectable:node.matches('.ai-final-answer,.ai-result-section') || undefined,collection:describeCollection(node),tag:node.tagName==='LEGEND' ? 'h3' : containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
   }
   function collect() {
     // Drop removed controls, including retired dynamic list rows.

@@ -74,7 +74,7 @@ function Chart({node}) {
   return h(Inspectable,{node},h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'}));
 }
 function CardRun({nodes,bridge}) {
-  return h(Group,{className:'product-card-run',wrap:'wrap',align:'stretch',gap:'var(--product-section-gap)'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot'},h(View,{node:child,bridge}))));
+  return h(Group,{className:'product-card-run','data-card-run':nodes[0]?.span==='full' ? 'full' : nodes[0]?.kind==='details' ? 'disclosures' : nodes[0]?.band || 'cards',wrap:'wrap',align:'stretch',gap:'var(--product-section-gap)'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot'},h(View,{node:child,bridge}))));
 }
 function CardGrid({node,bridge,props}) {
   // A run keeps its identity when its first card moves; cards have their own IDs.
@@ -154,7 +154,7 @@ function Workspace({bridge,shadow,onReady}) {
         h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},h(Chevron,{open:menu}),menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge))),
         h('div',{className:'product-subviews'},state.subviews.length ? h(Tabs,{id:'product-sections',value:selectedView,variant:'pills',className:'product-subview-tabs',onChange:value=>{if(value)bridge.activate(value);}},h(Tabs.List,{'aria-label':`${state.title}分类`},state.subviews.map(node=>h(Tabs.Tab,{key:node.id,value:node.id,disabled:node.disabled},node.text)))) : null,headings.length>2 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const id=e.currentTarget.value;if(bridge.reveal(id))setJump({id});}}) : null),
         h('main',{className:'product-content',ref:main,key:state.key,id:selectedView ? `product-sections-panel-${selectedView}` : undefined,'aria-label':state.title,'aria-labelledby':selectedView ? `product-sections-tab-${selectedView}` : undefined},h(PageEntrance,{key:`${state.key}:${selectedView || ''}`},h(View,{node:state.content,bridge}))),
-        h('footer',{className:'product-status'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite'},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null))))));
+        h('footer',{className:'product-status','aria-label':'运行状态与消息'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite',role:'region','aria-label':'消息与提醒，可滚动',tabIndex:0},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null))))));
 }
 class WorkspaceBoundary extends React.Component {
   state={failed:false};

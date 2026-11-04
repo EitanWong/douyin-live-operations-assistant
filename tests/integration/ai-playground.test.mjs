@@ -20,6 +20,21 @@ function fixture(service){
  const ui=new AIPlayground(panel.root,{service,describe:()=> '已保存 · test-model',exportReport:value=>exported=value});
  return {dom,panel,ui,exported:()=>exported,close(){ui.close();panel.destroy();dom.window.close();}};
 }
+test('问答测试空状态只保留输入，生成后在相邻结果卡展示，评测入口排在其后',async()=>{
+ const f=fixture({run:async({question})=>result(question)});
+ try{
+  f.panel.tab('ai');f.panel.node('[data-ai-section-tab=playground]').click();assert.equal(f.panel.node('[data-page=ai]>.rule-summary').hidden,true,'服务总开关状态不占用独立问答测试空间');
+  const question=f.panel.node('[data-playground-question]').closest('section'),output=f.panel.node('[data-playground-results]').closest('section'),quality=f.panel.node('[data-playground-suite]').closest('details');
+  assert.ok(question.querySelector('[data-playground-guidance]')?.closest('details'),'详细说明按需查看，不挤压问答主操作');
+  assert.match(question.querySelector('[data-playground-guidance]').closest('details').textContent,/不发公屏/u,'测试用途和费用说明放在同一入口');
+  assert.ok(question.querySelector('[data-playground-summary]')?.closest('details'),'评测和保留记录说明归入测试操作侧');
+  assert.equal(f.panel.node('[data-page=ai]>[data-workspace-help]').hidden,true);
+  assert.equal(output.hidden,true);assert.ok(!question.classList.contains('workspace-wide'));assert.ok(!output.classList.contains('workspace-wide'));
+  assert.ok(output.compareDocumentPosition(quality) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
+  f.panel.node('[data-playground-question]').value='测试';await f.ui.run();assert.equal(output.hidden,false);assert.match(output.textContent,/答案。/u);
+  f.panel.node('[data-playground-clear]').click();assert.equal(output.hidden,true);
+ }finally{f.close();}
+});
 test('扩展工具的AI问答支持真实可见投影、任意问题、连续对话、选项和来源',async()=>{
  const inputs=[],f=fixture({run:async value=>{inputs.push(value);value.onProgress({stage:'search',query:'查资料'});return result(value.question);}});
  const bridge=createWorkspaceBridge(f.panel);
@@ -74,6 +89,7 @@ test('本次最终答案、实际处理链路、来源和检查分区展示，�
   assert.equal(latest.querySelector('[data-playground-answer]').textContent,'答案。');
   assert.match(latest.querySelector('[aria-label="处理链路"]').textContent,/准备上下文.*联网查证/u);
   assert.ok(latest.querySelector('[data-playground-checks]'));assert.ok(latest.querySelector('[data-playground-sources]'));
+  const diagnostics=latest.querySelector('[data-playground-diagnostics]');assert.ok(diagnostics);assert.equal(diagnostics.open,false);assert.ok(diagnostics.contains(latest.querySelector('.ai-result-meta')));assert.ok(diagnostics.contains(latest.querySelector('[data-playground-sources]')));
   const history=target.querySelector('details[data-playground-history]');assert.ok(history);assert.equal(history.open,false);assert.match(history.textContent,/第一问/u);assert.doesNotMatch(latest.textContent,/第一问/u);
   f.panel.tab('ai');f.panel.node('[data-ai-section-tab="playground"]').click();const bridge=createWorkspaceBridge(f.panel);
   try{const projected=walk(bridge.getSnapshot().content);for(const name of ['ai-result-heading','ai-result-meta'])assert.equal(projected.find(node=>node.classes?.split(' ').includes(name))?.layout,'row','标题与用量以横排呈现，不把宽度基准变成空白高度');
