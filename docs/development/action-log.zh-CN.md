@@ -2276,3 +2276,9 @@ crapper、dryer、mutator 在本会话已核实均不可用，三项未执行；
 - `crapper`、`dryer`、`mutator`不可用，三项未执行，未将回归/构建/语法检查视为替代通过。
 
 提交3c8197b实现共享公共工具与视觉证据，12e01cc正常合入远端界面/持续记忆，96bc6db修复搜索关闭时查询归属。此段只补日志，不修改已验证生产代码；接下来按项目约定推送dev并核对远端，不改main、版本或标签。独立工作树保留可用构建与证据，未清理仍在使用或用途不明的其他工作树。完整接口、条款和工具协议见public-data-tools.zh-CN.md。
+
+推送核对：代码与完整验证记录 **6f7a3209f30a9f6fa2d0ea8338fe137ad5590564** 已从独立工作树推送到 `origin/dev`，`git ls-remote origin refs/heads/dev`与本地HEAD逐字一致。确认原项目dev目录没有未提交工作后，快进同步到相同提交并在原路径重新构建；manifest/background/content产物与验证工作树逐字一致，构建日志为build-original-path.log。
+
+全部本轮红绿测试、真实接口回执和已安装原生观察指令的原副本均复制保留在原项目 `output/current-facts-2026-11-04`。尝试通过managed archive工具回收本轮独立工作树时，应用返回“The task's primary checkout cannot be removed.”，因此保留该工作树，不绕过应用手动删除；其他未知归属工作树未动。此次没有临时浏览器、常驻验证服务或未提交生产代码。最终仅此推送回执再作独立文档提交推送dev；无需重复生产测试。
+
+用户使用原项目 `dist/chrome-extension` 的最新构建，重载扩展、刷新直播页并重启感知后生效；本机原生依赖无需重装。当前仍无真实付费模型/主播画面实播验证，亦未宣称远端CI通过。crapper/dryer/mutator不可用、未执行；Open-Meteo免费托管服务的非商用使用范围及其他服务条款见公共数据工具文档。
