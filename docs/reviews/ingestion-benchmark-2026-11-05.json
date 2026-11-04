@@ -1,0 +1,44 @@
+{
+  "node": "v26.12.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "scenario": "1000 cross-transport lookups with 20000 live entries",
+  "runs": [
+    {
+      "reference": {
+        "medianMs": 63.26837499999999,
+        "p95Ms": 67.8075,
+        "remainingEntries": 20000
+      },
+      "ordered": {
+        "medianMs": 0.10783300000002782,
+        "p95Ms": 0.5111249999999927,
+        "remainingEntries": 20000
+      }
+    },
+    {
+      "ordered": {
+        "medianMs": 0.09737500000005639,
+        "p95Ms": 0.30854199999998855,
+        "remainingEntries": 20000
+      },
+      "reference": {
+        "medianMs": 58.45725000000016,
+        "p95Ms": 68.13529100000005,
+        "remainingEntries": 20000
+      }
+    },
+    {
+      "reference": {
+        "medianMs": 59.17729200000008,
+        "p95Ms": 64.81662500000016,
+        "remainingEntries": 20000
+      },
+      "ordered": {
+        "medianMs": 0.06354199999987031,
+        "p95Ms": 0.07920800000010786,
+        "remainingEntries": 20000
+      }
+    }
+  ]
+}

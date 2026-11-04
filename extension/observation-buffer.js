@@ -1,5 +1,3 @@
-import {serializedBytes} from '../src/runtime/inbox.js';
-
 const budget=limit=>({limit,count:0,bytes:0,gaps:0});
 function take(queue,limit) {
   let count=0,bytes=0;
@@ -16,9 +14,10 @@ export class ObservationBuffer {
     this.batch=null;this.sequence=0;
   }
   enqueue(kind,value) {
-    const bytes=serializedBytes(value),usage=kind==='captures'?this.captureBudget:this.eventBudget;
+    let text;try {text=JSON.stringify(value);} catch {}
+    const bytes=typeof text==='string'?text.length*2:null,usage=kind==='captures'?this.captureBudget:this.eventBudget;
     if(bytes==null || usage.count>=usage.limit || usage.bytes+bytes>8*1024*1024){usage.gaps++;return false;}
-    this[kind].push({value,bytes});usage.count++;usage.bytes+=bytes;return true;
+    this[kind].push({value:text,bytes});usage.count++;usage.bytes+=bytes;return true;
   }
   acknowledge(id) {
     if(!this.batch || id!==this.batch.payload.batchId)return;
@@ -36,7 +35,11 @@ export class ObservationBuffer {
         eventBytes:events.bytes+priority.bytes,captureBytes:captures.bytes
       };
     }
-    return {...(this.batch?.payload || {batchId:null,events:[],priority:[],captures:[]}),
+    const payload=this.batch?.payload || {batchId:null,events:[],priority:[],captures:[]};
+    // The MAIN facade is page-visible. Return fresh JSON values so a caller
+    // cannot mutate retained observations or inject into a future native read.
+    return {batchId:payload.batchId,events:payload.events.map(text=>JSON.parse(text)),
+      priority:payload.priority.map(text=>JSON.parse(text)),captures:payload.captures.map(text=>JSON.parse(text)),
       more:(!paused && this.events.length>0)||this.priority.length>0||this.captures.length>0,
       status:{bridgeGaps:this.eventBudget.gaps,bridgePending:this.eventBudget.count,
         captureBridgeGaps:this.captureBudget.gaps,captureBridgePending:this.captureBudget.count}};

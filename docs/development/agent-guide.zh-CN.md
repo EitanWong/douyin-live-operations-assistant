@@ -37,7 +37,8 @@ git diff --check
 | 任务 | 首选入口 | 重要边界与回归入口 |
 | --- | --- | --- |
 | 应用启停、页面缓存、切房 | `src/app.js`、`src/browser/room-context.js` | pagehide 的关闭与 bfcache 暂停不同；`live-mode`、`room-context` 测试 |
-| 直播事件采集与解码 | `extension/page.js`、`extension/content.js`、`src/browser/adapter.js`、`src/browser/protocol.js` | MAIN 与隔离世界交接；`adapter`、`protocol`、扩展集成测试 |
+| 直播事件采集与解码 | `extension/page.js`、`extension/observation-buffer.js`、`extension/content.js`、`src/browser/adapter.js`、`src/browser/protocol.js` | MAIN 与隔离世界交接；`adapter`、`protocol`、扩展集成测试 |
+| 配置镜像与连续保存 | `extension/storage-mirror.js`、`extension/content.js` | 确认值与最新乐观操作分离，旧失败不得覆盖新值；`storage-mirror`、扩展集成测试 |
 | 队列、背压、快照、日志确认 | `src/runtime/inbox.js`、`src/runtime/journal.js` | 有界内存与持久日志不同；`inbox`、`journal`、`extension` 测试 |
 | 感谢与发送恢复 | `src/core/engine.js`、`src/runtime/delivery.js` | 礼物优先、检查点、未知结果不自动重发；`core`、`delivery` 测试 |
 | 工具扩展、权限与回收 | `src/tools/registry.js`、`src/tools/runtime.js`、`src/tools/scope.js`、`src/tools/gateway.js` | 独立作用域、同步撤权、在途排空；`tools`、`reward-automation-protocol` 测试 |
@@ -61,12 +62,15 @@ git diff --check
 
 事件队列仍是单消费者，累计 200 条或 8ms 后在尚有工作时让出主线程，保留顺序与重放的一条步进语义。8ms 是事件之间检查的合作预算，不能抢占一个耗时的处理器。关闭释放内存队列与隔离区；已经开始的外部操作仍可能完成，持久日志的恢复规则不变。
 
+MAIN 观察批次由 `ObservationBuffer` 单独管理：读取可重试，下一次读取携带 `ack` 才释放上一批；在途数据仍计入原预算，确认仅代表进入 content 队列。DOM 备用队列也包含在途预算，并通过扩展 dispatch 交接；缺口统一使用 `collectionGapCount` 汇总，不要在新页面重复手写分类求和。
+
 ```sh
+node scripts/benchmark-ingestion.mjs
 npm run benchmark:runtime
 npm run benchmark:workspace
 ```
 
-前者检查调度、快照合并和本地堆；后者检查六图表各千点的 DOM 投影、状态更新和后台页更新。它们不发送网络请求，也不代表浏览器 FPS、进程 RSS 或全天运行保证。将性能证据、环境和限制写入行动日志；不要用机器相关毫秒值作为普通测试阈值。
+三个基准分别检查 2 万项去重热点、调度/快照合并/本地堆、六图表各千点的 DOM 投影及后台页更新。它们不发送网络请求，也不代表浏览器 FPS、进程 RSS 或全天运行保证。将性能证据、环境和限制写入行动日志；不要用机器相关毫秒值作为普通测试阈值。
 
 ## 术语
 
@@ -75,6 +79,7 @@ npm run benchmark:workspace
 | 开发 Agent 索引 | 本文的离线源码导航数据；不进入扩展产物或用户配置 |
 | 产品内 Agent | 为直播业务执行受限任务的 AI；与开发索引没有运行时依赖 |
 | Inbox | 内存事件交接队列；接收成功不等于已持久化 |
+| Bridge batch / 桥接批次 | MAIN 保留的未确认观测；重复读取不推进，ack 后释放，不代表已经落盘 |
 | Journal | 已落盘、尚待检查点确认的可重放事件 |
 | Checkpoint | 完成后才能确认日志或继续发送的实际存储屏障 |
 | Scope | 一个工具实例持有的取消信号、监听、计时器与在途任务 |

@@ -27,3 +27,17 @@ test('协议帧独立限流且重读不释放容量，非法观测不妨碍后�
   assert.equal(next.status.captureBridgePending,224);
   assert.equal(next.status.captureBridgeGaps,1);assert.equal(next.status.bridgeGaps,2);
 });
+
+test('调用者修改返回批次不能向 MAIN 保留队列注入伪造消息或改变容量',()=>{
+  const buffer=new ObservationBuffer();
+  buffer.enqueue('events',{type:'chat',id:'native',user:{name:'真实观众'}});
+  buffer.enqueue('captures',{messages:[{method:'WebcastChatMessage'}]});
+  const observed=buffer.drain();
+  observed.events[0].user.name='伪造观众';observed.events.push({type:'gift',id:'forged'});
+  observed.captures[0].messages.length=0;
+  const retried=buffer.drain();
+  assert.deepEqual(retried.events,[{type:'chat',id:'native',user:{name:'真实观众'}}]);
+  assert.equal(retried.captures[0].messages[0].method,'WebcastChatMessage');
+  const cleared=buffer.drain({ack:retried.batchId});
+  assert.equal(cleared.status.bridgePending,0);assert.equal(cleared.status.captureBridgePending,0);
+});
