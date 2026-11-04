@@ -449,13 +449,17 @@ test('异步事件处理失败会被收敛为诊断错误，并保持后续帧�
     assert.equal(adapter.pending, 0);
   } finally { dom.window.close(); }
 });
-test('生成的单文件油猴脚本在加载前可启动，无外部依赖且默认暂停', async () => {
+test('生成的单文件油猴脚本在加载前可启动并监控开播，无外部依赖且默认不发送', async () => {
   const source = await readFile(join(fixture.dist, 'douyin-live-assistant.user.js'), 'utf8');
   const values = new Map();
   const dom = new JSDOM('<body></body>', { url: 'https://live.douyin.com/1234567890?anchor_id=1234567890', runScripts: 'outside-only', pretendToBeVisual: true });
   Object.assign(dom.window, { unsafeWindow: dom.window, structuredClone, TextDecoder, TextEncoder, GM_getValue: (k, fallback) => values.get(k) ?? fallback, GM_setValue: (k, v) => values.set(k, v), GM_deleteValue: k => values.delete(k), GM_xmlhttpRequest: () => assert.fail('默认不应请求 AI'), GM_registerMenuCommand: () => {} });
-  dom.window.eval(source); const host = dom.window.document.getElementById('douyin-live-assistant'); assert.ok(host); assert.equal(host.shadowRoot.querySelector('[data-state]').textContent, '已暂停');
-  assert.equal(host.shadowRoot.querySelector('[data-field="anchorId"]').value, '1234567890'); assert.equal(source.includes('@require'), false); dom.window.close();
+  try {
+    dom.window.eval(source); const host = dom.window.document.getElementById('douyin-live-assistant'); assert.ok(host);
+    assert.equal(host.shadowRoot.querySelector('[data-state]').textContent, '等待开播 · 持续监控中');
+    const start=host.shadowRoot.querySelector('[data-action=start]');assert.equal(start.hidden,false);assert.equal(start.textContent,'开始场控');
+    assert.equal(host.shadowRoot.querySelector('[data-field="anchorId"]').value, '1234567890'); assert.equal(source.includes('@require'), false);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 
 test('价格、关键词、名单、多个定时组用表单完整读写；规则可排序删除', () => {
