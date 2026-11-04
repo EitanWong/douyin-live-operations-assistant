@@ -470,7 +470,11 @@ export function boot(options = {}) {
     identity = { ...next, admin: roomAdminStatus(next.self, next.adminUserIds) }; const c = engine.config;
     engine.setIdentity(identity);
     if (next.anchor && c.identity.autoAnchor) {
-      if(media.state!=='idle' && mediaAnchor!==next.anchor.id)media.stop();
+      if(media.state!=='idle' && mediaAnchor!==next.anchor.id){
+        // Native capture is already bound to this room before anchor metadata arrives.
+        if(activeMediaConfig.inputSource==='native' && !mediaAnchor)mediaAnchor=next.anchor.id;
+        else media.stop();
+      }
       if (c.anchorId && c.anchorId !== next.anchor.id && engine.running) log('error', '识别到主播资料变化；场控保持运行，请检查当前房间配置');
       c.anchorId = next.anchor.id;
     }

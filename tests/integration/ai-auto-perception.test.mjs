@@ -134,3 +134,14 @@ test('原生语音与画面完成后自动判断主播接话，不需要弹幕�
  await settle();assert.equal(prompts.length,1);assert.equal(f.api.engine.stats.previews,1);assert.equal(f.opened,1);
  f.api.stop('暂停');assert.equal(f.closed,0);f.api.panel.callbacks.stopMedia();assert.equal(f.closed,1);
 }));
+
+test('同一直播间首次补全主播资料不会停止已经启动的原生感知',async()=>{
+  let identify;
+  await fixture(async f=>{
+    f.config.anchorId='';await f.save(f.config);await f.api.panel.callbacks.start();await wait(()=>f.api.media.state==='running');
+    identify({anchor:{id:'123',name:'当前主播'}});
+    assert.equal(f.api.engine.config.anchorId,'123');assert.equal(f.api.media.state,'running');assert.equal(f.closed,0);
+    const at=Date.now();f.source.onObservation({kind:'omni',at,endedAt:at,text:'补全资料后继续观察',inputSource:'native'});
+    assert.equal(f.api.engine.aiContext().mediaContext.observations[0].text,'补全资料后继续观察');
+  },{boot:{identityFactory:callback=>{identify=callback;return {refresh:async()=>{},close(){}};}}});
+});
