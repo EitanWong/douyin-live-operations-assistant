@@ -84,14 +84,15 @@ export const PRODUCT_CSS=`
 .product-status{max-height:25%;overflow:auto;overscroll-behavior:auto}
 @container assistant (max-height:520px){.product-toolbar{padding-block:6px}.product-subviews{padding-block:4px;max-height:25%;overflow:auto;flex-wrap:nowrap}.product-subview-tabs{flex:1;min-width:0}.product-subview-tabs .mantine-Tabs-list{flex-wrap:nowrap;overflow-x:auto}.product-subview-tabs .mantine-Tabs-tab{flex-shrink:0}.product-subviews>.mantine-InputWrapper-root{flex:0 1 var(--product-inline-control-width)}.product-status{padding-block:4px;max-height:calc(var(--product-control-height) + 8px)}.product-content{padding-block:8px}}
 @container product (max-width:400px){.product-toolbar{gap:6px}.product-heading{gap:6px}.product-toolbar-actions{gap:4px}.product-page button{max-width:100%}}
-/* Cards keep their natural height; the page owns vertical scrolling. */
+/* Rows align and stretch together; the page owns vertical scrolling. */
 .product-main:is([data-fit=compact],[data-fit=scroll]){${compactDimensions}}
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-toolbar{padding:8px 12px}
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-subviews{padding:6px 12px}
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-status{padding:6px 12px;max-height:calc(var(--product-control-height) + 12px)}
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-switch{padding-block:2px}
 .product-main:is([data-fit=compact],[data-fit=scroll]) .product-disclosure:has(>.product-disclosure-heading>button[aria-expanded=false]){padding-block:4px}
-.product-card-grid{display:block!important;gap:0!important}.product-masonry{position:relative;display:block;width:100%;min-width:0}.product-card-slot{min-width:0;max-width:100%;margin-bottom:var(--product-section-gap)!important}.product-card-slot>.mantine-Paper-root{height:auto}
+.product-card-run{width:100%;min-width:0}.product-card-slot{display:flex;flex:1 1 min(100%,var(--product-card-min-width));min-width:0;max-width:100%}.product-card-slot>*{flex:1;min-width:0;max-width:100%;margin:0}.product-card-slot>.mantine-Paper-root{display:flex;flex-direction:column;align-self:stretch}
+.product-layout[data-layout=metrics]>*{flex:1 1 min(100%,var(--product-metric-min-width))}.product-layout[data-layout=metrics]>.product-full{flex-basis:100%}
 .product-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex:none;min-width:0;padding:var(--product-card-padding);border-bottom:1px solid var(--product-line)}
 .product-card-heading h3{min-height:var(--product-heading-height);display:flex;align-items:center}
 .product-card-body{min-height:0;min-width:0;padding:var(--product-card-padding);overflow:visible;overscroll-behavior:auto;scroll-padding:var(--product-card-padding);flex:1 1 auto}

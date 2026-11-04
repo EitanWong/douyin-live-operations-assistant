@@ -1,4 +1,4 @@
-import {createElement as h,createContext,useContext,useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {createElement as h,createContext,useContext,useEffect,useRef,useState} from 'react';
 import {Modal} from '@mantine/core';
 import {Button,useMotionPreference} from './motion.js';
 import {recordText} from './collection.js';
@@ -28,23 +28,16 @@ export function Inspectable({node,children,independent=false}) {
   if(covered && !independent)return children;
   return h(EntryScope.Provider,{value:false},h('div',{className:'product-inspectable'},h(InspectButton,{node}),h(InspectionContents,null,children)));
 }
-export function InspectionProvider({content,shadow,pageKey,disabled,render,reflow,children}) {
-  const [target,setTarget]=useState(null),[opened,setOpened]=useState(false),trigger=useRef(null),body=useRef(null),reduced=useMotionPreference();
+export function InspectionProvider({content,shadow,pageKey,disabled,render,children}) {
+  const [target,setTarget]=useState(null),[opened,setOpened]=useState(false),trigger=useRef(null),reduced=useMotionPreference();
   const current=target && findNode(content,target.id),node=current || target?.node;
   const close=()=>setOpened(false);
   useEffect(()=>{if(target && (!current || target.pageKey!==pageKey || disabled))close();},[current,pageKey,disabled,target]);
-  useLayoutEffect(()=>{
-    if(!opened || !body.current)return;
-    const element=body.current,view=shadow.host.ownerDocument.defaultView;let frame;
-    const layout=()=>{view.cancelAnimationFrame(frame);frame=view.requestAnimationFrame(()=>reflow(element));};
-    const observer=new view.ResizeObserver(layout);observer.observe(element);for(const child of element.querySelectorAll('.product-card-content'))observer.observe(child);layout();
-    return ()=>{observer.disconnect();view.cancelAnimationFrame(frame);};
-  },[opened,node,reflow,shadow]);
   const inspection={open(id){const node=findNode(content,id);if(!node)return;trigger.current=shadow.activeElement;setTarget({id,node,pageKey});setOpened(true);}};
   const restore=()=>{setTarget(null);const element=trigger.current;if(element?.isConnected)element.focus({preventScroll:true});};
   return h(Inspection.Provider,{value:inspection},children({inspecting:opened && !disabled}),
     h(Modal,{opened:opened && !disabled,onClose:close,title:node ? viewLabel(node) : '',size:'min(1120px, calc(100vw - 24px))',centered:true,withinPortal:false,lockScroll:false,returnFocus:false,closeOnEscape:false,onExitTransitionEnd:restore,
       transitionProps:{transition:'pop',duration:reduced ? 0 : 180},classNames:{root:'product-inspection-dialog',content:'product-inspection-content',body:'product-inspection-body'},closeButtonProps:{'aria-label':'关闭放大视图'},
       onKeyDown:event=>{if(event.key==='Escape' && !event.isComposing){event.preventDefault();event.stopPropagation();close();}}},
-      node ? h(Inspection.Provider,{value:null},h('div',{className:'product-inspection-view product-page',ref:body},render(node))) : null));
+      node ? h(Inspection.Provider,{value:null},h('div',{className:'product-inspection-view product-page'},render(node))) : null));
 }

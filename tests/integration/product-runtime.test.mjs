@@ -34,7 +34,7 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   await new Promise(resolve=>setTimeout(resolve,70));const ui=container.shadowRoot;
   const sidebarToggle=ui.querySelector('.product-nav-toggle button');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'true');assert.equal(ui.getElementById(sidebarToggle.getAttribute('aria-controls'))?.getAttribute('aria-label'),'功能导航');
   sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(ui.querySelector('.product-shell').dataset.sidebarCollapsed,'true');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'false');assert.equal(sidebarToggle.getAttribute('title'),'展开侧边栏');assert.ok(sidebarToggle.querySelector('svg'));sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(panel.navigation.collapsed,false);
-  assert.ok(ui.querySelector('.product-card-grid[data-layout=cards] .product-masonry [data-surface=card]'));assert.equal(ui.querySelectorAll('[data-layout=fields] input[aria-label="模型名"]').length,1);assert.ok(ui.querySelector('.mantine-SimpleGrid-root input[aria-label="模型名"]'));assert.equal(ui.querySelector('h3').textContent,'回复模型');assert.match(ui.querySelector('table').textContent,/甲9/);assert.match(ui.querySelector('.product-status').textContent,/未保存草稿/);assert.doesNotMatch(ui.querySelector('.product-toolbar').textContent,/未保存草稿/);
+  assert.ok(ui.querySelector('.product-card-grid[data-layout=cards] .product-card-run [data-surface=card]'));assert.equal(ui.querySelectorAll('[data-layout=fields] input[aria-label="模型名"]').length,1);assert.ok(ui.querySelector('.mantine-SimpleGrid-root input[aria-label="模型名"]'));assert.equal(ui.querySelector('h3').textContent,'回复模型');assert.match(ui.querySelector('table').textContent,/甲9/);assert.match(ui.querySelector('.product-status').textContent,/未保存草稿/);assert.doesNotMatch(ui.querySelector('.product-toolbar').textContent,/未保存草稿/);
   assert.equal(ui.querySelector('[data-card-size=tile]').querySelectorAll('.product-expand').length,1,'卡片内表格、指标、折叠区共用一个放大入口');
   const expand=ui.querySelector('button[aria-label="放大查看：回复模型"]');assert.ok(expand,'卡片提供明确的放大入口');expand.focus();expand.click();await new Promise(resolve=>setTimeout(resolve,60));
   const enlarged=ui.querySelector('[role=dialog]');assert.ok(enlarged);assert.match(enlarged.textContent,/回复模型/);assert.ok(ui.querySelector('.product-shell').hasAttribute('inert'));
@@ -79,8 +79,10 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   // Large projected datasets must stay bounded and keep original action ownership.
   const dataset=document.createElement('section');dataset.innerHTML='<h3>互动记录</h3><table aria-label="互动记录"><thead><tr><th>观众</th><th>状态</th><th>钻石</th><th>操作</th></tr></thead><tbody></tbody></table>';
   const rows=dataset.querySelector('tbody');let acted=-1;
+  const metrics=document.createElement('div');metrics.className='stats';metrics.innerHTML=Array.from({length:4},(_,i)=>`<div><b>${i}</b><span>指标 ${i}</span></div>`).join('');dataset.prepend(metrics);
   for(let i=0;i<63;i++){const row=rows.insertRow();row.innerHTML=`<td>${i===61?'青山 ＡＢＣ':'观众'+i}</td><td>${i%2?'已确认':'待确认'}</td><td>${i*10}</td><td><button>查看 ${i}</button></td>`;row.querySelector('button').onclick=()=>{acted=i;};}
   root.querySelector('[data-page=ai]').append(dataset);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.ok(ui.querySelector('[data-layout=metrics].mantine-Group-root'),'指标采用可铺满尾行的 Mantine 等高布局');
   const collection=[...ui.querySelectorAll('.product-data-set')].find(n=>n.querySelector('table')?.textContent.includes('观众0'));
   assert.ok(collection,'表格使用统一的数据浏览区');
   assert.equal(collection.querySelectorAll('tbody tr').length,20);

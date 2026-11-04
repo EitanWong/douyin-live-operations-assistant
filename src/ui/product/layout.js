@@ -37,7 +37,7 @@ export function cardRuns(children) {
  const runs=[];
  for(const child of children){
   if(child.span==='full')runs.push([child]);
-  else if(!runs.length || runs.at(-1)[0].span==='full')runs.push([child]);
+  else if(!runs.length || runs.at(-1)[0].span==='full' || (runs.at(-1)[0].kind==='details')!==(child.kind==='details'))runs.push([child]);
   else runs.at(-1).push(child);
  }
  return runs;
