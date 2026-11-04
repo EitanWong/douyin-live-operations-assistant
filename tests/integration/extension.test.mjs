@@ -2,6 +2,7 @@ import {createEdgeClient} from '../../src/browser/edge-client.js';
 import {createNativeASRClient} from '../../src/browser/native-asr-client.js';
 import {RoomContext,roomFromURL} from '../../src/browser/room-context.js';
 import { ProtocolCache } from '../../extension/protocol-cache.js';
+import { ObservationBuffer } from '../../extension/observation-buffer.js';
 import { fanclubFrameContext, cleanFanclubSnapshot } from '../../src/data/fanclub.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -42,7 +43,7 @@ async function rawEntry(entry) {
   if(entry==='content')source=`const failureCode = ${failureCode.toString()};\n`+source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
   return source;
 }
-async function evalPage(page) {page.RoomContext=RoomContext;page.eval(await rawEntry('page'));}
+async function evalPage(page) {page.RoomContext=RoomContext;page.ObservationBuffer=ObservationBuffer;page.eval(await rawEntry('page'));}
 async function evalContent(page) {page.structuredClone=structuredClone;connectNative(page);page.eval(await readFile(file('content.js'),'utf8'));}
 function pageTransport(page) {return async request=>({ok:true,value:await page.__douyinAssistantPageV2.call(request.command)});}
 test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，重复批次只发一次，停止票据立即失效',async()=>{
@@ -242,10 +243,72 @@ test('MAIN 观察器在隔离脚本读取前完整缓存事件，分页读取只
     await evalPage(dom.window);
     for(let n=0;n<160;n++)captured.onEvent({type:n % 2 ? 'chat' : 'gift',id:String(n),text:`消息${n}`});
     assert.equal(received.length,0);
-    const drain=()=>received.push(...dom.window.__douyinAssistantPageV2.call({type:'drain'}).events);
+    let ack;
+    const drain=()=>{const batch=dom.window.__douyinAssistantPageV2.call({type:'drain',ack});received.push(...batch.events);ack=batch.batchId;};
     drain();drain();drain();
     assert.equal(received.length,160); assert.equal(received[159].id,'159'); assert.equal(received.filter(e=>e.type==='chat').length,80);
   } finally {dom.window.close();}
+});
+test('MAIN 未确认批次可重读且仍占容量，重复确认不删除下一批，暂停仍传递优先事件',async()=>{
+  let captured;
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window;
+  Object.assign(page,{DouyinAdapter:class {constructor(options){captured=options;}hook(){}},DEFAULTS:{},copy:value=>value});
+  try {
+    await evalPage(page);
+    for(let i=0;i<4096;i++)captured.onEvent({type:'chat',id:String(i)});
+    const call=command=>page.__douyinAssistantPageV2.call({type:'drain',...command});
+    const first=call();
+    assert.deepEqual(Array.from(call().events,e=>e.id),Array.from(first.events,e=>e.id),'响应丢失后重读同一批');
+    captured.onEvent({type:'chat',id:'overflow'});
+    assert.equal(call().status.bridgeGaps,1,'在途未确认事件仍占有界缓冲容量');
+    assert.equal(call().status.bridgePending,4096);
+    captured.onCapture({rawBase64:'AQ=='});
+    const second=call({ack:first.batchId});
+    assert.equal(second.events[0].id,'128');assert.equal(second.captures.length,1);
+    assert.equal(call({ack:first.batchId}).events[0].id,'128','重复旧确认不得删除新批次');
+    captured.onPK({type:'pk-score',id:'urgent'});
+    const paused=call({ack:second.batchId,paused:true});
+    assert.equal(paused.events.length,0);assert.equal(paused.priority[0].id,'urgent');
+    const received=[...first.events,...second.events];let batch=call({ack:paused.batchId});
+    while(batch.events.length){received.push(...batch.events);batch=call({ack:batch.batchId});}
+    assert.deepEqual(received.map(e=>e.id),Array.from({length:4096},(_,i)=>String(i)));
+    assert.equal(batch.status.bridgePending,0);assert.equal(batch.status.captureBridgePending,0);
+  }finally{page.close();}
+});
+
+for(const mode of ['lost-response','pagehide'])test(`内容桥在 ${mode} 后恢复 MAIN 已读取批次且不重复交付`,async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window;
+  let captured,adapter,release,reads=0;const timers=[],handled=[],saved=[];
+  Object.assign(page,{EventInbox,roomFromURL,RoomContext,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},DEFAULTS:{},copy:value=>value,
+    DouyinAdapter:class {constructor(options){Object.assign(this,options);captured=options;}hook(){}emitStatus(){}},
+    setTimeout:callback=>{timers.push(callback);return timers.length;},clearTimeout(){},
+    chrome:{runtime:{onMessage:{addListener(){}},sendMessage:async request=>{
+      if(request.type==='init')return {ok:true,value:{}};
+      if(request.type==='protocol-append'){saved.push(request.record);return {ok:true,value:true};}
+      if(request.type==='page-command' && request.command.type==='drain'){
+        const value=page.__douyinAssistantPageV2.call(request.command);reads++;
+        if(reads===1){
+          if(mode==='lost-response')throw Error('response lost after MAIN executed');
+          await new Promise(resolve=>{release=resolve;});
+        }
+        return {ok:true,value};
+      }
+      return {ok:true,value:[]};
+    }}},boot:options=>{adapter=options.adapterFactory({onEvent:event=>handled.push(event.id)});adapter.hook();}
+  });
+  try {
+    await evalPage(page);captured.onEvent({type:'chat',id:'retained'});captured.onCapture({rawBase64:'AQ=='});
+    await page.eval(`(async()=>{${await rawEntry('content')}})()`);await new Promise(setImmediate);
+    if(mode==='pagehide'){
+      page.dispatchEvent(new page.Event('pagehide'));release();await new Promise(setImmediate);
+      assert.deepEqual(handled,[]);
+      page.dispatchEvent(new page.PageTransitionEvent('pageshow',{persisted:true}));
+    }else await timers.shift()();
+    await new Promise(setImmediate);await adapter.inbox.whenIdle();
+    await timers.shift()();await new Promise(setImmediate);
+    assert.deepEqual(handled,['retained']);assert.equal(saved.length,1);
+    assert.equal(page.__douyinAssistantPageV2.call({type:'drain'}).status.bridgePending,0);
+  }finally{release?.();adapter?.closeEvents();page.close();}
 });
 test('隔离脚本把 MAIN 原始协议帧送入独立持久化通道', async () => {
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});

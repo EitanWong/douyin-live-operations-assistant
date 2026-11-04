@@ -140,15 +140,19 @@ if (room) {
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
     if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
   });
-  let bridgeTimer,bridgePending=false,bridgeStopped=false;
+  let bridgeTimer,bridgeAck,bridgePending=false,bridgeStopped=false;
   const drainBridge=async()=>{
     if(bridgeStopped || bridgePending || contextInvalidated)return;
     bridgePending=true;let more=false;
     try {
-      const batch=await message({type:'page-command',command:{type:'drain',paused:Boolean(activeAdapter?.flowPaused)}});
+      const batch=await message({type:'page-command',command:{type:'drain',ack:bridgeAck,paused:Boolean(activeAdapter?.flowPaused)}});
       if(bridgeStopped || !batch || typeof batch!=='object')return;
-      for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
-      for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
+      if(batch.batchId==null || batch.batchId!==bridgeAck){
+        for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
+        for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
+        // This acknowledges admission to the bounded content queues, not disk durability.
+        bridgeAck=batch.batchId;
+      }
       receivePacket({type:'status',status:batch.status});activeAdapter?.sync();more=batch.more===true;
     } catch(error) {
       if(!contextInvalidated)liveStatus={...liveStatus,connected:false,bridgeError:error.message};
