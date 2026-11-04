@@ -57,3 +57,8 @@ test('可见组件接管后旧宽度观察器不再改折叠状态，回退时�
   layout.setSuspended(false);assert.equal(detail.open,false);assert.equal(detail.querySelector('input').value,'草稿');
  }finally{layout.destroy();dom.window.close();}
 });
+
+test('主播列表每条记录横排资料和操作，不再堆成三层',()=>{
+ const dom=new JSDOM('<div class="profile-card"><div><strong>主播 · 当前</strong><small>直播间 123 · UID 456</small></div><a href="https://live.douyin.com/123">打开并配置 ↗</a></div>');
+ try{assert.equal(describeLayout(dom.window.document.querySelector('.profile-card')).layout,'row');}finally{dom.window.close();}
+});
