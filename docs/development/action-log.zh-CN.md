@@ -2460,3 +2460,9 @@ DOM 备用采集复核：先添加慢订阅/超大消息红测，确认原队列
 阶段验证：重新 npm ci（锁定依赖安装成功，审计 0 漏洞）、正式 build、check 与首次完整回归 **1523/1523** 通过（139.394 秒）。复查新增桥接的公开 facade 时发现保留批次若直接暴露数组，调用者可改写下一次读取内容；追加嵌套数据/伪造插入红测确认此新增风险，再将保留内容改为入队时已计量的 JSON 快照、每次返回独立解析值。专项 3/3 通过，容量仍包含在途数据，不反复 stringify。此为提交前自审修正，最终完整回归重跑，不能把前一轮结果冒充最终版本验证。评审报告、原始基准和 Agent 导航同步更新。
 
 最终本地验证：生产代码 `80a2b56` 完整回归 **1524/1524**，0 失败/取消/跳过（138.249 秒）；最终 `npm run build`、`npm run check`、`npm run agent:check`、`git diff --check` 通过。索引当前覆盖 **423 个模块、2550 个顶层符号/类成员**。构建输出原路径 `dist/chrome-extension` 与油猴脚本；需重新加载扩展并刷新直播页。依赖安装审计为 0 漏洞，未修改依赖或版本。没有新建服务/工作树，不清理其他用途未确认的工作树；本轮未执行实播发送或 24–72 小时压力验收，原生代码未修改，等待远端 CI 的原生任务。crapper/dryer/mutator 不可用、未执行。接下来沿 dev 推送，并追加远端结果。
+
+最终交付回执：**153ce9e4a1852313460dd4d488a22708d9d30680** 已推送 `origin/dev`，`git ls-remote` 核对远端逐字一致。GitHub [CI 41899614472](https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/41899614472) 的 `test-build` 已成功（5m25s），包含 Node 20 完整测试、索引检查、构建/check、打包与产物上传；截至交付，`native-perception` 仍在安装依赖，尚无远端原生测试结论，不宣称整个 workflow 通过。
+
+补充原生验证：默认 Python 3.15 运行 16 项有 1 项因缺少 websockets 跳过；随后使用安装器定义的现有原生运行环境 `/Users/eitan/.local/share/douyin-live-assistant/native/.venv/bin/python` 对当前源码重测，**16/16 全通过，0 跳过**（8.362 秒，Python 3.14），包含真实本地 WebSocket + FFmpeg 双轨测试；没有请求抖音或外部音画服务，没有新装依赖或重注册宿主。此本机结果不替代尚未结束的远端原生任务。已请求在 Codex 侧栏展示评审报告，UI 返回 queued。结束本地只读 CI 观察进程，远端工作流继续独立运行。
+
+此回执作为纯文档提交同步 dev，生产代码仍为已完整验证的 `80a2b56`；main、版本号、标签与 Release 均未改变。后续重点及证据边界见 `docs/reviews/message-chain-review-2026-11-05.zh-CN.md`。crapper、dryer、mutator 仍不可用、未执行。

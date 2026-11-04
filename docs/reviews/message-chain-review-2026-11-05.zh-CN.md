@@ -36,6 +36,8 @@
 
 ## 验证与交付
 
-最终本地完整回归 **1524/1524**（138.249 秒），0 失败/取消/跳过；`npm ci`、最终构建、check、索引校验和 diff 检查通过。
+最终本地完整回归 **1524/1524**（138.249 秒），0 失败/取消/跳过；现有原生运行环境 **16/16**（8.362 秒）通过，0 跳过；`npm ci`、最终构建、check、索引校验和 diff 检查通过。
+
+`153ce9e` 已推送 dev，远端 CI 的扩展 test-build 任务成功；截至交付，原生任务仍在安装依赖，尚不能宣称整个远端 workflow 通过。详见 [CI 41899614472](https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/41899614472)。
 
 专项红绿日志、完整回归和构建日志位于 `output/chain-review-2026-11-05/`。最终测试数量、构建/check、提交与推送回执在 [行动日志](../development/action-log.zh-CN.md) 对应章节维护。
