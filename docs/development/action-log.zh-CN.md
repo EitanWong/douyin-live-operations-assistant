@@ -1902,3 +1902,5 @@ Promptfoo接入首轮完整保留：评分脚本单行返回被框架按表达�
 最终证据：output/layout-fit-2026-11-04 中的 red.log、targeted.log、final-test.log、final-check.log、build.log、before.json、desktop-final.json、minimum.json、subviews-minimum.json、fit-transition.json、wheel-refresh.json、populated.json 和 one-page.png。行空位检查不包含统一的 6/8/12/16px 可读性间距；有限窗口实测不表述为任意极端尺寸的数学保证。
 
 专用检查限制：crapper / dryer / mutator 命令及可调用工具均不可用，三项未执行；其他检查不替代其结果。未完成项：用户安装中的扩展需重新加载并刷新直播页才能使用新构建。提交推送仅针对 dev，不调整 main、版本号或标签；具体回执随后补充。
+
+交付回执：布局、密度选择、回归和规范已提交为 **b216690be9b5d4234abfa69df22ca8f66013d8fe** 并推送 origin/dev（e6e7ac2 → b216690）；git ls-remote 与本地 HEAD 逐字一致，工作区干净。最终 1365/1365、专项 26/26、构建、check 与 diff 检查通过；4187 服务已停止，临时标签列表为空、viewport override 已恢复。本段回执以独立文档提交推送，最终提交号见完成报告；不再改动产品代码。
