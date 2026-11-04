@@ -5,6 +5,24 @@ import {predictionView} from '../../src/tools/predictions/view.js';
 import {predictionsTool} from '../../src/tools/predictions/index.js';
 import {forecastReport} from '../../src/analytics/forecast.js';
 import {parseSettings} from '../../src/analytics/schema.js';
+test('intent distribution exposes every observed count and share, and clears stale rows without samples',()=>{
+ const dom=new JSDOM(predictionView.template()),root=dom.window.document;
+ const panel={root,demo:false,text:(s,t)=>{root.querySelector(s).textContent=t;}};
+ const r=forecastReport({scope:'1:2',now:Date.now(),settings:parseSettings({}),minutes:[],sessions:[],users:[],forecasts:[],history:[],outcomes:[],connected:false});
+ r.semantics.intents={greeting:3,request:1,decline:0,'<img src=x>':1};r.semantics.sampleSize=5;
+ predictionView.update(panel,{report:r});
+ const table=root.querySelector('[data-pred-intent-table] table');
+ assert.ok(table,'observed intent counts must be readable without hovering a chart');
+ assert.equal(table.getAttribute('aria-label'),'弹幕意图数值');
+ assert.deepEqual([...table.tBodies[0].rows].map(row=>[...row.cells].map(cell=>cell.textContent)),[
+  ['问候欢迎','3','60.0%'],['内容点播','1','20.0%'],['拒绝消费','0','0.0%'],['<img src=x>','1','20.0%']
+ ]);
+ assert.equal(table.querySelector('img'),null);
+ r.semantics.intents={};r.semantics.sampleSize=0;predictionView.update(panel,{report:r});
+ assert.equal(root.querySelector('[data-pred-intent-table] table'),null);
+ assert.match(root.querySelector('[data-pred-intent-table]').textContent,/暂无/);
+ dom.window.close();
+});
 test('prediction page explains missing evidence, saves scenarios and never interprets viewer text as HTML',async()=>{
  const dom=new JSDOM(predictionView.template()),root=dom.window.document;
  const panel={root,demo:false,text:(s,t)=>{root.querySelector(s).textContent=t;},disabled:(s,b)=>{root.querySelector(s).disabled=b;},toast(){}};
