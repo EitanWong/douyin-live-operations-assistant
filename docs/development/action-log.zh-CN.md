@@ -24,6 +24,8 @@
 
 最终本机验证：`npm test` **1499/1499** 通过，0失败/取消/跳过（157.630秒）；锁定依赖安装、正式构建、最终`npm run check`（索引新鲜度与源码/产物语法）、`git diff --check`全部通过。`d584927`同步油猴启动验收与失败清理，并在CI构建/全测前增加快速索引校验。生成产物位于原项目`dist/chrome-extension`。本轮原生源码未改，本机未重跑原生用例；crapper/dryer/mutator不可用、未执行。随后将验证报告作为独立文档提交，一并推送dev；远端回执和CI结果另记。
 
+最终交付回执：代码、测试、索引与基准报告 **8db416abb0490f579f699ef33f4b4760b12e0f45** 已成功推送`origin/dev`（`dcbc1aa..8db416a`），`git ls-remote`核对逐字一致。[CI 41885197777](https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/41885197777) 已成功：test-build 9分13秒，含索引校验、构建、完整测试、语法检查、打包与产物上传；native-perception 42秒通过，含真实本地媒体管线。此前远端失败的未开播监控租约用例已随本次完整CI通过。本轮临时服务和测试进程均已退出，未知归属工作树保留；未做全天真实直播压测，未宣称总内存/帧率达到极限。crapper/dryer/mutator不可用、未执行。此回执仅另作独立文档提交同步dev，不改已验证的代码或索引。重载原项目`dist/chrome-extension`并刷新直播页后生效。
+
 按任务追加动作、原因、验证结果及未完成项；项目原则统一维护在 [AGENTS.md](../../AGENTS.md)。最终提交标识和推送结果在任务完成报告中补充。
 
 ## 2026-10-28：将 ub-mode 设为项目规则
