@@ -281,21 +281,25 @@ export class DouyinAdapter {
   hookLongPoll(enqueueFrame) {
     const XHR = this.page.XMLHttpRequest, proto = XHR?.prototype;
     if (!proto || proto.__liveAssistantPollHook) return;
-    const nativeOpen = proto.open, nativeSend = proto.send, adapter = this;
+    const nativeOpen = proto.open, nativeSend = proto.send, adapter = this, observations = new WeakMap();
     Object.defineProperty(proto, '__liveAssistantPollHook', { value:true, configurable:true });
     proto.open = function(method, input, ...rest) {
       let url = null;
       try { url = new URL(String(input), adapter.page.location.href); } catch {}
+      const result = nativeOpen.call(this, method, input, ...rest);
+      observations.get(this)?.();
       this.__liveAssistantPoll = url?.origin === adapter.page.location.origin && url.pathname === '/webcast/im/fetch/'
         ? { method:String(method || 'GET').toUpperCase(), pathname:url.pathname } : null;
-      return nativeOpen.call(this, method, input, ...rest);
+      return result;
     };
     proto.send = function(...args) {
       const request = this.__liveAssistantPoll;
-      if (request?.method === 'GET' && adapter.roomContext.current()) {
+      let cleanup;
+      if (request?.method === 'GET' && adapter.roomContext.current() && !observations.has(this)) {
         const xhr = this;
         adapter.status.pollRequests = (adapter.status.pollRequests || 0) + 1;
-        xhr.addEventListener('load', () => {
+        const loaded = () => {
+          cleanup();
           if (!adapter.roomContext.current()) return;
           if (xhr.status < 200 || xhr.status >= 300) { adapter.status.pollFailed = (adapter.status.pollFailed || 0) + 1; adapter.emitStatus(); return; }
           let response, responseType = '';
@@ -312,9 +316,17 @@ export class DouyinAdapter {
               enqueueFrame(Uint8Array.from(text, char => char.charCodeAt(0)), 'http-poll');
             } else { adapter.status.pollUnsupported = (adapter.status.pollUnsupported || 0) + 1; adapter.emitStatus(); }
           }
-        }, { once:true });
+        };
+        cleanup = () => {
+          xhr.removeEventListener('load', loaded);xhr.removeEventListener('loadend', cleanup);
+          observations.delete(xhr);
+        };
+        observations.set(xhr, cleanup);
+        xhr.addEventListener('load', loaded, {once:true});
+        xhr.addEventListener('loadend', cleanup, {once:true});
       }
-      return nativeSend.apply(this, args);
+      try { return nativeSend.apply(this, args); }
+      catch (error) { cleanup?.();throw error; }
     };
     this.status.pollHook = true;
   }

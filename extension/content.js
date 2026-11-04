@@ -7,6 +7,7 @@ import { RequestBridgeClient } from '../src/browser/request-sender.js';
 import { IdentityReader } from '../src/browser/identity.js';
 import { EventInbox, failureCode } from '../src/runtime/inbox.js';
 import { roomFromURL } from '../src/browser/room-context.js';
+import { StorageMirror } from './storage-mirror.js';
 
 async function startContent() {
 const jsonBytes = value => {
@@ -86,23 +87,9 @@ if (room) {
     activeAdapter?.sync();
   };
   window.addEventListener('pagehide',()=>{void updateCollectionLease(false);});
-  const values = new Map(Object.entries(await message({ type:'init' })));
-  let writes = Promise.resolve();
-  const write = (key,value,remove=false) => {
-    const previous = values.get(key); if (remove) values.delete(key); else values.set(key,value);
-    const previousWrite = writes;
-    const task = (async () => {
-      try { await previousWrite; } catch {}
-      try { return await message({type:remove?'delete':'set',key,value}); }
-      catch (error) {
-        if (previous === undefined) values.delete(key); else values.set(key,previous);
-        throw error;
-      }
-    })();
-    writes=task; void task.catch(()=>{}); return task;
-  };
-  const set = (key,value) => write(key,value);
-  const del = key => write(key,undefined,true);
+  const storageMirror=new StorageMirror(await message({type:'init'}),message),values=storageMirror.values;
+  const set = (key,value) => storageMirror.write(key,value);
+  const del = key => storageMirror.write(key,undefined,true);
   const journal = {
     append: (event,id) => message({type:'event-append',event,id}),
     pending: after => message({type:'event-list',after}),
@@ -130,12 +117,12 @@ if (room) {
       void (async () => {
         try {
           if (!checkpoint) throw new Error('页面正在初始化');
-          await checkpoint(); await writes; reply({ok:true});
+          await checkpoint(); await storageMirror.writes; reply({ok:true});
         } catch (error) { reply({ok:false,error:error.message}); }
       })();
       return true;
     }
-    if (request.type === 'storage') { for (const [key,change] of Object.entries(request.changes)) { if (change.newValue === undefined) values.delete(key); else values.set(key,change.newValue); } }
+    if (request.type === 'storage') storageMirror.observe(request.changes);
     if (request.type === 'income-updated') incomeChanged?.();
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
     if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
@@ -266,7 +253,7 @@ if (room) {
     const requestId=crypto.randomUUID();let aborted=false;
     void (async()=>{
       try {
-        await writes;
+        await storageMirror.writes;
         if(aborted)return;
         const response = await message({requestId,type:['weather','public-data'].includes(details.operation) ? details.operation : details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
         if(!aborted)details.onload(response);

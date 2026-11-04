@@ -38,3 +38,17 @@ test('重复传输抑制不吞掉同传输更新，续期后按最后观察时�
   assert.equal(a.isDuplicateProtocolEvent(event(0),'http-poll'),true,'续期不能被过期前缀误删');
   now+=60000;assert.equal(a.isDuplicateProtocolEvent(event(0),'http-poll'),false);
 });
+
+for(const nextPath of ['/webcast/im/fetch/','/webcast/user/'])test(`长轮询中止后复用 XHR 不残留旧订阅：${nextPath}`,async()=>{
+  const received=[],a=adapter(event=>received.push(event.id));
+  class XHR extends EventTarget {
+    open(){}
+    send(){}
+    complete(){this.status=200;this.responseType='arraybuffer';this.response=frame([201]);this.dispatchEvent(new Event('load'));}
+  }
+  a.page.XMLHttpRequest=XHR;a.hookLongPoll((data,transport)=>a.acceptFrame(data,transport));
+  const xhr=new XHR();xhr.open('GET','/webcast/im/fetch/');xhr.send();
+  // open() aborts/reuses the same native object before the previous load fired.
+  xhr.open('GET',nextPath);xhr.send();xhr.complete();await a.chain;
+  assert.deepEqual(received,nextPath.includes('/im/')?['201']:[]);
+});

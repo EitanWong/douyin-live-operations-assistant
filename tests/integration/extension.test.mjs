@@ -3,6 +3,7 @@ import {createNativeASRClient} from '../../src/browser/native-asr-client.js';
 import {RoomContext,roomFromURL} from '../../src/browser/room-context.js';
 import { ProtocolCache } from '../../extension/protocol-cache.js';
 import { ObservationBuffer } from '../../extension/observation-buffer.js';
+import { StorageMirror } from '../../extension/storage-mirror.js';
 import { fanclubFrameContext, cleanFanclubSnapshot } from '../../src/data/fanclub.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +41,7 @@ function connectNative(page) {
 function nativeEvent(page,event) {nativeQueues.get(page).events.push(event);}
 async function rawEntry(entry) {
   let source=(await readFile(new URL(`../../extension/${entry}.js`,import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
-  if(entry==='content')source=`const failureCode = ${failureCode.toString()};\n`+source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
+  if(entry==='content')source=`const failureCode = ${failureCode.toString()};\nconst StorageMirror = ${StorageMirror.toString()};\n`+source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
   return source;
 }
 async function evalPage(page) {page.RoomContext=RoomContext;page.ObservationBuffer=ObservationBuffer;page.eval(await rawEntry('page'));}
@@ -364,6 +365,32 @@ test('后台拒绝非直播页面与子frame，保存读取可复用', async()=>
   assert.equal((await w.send({type:'set',key:'live-assistant:runtime:1',value:{version:1}})).ok,true);
   assert.equal((await w.send({type:'init'})).value['live-assistant:config:1'].mode,'auto');
   assert.equal((await w.send({type:'init'})).value['live-assistant:runtime:1'].version,1);
+});
+
+for(const scenario of ['newer-success','both-fail','external-change'])test(`内容脚本保存失败不回滚较新的配置：${scenario}`,async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,key='live-assistant:config:1';
+  let api,listener;const requests=[];
+  Object.assign(page,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},DouyinAdapter:class {},
+    chrome:{runtime:{onMessage:{addListener:fn=>{listener=fn;}},sendMessage:request=>{
+      if(request.type==='init')return Promise.resolve({ok:true,value:{[key]:'initial'}});
+      return new Promise(resolve=>requests.push({request,resolve}));
+    }}},boot:options=>{api=options;}
+  });
+  try{
+    await page.eval(`(async()=>{${await rawEntry('content')}})()`);
+    const first=api.set(key,'first');const rejected=assert.rejects(first,/storage failed/);
+    const second=scenario==='external-change'?null:api.set(key,'second');
+    const secondRejected=scenario==='both-fail'?assert.rejects(second,/storage failed/):null;
+    await new Promise(setImmediate);
+    if(scenario==='external-change')listener({type:'storage',changes:{[key]:{newValue:'external'}}});
+    requests.shift().resolve({ok:false,error:'storage failed'});await rejected;await new Promise(setImmediate);
+    if(second){
+      assert.equal(api.get(key),'second','旧请求失败不得覆盖较新的乐观保存');
+      requests.shift().resolve(scenario==='both-fail'?{ok:false,error:'storage failed'}:{ok:true,value:true});
+      await (secondRejected||second);
+    }
+    assert.equal(api.get(key),scenario==='newer-success'?'second':scenario==='both-fail'?'initial':'external');
+  }finally{page.close();}
 });
 
 test('外观偏好只允许已知模式并可由扩展页或直播页经后台访问', async()=>{
