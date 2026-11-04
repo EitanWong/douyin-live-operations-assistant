@@ -33,7 +33,7 @@ import { validateEndpoint } from '../services/ai.js';
 import { SEARCH_PROVIDERS, validateSearchEndpoint } from '../services/search.js';
 import { giftDate } from '../data/gifts.js';
 import { BOT_COMMANDS, RoomBot } from '../core/bot.js';
-import { hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
+import { collectionGapCount, hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
 import {KnowledgeLibrary} from './knowledge-library.js';
 import {knowledgePageTemplate} from './knowledge-template.js';
 import {KNOWLEDGE_CSS} from './knowledge-styles.js';
@@ -1104,7 +1104,7 @@ export class Panel {
       this.node('[data-deliveries]').innerHTML = records.length ? [...pending,...records.filter(record=>!pending.includes(record)).slice(-10).reverse()].map(record=>`<div class="section"><strong>${esc(states[record.state] || record.state)}</strong><p>${esc(record.text)}</p><p class="hint">${esc(record.reason || (record.state === 'echoed' ? `回显延迟 ${record.latencyMs} ms${record.messageId ? ` · 消息 ${record.messageId}` : ''}` : '等待本人账号的公屏回显'))}</p></div>`).join('') : '<p class="empty">暂无发送记录。</p>';
     }
     const health = network.ingestion || {}, storage = network.storage;
-    const capture = network.capture || {}, gaps = (health.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(capture.gaps || 0);
+    const capture = network.capture || {}, gaps = collectionGapCount(network);
     const storageText = storage?.used != null ? `临时缓存 ${(storage.used/1024/1024).toFixed(2)} / ${(storage.quota/1024/1024).toFixed(0)} MB；持久数据 ${(Object.values(storage.durable?.categories || {}).reduce((sum,item)=>sum+item.bytes,0)/1024/1024).toFixed(2)} MB（IndexedDB）` : '存储用量尚未取得';
     const pruneText = storage?.pruned?.deleted ? `；最近自动清理 ${storage.pruned.deleted} 条旧协议帧（${(storage.pruned.bytes/1024/1024).toFixed(2)} MB）` : '';
     this.text('[data-ingestion-health]',`${health.blocked ? '采集交接受阻（场控仍保持运行）' : health.quarantined ? '有隔离事件待处理' : '采集交接正常'} · 本次协议帧已保存 ${capture.saved || 0} 条 / 等待 ${capture.pending || 0} 条 · 隔离 ${health.quarantined || 0} 条 · 已知缺口 ${gaps}（事件或帧） · ${storageText}${pruneText}${health.reason ? `。${health.reason}` : ''}`);

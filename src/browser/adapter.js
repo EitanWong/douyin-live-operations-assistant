@@ -5,6 +5,7 @@ import { PageRequestSender } from './request-sender.js';
 import { AnchorDataCollector } from './anchor-data.js';
 import { CollectionGuard } from './collection-guard.js';
 import { readRoomLikes } from './room-likes.js';
+import { serializedBytes } from '../runtime/inbox.js';
 
 const MAX_CAPTURE_FRAME_BYTES = 512 * 1024;
 function chatRowIdentity(row,nickname) {
@@ -417,7 +418,8 @@ export class DouyinAdapter {
     if (!Object.hasOwn(counts, method) && Object.keys(counts).length >= 50) return;
     counts[method] = (counts[method] || 0) + 1;
   }
-  emitStatus() { this.onStatus({ ...this.status }); }
+  emitStatus() { this.onStatus({ ...this.status, ...(this.domStatus ? {dom:{...this.domStatus}} : {}) }); }
+  restoreCollection(saved) { this.domStatus={pending:0,bytes:0,gaps:Number(saved?.domGaps)||0}; }
   // 无弹幕不等于断线；打开的 socket 或近期成功的长轮询都可接收。
   healthy() { return Boolean(this.status.connected || this.status.lastPoll && Date.now() - this.status.lastPoll < 90000); }
   readAudienceContributions() { return readAudienceContributions(this.page.document || document); }
@@ -780,8 +782,21 @@ export class DouyinAdapter {
     }
   }
   observeDOM() {
+    this.stopDOM?.();
     // 变动时拍下弹幕快照；虚拟列表随即移除/复用节点也不丢掉已读消息。
     const pending = []; let timer = null, flushing = false, stopped = false, lastError = 0, domNeedsBaseline = false, startVisible = false, endVisible = false;
+    const health=this.domStatus ||= {pending:0,bytes:0,gaps:0};
+    let pendingCount=0,pendingBytes=0,publishedGaps=health.gaps;
+    const publish=()=>{
+      if(health.pending===pendingCount && health.bytes===pendingBytes && publishedGaps===health.gaps)return;
+      health.pending=pendingCount;health.bytes=pendingBytes;publishedGaps=health.gaps;this.emitStatus();
+    };
+    const enqueue=event=>{
+      const bytes=serializedBytes(event);
+      if(bytes==null || pendingCount>=4096 || pendingBytes+bytes>8*1024*1024){health.gaps++;return;}
+      pending.push({event,bytes});pendingCount++;pendingBytes+=bytes;
+    };
+    const deliver=event=>this.dispatch ? this.dispatch(event) : this.onEvent(event);
     this.status.domRows = 0; this.status.domBatches = 0;
     const selector = () => this.getConfig().adapter.chatSelector || '[data-e2e="chat-message"], [class*="webcast-chatroom___item"]';
     const read = (row, emit, receivedAt, allowMilestone = true) => {
@@ -795,18 +810,18 @@ export class DouyinAdapter {
       // 昵称、灯牌和正文在 textContent 中会连在一起，不能把发送者拼成被感谢的人。
       const text = contentEl ? contentEl.textContent.trim() : signature;
       const milestone = recognizeMilestone(text);
-      if (allowMilestone && milestone && this.shouldReadMilestones()) pending.push({ type:'milestone', milestone, text, source:'dom', receivedAt });
+      if (allowMilestone && milestone && this.shouldReadMilestones()) enqueue({ type:'milestone', milestone, text, source:'dom', receivedAt });
       if (!nameEl || !contentEl) return;
       const name = nameEl.textContent.trim().replace(/[:：]$/, '');
-      if (emit && name && text && !milestone) pending.push({ type:'chat', user:{name,...chatRowIdentity(row,nameEl),fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
+      if (emit && name && text && !milestone) enqueue({ type:'chat', user:{name,...chatRowIdentity(row,nameEl),fanClubs:[],wealthLevel:null}, text, source:'dom', receivedAt });
     };
     const report = error => { if (Date.now() - lastError > 10000) { lastError = Date.now(); this.onLog('error', `页面弹幕采集异常：${error.message}`); } };
     const detectLiveBoundary = () => {
       const c = this.getConfig().adapter;
       const start = c.startSelector ? isVisible(document.querySelector(c.startSelector)) : false;
       const end = c.endSelector ? isVisible(document.querySelector(c.endSelector)) : false;
-      if (start && !end && !startVisible) void Promise.resolve(this.onEvent({ type:'start', source:'dom-observed', at:Date.now() })).catch(report);
-      if (end && !endVisible) void Promise.resolve(this.onEvent({ type:'end', source:'dom', at:Date.now() })).catch(report);
+      if (start && !end && !startVisible) void Promise.resolve(deliver({ type:'start', source:'dom-observed', at:Date.now() })).catch(report);
+      if (end && !endVisible) void Promise.resolve(deliver({ type:'end', source:'dom', at:Date.now() })).catch(report);
       startVisible = start; endVisible = end;
     };
     const scheduleFlush = delay => {
@@ -819,14 +834,16 @@ export class DouyinAdapter {
       try {
         const enabled = this.shouldReadChat(), milestonesEnabled = this.shouldReadMilestones();
         // 每批最多处理 200 条，余下继续处理，不能把超过 200 条的消息截掉。
-        for (const event of pending.splice(0, 200)) {
+        for (const {event,bytes} of pending.splice(0, 200)) {
           if (stopped) break;
-          if (event.type === 'milestone' ? !milestonesEnabled : !enabled) continue;
-          try { await Promise.resolve(this.onEvent(event)); } catch (error) { report(error); }
+          try {
+            if (event.type === 'milestone' ? milestonesEnabled : enabled) await deliver(event);
+          } catch (error) { if(!stopped){health.gaps++;report(error);} }
+          finally {if(!stopped){pendingCount--;pendingBytes-=bytes;}}
         }
       } finally {
         flushing = false;
-        if (!stopped) scheduleFlush(0);
+        if (!stopped) {publish();scheduleFlush(0);}
       }
     };
     this.observer = new MutationObserver(records => {
@@ -857,6 +874,7 @@ export class DouyinAdapter {
           return;
         }
         for (const row of rows) { try { read(row, emit, receivedAt); } catch (error) { report(error); } }
+        publish();
         scheduleFlush(50);
       } catch (error) { report(error); }
     });
@@ -864,10 +882,12 @@ export class DouyinAdapter {
     this.observer.observe(document.body, { childList:true, subtree:true, characterData:true, attributes:true, attributeFilter:['class','style','hidden','aria-hidden'] });
     detectLiveBoundary();
     this.stopDOM = () => {
+      if(stopped)return;
       stopped = true;
       this.observer.disconnect();
       clearTimeout(timer); timer = null;
       pending.length = 0;
+      pendingCount=0;pendingBytes=0;publish();
     };
   }
 }

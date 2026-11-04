@@ -34,7 +34,7 @@ import { JournalCommitter, RuntimeWriter } from './runtime/journal.js';
 import { failureCode } from './runtime/inbox.js';
 import { audienceAge } from './core/audience.js';
 import { createPageTools } from './runtime/tool-host.js';
-import { hasUnacknowledgedRuntimeAlert, normalizeRuntimeAlertState, reconcileRuntimeAlertState, runtimeAlertState } from './runtime/health.js';
+import { collectionGapCount, hasUnacknowledgedRuntimeAlert, normalizeRuntimeAlertState, reconcileRuntimeAlertState, runtimeAlertState } from './runtime/health.js';
 
 export function boot(options = {}) {
   const demo = Boolean(options.demo);
@@ -97,7 +97,7 @@ export function boot(options = {}) {
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
     const save = () => {
       currentMemory();
-      const snapshot = { ...engine.snapshot(),accountSources:accounts.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),acknowledgedRuntimeAlert} };
+      const snapshot = { ...engine.snapshot(),accountSources:accounts.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),domGaps:network.dom?.gaps ?? runtimeSnapshot?.collection?.domGaps ?? 0,acknowledgedRuntimeAlert} };
       const write = runtimeWriter.save({snapshot,memories:liveMemory.capture()});
       const reported = write.catch(error => reportPersistenceError(error, '运行状态保存失败'));
       return immediate ? write : reported;
@@ -401,14 +401,14 @@ export function boot(options = {}) {
       } else if (journalKey || event?._journalKey) journalCommitter?.add(journalKey || event._journalKey);
     },
     onLog: log, onStatus: status => {
-      const previousGaps = (network.ingestion?.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(network.capture?.gaps || 0);
+      const previousGaps = collectionGapCount(network);
       const previousAcknowledgement = JSON.stringify(acknowledgedRuntimeAlert);
       const nextStatus = {...status,contextInvalidated:status.contextInvalidated || persistenceDisabled};
       acknowledgedRuntimeAlert = reconcileRuntimeAlertState(nextStatus,acknowledgedRuntimeAlert);
       network = {...nextStatus,roomMonitor:roomMonitor?.status,acknowledgedRuntimeAlert};
       if (network.contextInvalidated) reportPersistenceError(contextFailure(), '扩展连接已失效');
       refresh(); wakeSender();
-      if ((status.ingestion?.gaps || 0)+(status.bridgeGaps || 0)+(status.frameGaps || 0)+(status.capture?.gaps || 0) !== previousGaps || JSON.stringify(acknowledgedRuntimeAlert) !== previousAcknowledgement) persistRuntime();
+      if (collectionGapCount(status) !== previousGaps || JSON.stringify(acknowledgedRuntimeAlert) !== previousAcknowledgement) persistRuntime();
     },
     shouldReadChat: () => predictions.enabled() || tools?.state('giveaway')?.phase==='running' || engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
     shouldReadMilestones: () => engine.running
@@ -436,7 +436,7 @@ export function boot(options = {}) {
       const liveIncome=ended || income && identity.live?.status && identity.live.status !== 'live' ? null : income;
       return {income:liveIncome ? {...liveIncome,...(local?.id===liveIncome.id && local.endAt ? {endAt:local.endAt} : {}),pending:incomePending.size} : null,
         giftHistory:engine.config.incomeEnabled && giftHistoryContext?.anchorId===engine.config.anchorId ? giftHistoryContext : null,
-        predictions:predictions.context(),collectionHealth:{connected:adapter.healthy?.() || false,lastFrameAt:network.lastFrame || null,gaps:(network.ingestion?.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(network.capture?.gaps || 0)}};
+        predictions:predictions.context(),collectionHealth:{connected:adapter.healthy?.() || false,lastFrameAt:network.lastFrame || null,gaps:collectionGapCount(network)}};
     },
     manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
@@ -694,7 +694,7 @@ export function boot(options = {}) {
         panel.recordSearch({...result,question:'搜索连接测试'});panel.toast(`搜索连接通过，返回 ${result.results.length} 条来源。`);
       },
       forgetSearchKey:async endpoint=>{const name=searchSecretKey(endpoint);await del(name);sessionKeys.delete(name);panel.node('[data-search-key]').value='';panel.toast('搜索服务密钥已清除');},
-      diagnoseAI:()=>aiDiagnostics({config:engine.config,context:engine.aiContext(),mediaState:media.state,memoryCount:currentMemory().list().length,knownGaps:(network.ingestion?.gaps || 0)+(network.bridgeGaps || 0)+(network.frameGaps || 0)+(network.capture?.gaps || 0)}),
+      diagnoseAI:()=>aiDiagnostics({config:engine.config,context:engine.aiContext(),mediaState:media.state,memoryCount:currentMemory().list().length,knownGaps:collectionGapCount(network)}),
       diagnose: () => ({...adapter.diagnose(),roomData:engine.roomData}),
       acknowledgeRuntimeAlert: async () => {
         acknowledgedRuntimeAlert = runtimeAlertState(network);

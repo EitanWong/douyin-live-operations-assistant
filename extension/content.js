@@ -177,6 +177,7 @@ if (room) {
     get eventHead() { return this.inbox.head; }
     restoreCollection(saved) {
       if (!saved) return;
+      this.domStatus={pending:0,bytes:0,gaps:Number(saved.domGaps)||0};
       this.inbox.health.gaps = Number(saved.gaps) || 0; this.inbox.health.giftGaps = Number(saved.giftGaps) || 0;
       this.priorBridgeGaps = Number(saved.bridgeGaps) || 0; this.priorFrameGaps = Number(saved.frameGaps) || 0; this.priorCaptureGaps = Number(saved.captureGaps) || 0;
     }
