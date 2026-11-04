@@ -134,5 +134,6 @@ export class LiveMediaAnalyzer {
     }catch(error){this.error(error,sample.kind,session);}
     finally{if(this.busy.get(sample.kind)===token)this.busy.delete(sample.kind);}
   }
+  detach(){const session=this.actor.getSnapshot().context.session;if(session)session.detach=true;this.stop();}
   stop(){if(this.state==='idle'){this.notify();return;}this.actor.send({type:'STOP'});}
 }

@@ -60,14 +60,18 @@ export class AISettings {
     if(next===undefined)return;event.preventDefault();this.showSection(keys[next]);this.root.querySelector(`[data-ai-section-tab="${keys[next]}"]`).focus();
   }
   reveal(element){const section=element.closest('[data-ai-section]');if(section)this.showSection(section.dataset.aiSection);}
+  syncPerception(){
+    const text=this.root.querySelector('[data-field="ai.pipeline.mode"]').value==='text',active=this.mediaState && this.mediaState!=='idle';
+    this.root.querySelector('[data-media-start]').hidden=text;
+    this.root.querySelector('[data-perception-off]').hidden=!text || Boolean(active);
+    this.root.querySelector('[data-perception-active]').hidden=text && !active;
+  }
   syncPipeline(){
     const mode=this.root.querySelector('[data-field="ai.pipeline.mode"]').value;
     this.root.querySelector('[data-pipeline-ali]').hidden=['custom','text','local-audio'].includes(mode);
     this.root.querySelector('[data-custom-media]').hidden=mode!=='custom';
     this.root.querySelector('[data-text-service]').hidden=mode==='omni-only';
-    this.root.querySelector('[data-media-start]').hidden=mode==='text';
-    this.root.querySelector('[data-perception-off]').hidden=mode!=='text';
-    this.root.querySelector('[data-perception-active]').hidden=mode==='text';
+    this.syncPerception();
     for(const node of this.root.querySelectorAll('[data-ai-modes]'))node.hidden=!node.dataset.aiModes.split(' ').includes(mode);
     this.root.querySelector('[data-pipeline-role]').textContent=mode==='omni-only' ? '感知 + 回复共用' : '仅感知';
     this.root.querySelector('[data-pipeline-description]').textContent=({'local-audio':'使用已准备的本地中文语音模型识别直播，回复沿用文字模型及其端侧兜底，无需语音云服务密钥。',custom:'回复服务独立配置；可按需开启自定义视觉、语音或 Omni 分段识别。',text:'只用直播数据、弹幕、知识与搜索生成回复，无需配置感知服务。','omni-llm':'Omni 持续理解直播音画，回复由独立配置的文字模型生成。','omni-only':'同一套百炼配置，Omni 负责直播感知和弹幕回复。','ali-split':'视觉与语音分别按间隔识别直播内容，回复使用文字模型。'})[mode];
@@ -104,6 +108,7 @@ export class AISettings {
   populate(assistant){this.syncReplyFrequency();this.skills=structuredClone(assistant?.skills || []);this.showSkills();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
   credentials(){return Object.fromEntries(['vision','audio','pipeline'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
   state({state,skipped=0,errors=0,totalTokens,lastFinalAt,phase}){
+    this.mediaState=state;this.syncPerception();
     this.mediaPhase=state==='idle' ? undefined : phase || this.mediaPhase;phase=this.mediaPhase;
     this.root.querySelector('[data-media-start]').disabled=state!=='idle';this.root.querySelector('[data-media-stop]').disabled=state==='idle';
     const direct=this.root.querySelector('[data-field="ai.media.inputSource"]').value!=='display';

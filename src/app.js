@@ -16,7 +16,7 @@ import {createAIPlayground} from './services/ai-playground.js';
 import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
-import {createNativeCapture,checkNativeComponent} from './browser/native-perception.js';
+import {createNativeCapture,checkNativeComponent,readNativeSession} from './browser/native-perception.js';
 import { RoomContext } from './browser/room-context.js';
 import {RoomMonitor} from './browser/room-monitor.js';
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
@@ -270,7 +270,8 @@ export function boot(options = {}) {
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
   const mediaSecretKey=endpoint=>`live-assistant:media-key:${new URL(validateEndpoint(endpoint)).origin}`;
   let activeMediaConfig=resolveMediaConfig(config.ai),mediaAnchor=config.anchorId,mediaAttemptKey='';
-  const mediaEvidence=new MediaEvidence();
+  let mediaManuallyStopped=false,nativeResumePending=Boolean(!demo && options.nativeConnect);
+  let mediaEvidence=new MediaEvidence();
   const mediaKey=endpoint=>(sessionKeys.get(mediaSecretKey(endpoint)) ?? get(mediaSecretKey(endpoint),'')) || (sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''));
   const recognizeMedia=createMediaClient({request,getKey:mediaKey});
   const clearMedia=()=>{mediaEvidence.clear();panel?.aiSettings.observations([]);};
@@ -284,6 +285,7 @@ export function boot(options = {}) {
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
   });
+  const stopForegroundMedia=()=>{if(activeMediaConfig.inputSource!=='native')media.stop();};
   const searchSecretKey = endpoint => `live-assistant:search-key:${new URL(validateSearchEndpoint(endpoint)).origin}`;
   const webKnowledge=createWebKnowledge();
   const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
@@ -305,7 +307,7 @@ export function boot(options = {}) {
     const key = state.endedAt ? state.roomId || 'ended' : '';
     if (key && key !== stoppedBroadcast) {
       const armed=autoStartArmed || engine.running || engine.resumeRequested;
-      media.stop();tools?.notify('stop', '直播已结束，已停止工具任务');
+      stopForegroundMedia();tools?.notify('stop', '直播已结束，已停止工具任务');
       engine.stop('直播已结束，清空本场互动并等待下次开播');
       autoStartArmed=armed && !manualPause;autoStartNext=0;
     }
@@ -435,7 +437,7 @@ export function boot(options = {}) {
     },
     manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
-    onStop: () => { media.stop(); lock.release(); autoStartArmed = false; },
+    onStop: () => { stopForegroundMedia(); lock.release(); autoStartArmed = false; },
     send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : async (text, isCurrent, hooks) => {
       const independent=!engine.running;
       if(independent && (!isCurrent() || !await lock.acquire()))return {submitted:false,reason:'等待当前直播间发送锁'};
@@ -526,6 +528,7 @@ export function boot(options = {}) {
   }
   const mediaRunKey=()=>JSON.stringify([engine.epoch,engine.config.anchorId,resolveMediaConfig(engine.config.ai)]);
   async function startMedia(c,credentials){
+    mediaManuallyStopped=false;
     mediaAttemptKey=mediaRunKey();
     if(media.state!=='idle')return;
     if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
@@ -537,7 +540,7 @@ export function boot(options = {}) {
     try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
   }
   function syncMedia(){
-    if(demo || closed || suspended || persistenceDisabled || !engine.running || !engine.config.ai.enabled || !roomContext.current() || engine.liveMode.endedAt)return;
+    if(demo || closed || suspended || persistenceDisabled || nativeResumePending || mediaManuallyStopped || !engine.running || !engine.config.ai.enabled || !roomContext.current() || engine.liveMode.endedAt)return;
     const effective=resolveMediaConfig(engine.config.ai);
     if(!effective.autoStart || effective.inputSource==='display' || !effective.videoEnabled && !effective.audioEnabled)return;
     const key=mediaRunKey();
@@ -549,12 +552,29 @@ export function boot(options = {}) {
       panel?.aiSettings.showError(error.message);log('ai',`自动音画感知未启动：${error.message}；检查后可手动重试`);
     });
   }
+  async function resumeNativeMedia(){
+    if(demo || !options.nativeConnect)return;
+    nativeResumePending=true;
+    try{
+      const session=await readNativeSession(options.nativeConnect);
+      if(closed || suspended || !roomContext.current() || media.state!=='idle')return;
+      if(session.stopped){mediaManuallyStopped=true;return;}
+      if(!session.config || mediaManuallyStopped)return;
+      const endpoint=`${new URL(session.config.realtimeEndpoint).origin}/compatible-mode/v1/chat/completions`;
+      activeMediaConfig={...resolveMediaConfig(engine.config.ai),...session.config,videoEnabled:true,audioEnabled:true,omniEnabled:true,visionEndpoint:endpoint,audioEndpoint:endpoint,resume:true};
+      mediaAnchor=engine.config.anchorId;mediaAttemptKey=mediaRunKey();
+      // A resumed subscription can replay fresh observations from before this page.
+      mediaEvidence=new MediaEvidence();panel?.aiSettings.observations([]);
+      await media.start(activeMediaConfig);
+    }catch(error){if(!closed && !suspended)log('ai',`后台感知恢复：${error.message}`);}
+    finally{nativeResumePending=false;}
+  }
   function download(name, content) {
     const url = URL.createObjectURL(new Blob([content], { type: 'application/json;charset=utf-8' }));
     const a = document.createElement('a'); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   const pause = (reason, { manual = false } = {}) => {
-    media.stop();
+    stopForegroundMedia();
     tools.notify('stop', reason);
     if (manual) manualPause = true;
     autoStartArmed = false;
@@ -640,7 +660,8 @@ export function boot(options = {}) {
         await prepareMediaKeys(c,mediaCredentials)();
         if (c.identity.autoAnchor && identity.anchor) c.anchorId = identity.anchor.id;
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
-        if(c.ai.enabled!==engine.config.ai.enabled || c.anchorId!==mediaAnchor || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(activeMediaConfig) || JSON.stringify(resolveMediaConfig(c.ai))!==JSON.stringify(resolveMediaConfig(engine.config.ai))){media.stop();mediaAttemptKey='';}
+        const {autoStart:nextAuto,...nextMedia}=resolveMediaConfig(c.ai),{autoStart:previousAuto,...previousMedia}=resolveMediaConfig(engine.config.ai);
+        if(activeMediaConfig.inputSource!=='native' && c.ai.enabled!==engine.config.ai.enabled || c.anchorId!==mediaAnchor || JSON.stringify(nextMedia)!==JSON.stringify(previousMedia)){media.stop();mediaAttemptKey='';}
         await set(configKey, c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c);playground?.cancel();playground?.updateConfig(); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
@@ -648,7 +669,7 @@ export function boot(options = {}) {
       webKnowledge,
       startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
-      stopMedia:()=>{mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
+      stopMedia:()=>{mediaManuallyStopped=true;mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
       forgetMediaKey:async(kind,endpoint)=>{const name=mediaSecretKey(endpoint);media.stop();await del(name);sessionKeys.delete(name);for(const input of panel.root.querySelectorAll('[data-media-key]'))input.value='';panel.toast('此服务的音视频密钥已清除；同域普通AI密钥需在服务连接中清除');},
       hasAIKey: (endpoint,omni=false) => Boolean(omni ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
       generatePhrases: async (c, key, remember, options,mediaCredentials) => {
@@ -772,7 +793,7 @@ export function boot(options = {}) {
       void roomMonitor?.tick();
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
-      if (!roomContext.current()) { roomMonitor?.close();media.stop(); playground?.cancel();accountRefresh.close();void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (!roomContext.current()) { roomMonitor?.close();media.detach(); playground?.cancel();accountRefresh.close();void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
       if ((engine.pk.current()?.phase === 'active' || panel.isPKVisible()) && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
@@ -791,7 +812,7 @@ export function boot(options = {}) {
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, engine.config.gift.yuanPerDiamond);
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
     window.addEventListener('pagehide', event => {
-      media.stop();playground?.cancel();
+      media.detach();playground?.cancel();
       void accountRefresh.cancel().catch(()=>{});
       void (event.persisted ? tools.suspend() : tools.close());
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
@@ -809,6 +830,7 @@ export function boot(options = {}) {
     window.addEventListener('pageshow', event => {
       if (!event.persisted || closed) return;
       suspended = false;
+      void resumeNativeMedia();
       void tools.resume().then(() => { if (manualPause) tools.notify('stop', '本页已手动暂停'); });
       stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
       void sampleContributions();
@@ -845,6 +867,7 @@ export function boot(options = {}) {
     const installCommand=panel.root.querySelector('[data-native-install-command]');
     if(installCommand && /^[a-p]{32}$/u.test(options.nativeExtensionId || ''))installCommand.textContent=`npm run native:install -- --extension-id=${options.nativeExtensionId}`;
     options.onReady?.({ engine, panel, adapter, tools,media,predictions, stop: pause, rememberUser, refreshIncome, wake:wakeRoom, checkpoint:() => persistRuntime(true) });
+    void resumeNativeMedia();
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });
   return engine;
