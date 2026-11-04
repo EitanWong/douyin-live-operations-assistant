@@ -2368,3 +2368,5 @@ crapper、dryer、mutator 在本会话已核实均不可用，三项未执行；
 完整回归、最终check及dev提交推送回执随后追加。浏览器初始点击遇到超时，先读取当前DOM确认页面状态，再完成正常导航与测量；未绕过浏览器限制。版本保持0.1.2，不改main或发布标签。
 
 验证完成：专项13/13，完整回归 **1484/1484**，0失败/跳过；`npm run build`、`npm run check`、`git diff --check`通过。证据日志保留`output/compact-pages-2026-11-05/`。临时4183演示服务已停止，构建更新到原项目`dist/chrome-extension`；重新加载扩展并刷新直播页后生效。未核验远端CI，未更改业务发送/点赞策略。接下来提交并推送dev，回执单独记录。
+
+最终回执：修复 **629dd0ed0bfa0f8e39c3aba02b82aec2e02506d3** 已推送`origin/dev`，远端分支核对一致，生产工作区干净；此回执另作日志提交。crapper、dryer、mutator不可用、未执行；完整回归与Chrome布局验收不是这些专用工具的替代通过结果。
