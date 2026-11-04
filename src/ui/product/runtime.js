@@ -88,7 +88,7 @@ function Card({node,bridge,props}) {
     heading ? h('header',{className:'product-card-heading'},h(View,{node:heading,bridge}),h(InspectButton,{node,label})) : canInspect(node) ? h('div',{className:'product-card-utility'},h(InspectButton,{node,label})) : null,
     h('div',{className:'product-card-body',tabIndex:0,role:'region','aria-label':label},h(InspectionContents,null,h(Stack,{className:'product-card-content',gap:'var(--product-gap)'},renderChildren(heading ? node.children.slice(1) : node.children,bridge)))));
 }
-function View({node,bridge}) {
+const View=React.memo(function View({node,bridge}) {
   if(!node)return null;
   if(node.inspectable)return h(Inspectable,{node,independent:true},h(View,{node:{...node,inspectable:false},bridge}));
   if(node.kind==='text')return node.text;
@@ -115,7 +115,7 @@ function View({node,bridge}) {
   if(node.layout==='row')return h(Group,{...props,gap:'var(--product-gap)',wrap:'wrap',align:'center'},content);
   if(node.layout==='stack')return h(Stack,{...props,gap:'var(--product-gap)'},content);
   return h(node.tag || 'div',props,renderChildren(node.children,bridge));
-}
+});
 function KnowledgeDialog({node,bridge,shadow}) {
   const trigger=useRef(shadow.activeElement),row=useRef(shadow.activeElement?.closest('.product-disclosure'));
   useEffect(()=>()=>{const target=trigger.current?.isConnected ? trigger.current : row.current?.querySelector('button');target?.focus();},[]);

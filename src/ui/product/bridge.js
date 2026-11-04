@@ -2,6 +2,7 @@
 // presentation. Only the active page is projected, never a second config store.
 import {describeLayout,describeCollection,isTransparentLayout,layoutChildren,packPageCards} from './layout.js';
 import {APPEARANCE_PREFERENCES} from '../appearance.js';
+import {shareView} from './snapshot.js';
 
 const ignored = 'STYLE,SCRIPT,OPTION,SUMMARY,TEMPLATE'.split(',');
 const containers = 'DIV,SECTION,ARTICLE,MAIN,HEADER,FOOTER,FORM,FIELDSET,LABEL,NAV,UL,OL,LI,DL,DT,DD'.split(',');
@@ -11,10 +12,10 @@ const available = node => { for (let p=node;p;p=p.parentElement) if(p.hidden)ret
 
 export function createWorkspaceBridge(panel) {
   const root=panel.root, view=root.ownerDocument.defaultView, ids=new WeakMap(), nodes=new Map(), listeners=new Set();
-  let serial=0, snapshot, signature='', destroyed=false, focus=null, focusSerial=0;
+  let serial=0, snapshot, destroyed=false, focus=null, focusSerial=0;
   function id(node) {
-    if(!ids.has(node)){const key=`control-${++serial}`;ids.set(node,key);nodes.set(key,node);}
-    return ids.get(node);
+    if(!ids.has(node))ids.set(node,`control-${++serial}`);
+    const key=ids.get(node);nodes.set(key,node);return key;
   }
   function children(node) { return [...node.childNodes].flatMap(child=>child.nodeType===1 && shown(child) && isTransparentLayout(child) ? children(child) : [project(child)]).filter(Boolean); }
   function field(input,wrapper=input) {
@@ -62,8 +63,9 @@ export function createWorkspaceBridge(panel) {
     return {kind:'group',id:id(node),...layout,inspectable:node.matches('.ai-final-answer,.ai-result-section') || undefined,collection:describeCollection(node),tag:node.tagName==='LEGEND' ? 'h3' : containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
   }
   function collect() {
-    // Drop removed controls, including retired dynamic list rows.
-    for(const [key,node] of nodes)if(!root.contains(node))nodes.delete(key);
+    // Only the projected view owns strong references; IDs survive in the WeakMap
+    // when a controller detaches/reuses a control or the user changes pages.
+    nodes.clear();
     const key=panel.activeTab, page=[...root.querySelectorAll('[data-page]')].find(p=>p.dataset.page===key);
     const nav=[...root.querySelectorAll('[data-tab]')].filter(n=>!n.hidden).map(n=>({key:n.dataset.tab,label:n.getAttribute('aria-label') || cleanText(n),group:cleanText(n.closest('[data-nav-group]')?.querySelector('.nav-group-title')),icon:n.querySelector('svg')?.outerHTML}));
     const toolbar=[...(root.querySelector('[data-workspace-toolbar] .foot')?.children || [])].filter(shown).flatMap(n=>n.matches('button,small') ? [project(n)] : children(n)).filter(Boolean);
@@ -76,23 +78,32 @@ export function createWorkspaceBridge(panel) {
   }
   function refresh() {
     if(destroyed)return;
-    const next=collect(), value=JSON.stringify(next);if(value===signature)return;
-    signature=value;snapshot=next;for(const listener of listeners)listener();
+    const next=shareView(snapshot,collect());if(next===snapshot)return;
+    snapshot=next;for(const listener of listeners)listener();
   }
-  const observer=new view.MutationObserver(records=>{const invalid=records.find(r=>r.attributeName==='aria-invalid' && r.target.getAttribute('aria-invalid')==='true');if(invalid)focus={id:id(invalid.target),serial:++focusSerial};refresh();});
+  const observer=new view.MutationObserver(records=>{
+    const relevant=records.filter(record=>{
+      const node=record.target.nodeType===1 ? record.target : record.target.parentElement;
+      const page=node?.closest('[data-page]');
+      return !page || page.dataset.page===panel.activeTab;
+    });
+    if(!relevant.length)return;
+    const invalid=relevant.find(r=>r.attributeName==='aria-invalid' && r.target.getAttribute('aria-invalid')==='true');
+    if(invalid)focus={id:id(invalid.target),serial:++focusSerial};refresh();
+  });
   observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','open','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','class','data-nav-collapsed','data-nav-side']});
   const themeObserver=new view.MutationObserver(refresh);themeObserver.observe(panel.host,{attributes:true,attributeFilter:['data-theme','data-palette','data-material']});
   root.addEventListener('input',refresh);root.addEventListener('change',refresh);
   refresh();
   return {
-    getSnapshot:()=>snapshot,subscribe(listener){listeners.add(listener);return ()=>listeners.delete(listener);},refresh,
+    getSnapshot:()=>snapshot,subscribe(listener){if(destroyed)return ()=>{};listeners.add(listener);return ()=>listeners.delete(listener);},refresh,
     change(key,value){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node) || node.disabled || node.readOnly)return false;
       if(node.type==='checkbox')node.checked=Boolean(value);else node.value=String(value);
       node.dispatchEvent(new view.Event(node.tagName==='SELECT' || ['checkbox','date','month','time','color','range'].includes(node.type) ? 'change' : 'input',{bubbles:true}));refresh();return true;},
     activate(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node) || node.disabled)return false;node.click();refresh();return true;},
     toggle(key,open){const node=nodes.get(key);if(!node || !root.contains(node) || node.tagName!=='DETAILS')return false;node.open=open;refresh();return true;},
     reveal(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node))return false;for(let parent=node;parent && parent!==root;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;refresh();return true;},
-    navigate(key){if(!snapshot.nav.some(n=>n.key===key))return;panel.tab(key);refresh();},
-    destroy(){destroyed=true;observer.disconnect();themeObserver.disconnect();root.removeEventListener('input',refresh);root.removeEventListener('change',refresh);listeners.clear();nodes.clear();}
+    navigate(key){if(destroyed || !snapshot.nav.some(n=>n.key===key))return;panel.tab(key);refresh();},
+    destroy(){destroyed=true;observer.disconnect();themeObserver.disconnect();root.removeEventListener('input',refresh);root.removeEventListener('change',refresh);listeners.clear();nodes.clear();snapshot=null;focus=null;}
   };
 }

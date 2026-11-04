@@ -30,8 +30,8 @@ function journalKey(event) {
 // Memory is bounded by both count and serialized size. Overflow is an explicit
 // collection gap; never describe rejected events as safely recorded.
 export class EventInbox {
-  constructor({ handle, onStatus = () => {}, limit = 4096, maxBytes = 8 * 1024 * 1024, quarantineLimit = 50, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
-    this.handle = handle; this.onStatus = onStatus; this.limit = limit; this.maxBytes = maxBytes; this.quarantineLimit = quarantineLimit; this.wait = wait;
+  constructor({ handle, onStatus = () => {}, limit = 4096, maxBytes = 8 * 1024 * 1024, quarantineLimit = 50, wait = ms => new Promise(resolve => setTimeout(resolve, ms)), now = () => performance.now() }) {
+    this.handle = handle; this.onStatus = onStatus; this.limit = limit; this.maxBytes = maxBytes; this.quarantineLimit = quarantineLimit; this.wait = wait; this.now = now;
     this.queue = []; this.head = 0; this.bytes = 0; this.quarantineBytes = 0; this.running = false; this.held = false; this.blocked = false; this.closed = false; this.quarantine = []; this.idleWaiters = [];
     this.health = {state:'healthy',code:'',reason:'',gaps:0,giftGaps:0};
   }
@@ -71,12 +71,13 @@ export class EventInbox {
     if (this.running || this.held || this.blocked || this.closed) return;
     this.running = true;
     try {
-      let processed = 0;
+      let processed = 0, sliceStart = this.now();
       while (this.head < this.queue.length && !this.held && !this.blocked && !this.closed && processed < maxItems) {
         const item = this.queue[this.head]; let done = false;
         for (let attempt = 1; attempt <= 3 && !this.closed; attempt++) {
-          try { await this.handle(item.event); item.resolve(true); done = true; break; }
+          try { await this.handle(item.event); if (this.closed) return; item.resolve(true); done = true; break; }
           catch (error) {
+            if (this.closed) return;
             const code = failureCode(error);
             this.health = {...this.health,state:'retrying',code,reason:String(error?.message || error)}; this.emit();
             if (['STORAGE_QUOTA','STORAGE_PRESSURE','JOURNAL_LIMIT','BACKPRESSURE','CONTEXT_INVALID'].includes(code)) { this.blocked = true; break; }
@@ -85,8 +86,14 @@ export class EventInbox {
             this.quarantine.push({event:item.event,code,reason:this.health.reason,bytes:item.bytes}); this.quarantineBytes += item.bytes; item.resolve(false); done = true; break;
           }
         }
+        if (this.closed) return;
         if (!done) { this.blocked = true; this.health.state = 'blocked'; this.emit(); break; }
         this.bytes -= item.bytes; this.queue[this.head++] = null; this.compact(); processed++;
+        // Resolved promises alone never yield to input, paint or timers. Keep the
+        // single consumer while allowing the host to run between bounded slices.
+        if (this.head < this.queue.length && processed < maxItems && !this.held && !this.blocked && (processed % 200 === 0 || this.now() - sliceStart >= 8)) {
+          await this.wait(0); sliceStart = this.now();
+        }
       }
       if (!this.blocked && !this.closed) {
         this.health.state = this.quarantine.length ? 'degraded' : 'healthy';
@@ -115,5 +122,10 @@ export class EventInbox {
     this.emit(); void this.drain();
   }
   export() { return {health:this.status(),events:this.queue.slice(this.head).filter(Boolean).map(item=>item.event),quarantine:this.quarantine}; }
-  close() { this.closed = true; for (const item of this.queue.slice(this.head)) item?.resolve(false); }
+  close() {
+    this.closed = true;
+    for (let i = this.head; i < this.queue.length; i++) this.queue[i]?.resolve(false);
+    this.queue = []; this.head = 0; this.bytes = 0;
+    this.quarantine = []; this.quarantineBytes = 0;
+  }
 }

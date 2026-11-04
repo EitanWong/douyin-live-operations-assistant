@@ -2,6 +2,58 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {EventInbox,failureCode,serializedBytes} from '../../src/runtime/inbox.js';
 
+test('突发事件按序排空期间允许主线程计时器执行，不丢弃事件',async()=>{
+  const seen=[],inbox=new EventInbox({handle:event=>seen.push(event.id)});
+  inbox.held=true;
+  const tasks=Array.from({length:600},(_,id)=>inbox.admit({id,type:'chat'}));
+  let progress;
+  const timer=new Promise(resolve=>setTimeout(()=>{progress=seen.length;resolve();},0));
+  inbox.held=false;await inbox.drain();await timer;
+  assert.ok(progress>0 && progress<600,`主线程应在排空前获得执行机会，实际 ${progress}`);
+  assert.deepEqual(seen,Array.from({length:600},(_,id)=>id));
+  assert.ok((await Promise.all(tasks)).every(Boolean));
+  assert.equal(inbox.status().bytes,0);
+});
+
+test('单个事件耗时较高时也让出主线程，暂停后保留剩余事件可恢复',async()=>{
+  let time=0;const seen=[],yields=[];
+  const inbox=new EventInbox({now:()=>time,handle:event=>{time+=9;seen.push(event.id);},wait:async ms=>{
+    yields.push(ms);inbox.held=true;
+  }});
+  inbox.held=true;const first=inbox.admit({id:1}),second=inbox.admit({id:2});
+  inbox.held=false;await inbox.drain();assert.equal(await first,true);
+  assert.deepEqual(yields,[0]);assert.deepEqual(seen,[1]);assert.equal(inbox.status().pending,1);
+  inbox.held=false;await inbox.drain();assert.equal(await second,true);assert.deepEqual(seen,[1,2]);
+});
+
+test('关闭立即释放积压与隔离事件，迟到的处理结果不恢复引用或修改计数',async()=>{
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const inbox=new EventInbox({handle:async event=>{
+    if(event.id==='bad')throw Object.assign(new Error('bad'),{code:'INVALID_EVENT'});
+    await gate;
+  }});
+  await inbox.admit({id:'bad'});await inbox.whenIdle();
+  const first=inbox.admit({id:'slow'}),second=inbox.admit({id:'queued'});
+  inbox.close();inbox.close();
+  try {
+    assert.equal(await first,false);assert.equal(await second,false);
+    assert.equal(inbox.status().pending,0);assert.equal(inbox.status().bytes,0);
+    assert.deepEqual(inbox.export().events,[]);assert.deepEqual(inbox.export().quarantine,[]);
+  } finally {release();await inbox.whenIdle();}
+  assert.equal(inbox.status().bytes,0);assert.equal(inbox.status().pending,0);
+});
+
+test('关闭期间迟到的处理失败不隔离、重试或发布新状态',async()=>{
+  let reject;
+  const gate=new Promise((_,fail)=>{reject=fail;});let calls=0,updates=0;
+  const inbox=new EventInbox({handle:()=>{calls++;return gate;},onStatus:()=>updates++});
+  const task=inbox.admit({id:'slow'});inbox.close();const before=updates;
+  reject(new Error('late failure'));await inbox.whenIdle();
+  assert.equal(await task,false);assert.equal(calls,1);assert.equal(updates,before);
+  assert.equal(inbox.status().bytes,0);assert.equal(inbox.status().quarantined,0);
+});
+
 test('结构化克隆可携带但 JSON 不可序列化的事件不会同步打断 dispatch',async()=>{
   const statuses=[]; let handled=0;
   const inbox=new EventInbox({handle:async()=>{handled++;},onStatus:status=>statuses.push(status)});

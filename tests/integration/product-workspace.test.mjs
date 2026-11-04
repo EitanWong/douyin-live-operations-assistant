@@ -11,6 +11,44 @@ function setup(){
 }
 const find=(node,kind)=>node?.kind===kind ? node : node?.children?.map(n=>find(n,kind)).find(Boolean);
 
+test('状态更新复用未变化的视图与图表，格式函数变化仍正确发布',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page=ai]');page.innerHTML='<div data-pred-chart="online"></div>';
+  const formatter=value=>`在线 ${value}`;
+  f.panel.predictionCharts={options:{online:{series:[{data:[1,2,3]}],tooltip:{formatter}}}};
+  f.bridge.refresh();const before=f.bridge.getSnapshot();
+  const status=f.root.querySelector('.shell-status');status.innerHTML='<span>运行中</span>';f.bridge.refresh();
+  assert.equal(f.bridge.getSnapshot().status,'运行中');
+  assert.equal(f.bridge.getSnapshot().content,before.content,'只更新状态时不重新提交图表');
+  const nextFormatter=value=>`人数 ${value}`;
+  f.panel.predictionCharts.options.online={series:[{data:[1,2,3]}],tooltip:{formatter:nextFormatter}};
+  f.bridge.refresh();assert.equal(find(f.bridge.getSnapshot().content,'chart').option.tooltip.formatter(4),'人数 4');
+ }finally{f.close();}
+});
+
+test('后台页面更新不读取前台图表，导航后显示后台最新内容',async()=>{
+ const f=setup();try{
+  let reads=0;
+  f.root.querySelector('[data-page=ai]').innerHTML='<div data-anchor-chart="online"></div>';
+  f.panel.anchorDashboard={charts:{instances:new Map([['online',{getOption(){reads++;return {series:[]};}}]])}};
+  f.bridge.refresh();await Promise.resolve();reads=0;
+  f.root.querySelector('[data-page=anchor]').innerHTML='<p>后台最新统计</p>';
+  await Promise.resolve();assert.equal(reads,0);
+  f.bridge.navigate('anchor');assert.match(JSON.stringify(f.bridge.getSnapshot().content),/后台最新统计/);
+ }finally{f.close();}
+});
+
+test('移除后重新挂回的同一控件仍可操作，销毁后不能再触发源控件',()=>{
+ const f=setup();try{
+  const button=f.root.querySelector('[data-action=test-ai]'),parent=button.parentElement;
+  let calls=0;button.onclick=()=>calls++;
+  const action=find(f.bridge.getSnapshot().content,'button');button.remove();f.bridge.refresh();
+  assert.equal(f.bridge.activate(action.id),false);parent.append(button);f.bridge.refresh();
+  assert.equal(f.bridge.activate(action.id),true);assert.equal(calls,1);
+  f.bridge.destroy();assert.equal(f.bridge.activate(action.id),false);assert.doesNotThrow(()=>f.bridge.navigate('ai'));
+ }finally{f.close();}
+});
+
 test('抽奖字段组标题与普通卡片共用标题栏语义',()=>{
  const f=setup();try{
   f.root.querySelector('[data-page=ai]').innerHTML='<div class="workspace-grid"><fieldset class="giveaway-config"><legend>奖品与开奖时间</legend><input aria-label="秒数" value="300"></fieldset></div>';f.bridge.refresh();
