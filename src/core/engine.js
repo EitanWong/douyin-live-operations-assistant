@@ -1131,7 +1131,7 @@ export class Engine {
   researchNotices() {
     for(const job of this.researchAI){
       if(!job.current()){job.controller.abort();continue;}
-      if(!job.noticed && this.now()-job.lookupAt>=5000){job.noticed=true;job.notice('资料查询中，查好后回复你。',true);}
+      if(!job.noticed && this.now()-job.lookupAt>=1000){job.noticed=true;job.notice('我查一下，稍等。',true);}
     }
   }
   hasAIQuota(now=this.now()){const a=this.config.ai;return !a.edge.localOnly && this.calls.filter(at=>now-at<3600000).length<a.maxPerHour || a.edge.enabled && this.localCalls.filter(at=>now-at<3600000).length<a.edge.maxPerHour;}
@@ -1185,11 +1185,11 @@ export class Engine {
         pacingMode:active.lookup ? 'direct' : task.data.pacingMode || (direct ? 'direct' : 'contextual'),userKey:turnViewerKey(event?.user),facts:replyFacts,lookup:Boolean(active.lookup)};
       return {...task.extra,aiChat,...(direct || active.lookup ? {priority:95} : {}),...(active.lookup ? {expires:this.now()+RESEARCH_TIMEOUT_MS} : {})};
     };
-    const noticeText=text=>{
-      const room=this.config.sending.maxLength-[...text].length-1;
-      return room>0 ? `${audienceAddress(event?.user,this.now(),Math.min(10,room))}，${text}` : [...text].slice(0,this.config.sending.maxLength).join('');
-    };
-    active.notice=(text,progress=false)=>this.enqueue('ai',noticeText(text),{...replyExtra(),...(progress ? {lookupNotice:active.lookupId} : {})});
+    const nameBudget=Math.min(10,Math.max(1,prompt.maxLength-6));
+    const mention=event?.type==='chat' && event.user?.name ? `@${[...event.user.name.replace(/[@\r\n]/gu,'')].slice(0,nameBudget).join('')} ` : '';
+    prompt.searchMaxLength=Math.max(1,prompt.maxLength-[...mention].length);
+    const noticeText=text=>`${mention}${text}`;
+    active.notice=(text,progress=false)=>this.enqueue('ai',noticeText([...text].length<=prompt.searchMaxLength ? text : progress ? '我查下。' : '稍后再试'),{...replyExtra(),...(progress ? {lookupNotice:active.lookupId} : {})});
     prompt.onLookup=()=>{
       if(!prompt.isCurrent())throw Object.assign(new Error('查询已取消'),{name:'AbortError'});
       if(active.lookup)return;
@@ -1224,7 +1224,7 @@ export class Engine {
           return;
         }
         if (output.trim() === '[SKIP]') { this.log('ai', 'AI 判断无需回复');if(active.lookup)active.notice('查到的资料不足，暂时无法确认。');else if (task.kind !== 'timer') fallback('AI 未生成回复'); }
-        else if (!this.enqueue(task.kind, output, replyExtra())) {if(active.lookup)active.notice('查询结果暂时无法发送，请稍后再试。');else fallback('AI 回复未通过检查');}
+        else if (!this.enqueue(task.kind, active.lookup ? noticeText(output) : output, replyExtra())) {if(active.lookup)active.notice('查询结果暂时无法发送，请稍后再试。');else fallback('AI 回复未通过检查');}
       }
     } catch (error) { if(error.name!=='AbortError'){this.log('error', `AI 调用失败：${error.message}`);if(prompt.isCurrent() && (direct || active.lookup || error.code==='LOOKUP_BUSY'))active.notice(error.code==='LOOKUP_BUSY' ? '当前查询较多，请稍后再试。' : active.lookup ? '查询未成功，请稍后再试。' : '暂时没能回答，请稍后再试。');else fallback('AI 调用失败');} }
     finally {

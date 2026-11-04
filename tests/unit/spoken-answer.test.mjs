@@ -32,7 +32,7 @@ test('非搜索对话也不把数字角标发到公屏，跳过标记保持有�
 test('复用知识的答案也支持独立来源字段，无需把角标写进正文',async()=>{
  const id='00000000-0000-4000-8000-000000000001',records=[];
  const ai=createAIClient({generate:async()=>JSON.stringify({intent:'knowledge',query:id,reply:'上海明天小雨。',sources:[1]}),
-  knowledge:{revision:async()=>0,candidates:async()=>[{id}],find:async()=>({...found,id,cached:true})},onSearch:row=>records.push(row)});
+  knowledge:{revision:async()=>0,candidates:async()=>[{...found,id}],find:async()=>({...found,id,cached:true})},onSearch:row=>records.push(row)});
  assert.equal(await ai(prompt,config),'上海明天小雨。');
  assert.deepEqual(records.at(-1).citationIndices,[1]);assert.equal(records.at(-1).citationWarning,'');
 });

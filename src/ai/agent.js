@@ -19,17 +19,17 @@ export function createResearchAgent({request,getKey,readPublicPage,reserve=async
  return async(job,{signal,checkpoint})=>{
   const data=validateAgentInput(job.input);await checkpoint('context','读取任务提交时的上下文快照与本地知识');
   const pages=[];for(const url of data.sources){if(signal.aborted)throw new Error('任务已取消');await checkpoint('public-source',new URL(url).hostname);try{const page=await readPublicPage(url,signal);pages.push({...page,text:page.text.slice(0,2000),truncated:page.text.length>2000});}catch(error){pages.push({url,error:error.message});}}
-  const sources=[],citationIndices=[];let modelCalls=0;const metered=details=>{if(details.operation!=='search'){modelCalls++;if(modelCalls>2)throw new Error('Agent模型调用预算已用完');}return request(details);};
+  const sources=[],citationIndices=[];let modelCalls=0;const metered=details=>{if(details.operation!=='search'){modelCalls++;if(modelCalls>3)throw new Error('Agent模型调用预算已用完');}return request(details);};
   const search=createSearchClient({request:metered,getKey:endpoint=>getKey('search',endpoint)});
   const client=createAIClient({request:metered,getKey:endpoint=>getKey('ai',endpoint),search,
    onIntent:record=>{void checkpoint('plan',record.intent).catch(()=>{});},onSearch:record=>{sources.push(...(record.results || []));citationIndices.push(...(record.citationIndices || []));}});
-  await reserve(job.scope);await checkpoint('agent','最多2次模型调用、1次搜索；后台结果不发送公屏');
+  await reserve(job.scope);await checkpoint('agent','常规2次模型调用，超长时最多压缩1次；最多2次并行搜索；后台结果不发送公屏');
   const context=data.context;
   const prompt={...context,task:{kind:'agent',instruction:'后台研究当前问题；按已核实上下文回答，必要时搜索，缺资料明确说明。'},target:{text:job.question,public_sources:pages},maxLength:1000,signal,isCurrent:()=>!signal.aborted,
    canFollowup:()=>modelCalls<2};
   // Reserve the second model call before allowing a search follow-up. The
   // reservation is conservative: unused capacity is not refunded after failure.
-  prompt.reserveFollowup=()=>{return modelCalls<2;};
+  prompt.reserveFollowup=async()=>{if(modelCalls>=3)return false;if(modelCalls===2)await reserve(job.scope);return true;};
   await reserve(job.scope);
   const answer=await client(prompt,data.ai);if(signal.aborted)throw new Error('任务已取消');await checkpoint('result','保存带来源结果，等待用户核对');
   return {answer,citationIndices,sources:sources.slice(0,5),publicSources:pages,at:Date.now(),contextAt:context.now || null,modelCalls,coverage:'snapshot research; no automatic public posting or factual-memory write'};

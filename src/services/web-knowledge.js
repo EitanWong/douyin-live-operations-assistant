@@ -16,7 +16,7 @@ export function knowledgeLifetime(query,freshness){
 }
 const sourceSchema=z.strictObject({index:z.number().int().min(1).max(5),title:z.string().max(160),url:z.string().max(2000).refine(value=>{try{const u=new URL(value);return ['http:','https:'].includes(u.protocol) && !u.username && !u.password;}catch{return false;}}),content:z.string().min(1).max(1200),publishedAt:z.string().max(80).nullable()});
 const recordSchema=z.strictObject({id:z.string().uuid(),key:z.string().max(5000),profile:z.string().max(2500),query:z.string().min(1).max(300),provider:z.enum(['bocha','tavily','searxng']),freshness:z.enum(['realtime','rules','stable','short']),searchedAt:z.number().finite().nonnegative(),expiresAt:z.number().finite().nonnegative(),results:z.array(sourceSchema).min(1).max(5)});
-const profileFor=config=>JSON.stringify([config.provider || 'bocha',validateSearchEndpoint(config.endpoint,config.provider || 'bocha'),config.maxResults]);
+const profileFor=config=>JSON.stringify(['source-review-v2',config.provider || 'bocha',validateSearchEndpoint(config.endpoint,config.provider || 'bocha'),config.maxResults]);
 const keyFor=(query,profile)=>JSON.stringify([profile,normalize(query)]);
 function fresh(row,now){return recordSchema.safeParse(row).success && row.searchedAt<=now && row.expiresAt>now && row.expiresAt<=row.searchedAt+knowledgeLifetime(row.query,row.freshness) && row.key===keyFor(row.query,row.profile);}
 function expiry(query,freshness,at){

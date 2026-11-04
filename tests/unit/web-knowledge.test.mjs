@@ -49,7 +49,7 @@ test('并发实例独立写入、容量有界；非法或未来来源不保存�
 test('云端首次主动查询并学习；重启后改写提问复用来源，搜索和后续调用均不发生',async()=>{
  const env=setup();let cache=env.open(),searches=0;const history=[];
  let ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音直播PK规则','','rules') : '规则以活动页公布的信息为准。[1]',search:async query=>{searches++;return sources(query,env.now());},onSearch:r=>history.push(r)});
- assert.equal(await ai(prompt,settings),'规则以活动页公布的信息为准。');assert.deepEqual(history.at(-1).citationIndices,[1]);assert.equal(searches,1);assert.equal((await cache.list()).length,1);cache.close();
+ assert.equal(await ai(prompt,settings),'规则以活动页公布的信息为准。');assert.deepEqual(history.at(-1).citationIndices,[1]);assert.equal(searches,2);assert.equal((await cache.list()).length,1);cache.close();
  cache=env.open();ai=createAIClient({knowledge:cache,generate:async p=>{assert.ok(p.knowledgeCandidates[0].results.length);return plan('knowledge',p.knowledgeCandidates[0].id,'规则以活动页为准。[1]');},search:()=>assert.fail('不应重复搜索'),onSearch:r=>history.push(r)});
  try{assert.equal(await ai({...prompt,target:{text:'直播PK机制是什么？'},reserveFollowup:()=>assert.fail('命中无第二次模型调用')},settings),'规则以活动页为准。');assert.equal(history.at(-1).cached,true);assert.deepEqual(settings.memory.entries,[]);}finally{cache.close();}
 });
@@ -58,9 +58,9 @@ test('精确命中不消耗搜索额度；强制更新确实重查；停用学�
  const env=setup(),cache=env.open();let searches=0;
  const ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音直播PK规则','','rules') : '以活动页为准。[1]',search:async q=>{searches++;return sources(q,env.now());}});
  try{
-  await ai(prompt,settings);await ai(prompt,settings);assert.equal(searches,1);
-  await ai({...prompt,target:{text:'重新查一下最新抖音PK规则'}},settings);assert.equal(searches,2);
-  await ai(prompt,{...settings,search:{...settings.search,rememberKnowledge:false}});assert.equal(searches,3);
+  await ai(prompt,settings);await ai(prompt,settings);assert.equal(searches,2);
+  await ai({...prompt,target:{text:'重新查一下最新抖音PK规则'}},settings);assert.equal(searches,4);
+  await ai(prompt,{...settings,search:{...settings.search,rememberKnowledge:false}});assert.equal(searches,6);
  }finally{cache.close();}
 });
 
@@ -91,7 +91,7 @@ test('路由期间过期的缓存自动重查，停用搜索时仍可使用有�
   const offline=createAIClient({knowledge:cache,generate});assert.equal(await offline(prompt,{...settings,search:{...settings.search,enabled:false}}),'以活动页为准。');
   const invalid=createAIClient({knowledge:cache,generate:async p=>plan('knowledge',p.knowledgeCandidates[0].id,'错误引用。[99]')});assert.equal(await invalid(prompt,settings),'错误引用。');
   const expires=createAIClient({knowledge:cache,generate:async p=>{if(p.intentRouting)env.advance(86400000);return generate(p);},search:async q=>{searches++;return sources(q,env.now());}});
-  assert.equal(await expires(prompt,settings),'更新后以活动页为准。');assert.equal(searches,1);
+  assert.equal(await expires(prompt,settings),'更新后以活动页为准。');assert.equal(searches,2);
  }finally{cache.close();}
 });
 
