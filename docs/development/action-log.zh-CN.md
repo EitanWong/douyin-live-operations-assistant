@@ -1874,3 +1874,5 @@ Promptfoo接入首轮完整保留：评分脚本单行返回被框架按表达�
 冻结树证据：output/layout-blocks-2026-11-04 中的 final-test.log、final-check.log、build.log、targeted.log、before.png、after.png、minimum.png、desktop.json、minimum.json、subviews-minimum.json、populated.json、wheel.json、wide.json、short-wide.json 和 measure-layout.js。测量检查的是网格空位与高度差，统一 12/16px 的可读性间距继续保留；不将有限尺寸实测表述为任意浏览器任意极端尺寸的数学保证。
 
 专用检查限制：crapper / dryer / mutator 命令及可调用工具均不可用，三项未执行，未用其他检查冒称其通过。未完成项：用户安装中的扩展需要重新加载并刷新直播页才能使用新构建。日常交付仅提交推送 dev，不直接更新 main、版本号或标签。
+
+交付回执：功能、回归与尺寸标准已提交为 **1ff5e94dea11cfaffa40258ecf23697516c6e1ed** 并推送 origin/dev（d874bc0 → 1ff5e94）；git ls-remote 与本地 HEAD 逐字一致。最终 1361/1361、构建、check 和 diff 检查通过；临时 4186 服务已停止，测试标签已关闭，本轮无新增工作树。该回执以独立文档提交再次推送 dev，最终提交号见完成报告；无额外代码变更。
