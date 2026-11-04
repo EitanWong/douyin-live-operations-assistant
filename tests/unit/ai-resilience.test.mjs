@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {withDeadline,createResilientAI} from '../../src/services/ai-resilience.js';
 import {Engine,mergeConfig} from '../../src/core/engine.js';
 
-test('联网问答等待语义路由和查证完成，端侧不抢先用未核实回复取消云端',async()=>{
+for(const enabled of [true,false])test(`公共工具问答等待路由查证，端侧不抢先取消云端（搜索${enabled}）`,async()=>{
  let local=0;const ai=createResilientAI({cloud:async p=>{await new Promise(r=>setTimeout(r,15));p.onLookup({query:'上海天气'});await new Promise(r=>setTimeout(r,20));return '上海晴。[1]';},
   edge:{ready:async()=>true,reply:async()=>{local++;return '没有天气资料。';}}});
- const answer=await ai({task:{kind:'ai'},target:{text:'上海今天天气怎么样'}},{search:{enabled:true},edge:{enabled:true},latency:{cloudMs:25,totalMs:30,edgeDelayMs:1}});
+ const answer=await ai({task:{kind:'ai'},target:{text:'上海今天天气怎么样'}},{search:{enabled},edge:{enabled:true},latency:{cloudMs:25,totalMs:30,edgeDelayMs:1}});
  assert.equal(answer,'上海晴。[1]');assert.equal(local,0);
 });
 

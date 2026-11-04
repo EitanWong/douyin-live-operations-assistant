@@ -34,7 +34,7 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
  return async(prompt,config)=>{
   let researching=false;
   const onLookup=record=>{researching=true;prompt.onLookup?.(record);};
-  const routedSearch=config.search?.enabled && ['ai','agent'].includes(prompt.task?.kind) && Boolean(prompt.target?.text);
+  const routedLookup=['ai','agent'].includes(prompt.task?.kind) && Boolean(prompt.target?.text);
   const started=now(),limits={...LATENCY_DEFAULTS,...config.latency,...(config.edge?.autoTune ? edge?.tuning?.() : {})},current=()=>!prompt.signal?.aborted && (!prompt.isCurrent || prompt.isCurrent());
   const trace=(provider,status)=>{try{onTrace({provider,status,elapsedMs:now()-started,kind:prompt.task?.kind || 'ai',at:now()});}catch{}};
   const cloudSignal=new AbortController(),edgeSignal=new AbortController();let delayTimer;
@@ -54,7 +54,7 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
     const prepared=config.edge?.enabled && edge && await edge.ready('text');
     if(!prepared){await failed;throw cloudFailure || new Error('端侧未准备');}
     // A lookup has one owner; a short local answer cannot cancel source checking.
-    const completed=routedSearch ? await failed : await Promise.race([failed,new Promise(resolve=>{delayTimer=setTimeout(()=>resolve(null),limits.edgeDelayMs);})]);
+    const completed=routedLookup ? await failed : await Promise.race([failed,new Promise(resolve=>{delayTimer=setTimeout(()=>resolve(null),limits.edgeDelayMs);})]);
     if(completed)throw new Error('云端已完成');
     if(researching)throw cloudFailure || new Error('联网查询未成功');
     clearTimeout(delayTimer);if(!current() || edgeSignal.signal.aborted)throw cancelled();
