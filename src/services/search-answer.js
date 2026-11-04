@@ -11,10 +11,10 @@ export function ruleAnswerIssues(answer,found,citationIndices){
  for(const pattern of [/取(?:较|最)?(?:高|大)|最高倍率/gu,/取(?:较|最)?(?:低|小)|最低倍率/gu,/优先按|优先使用/gu]){
   if(pattern.test(answer) && !new RegExp(pattern.source,'u').test(text))issues.push('来源未说明加成优先级，不能从不能叠加推断取高、取低或优先顺序');
  }
- const variation=/(?:不同|各)(?:种|个)?玩法[^。；;]{0,18}(?:倍率|概率)[^。；;]{0,10}(?:各异|不同)/u;
- if(variation.test(answer) && !variation.test(text))issues.push('来源未比较不同玩法的倍率或概率，不能添加这种差异断言');
- if(/(?:虚构(?:的)?测试|(?:对照)?测试(?:活动|资料|说明)|不是抖音通用规则)/u.test(text) && !/测试|示例|设定|对照/u.test(answer))issues.push('来源明确限定测试或示例，回答须保留该范围，不能说成抖音通用规则');
  const modes=new Set(text.match(/(?:玩法|模式)[A-Z甲乙丙一二三123]/gu) || []);
+ const variation=/(?:不同|各|其他)(?:种|个)?玩法[^。；;]{0,18}(?:时长|倍率|概率)[^。；;]{0,10}(?:各异|不同)/u;
+ if(variation.test(answer) && modes.size<2 && !variation.test(text))issues.push('来源未比较不同玩法的时长、倍率或概率，不能添加这种差异断言');
+ if(/(?:(?:测试|虚构|示例|设定).{0,4}(?:活动|资料|说明|规则|玩法)|不是抖音通用规则)/u.test(text) && !/测试|示例|设定|对照/u.test(answer))issues.push('来源明确限定测试或示例，回答须保留该范围，不能说成抖音通用规则');
  if(modes.size>1 && /本玩法|本模式/u.test(answer))issues.push('来源有多个玩法，须分别保留主语或概括这些示例的差异，不能统称本玩法');
  for(const match of answer.matchAll(/(?:无|没有|不存在)(?:任何|一个|固定|统一|通用|保底|概率|标准|公式){1,5}|(?:平台|官方|抖音).{0,8}未公开[^。；;]{0,15}/gu)){
   if(!cited.some(row=>row.content.includes(match[0])))issues.push(`否定性规则断言缺少直接来源原文：${match[0]}`);

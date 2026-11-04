@@ -147,3 +147,24 @@ test('测试规则必须保留来源范围，评论不能推出平台未公开�
  assert.ok(ruleAnswerIssues('不同玩法倍率和概率各异。',comment,[1]).length);
  assert.deepEqual(ruleAnswerIssues('网友评论不足以证明通用规则。',comment,[1]),[]);
 });
+
+test('有资料却遗漏独立引用须修订；引用仍缺失或伪造时不得当作已查证答案交付',async()=>{
+ for(const repaired of [true,false]){
+  let calls=0,reserves=0;
+  const client=createAIClient({search:async()=>found,generate:async p=>{
+   calls++;if(p.intentRouting)return '{"intent":"web-search","query":"周期"}';
+   if(p.answerDraft){assert.match(p.answerIssues.join(' '),/引用/);return JSON.stringify({answer:'周期73天。',sources:repaired ? [3] : [9]});}
+   return '{"answer":"周期73天。","sources":[]}';
+  }});
+  const result=client({...prompt,reserveFollowup:async()=>{reserves++;return true;}},config);
+  if(repaired)assert.equal(await result,'周期73天。');else await assert.rejects(result,/引用/);
+  assert.equal(calls,3);assert.equal(reserves,2);
+ }
+});
+
+test('测试用玩法也要保留范围，操作文档不能补出其他玩法时长不同',async()=>{
+ const {ruleAnswerIssues}=await import('../../src/services/search-answer.js');
+ assert.ok(ruleAnswerIssues('按礼物PK分判胜负。',{topic:'live-pk',results:[{index:1,content:'测试用玩法说明：本玩法按礼物PK分判胜负。'}]},[1]).length);
+ assert.ok(ruleAnswerIssues('其他玩法时长可能不同。',{topic:'live-pk',results:[{index:1,content:'从面板发起多人PK。'}]},[1]).length);
+ assert.deepEqual(ruleAnswerIssues('测试示例中两种玩法时长不同。',{topic:'live-pk',results:[{index:1,content:'测试资料：玩法A三分钟，玩法B十分钟。'}]},[1]),[]);
+});

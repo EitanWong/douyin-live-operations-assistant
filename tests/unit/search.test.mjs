@@ -110,11 +110,11 @@ test('意图JSON异常不会直接发到公屏；非问答模块不进入联网�
   assert.equal(await ai({...prompt,task:{kind:'gift'}},config),'谢谢支持。');
 });
 
-test('联网答案缺少引用仍返回正文，虚构引用移除且可核对来源',async()=>{
+test('联网答案缺少或虚构引用时仅修订一次，仍无有效依据不能交付',async()=>{
   for(const answer of ['上海晴。','上海晴。[99]']){
     let count=0;
     const ai=createAIClient({getKey:()=> 'key',search:async()=>({results:[{index:1,url:'https://x.test'}]}),request:details=>response(details,++count===1 ? plan('web-search','','上海天气') : answer)});
-    assert.equal(await ai(prompt,config),'上海晴。');
+    await assert.rejects(ai(prompt,config),/引用/u);assert.equal(count,3);
   }
 });
 

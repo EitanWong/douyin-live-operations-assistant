@@ -15,15 +15,16 @@ function fixture(answer,search=async()=>found){
   knowledge:{revision:async()=>1,candidates:async()=>[],find:async()=>null,remember:async()=>remembers++},onSearch:r=>records.push(r)});
  return {client,prompts,records,remembers:()=>remembers};
 }
-test('天气与知识答案未附引用时保留正文，标注诊断且不冒充已核实缓存',async()=>{
+test('天气与知识答案未附引用时只修订一次，仍无引用不得交付或写入缓存',async()=>{
  for(const answer of ['上海11月5日小雨，18至23℃。','标准大气压下，纯水沸点约100℃。']){
-  const f=fixture(answer);assert.equal(await f.client(prompt,config),answer);
-  assert.match(f.records.at(-1).citationWarning,/引用/u);assert.equal(f.remembers(),0);assert.equal(f.prompts.length,2);
+  const f=fixture(answer);await assert.rejects(f.client(prompt,config),/引用/u);
+  assert.match(f.records.at(-1).error,/引用/u);assert.equal(f.remembers(),0);assert.equal(f.prompts.length,3);
  }
 });
-test('常见中文引用格式统一为实际来源编号，虚构编号移除但不吞掉答案',async()=>{
+test('常见中文引用格式统一为实际来源编号，虚构编号不能作为有效依据',async()=>{
  for(const [raw,expected] of [['上海小雨。【1】','上海小雨。'],['上海小雨。［1］','上海小雨。'],['上海小雨。[99]','上海小雨。']]){
-  const f=fixture(raw);assert.equal(await f.client(prompt,config),expected);
+  const f=fixture(raw);
+  if(raw.includes('99'))await assert.rejects(f.client(prompt,config),/引用/u);else assert.equal(await f.client(prompt,config),expected);
   assert.equal(f.remembers(),raw.includes('99') ? 0 : 1);
  }
 });
@@ -53,7 +54,8 @@ test('缺来源的处理仍遵守后续请求额度和取消，不为保证回�
 test('结构化来源回答由模型选择实际依据，正文与引用分开解析后输出',async()=>{
  for(const [sources,expected,learned] of [[[1],'上海小雨。',1],[[99],'上海小雨。',0],[[],'上海小雨。',0]]){
   const f=fixture(JSON.stringify({answer:'上海小雨。',sources}));
-  assert.equal(await f.client(prompt,config),expected);assert.equal(f.remembers(),learned);
+  if(learned)assert.equal(await f.client(prompt,config),expected);else await assert.rejects(f.client(prompt,config),/引用/u);
+  assert.equal(f.remembers(),learned);
  }
 });
 test('最终查证提示只保留回答所需规则，结构化正文与依据不被礼物/主播规则淹没',()=>{

@@ -213,10 +213,12 @@ export function createAIClient({ request, getKey, generate, search, knowledge, o
     const refineAnswer=async(found,parsed)=>{
       const maxLength=prompt.searchMaxLength ?? prompt.maxLength;
       const issues=ruleAnswerIssues(parsed.answer,found,parsed.citationIndices);
+      if(found.results.length && !parsed.grounded)issues.push('回复有来源资料但缺少有效引用，sources必须填写真正支持结论的现有来源编号');
       if([...parsed.answer].length<=maxLength && !issues.length)return parsed;
       if(prompt.reserveFollowup && !await prompt.reserveFollowup())throw new Error('答案压缩或修订额度不足');
       const revised=searchAnswer(await complete({...prompt,maxLength,searchResults:found,answerDraft:parsed.answer,answerIssues:issues}),found);
       if([...revised.answer].length>maxLength)throw new Error('压缩后答案仍超过公屏字数');
+      if(found.results.length && !revised.grounded)throw new Error('修订后答案仍缺少有效引用');
       if(ruleAnswerIssues(revised.answer,found,revised.citationIndices).length)throw new Error('修订后答案仍有无依据的规则断言');
       return revised;
     };

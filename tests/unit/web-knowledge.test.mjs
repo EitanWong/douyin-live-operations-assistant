@@ -67,7 +67,7 @@ test('精确命中不消耗搜索额度；强制更新确实重查；停用学�
 test('未引用的答案、空结果、失败不学习；伪造缓存ID与引用不能直接发出',async()=>{
  const env=setup(),cache=env.open();try{
   for(const answer of ['没有来源的断言','无法确认。[99]','[SKIP]']){
-   const ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : answer,search:async q=>sources(q,env.now())});await ai(prompt,settings);
+   const ai=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('web-search','抖音PK规则','','rules') : answer,search:async q=>sources(q,env.now())});await assert.rejects(ai(prompt,settings),/引用/u);
   }
   assert.deepEqual(await cache.list(),[]);
   const ai=createAIClient({knowledge:cache,generate:async()=>plan('knowledge','00000000-0000-4000-8000-000000000000','编造结论。[1]')});assert.match(await ai(prompt,settings),/还不能确定/);
@@ -83,13 +83,13 @@ test('本地模型使用同一份长期资料，知识存储失败不会吞掉�
  }finally{cache.close();}
 });
 
-test('路由期间过期的缓存自动重查，停用搜索时仍可使用有效知识；虚构引用移除不吞答案',async()=>{
+test('路由期间过期的缓存自动重查，停用搜索时仍可使用有效知识；虚构引用修订仍错则拒绝',async()=>{
  const env=setup(),cache=env.open();let searches=0;
  try{
   await cache.remember(sources('抖音PK规则',env.now()),settings.search,{freshness:'rules'});
   const generate=async p=>p.intentRouting ? plan('knowledge',p.knowledgeCandidates[0].id,'以活动页为准。[1]') : '更新后以活动页为准。[1]';
   const offline=createAIClient({knowledge:cache,generate});assert.equal(await offline(prompt,{...settings,search:{...settings.search,enabled:false}}),'以活动页为准。');
-  const invalid=createAIClient({knowledge:cache,generate:async p=>plan('knowledge',p.knowledgeCandidates[0].id,'错误引用。[99]')});assert.equal(await invalid(prompt,settings),'错误引用。');
+  const invalid=createAIClient({knowledge:cache,generate:async p=>p.intentRouting ? plan('knowledge',p.knowledgeCandidates[0].id,'错误引用。[99]') : '{"answer":"错误引用。","sources":[99]}' });await assert.rejects(invalid(prompt,settings),/引用/u);
   const expires=createAIClient({knowledge:cache,generate:async p=>{if(p.intentRouting)env.advance(86400000);return generate(p);},search:async q=>{searches++;return sources(q,env.now());}});
   assert.equal(await expires(prompt,settings),'更新后以活动页为准。');assert.equal(searches,2);
  }finally{cache.close();}
