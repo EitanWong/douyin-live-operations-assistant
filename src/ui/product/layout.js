@@ -4,7 +4,7 @@ export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36
 export const PRODUCT_COMPACT_DIMENSIONS=Object.freeze({...PRODUCT_DIMENSIONS,controlHeight:32,headingHeight:24,textareaMinHeight:72,cardMinWidth:280,contentPadding:12,gap:6,sectionGap:8,cardPadding:8,metricMinHeight:52,chartHeight:180});
 const transparent='.ai-settings,.ai-service-grid,[data-workspace-contents],[data-ai-modes],[data-custom-media],[data-perception-active],.workspace-metrics';
 const cards='.pred-visual-grid,.workspace-grid,.settings-workspace,.income-workspace,.pk-workspace,.pk-overview,.pk-analysis,.anchor-analytics,[data-list],[data-memory-list]';
-const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times,.giveaway-prize-row,.bot-game-options';
+const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times,.giveaway-prize-row,.bot-game-options,.feature-settings .feature-list';
 const metrics='.knowledge-metrics,.pred-metrics,.anchor-session-times,.anchor-metrics,.stats,.overview-metrics,.anchor-exhibition-grid,.income-meta,.gift-total-grid,.pk-prob,.pk-reading,.anchor-kpis';
 const rows='.knowledge-heading,.knowledge-section-heading,.row,.actions,.ai-key-actions,.ai-test-row,.ai-card-heading,.ai-result-heading,.ai-result-meta,.anchor-periods,.workspace-filter-controls,.workspace-filter-actions,.workspace-filter-heading,.status,.anchor-pagination,.anchor-section-head,.pk-chart-head,.giveaway-actions,.pk-page-heading,.pk-broadcast-master,.pk-broadcast-option,.row-head,.row-head>div,.inline,.feature-row,.presets,.log-head,.giveaway-gift-selected';
 const surfaces='.knowledge-toolbar,.knowledge-section,.pred-card,.workspace-card,.settings-group,.ai-card,.anchor-section,.pk-visual,.pk-overview-main,.pk-outlook,.pk-analysis>details,.giveaway-config,.giveaway-live,.editor-row';
@@ -59,7 +59,7 @@ export function gridOptions(node) {
  // Full-width children occupy every track, so auto-fit cannot collapse phantom
  // columns. Cap tracks by actual items and let container queries choose the fit.
  const count=node.children.filter(child=>child.span!=='full').length;
- const minimum=node.layout==='fields' ? PRODUCT_DIMENSIONS.fieldMinWidth : PRODUCT_DIMENSIONS.metricMinWidth;
+ const minimum=node.classes?.split(/\s/u).includes('feature-list') ? PRODUCT_DIMENSIONS.cardMinWidth : node.layout==='fields' ? PRODUCT_DIMENSIONS.fieldMinWidth : PRODUCT_DIMENSIONS.metricMinWidth;
  const gap=PRODUCT_DIMENSIONS.gap,cols={base:1};
  for(let i=2;i<=Math.min(6,count);i++)cols[`${minimum*i+gap*(i-1)}px`]=i;
  return {cols};
