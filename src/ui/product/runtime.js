@@ -70,6 +70,13 @@ function Chart({node}) {
   return h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'});
 }
 function renderChildren(nodes,bridge){return nodes.map((node,i)=>node.span==='full' ? h('div',{key:node.id || i,className:'product-full'},h(View,{node,bridge})) : h(View,{node,bridge,key:node.id || i}));}
+function Card({node,bridge,props}) {
+  const first=node.children[0],heading=first?.tag==='h3' || first?.layout==='row' && first.children.some(child=>child.tag==='h3') ? first : null;
+  const label=heading ? recordText(heading) : node.label || '功能设置';
+  return h(Paper,{...props,'data-card-size':node.size,component:Stack,gap:0,withBorder:true,p:0,radius:'md'},
+    heading ? h('header',{className:'product-card-heading'},h(View,{node:heading,bridge})) : null,
+    h(Stack,{className:'product-card-body',gap:'var(--product-gap)',tabIndex:0,role:'region','aria-label':label},renderChildren(heading ? node.children.slice(1) : node.children,bridge)));
+}
 function View({node,bridge}) {
   if(!node)return null;
   if(node.kind==='text')return node.text;
@@ -90,7 +97,7 @@ function View({node,bridge}) {
   const content=renderChildren(node.children,bridge);
   if(['cards','fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:node.layout==='cards' ? 'var(--product-section-gap)' : 'var(--product-gap)'},content);
   if(node.layout==='scoreboard')return h('div',props,content);
-  if(node.surface==='card')return h(Paper,{...props,component:Stack,gap:'var(--product-gap)',withBorder:true,p:'var(--product-card-padding)',radius:'md'},content);
+  if(node.surface==='card')return h(Card,{node,bridge,props});
   if(node.layout==='row')return h(Group,{...props,gap:'var(--product-gap)',wrap:'wrap',align:'center'},content);
   if(node.layout==='stack')return h(Stack,{...props,gap:'var(--product-gap)'},content);
   return h(node.tag || 'div',props,renderChildren(node.children,bridge));

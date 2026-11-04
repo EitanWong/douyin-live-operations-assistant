@@ -29,6 +29,20 @@ test('卡片按原顺序成对排成完整行，通栏内容两侧的单张卡�
  assert.deepEqual(gridOptions({layout:'cards',children:result}),{cols:{base:1,'656px':2}});
 });
 
+test('长短卡片使用同一积木规格，折叠操作独占完整行而不留下空位',()=>{
+ const children=[{id:'short',surface:'card',children:[]},{id:'long',surface:'card',children:Array(20).fill({kind:'field'})},{id:'advanced',kind:'details',surface:'card'},{id:'last',surface:'card'}];
+ const result=layoutChildren('cards',children);
+ assert.deepEqual(result.map(node=>node.size),['tile','tile',undefined,'tile']);
+ assert.deepEqual(result.map(node=>node.span),[undefined,undefined,'full','full']);
+ assert.deepEqual(result.map(node=>node.id),children.map(node=>node.id));
+ assert.ok(children.every(node=>node.size===undefined && node.span===undefined));
+});
+
+test('显式通栏配置使用紧凑区块规格，普通卡片仍保持统一行高',()=>{
+ const result=layoutChildren('cards',[{surface:'card',span:'full'},{surface:'card'},{surface:'card'}]);
+ assert.deepEqual(result.map(node=>node.size),['section','tile','tile']);
+});
+
 test('纯数据网格使用指标宽度，PK 速度与可信度不会占用表单的大列宽',()=>{
  const dom=new JSDOM('<div class="grid"><div><span>近15秒速度</span><p>120 / 100</p></div><div><span>可信度</span><p>70%</p></div></div><div class="grid"><label>间隔<input></label></div>');
  try{assert.deepEqual([...dom.window.document.body.children].map(node=>describeLayout(node).layout),['metrics','fields']);}finally{dom.window.close();}

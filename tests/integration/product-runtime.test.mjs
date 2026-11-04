@@ -38,6 +38,10 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   const slider=ui.querySelector('.mantine-Slider-root [role=slider]');assert.ok(slider,'组件界面使用真正的Mantine滑块，不将range包成文本框');assert.equal(slider.getAttribute('aria-valuetext'),'克制陪伴');slider.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'End',bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));assert.equal(root.querySelector('input[type=range]').value,'4');
   const tabs=[...ui.querySelectorAll('[role=tab]')];assert.deepEqual(tabs.map(n=>n.textContent),['模型设置','额度设置']);tabs[0].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));assert.equal(sections,1);assert.equal(ui.querySelector('[role=tab][aria-selected=true]').textContent,'额度设置');
   const input=ui.querySelector('input[aria-label="模型名"]');assert.ok(input);const description=input.closest('.mantine-InputWrapper-root').querySelector('.mantine-InputWrapper-description');assert.ok(input.compareDocumentPosition(description) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,'说明位于输入框之后，不使同排输入框错位');const setter=Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set;setter.call(input,'new-model');input.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));
+  const card=input.closest('[data-card-size="tile"]'),body=card?.querySelector('.product-card-body');
+  assert.ok(card,'长短内容都进入统一规格卡片');assert.ok(body?.contains(input),'所有原字段位于可滚动卡片正文');
+  assert.equal(body.tabIndex,0,'鼠标与键盘均可进入滚动区');assert.equal(body.getAttribute('aria-label'),'回复模型');
+  assert.equal(card.querySelector('.product-card-heading h3')?.textContent,'回复模型','标题固定在滚动正文之外');
   await new Promise(resolve=>setTimeout(resolve,25));assert.equal(root.querySelector('input').value,'new-model');assert.equal(changes,1);
   [...ui.querySelectorAll('button')].find(b=>b.textContent==='保存设置').click();assert.equal(saves,1);
   ui.querySelector('input[type=checkbox]').click();assert.equal(root.querySelector('input[type=checkbox]').checked,true);

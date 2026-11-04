@@ -1,6 +1,6 @@
 // Translate legacy presentation once at the boundary. The visible workspace
 // uses these roles, never a second set of source-DOM layout selectors.
-export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,textareaMinHeight:96,cardMinWidth:320,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
+export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,textareaMinHeight:96,cardMinWidth:320,cardHeight:400,cardMinHeight:280,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
 const transparent='.ai-settings,.ai-service-grid,[data-workspace-contents],[data-ai-modes],[data-custom-media],[data-perception-active],.workspace-metrics';
 const cards='.pred-visual-grid,.workspace-grid,.settings-workspace,.income-workspace,.pk-workspace,.pk-overview,.pk-analysis,.anchor-analytics,[data-list],[data-memory-list]';
 const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times';
@@ -26,7 +26,7 @@ export function describeLayout(node) {
 
 export function layoutChildren(layout,children) {
  if(layout==='cards'){
-  const result=children.map(child=>child.surface==='card' ? child : {...child,span:'full'});
+  const result=children.map(child=>child.surface==='card' && child.kind!=='details' ? {...child,size:child.span==='full' ? 'section' : 'tile'} : {...child,span:'full'});
   // Each run uses complete pairs; an unpaired card gets the whole final row.
   let start=0;
   for(let i=0;i<=result.length;i++){
