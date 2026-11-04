@@ -1,17 +1,18 @@
-// Probe in priority order. Scrolling is the fallback after both natural layouts.
+// Find the largest readable scale that fits, then fall back to page scrolling.
+// Column widths are stable during the probes so the required height is monotone.
 export function chooseWorkspaceFit(measure) {
-  for(const density of ['comfortable','compact']) {
-    const {required,available}=measure(density);
-    if(available<=0)return null;
-    if(required<=available+1)return density;
-  }
-  return 'scroll';
+  const fits=scale=>{const {required,available}=measure(scale);return available<=0 ? null : required<=available+1;};
+  const comfortable=fits(1);if(comfortable===null)return null;
+  let low=0,high=2;
+  if(comfortable){low=1;if(fits(2))return {scale:2,density:'comfortable'};}
+  else {high=1;if(!fits(0))return {scale:0,density:'scroll'};}
+  for(let i=0;i<6;i++){const middle=(low+high)/2;if(fits(middle))low=middle;else high=middle;}
+  return {scale:low,density:comfortable ? 'comfortable' : 'compact'};
 }
 
 export class WorkspaceFit {
-  constructor(content,{reflow=()=>{}}={}) {
+  constructor(content) {
     this.content=content;this.owner=content.closest('.product-main');
-    this.reflow=()=>reflow(content);
     this.view=content.ownerDocument.defaultView;this.frame=0;this.observed=new Set();
     this.schedule=()=>{if(!this.frame)this.frame=this.view.requestAnimationFrame(()=>{this.frame=0;this.layout();});};
     this.observer=new this.view.ResizeObserver(this.schedule);
@@ -26,15 +27,16 @@ export class WorkspaceFit {
   layout() {
     const page=this.content.querySelector('.product-page');
     if(!page || !this.content.clientWidth || !this.content.clientHeight)return;
-    // Natural-height probes must not reset a scrolled field group or its page.
+    // Density probes must not reset a scrolled field group or its page.
     const positions=[this.content,...this.content.querySelectorAll('.product-card-body')].map(node=>({node,top:node.scrollTop,left:node.scrollLeft}));
-    const fit=chooseWorkspaceFit(density=>{
-      this.owner.dataset.fit=density;
-      this.reflow();
+    this.owner.dataset.measuring='';
+    const fit=chooseWorkspaceFit(scale=>{
+      this.owner.style.setProperty('--product-density',String(scale));
       const style=this.view.getComputedStyle(this.content);
       return {required:page.getBoundingClientRect().height+Number.parseFloat(style.paddingTop)+Number.parseFloat(style.paddingBottom),available:this.content.clientHeight};
     });
-    if(fit){this.owner.dataset.fit=fit;this.reflow();}
+    if(fit){this.owner.dataset.fit=fit.density;this.owner.style.setProperty('--product-density',String(fit.scale));}
+    delete this.owner.dataset.measuring;
     for(const {node,top,left} of positions){if(node.scrollTop!==top)node.scrollTop=top;if(node.scrollLeft!==left)node.scrollLeft=left;}
   }
   destroy() {this.observer.disconnect();this.view.cancelAnimationFrame(this.frame);}

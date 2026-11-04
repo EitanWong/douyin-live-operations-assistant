@@ -27,7 +27,7 @@ test('卡片保留原顺序与显式通栏，不提前限定双列或把尾项�
  assert.ok(children.every(node=>node.span===undefined),'投影不改变原表单与规则状态');
 });
 
-test('长短卡片与普通折叠操作共用列宽，小组件填充空位而不强制整行',()=>{
+test('长短卡片与普通折叠操作共用尺寸标准，折叠区不强制通栏',()=>{
  const children=[{id:'short',surface:'card',children:[]},{id:'long',surface:'card',children:Array(20).fill({kind:'field'})},{id:'advanced',kind:'details',surface:'card'},{id:'last',surface:'card'}];
  const result=layoutChildren('cards',children);
  assert.deepEqual(result.map(node=>node.size),['tile','tile','tile','tile']);
@@ -36,7 +36,7 @@ test('长短卡片与普通折叠操作共用列宽，小组件填充空位而�
  assert.ok(children.every(node=>node.size===undefined && node.span===undefined));
 });
 
-test('显式通栏配置与普通卡片保留宽度角色，高度由自然内容决定',()=>{
+test('显式通栏配置与普通卡片保留宽度角色，行高由所在行内容决定',()=>{
  const result=layoutChildren('cards',[{surface:'card',span:'full'},{surface:'card'},{surface:'card'}]);
  assert.deepEqual(result.map(node=>node.size),['section','tile','tile']);
 });

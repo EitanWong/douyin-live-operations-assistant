@@ -9,7 +9,6 @@ import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
 import {gridOptions,cardRuns} from './layout.js';
 import {WorkspaceFit} from './fit.js';
-import {mountCardGrid,layoutCardGrids} from './masonry.js';
 import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel} from './inspect.js';
 import {recordText} from './collection.js';
 import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
@@ -75,13 +74,11 @@ function Chart({node}) {
   return h(Inspectable,{node},h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'}));
 }
 function CardRun({nodes,bridge}) {
-  const element=useRef(null);
-  useLayoutEffect(()=>mountCardGrid(element.current),[]);
-  return h('div',{ref:element,className:'product-masonry'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot','data-full':child.span==='full' || undefined},h(View,{node:child,bridge}))));
+  return h(Group,{className:'product-card-run','data-card-run':nodes[0]?.span==='full' ? 'full' : nodes[0]?.kind==='details' ? 'disclosures' : nodes[0]?.band || 'cards',wrap:'wrap',align:'stretch',gap:'var(--product-section-gap)'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot'},h(View,{node:child,bridge}))));
 }
 function CardGrid({node,bridge,props}) {
   // A run keeps its identity when its first card moves; cards have their own IDs.
-  return h('div',{...props,className:`${props.className} product-card-grid`},cardRuns(node.children).map((run,index)=>h(CardRun,{key:index,nodes:run,bridge})));
+  return h(Stack,{...props,gap:'var(--product-section-gap)',className:`${props.className} product-card-grid`},cardRuns(node.children).map((run,index)=>h(CardRun,{key:index,nodes:run,bridge})));
 }
 function renderChildren(nodes,bridge){return nodes.map((node,i)=>node.span==='full' ? h('div',{key:node.id || i,className:'product-full'},h(View,{node,bridge})) : h(View,{node,bridge,key:node.id || i}));}
 function Card({node,bridge,props}) {
@@ -111,7 +108,7 @@ function View({node,bridge}) {
   const props={className:[node.classes,node.layout ? 'product-layout' : '',node.collection?.mode==='scroll' ? 'product-edit-scroll' : ''].filter(Boolean).join(' '),'data-view-id':node.id,'data-layout':node.layout,'data-surface':node.surface,'aria-label':node.label,role:node.role,tabIndex:node.tag==='h3' ? -1 : undefined};
   if(node.layout==='cards')return h(CardGrid,{node,bridge,props});
   const content=renderChildren(node.children,bridge);
-  if(node.layout==='metrics')return h(Inspectable,{node},h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:'var(--product-gap)'},content));
+  if(node.layout==='metrics')return h(Inspectable,{node},h(Group,{...props,wrap:'wrap',align:'stretch',gap:'var(--product-gap)'},content));
   if(node.layout==='fields')return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:'var(--product-gap)'},content);
   if(node.layout==='scoreboard')return h('div',props,content);
   if(node.surface==='card')return h(Card,{node,bridge,props});
@@ -137,7 +134,7 @@ function Workspace({bridge,shadow,onReady}) {
   const groupReveal=useMotionTarget({height:state.sidebar.collapsed && !compact ? 0 : 24,opacity:state.sidebar.collapsed && !compact ? 0 : 1},{...springs.layout,opacity:fade});
   const selectedView=state.subviews.find(node=>node.selected)?.id;
   const fit=useRef(null);
-  useLayoutEffect(()=>{fit.current=new WorkspaceFit(main.current,{reflow:layoutCardGrids});return ()=>fit.current.destroy();},[state.key]);
+  useLayoutEffect(()=>{fit.current=new WorkspaceFit(main.current);return ()=>fit.current.destroy();},[state.key]);
   useLayoutEffect(()=>{fit.current.refresh();},[state.content,selectedView]);
   useEffect(()=>{const query=shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)'),change=()=>setSystemDark(query.matches);query.addEventListener('change',change);return ()=>query.removeEventListener('change',change);},[shadow]);
   useEffect(()=>{main.current?.scrollTo?.({top:0});setMenu(false);},[state.key,selectedView]);
@@ -149,7 +146,7 @@ function Workspace({bridge,shadow,onReady}) {
   const headings=[];function walk(node){if(node?.tag==='h3')headings.push({value:node.id,label:node.children.filter(n=>n.kind==='text').map(n=>n.text).join('').trim()});for(const child of node?.children || [])walk(child);}walk(state.content);
   const nav=h('nav',{id:'product-navigation',className:'product-nav','aria-label':'功能导航'},groups.map(group=>h('div',{key:group,className:'product-nav-group'},h(motion.div,{className:'product-nav-label',initial:false,'aria-hidden':state.sidebar.collapsed && !compact,animate:groupReveal},group),state.nav.filter(n=>n.group===group).map(item=>h(Button,{key:item.key,className:'product-nav-button',variant:state.key===item.key ? 'light' : 'subtle',fullWidth:true,'aria-label':item.label,title:item.label,'aria-current':state.key===item.key ? 'page' : undefined,onClick:()=>bridge.navigate(item.key),leftSection:icon(item.icon)},item.label)))));
   return h(MantineProvider,{forceColorScheme:dark ? 'dark' : 'light',getRootElement:()=>shadow.host,cssVariablesSelector:':host',deduplicateCssVariables:false,withGlobalClasses:false,cssVariablesResolver:componentVariables,theme:componentTheme(state.palette,dark)},
-    h(InspectionProvider,{content:state.content,shadow,pageKey:`${state.key}:${selectedView || ''}`,disabled:Boolean(state.dialog),reflow:layoutCardGrids,render:node=>node.kind==='details' ? h(Stack,{gap:'var(--product-gap)'},renderChildren(node.children,bridge)) : h(View,{node,bridge})},({inspecting})=>h(React.Fragment,null,
+    h(InspectionProvider,{content:state.content,shadow,pageKey:`${state.key}:${selectedView || ''}`,disabled:Boolean(state.dialog),render:node=>node.kind==='details' ? h(Stack,{gap:'var(--product-gap)'},renderChildren(node.children,bridge)) : h(View,{node,bridge})},({inspecting})=>h(React.Fragment,null,
     state.dialog ? h(KnowledgeDialog,{node:state.dialog,bridge,shadow}) : null,
     h(motion.div,{initial:false,animate:sidebarWidth,className:'product-shell',inert:inspecting,'aria-hidden':inspecting || undefined,'data-menu-open':menu,'data-sidebar-side':state.sidebar.side,'data-sidebar-collapsed':state.sidebar.collapsed,'data-material':state.material,'data-mantine-color-scheme':dark ? 'dark' : 'light'},
       h(motion.aside,{className:'product-sidebar','aria-label':'功能侧边栏',initial:false,inert:compact && !menu,'aria-hidden':compact && !menu,animate:sidebarReveal},h('div',{className:'product-sidebar-inner'},state.sidebar.toggle ? h('div',{className:'product-nav-toggle'},h(Button,{className:'product-nav-button',variant:'subtle',fullWidth:true,'aria-label':state.sidebar.toggle.label,title:state.sidebar.toggle.label,'aria-expanded':!state.sidebar.collapsed,'aria-controls':'product-navigation',onClick:()=>bridge.activate(state.sidebar.toggle.id),leftSection:icon(state.sidebar.toggle.icon)},state.sidebar.toggle.label)) : null,nav)),
@@ -157,7 +154,7 @@ function Workspace({bridge,shadow,onReady}) {
         h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},h(Chevron,{open:menu}),menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge))),
         h('div',{className:'product-subviews'},state.subviews.length ? h(Tabs,{id:'product-sections',value:selectedView,variant:'pills',className:'product-subview-tabs',onChange:value=>{if(value)bridge.activate(value);}},h(Tabs.List,{'aria-label':`${state.title}分类`},state.subviews.map(node=>h(Tabs.Tab,{key:node.id,value:node.id,disabled:node.disabled},node.text)))) : null,headings.length>2 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const id=e.currentTarget.value;if(bridge.reveal(id))setJump({id});}}) : null),
         h('main',{className:'product-content',ref:main,key:state.key,id:selectedView ? `product-sections-panel-${selectedView}` : undefined,'aria-label':state.title,'aria-labelledby':selectedView ? `product-sections-tab-${selectedView}` : undefined},h(PageEntrance,{key:`${state.key}:${selectedView || ''}`},h(View,{node:state.content,bridge}))),
-        h('footer',{className:'product-status'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite'},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null))))));
+        h('footer',{className:'product-status','aria-label':'运行状态与消息'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite',role:'region','aria-label':'消息与提醒，可滚动',tabIndex:0},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null))))));
 }
 class WorkspaceBoundary extends React.Component {
   state={failed:false};

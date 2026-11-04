@@ -30,17 +30,18 @@ export function renderPlaygroundResult(parent,row,{latest=false}={}){
  const answer=append(item,'section','','ai-final-answer');answer.setAttribute('aria-label','最终答案');
  append(answer,'h4',row.status==='skipped' ? '本次不回复' : row.status==='failed' || row.status==='cancelled' ? '本次未生成答案' : '最终答案');
  const text=append(answer,'p',row.status==='running' ? '正在处理，最终答案将在这里显示。' : row.answer==='[SKIP]' ? '模型判断当前不需要回复。' : row.answer || row.error || '未生成回复','ai-answer-text');text.dataset.playgroundAnswer='';
- const meta=append(item,'div','','ai-result-meta');
+ const diagnostics=item.ownerDocument.createElement('details');diagnostics.dataset.playgroundDiagnostics='';append(diagnostics,'summary','用量、检查与来源');
+ const meta=append(diagnostics,'div','','ai-result-meta');
  for(const value of [`${row.provider==='edge' ? '本地' : row.provider==='cloud' ? '云端' : '执行中'} · ${row.model || '模型待确认'}`,`${row.elapsedMs || 0}ms`,`云端 ${row.calls?.cloud || 0} / 本地 ${row.calls?.local || 0} 次`,intents[row.intent] || '意图待识别'])append(meta,'span',value);
  if(row.cached)append(meta,'span','复用有效历史缓存');
  if(row.controlled)append(item,'p','固定资料评测 · 非真实天气或直播数据','hint');
  if(row.searchError)append(item,'p',`查询提示：${row.searchError}`,'ai-result-warning');
  if(row.citationWarning)append(item,'p',row.citationWarning,'ai-result-warning');
  renderTrace(item,row.trace || []);
- const checks=append(item,'details','','ai-result-checks');checks.dataset.playgroundChecks='';
+ const checks=append(diagnostics,'details','','ai-result-checks');checks.dataset.playgroundChecks='';
  append(checks,'summary',`检查结果 · ${(row.checks || []).filter(check=>check.pass).length}/${row.checks?.length || 0} 通过`);
  for(const check of row.checks || [])append(checks,'p',`${check.pass ? '✓ 通过' : '! 需核对'}：${check.label}`);
  if(row.context)append(checks,'p',`已用上下文：${row.context.chat}条对话 · ${row.context.media}条音画观察 · 知识库${row.context.knowledge ? '开启' : '关闭'}`);
- renderSources(item,row);
+ renderSources(diagnostics,row);item.append(diagnostics);
  return item;
 }

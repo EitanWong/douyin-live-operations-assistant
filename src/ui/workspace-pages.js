@@ -61,10 +61,51 @@ function pageHelp(page){
   const intro=page.querySelector(':scope>.intro');if(!intro)return;
   const help=element(page,'details','workspace-help','data-workspace-help'),summary=element(page,'summary');summary.textContent='使用说明';help.append(summary,intro);page.append(help);
 }
+function organizeFeatureTiles(page){
+  const explanations=element(page,'details','workspace-help','data-feature-explanations'),summary=element(page,'summary');summary.textContent='功能分类说明';explanations.append(summary);
+  for(const group of page.querySelectorAll(':scope>.settings-group')){
+    const title=group.querySelector('h3').textContent,note=group.querySelector('.group-note');
+    const explanation=element(page,'p');explanation.textContent=`${title}：${note?.textContent || ''}`;explanations.append(explanation);
+    for(const row of group.querySelectorAll('.feature-row')){
+      const tile=element(page,'section','workspace-card feature-tile'),category=element(page,'p','group-note');category.textContent=title;tile.append(category,row);group.before(tile);
+    }
+    for(const button of group.querySelectorAll('button'))explanations.append(button);
+    group.remove();
+  }
+  page.append(explanations);
+}
+function organizeShortSections(page){
+  if(page.dataset.page==='features')organizeFeatureTiles(page);
+  if(page.dataset.page==='likes'){
+    const rules=page.querySelector('[data-field="like.responseMode"]').closest('.settings-group'),copy=page.querySelector('[data-field="like.templates"]').closest('.settings-group');
+    rules.querySelector('h3').textContent='感谢方式与话术';copy.querySelector('h3').remove();rules.append(...copy.childNodes);copy.remove();
+  }
+  if(page.dataset.page==='gift'){
+    page.querySelector('.gift-totals')?.classList.add('workspace-wide');
+    const recent=page.querySelector('.recent-gifts');
+    if(recent){const details=element(page,'details','recent-gifts workspace-card'),summary=element(page,'summary');summary.append(...recent.querySelector('.log-head').childNodes);recent.querySelector('.log-head').remove();details.append(summary,...recent.childNodes);recent.replaceWith(details);}
+  }
+  if(page.dataset.page==='bot'){
+    for(const card of page.querySelectorAll(':scope>.settings-group'))card.classList.add('workspace-wide');
+    page.querySelector('.feature-list')?.classList.add('bot-game-options');
+  }
+}
+function organizeAI(page){
+  const models=page.querySelector('[data-ai-section=models]');if(!models)return;
+  const configuration=models.querySelector('[data-field="ai.pipeline.mode"]').closest('.ai-card');
+  for(const selector of ['[data-reply-slider]','[data-action=test-ai]']){
+    const card=models.querySelector(selector).closest('.ai-card'),heading=card.querySelector('h3'),label=element(page,'h4');label.textContent=heading.textContent;heading.replaceWith(label);configuration.append(...card.childNodes);card.remove();
+  }
+  const custom=models.querySelector('[data-field="ai.media.videoEnabled"]').closest('.ai-card'),details=element(page,'details',custom.className),summary=element(page,'summary');summary.textContent=custom.querySelector('h3').textContent;custom.querySelector('h3').remove();details.append(summary,...custom.childNodes);custom.replaceWith(details);
+  page.querySelector('[data-media-start]').closest('.ai-card').classList.add('workspace-wide');
+}
 export function organizePage(page){
   if(page.dataset.page==='anchor'){organizeAnchor(page);pageHelp(page);return;}
   flattenSettings(page);
+  organizeShortSections(page);
+  if(page.dataset.page==='ai')organizeAI(page);
   const body=element(page,'div','workspace-grid','data-workspace-body');body.dataset.workspaceGrid='';
+  if(page.dataset.page==='features')body.classList.add('feature-grid');
   const candidates=[...page.children].filter(child=>child.matches('.settings-group,.workspace-card,.gift-totals,.recent-gifts,.identity,.giveaway-config,.giveaway-live,details.advanced'));
   if(candidates.length){candidates[0].before(body);for(const card of candidates){card.classList.add('workspace-card');card.dataset.workspaceCard='';body.append(card);}}
   // AI sections own their own layouts and visibility, but share the card scale.

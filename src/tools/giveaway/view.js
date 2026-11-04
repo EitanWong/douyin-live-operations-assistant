@@ -84,7 +84,9 @@ export const giveawayView = {
       <p class="hint">最多 20 项奖品、合计 1000 人。每人最多中一项；人数不足时按列表顺序分配。本轮开始后规则固定。</p>
       <label class="field"><span>倒计时 / 秒</span><input type="number" data-giveaway="durationSec" value="300" min="1" max="86400" step="1"></label>
     </fieldset>
-    <fieldset class="giveaway-config"><legend>中奖规则</legend>
+    <fieldset class="giveaway-config"><legend>弹幕参与与中奖规则</legend><p class="hint">弹幕与礼物满足任意一种即可参与，每人每轮一个名额。</p>
+      <label class="giveaway-option"><input type="checkbox" data-giveaway="chatEnabled" checked>发送指定弹幕参与</label>
+      <label class="field"><span>参与弹幕</span><input type="text" data-giveaway="keyword" value="参与抽奖" maxlength="100"><small>去除首尾空格后须完全一致；重复发送不增加名额。</small></label>
       <details data-giveaway-weight-settings><summary>指定观众抽取权重 · 其他观众默认为 1</summary>
         <p class="hint">按用户 ID 设置，权重越高越容易被抽中。范围 0.01～1000，最多两位小数。例如只有两人、权重分别为 1 和 3 时，首个名额概率为 25% 和 75%；多名额会在每次抽取后重新计算。</p>
         <datalist id="giveaway-known-viewers" data-giveaway-known-viewers></datalist><div data-giveaway-weights></div>
@@ -93,29 +95,27 @@ export const giveawayView = {
       <label class="giveaway-option"><input type="checkbox" data-giveaway="anchorGuaranteed">主播参与必中</label>
       <p class="hint" data-giveaway-anchor>需识别当前主播 UID。主播须先满足参与条件；中奖占用第一项奖品的一个名额。</p>
     </fieldset>
-    <fieldset class="giveaway-config"><legend>参与方式 · 满足任意一种即可</legend>
-      <label class="giveaway-option"><input type="checkbox" data-giveaway="chatEnabled" checked>发送指定弹幕参与</label>
-      <label class="field"><span>参与弹幕</span><input type="text" data-giveaway="keyword" value="参与抽奖" maxlength="100"><small>去除首尾空格后须完全一致；重复发送不增加名额。</small></label>
+    <fieldset class="giveaway-config"><legend>礼物参与</legend>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="giftEnabled">赠送指定礼物直接参与</label>
+      <div class="grid"><label class="field"><span>已选礼物名称或 ID · 可手动补充</span><input type="text" data-giveaway="gifts" value="小心心" maxlength="1000"><small>勾选目录会填入 ID；手动填写多项时用逗号分隔。指定礼物合并累计。</small></label>
+      <label class="field"><span>累计礼物数量</span><input type="number" data-giveaway="giftMin" value="1" min="1" max="100000" step="1"><small>仅累计本轮指定礼物；达到门槛自动入池，无需再发弹幕。</small></label></div>
+      <details><summary>从直播间礼物目录选择</summary>
       <div class="actions"><button type="button" data-action="giveaway-refresh-gifts">读取 / 刷新礼物目录</button></div>
       <p class="hint" data-giveaway-gift-message role="status" aria-live="polite">读取当前直播间礼物目录，无需先打开网页礼物面板；也可手动填写。</p>
       <label class="field"><span>搜索礼物名称或 ID</span><input type="search" data-giveaway-gift-search placeholder="例如：小心心、玫瑰或 463"></label>
       <div class="giveaway-gift-list" data-giveaway-gift-list role="group" aria-label="可选礼物"></div>
       <p class="hint" data-giveaway-gift-count></p>
       <div class="giveaway-gift-selected" data-giveaway-gift-selected role="group" aria-label="已选礼物"></div>
-      <div class="grid"><label class="field"><span>已选礼物名称或 ID · 可手动补充</span><input type="text" data-giveaway="gifts" value="小心心" maxlength="1000"><small>勾选目录会填入 ID；手动填写多项时用逗号分隔。指定礼物合并累计。</small></label>
-      <label class="field"><span>累计礼物数量</span><input type="number" data-giveaway="giftMin" value="1" min="1" max="100000" step="1"><small>仅累计本轮指定礼物；达到门槛自动入池，无需再发弹幕。</small></label></div>
+      </details>
     </fieldset>
-    <fieldset class="giveaway-config"><legend>弹幕反馈</legend>
-      <p class="hint">抽奖反馈自动发送到公屏。</p>
+    <section class="giveaway-live workspace-wide" aria-label="当前抽奖"><h3 data-giveaway-round-title>尚未开始</h3><p class="giveaway-clock" data-giveaway-countdown role="timer" aria-live="off">设置奖品和参与方式，然后开始第一轮抽奖。</p><p class="giveaway-result" data-giveaway-result role="status" aria-live="polite"></p><div class="actions"><button type="button" data-action="giveaway-copy" disabled>复制开奖公告</button></div>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="announcePrizeNames" checked>开场播报奖品名称</label>
-      <p class="hint">开场可隐藏奖品，中奖后始终 @ 中奖者并播报奖品，不公开抽取规则。每分钟主动提示参与方式，最后 10 秒停止招募；播报开轮、报名成功和开奖结果。剩余时间前段每分钟提醒，最后两分钟在 120、90、60、30、10、5 秒时提醒，越接近开奖反馈越及时。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；按实际剩余秒数播报，过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p>
-    </fieldset>
+      <details><summary>弹幕播报与提醒规则</summary><p class="hint">开场可隐藏奖品，中奖后始终 @ 中奖者并播报奖品，不公开抽取规则。每分钟主动提示参与方式，最后 10 秒停止招募；播报开轮、报名成功和开奖结果。剩余时间前段每分钟提醒，最后两分钟在 120、90、60、30、10、5 秒时提醒，越接近开奖反馈越及时。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；按实际剩余秒数播报，过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p></details>
     <div class="actions"><button type="button" class="primary" data-action="giveaway-start">开始抽奖</button><button type="button" class="danger" data-action="giveaway-cancel" disabled>取消本轮</button></div>
     <p class="hint" data-giveaway-status role="status" aria-live="polite">正在读取抽奖记录</p>
     <p class="hint" data-giveaway-feedback role="status" aria-live="polite">开轮后显示弹幕反馈状态</p>
     <p class="hint" data-giveaway-entry-feedback role="status" aria-live="polite"></p>
-    <section class="giveaway-live" aria-label="当前抽奖"><h3 data-giveaway-round-title>尚未开始</h3><p class="giveaway-clock" data-giveaway-countdown role="timer" aria-live="off">设置奖品和参与方式，然后开始第一轮抽奖。</p><p class="giveaway-result" data-giveaway-result role="status" aria-live="polite"></p><div class="actions"><button type="button" data-action="giveaway-copy" disabled>复制开奖公告</button></div></section>
+    </section>
     <div class="giveaway-history-head"><h3>抽奖记录</h3><div class="actions"><button type="button" data-action="giveaway-csv" disabled>导出 CSV</button><button type="button" data-action="giveaway-json" disabled>导出 JSON</button></div></div>
     <div data-giveaway-history></div>
     <p class="hint">结果保存在本工具，并自动公布到公屏。记录保存在本机；CSV 可用于表格统计，JSON 保留完整规则、明细与弹幕反馈记录。发送状态和公屏回显可在运行日志查看。请保持直播页打开；刷新后会恢复本轮，关闭期间的互动无法采集。参与人数不足时按奖品列表顺序分配；无人参加时保留空结果。</p>
