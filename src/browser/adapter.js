@@ -345,8 +345,10 @@ export class DouyinAdapter {
               : { captureError:'FRAME_TOO_LARGE' }) };
           if (typeof this.onCapture === 'function') this.onCapture(capture);
         } catch (error) { this.status.captureErrors = (this.status.captureErrors || 0) + 1; this.reportError(error); }
-        const events = decodedEvents.filter(event => {
+        const duplicates = new Set();
+        const events = decodedEvents.filter((event, index) => {
           if (!this.isDuplicateProtocolEvent(event, transport)) return true;
+          duplicates.add(index);
           this.status.duplicateEvents = (this.status.duplicateEvents || 0) + 1; return false;
         });
         this.status.frames++; this.status.lastFrame = Date.now(); this.status.events += events.length;
@@ -361,7 +363,7 @@ export class DouyinAdapter {
         const cacheBytes = JSON.stringify(events).length * 2, cache = this.decodedCacheBytes + cacheBytes <= 16 * 1024 * 1024;
         if (cache) this.decodedCacheBytes += cacheBytes; else this.status.uncachedFrames = (this.status.uncachedFrames || 0) + 1;
         this.status.decodedCacheBytes = this.decodedCacheBytes; this.emitStatus();
-        return { events:cache ? events : null, cacheBytes:cache ? cacheBytes : 0 };
+        return { events:cache ? events : null, duplicates:cache ? null : duplicates, cacheBytes:cache ? cacheBytes : 0 };
       } catch (error) { this.reportError(error); return {events:[],cacheBytes:0}; }
     })();
     const previous = this.chain;
@@ -370,7 +372,9 @@ export class DouyinAdapter {
       let cacheBytes = 0, result;
       try {
         result = await decoded; cacheBytes = result.cacheBytes;
-        const events = result.events || (await decodeFrame(data)).map(event => ({ ...event, receivedAt }));
+        // Cache pressure must not change admission: the first decode already
+        // updated deduplication state, so retain its decisions when decoding again.
+        const events = result.events || (await decodeFrame(data)).filter((_, index) => !result.duplicates.has(index)).map(event => ({ ...event, receivedAt }));
         let processed = 0;
         for (const event of events) {
           if (event.type === 'gift') {
@@ -385,15 +389,20 @@ export class DouyinAdapter {
         }
         if (this.pending > 1 && this.status.frames % 20 === 0) await new Promise(resolve => setTimeout(resolve, 0));
       } catch (error) { this.reportError(error); }
-      finally { if (result) result.events = null; this.pending--; this.pendingBytes -= frameBytes; this.decodedCacheBytes -= cacheBytes; this.status.decodedCacheBytes = this.decodedCacheBytes; this.status.pendingFrames = this.pending; this.emitStatus(); }
+      finally { if (result) { result.events = null; result.duplicates = null; } this.pending--; this.pendingBytes -= frameBytes; this.decodedCacheBytes -= cacheBytes; this.status.decodedCacheBytes = this.decodedCacheBytes; this.status.pendingFrames = this.pending; this.emitStatus(); }
     })();
   }
   isDuplicateProtocolEvent(event, transport) {
     if (!event?.id) return false;
-    const now = Date.now(), key = `${event.type}:${event.id}`;
-    for (const [id, record] of this.seenProtocolEvents) if (now - record.at > 120000) this.seenProtocolEvents.delete(id);
+    // Keep insertion and expiry order aligned, including after clock rollback.
+    const now = this.seenProtocolTime = Math.max(this.seenProtocolTime || 0, Date.now()), key = `${event.type}:${event.id}`;
+    for (const [id, record] of this.seenProtocolEvents) {
+      if (now - record.at <= 120000) break;
+      this.seenProtocolEvents.delete(id);
+    }
     const previous = this.seenProtocolEvents.get(key);
     if (previous && previous.transport !== transport) return true;
+    this.seenProtocolEvents.delete(key);
     this.seenProtocolEvents.set(key, { at:now, transport });
     while (this.seenProtocolEvents.size > 20000) this.seenProtocolEvents.delete(this.seenProtocolEvents.keys().next().value);
     return false;
