@@ -21,16 +21,37 @@ export function describeLayout(node) {
  const surface=node.matches(surfaces) ? 'card' : undefined;
  const dataGrid=node.matches('.grid') && !node.querySelector('input,textarea,select');
  const layout=node.matches('[data-memory-list],[data-web-knowledge-list]') ? 'stack' : node.matches('.pk-scoreboard') ? 'scoreboard' : node.matches(cards) ? 'cards' : dataGrid || node.matches(metrics) ? 'metrics' : node.matches(fields) ? 'fields' : node.matches(rows) ? 'row' : node.matches(blocks) ? 'stack' : undefined;
- const span=node.matches('.workspace-wide,[data-ai-section="models"]>.ai-card:first-child') || node.tagName==='DETAILS' && !node.matches('.pk-visual,.pk-outlook,.pk-analysis>details') ? 'full' : undefined;
+ const span=node.matches('.workspace-wide') ? 'full' : undefined;
  return {layout,surface,span};
 }
 
 export function layoutChildren(layout,children) {
  if(layout==='cards'){
-  return children.map(child=>child.surface==='card' && child.kind!=='details' ? {...child,size:child.span==='full' ? 'section' : 'tile'} : {...child,span:'full'});
+  return children.map(child=>child.surface==='card' || child.kind==='details' ? {...child,size:child.span==='full' ? 'section' : 'tile'} : {...child,span:'full'});
  }
  if(layout==='fields')return children.map(child=>child.kind==='field' && child.type!=='textarea' || child.kind==='group' && child.layout==='stack' ? child : {...child,span:'full'});
  return children;
+}
+
+export function cardRuns(children) {
+ const runs=[];
+ for(const child of children){
+  if(child.span==='full')runs.push([child]);
+  else if(!runs.length || runs.at(-1)[0].span==='full')runs.push([child]);
+  else runs.at(-1).push(child);
+ }
+ return runs;
+}
+
+export function packPageCards(children) {
+ const packed=[];
+ for(const child of children){
+  const previous=packed.at(-1);
+  if(child.kind==='details' && child.classes?.split(/\s/u).includes('workspace-help') && previous?.layout==='cards'){
+   packed[packed.length-1]={...previous,children:[...previous.children,{...child,size:'tile'}]};
+  }else packed.push(child);
+ }
+ return packed;
 }
 
 export function gridOptions(node) {

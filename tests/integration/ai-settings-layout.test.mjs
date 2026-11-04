@@ -21,6 +21,8 @@ test('AI 设置按用途归类，切换不修改配置、不丢草稿或密钥�
     const {panel,section,dom}=s,tabs=[...panel.root.querySelectorAll('[data-ai-section-tab]')];
     assert.deepEqual(tabs.map(t=>t.textContent),['连接与模型','直播感知','知识与搜索','观众与研究','问答测试','本地与性能','高级设置']);
     assert.ok(section('models'));assert.equal(section('models').hidden,false);
+    const connection=panel.node('[data-action="test-ai"]').closest('.ai-card');
+    assert.ok(connection,'连接检查与配置卡片共享可用列');assert.equal(connection.querySelector('h3').textContent,'连接检查');
     tabs[1].click();assert.equal(section('models').hidden,true);assert.equal(section('perception').hidden,false);assert.equal(panel.dirty,false);
     tabs[2].click();const knowledge=panel.node('[data-field="ai.knowledge"]');knowledge.value='周六八点开播';knowledge.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
     tabs[0].click();panel.node('[data-api-key]').value='draft-secret';tabs.at(-1).click();tabs[0].click();

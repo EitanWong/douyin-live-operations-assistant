@@ -7,10 +7,10 @@ import {useTable,tableFeatures} from '@tanstack/react-table';
 import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
-import {gridOptions} from './layout.js';
+import {gridOptions,cardRuns} from './layout.js';
 import {WorkspaceFit} from './fit.js';
 import {mountCardGrid,layoutCardGrids} from './masonry.js';
-import {InspectionProvider,InspectButton,Inspectable,viewLabel} from './inspect.js';
+import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel} from './inspect.js';
 import {recordText} from './collection.js';
 import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
 import {componentTheme,componentVariables,paletteScale} from '../theme-palette.js';
@@ -57,7 +57,7 @@ function RecordCollection({node,bridge}) {
   return h('section',{className:'product-data-set','aria-label':label},
     h('div',{className:'product-data-heading'},h('strong',null,label),h(InspectButton,{node,label})),
     h(DataBrowserTools,{browser,label}),
-    h('div',{className:'product-record-scroll',ref:browser.scroll,tabIndex:0,'aria-label':`${label}，可滚动`},browser.count ? h(View,{node:{...node,collection:undefined,children:browser.indices.map(index=>node.children[index])},bridge}) : h('p',{className:'empty'},'没有匹配的记录')),
+    h('div',{className:'product-record-scroll',ref:browser.scroll,tabIndex:0,'aria-label':`${label}，可滚动`},browser.count ? h(InspectionContents,null,h(View,{node:{...node,collection:undefined,children:browser.indices.map(index=>node.children[index])},bridge})) : h('p',{className:'empty'},'没有匹配的记录')),
     h(DataBrowserFooter,{browser,label}));
 }
 function Disclosure({node,bridge}) {
@@ -66,7 +66,7 @@ function Disclosure({node,bridge}) {
   const invalid=JSON.stringify(node.children).includes('"invalid":true');
   useEffect(()=>{if(invalid && !open)bridge.toggle(node.id,true);},[invalid,open,bridge,node.id]);
   useEffect(()=>{if(open && invalid){const input=body.current?.querySelector('[aria-invalid="true"]');input?.focus();input?.scrollIntoView?.({block:'center'});}},[open,invalid]);
-  return h(Paper,{withBorder:true,className:['product-disclosure',node.classes].filter(Boolean).join(' '),'data-surface':node.surface,'data-view-id':node.id},h('div',{className:'product-disclosure-heading'},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':regionId,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(InspectButton,{node})),h(Reveal,{open,id:regionId},h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body},renderChildren(node.children,bridge))));
+  return h(Paper,{withBorder:true,className:['product-disclosure',node.classes].filter(Boolean).join(' '),'data-surface':node.surface,'data-view-id':node.id},h('div',{className:'product-disclosure-heading'},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':regionId,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(InspectButton,{node})),h(Reveal,{open,id:regionId},h(InspectionContents,null,h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body},renderChildren(node.children,bridge)))));
 }
 function Chart({node}) {
   const element=useRef(null),chart=useRef(null);
@@ -74,10 +74,14 @@ function Chart({node}) {
   useEffect(()=>{chart.current.update(node.option);},[node.option]);
   return h(Inspectable,{node},h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'}));
 }
-function CardGrid({node,bridge,props}) {
+function CardRun({nodes,bridge}) {
   const element=useRef(null);
   useLayoutEffect(()=>mountCardGrid(element.current),[]);
-  return h('div',{...props,ref:element,className:`${props.className} product-masonry`},node.children.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot','data-full':child.span==='full' || undefined},h(View,{node:child,bridge}))));
+  return h('div',{ref:element,className:'product-masonry'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot','data-full':child.span==='full' || undefined},h(View,{node:child,bridge}))));
+}
+function CardGrid({node,bridge,props}) {
+  // A run keeps its identity when its first card moves; cards have their own IDs.
+  return h('div',{...props,className:`${props.className} product-card-grid`},cardRuns(node.children).map((run,index)=>h(CardRun,{key:index,nodes:run,bridge})));
 }
 function renderChildren(nodes,bridge){return nodes.map((node,i)=>node.span==='full' ? h('div',{key:node.id || i,className:'product-full'},h(View,{node,bridge})) : h(View,{node,bridge,key:node.id || i}));}
 function Card({node,bridge,props}) {
@@ -85,11 +89,11 @@ function Card({node,bridge,props}) {
   const label=viewLabel(node);
   return h(Paper,{...props,'data-card-size':node.size,component:Stack,gap:0,withBorder:true,p:0,radius:'md'},
     heading ? h('header',{className:'product-card-heading'},h(View,{node:heading,bridge}),h(InspectButton,{node,label})) : h('div',{className:'product-card-utility'},h(InspectButton,{node,label})),
-    h('div',{className:'product-card-body',tabIndex:0,role:'region','aria-label':label},h(Stack,{className:'product-card-content',gap:'var(--product-gap)'},renderChildren(heading ? node.children.slice(1) : node.children,bridge))));
+    h('div',{className:'product-card-body',tabIndex:0,role:'region','aria-label':label},h(InspectionContents,null,h(Stack,{className:'product-card-content',gap:'var(--product-gap)'},renderChildren(heading ? node.children.slice(1) : node.children,bridge)))));
 }
 function View({node,bridge}) {
   if(!node)return null;
-  if(node.inspectable)return h(Inspectable,{node},h(View,{node:{...node,inspectable:false},bridge}));
+  if(node.inspectable)return h(Inspectable,{node,independent:true},h(View,{node:{...node,inspectable:false},bridge}));
   if(node.kind==='text')return node.text;
   if(node.kind==='field')return h(Control,{node,bridge});
   if(node.kind==='button')return h(Button,{size:'sm',variant:node.primary || node.selected ? 'filled' : 'light',color:node.danger ? 'red' : undefined,disabled:node.disabled,loading:node.busy,'aria-label':node.label,'aria-pressed':node.selected || undefined,onClick:()=>bridge.activate(node.id),leftSection:icon(node.icon)},node.text);

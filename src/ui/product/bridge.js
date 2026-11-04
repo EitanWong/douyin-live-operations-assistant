@@ -1,6 +1,6 @@
 // Transitional boundary: the controller owns drafts and actions; React owns
 // presentation. Only the active page is projected, never a second config store.
-import {describeLayout,describeCollection,isTransparentLayout,layoutChildren} from './layout.js';
+import {describeLayout,describeCollection,isTransparentLayout,layoutChildren,packPageCards} from './layout.js';
 import {APPEARANCE_PREFERENCES} from '../appearance.js';
 
 const ignored = 'STYLE,SCRIPT,OPTION,SUMMARY,TEMPLATE'.split(',');
@@ -71,7 +71,7 @@ export function createWorkspaceBridge(panel) {
     const dialog=page?.querySelector('[data-knowledge-dialog]:not([hidden])');
     return {key,title:nav.find(n=>n.key===key)?.label || cleanText(page?.querySelector('h2')),nav,toolbar,subviews,sidebar:{side:panel.navigation?.side || 'left',collapsed:Boolean(panel.navigation?.collapsed),toggle:project(root.querySelector('[data-sidebar-toggle]'))},
       dialog:dialog ? {id:id(dialog),title:cleanText(dialog.querySelector('[data-memory-dialog-title]')),cancelId:id(dialog.querySelector('[data-memory-cancel]')),children:children(dialog.querySelector('[data-knowledge-dialog-body]'))} : null,
-      content:page ? {kind:'group',id:id(page),layout:'stack',tag:'div',classes:'product-page',children:children(page)} : null,
+      content:page ? {kind:'group',id:id(page),layout:'stack',tag:'div',classes:'product-page',children:packPageCards(children(page))} : null,
       messages:[...(root.querySelector('.workspace-message-list')?.children || [])].filter(shown).map(node=>({...project(node),error:node.classList.contains('error')})).filter(Boolean),status:[...(root.querySelector('.shell-status')?.children || [])].map(cleanText).join(' · '),theme:panel.host.dataset.theme || APPEARANCE_PREFERENCES.theme.fallback,palette:panel.host.dataset.palette || APPEARANCE_PREFERENCES.palette.fallback,material:panel.host.dataset.material || APPEARANCE_PREFERENCES.material.fallback,focus};
   }
   function refresh() {

@@ -34,7 +34,8 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   await new Promise(resolve=>setTimeout(resolve,70));const ui=container.shadowRoot;
   const sidebarToggle=ui.querySelector('.product-nav-toggle button');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'true');assert.equal(ui.getElementById(sidebarToggle.getAttribute('aria-controls'))?.getAttribute('aria-label'),'功能导航');
   sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(ui.querySelector('.product-shell').dataset.sidebarCollapsed,'true');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'false');assert.equal(sidebarToggle.getAttribute('title'),'展开侧边栏');assert.ok(sidebarToggle.querySelector('svg'));sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(panel.navigation.collapsed,false);
-  assert.ok(ui.querySelector('.product-masonry[data-layout=cards] [data-surface=card]'));assert.equal(ui.querySelectorAll('[data-layout=fields] input[aria-label="模型名"]').length,1);assert.ok(ui.querySelector('.mantine-SimpleGrid-root input[aria-label="模型名"]'));assert.equal(ui.querySelector('h3').textContent,'回复模型');assert.match(ui.querySelector('table').textContent,/甲9/);assert.match(ui.querySelector('.product-status').textContent,/未保存草稿/);assert.doesNotMatch(ui.querySelector('.product-toolbar').textContent,/未保存草稿/);
+  assert.ok(ui.querySelector('.product-card-grid[data-layout=cards] .product-masonry [data-surface=card]'));assert.equal(ui.querySelectorAll('[data-layout=fields] input[aria-label="模型名"]').length,1);assert.ok(ui.querySelector('.mantine-SimpleGrid-root input[aria-label="模型名"]'));assert.equal(ui.querySelector('h3').textContent,'回复模型');assert.match(ui.querySelector('table').textContent,/甲9/);assert.match(ui.querySelector('.product-status').textContent,/未保存草稿/);assert.doesNotMatch(ui.querySelector('.product-toolbar').textContent,/未保存草稿/);
+  assert.equal(ui.querySelector('[data-card-size=tile]').querySelectorAll('.product-expand').length,1,'卡片内表格、指标、折叠区共用一个放大入口');
   const expand=ui.querySelector('button[aria-label="放大查看：回复模型"]');assert.ok(expand,'卡片提供明确的放大入口');expand.focus();expand.click();await new Promise(resolve=>setTimeout(resolve,60));
   const enlarged=ui.querySelector('[role=dialog]');assert.ok(enlarged);assert.match(enlarged.textContent,/回复模型/);assert.ok(ui.querySelector('.product-shell').hasAttribute('inert'));
   assert.equal(enlarged.querySelectorAll('.product-expand').length,0,'独立视图不重复嵌套放大入口');
@@ -112,6 +113,9 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   assert.equal(recordBrowser.querySelectorAll('.product-record-scroll button').length,1);recordBrowser.querySelector('.product-record-scroll button').click();assert.equal(profileAction,44);
   const drafts=document.createElement('div');drafts.dataset.list='keywords';drafts.innerHTML=Array.from({length:30},(_,i)=>`<div class="editor-row"><label><span>规则 ${i}</span><textarea>草稿 ${i}</textarea></label></div>`).join('');root.querySelector('[data-page=ai]').append(drafts);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
   assert.equal(ui.querySelector('.product-edit-scroll').querySelectorAll('textarea').length,30,'编辑集合用内部滚动保留全部草稿');
+  const retainedDraft=ui.querySelector('.product-edit-scroll textarea');
+  drafts.prepend(drafts.lastElementChild);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.ok([...ui.querySelectorAll('.product-edit-scroll textarea')].find(field=>field.value==='草稿 0')===retainedDraft,'规则排序不重建同组草稿');
   // Dialogs render through Mantine in this shadow root and edit the original controls.
   const dialog=document.createElement('div');dialog.dataset.knowledgeDialog='';dialog.hidden=true;
   dialog.innerHTML='<h3 data-memory-dialog-title>添加知识</h3><div data-knowledge-dialog-body><label class="field"><span>资料标题</span><input autofocus value="初稿"></label><button data-memory-cancel>取消</button><button data-confirm>确定</button></div>';

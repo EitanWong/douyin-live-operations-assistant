@@ -4,6 +4,8 @@ import {Button,useMotionPreference} from './motion.js';
 import {recordText} from './collection.js';
 
 const Inspection=createContext(null);
+const EntryScope=createContext(false);
+export function InspectionContents({children}) {return h(EntryScope.Provider,{value:true},children);}
 export function viewLabel(node) {
   const first=node.children?.find(child=>child.tag==='h3' || child.tag==='h4' || child.tag==='strong' || child.layout==='row' && child.children?.some(part=>part.tag==='h3'));
   const heading=first?.layout==='row' ? first.children.find(part=>part.tag==='h3') : first;
@@ -16,12 +18,15 @@ function findNode(node,id) {
 }
 export function InspectButton({node,label=viewLabel(node)}) {
   const inspection=useContext(Inspection);
-  if(!inspection)return null;
+  const covered=useContext(EntryScope);
+  if(!inspection || covered)return null;
   return h(Button,{className:'product-expand',variant:'subtle',size:'xs',title:`放大查看：${label}`,'aria-label':`放大查看：${label}`,'aria-haspopup':'dialog',onClick:()=>inspection.open(node.id)},
     h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.7,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M3 3l6 6m12-6-6 6M3 21l6-6m12 6-6-6'})));
 }
-export function Inspectable({node,children}) {
-  return h('div',{className:'product-inspectable'},h(InspectButton,{node}),children);
+export function Inspectable({node,children,independent=false}) {
+  const covered=useContext(EntryScope);
+  if(covered && !independent)return children;
+  return h(EntryScope.Provider,{value:false},h('div',{className:'product-inspectable'},h(InspectButton,{node}),h(InspectionContents,null,children)));
 }
 export function InspectionProvider({content,shadow,pageKey,disabled,render,reflow,children}) {
   const [target,setTarget]=useState(null),[opened,setOpened]=useState(false),trigger=useRef(null),body=useRef(null),reduced=useMotionPreference();
