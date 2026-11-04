@@ -1,6 +1,6 @@
-import React,{createElement as h,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
+import React,{createElement as h,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createRoot} from 'react-dom/client';
-import {MantineProvider,Switch,Input,Slider,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Progress,SimpleGrid,Stack,Group,Tabs,Modal} from '@mantine/core';
+import {MantineProvider,Switch,Input,Slider,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Progress,SimpleGrid,Flex,Stack,Group,Tabs,Modal} from '@mantine/core';
 import {m as motion,LazyMotion,domAnimation} from 'motion/react';
 import {Button,MotionIcon,Chevron,Reveal,PageEntrance,MotionPreferences,useMotionTarget,springs,fade} from './motion.js';
 import {useTable,tableFeatures} from '@tanstack/react-table';
@@ -8,6 +8,7 @@ import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
 import {gridOptions} from './layout.js';
+import {WorkspaceFit} from './fit.js';
 import {recordText} from './collection.js';
 import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
 import {componentTheme,componentVariables,paletteScale} from '../theme-palette.js';
@@ -75,7 +76,7 @@ function Card({node,bridge,props}) {
   const label=heading ? recordText(heading) : node.label || '功能设置';
   return h(Paper,{...props,'data-card-size':node.size,component:Stack,gap:0,withBorder:true,p:0,radius:'md'},
     heading ? h('header',{className:'product-card-heading'},h(View,{node:heading,bridge})) : null,
-    h(Stack,{className:'product-card-body',gap:'var(--product-gap)',tabIndex:0,role:'region','aria-label':label},renderChildren(heading ? node.children.slice(1) : node.children,bridge)));
+    h('div',{className:'product-card-body',tabIndex:0,role:'region','aria-label':label},h(Stack,{className:'product-card-content',gap:'var(--product-gap)'},renderChildren(heading ? node.children.slice(1) : node.children,bridge))));
 }
 function View({node,bridge}) {
   if(!node)return null;
@@ -94,8 +95,9 @@ function View({node,bridge}) {
   if(node.kind==='break')return h('br');
   if(node.kind==='link')return h('a',{href:node.href,target:'_blank',rel:'noopener noreferrer'},node.text);
   const props={className:[node.classes,node.layout ? 'product-layout' : '',node.collection?.mode==='scroll' ? 'product-edit-scroll' : ''].filter(Boolean).join(' '),'data-view-id':node.id,'data-layout':node.layout,'data-surface':node.surface,'aria-label':node.label,role:node.role,tabIndex:node.tag==='h3' ? -1 : undefined};
+  if(node.layout==='cards')return h(Flex,{...props,wrap:'wrap',align:'stretch',gap:'var(--product-section-gap)'},node.children.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot','data-full':child.span==='full' || undefined},h(View,{node:child,bridge}))));
   const content=renderChildren(node.children,bridge);
-  if(['cards','fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:node.layout==='cards' ? 'var(--product-section-gap)' : 'var(--product-gap)'},content);
+  if(['fields','metrics'].includes(node.layout))return h(SimpleGrid,{...props,...gridOptions(node),type:'container',spacing:'var(--product-gap)'},content);
   if(node.layout==='scoreboard')return h('div',props,content);
   if(node.surface==='card')return h(Card,{node,bridge,props});
   if(node.layout==='row')return h(Group,{...props,gap:'var(--product-gap)',wrap:'wrap',align:'center'},content);
@@ -119,6 +121,9 @@ function Workspace({bridge,shadow,onReady}) {
   const sidebarReveal=useMotionTarget({height:compact ? menu ? 'auto' : 0 : '100%',opacity:compact && !menu ? 0 : 1},{...springs.disclosure,opacity:fade});
   const groupReveal=useMotionTarget({height:state.sidebar.collapsed && !compact ? 0 : 24,opacity:state.sidebar.collapsed && !compact ? 0 : 1},{...springs.layout,opacity:fade});
   const selectedView=state.subviews.find(node=>node.selected)?.id;
+  const fit=useRef(null);
+  useLayoutEffect(()=>{fit.current=new WorkspaceFit(main.current);return ()=>fit.current.destroy();},[state.key]);
+  useLayoutEffect(()=>{fit.current.refresh();},[state.content,selectedView]);
   useEffect(()=>{const query=shadow.host.ownerDocument.defaultView.matchMedia('(prefers-color-scheme: dark)'),change=()=>setSystemDark(query.matches);query.addEventListener('change',change);return ()=>query.removeEventListener('change',change);},[shadow]);
   useEffect(()=>{main.current?.scrollTo?.({top:0});setMenu(false);},[state.key,selectedView]);
   useEffect(()=>{onReady?.();},[onReady]);

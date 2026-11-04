@@ -1,6 +1,7 @@
 // Translate legacy presentation once at the boundary. The visible workspace
 // uses these roles, never a second set of source-DOM layout selectors.
-export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,textareaMinHeight:96,cardMinWidth:320,cardHeight:400,cardMinHeight:280,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
+export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36,textareaMinHeight:96,cardMinWidth:320,cardMaxHeight:560,contentPadding:20,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
+export const PRODUCT_COMPACT_DIMENSIONS=Object.freeze({...PRODUCT_DIMENSIONS,controlHeight:32,headingHeight:24,textareaMinHeight:72,cardMinWidth:280,contentPadding:12,gap:6,sectionGap:8,cardPadding:8,metricMinHeight:52,chartHeight:180});
 const transparent='.ai-settings,.ai-service-grid,[data-workspace-contents],[data-ai-modes],[data-custom-media],[data-perception-active],.workspace-metrics';
 const cards='.pred-visual-grid,.workspace-grid,.settings-workspace,.income-workspace,.pk-workspace,.pk-overview,.pk-analysis,.anchor-analytics,[data-list],[data-memory-list]';
 const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times';
@@ -26,15 +27,7 @@ export function describeLayout(node) {
 
 export function layoutChildren(layout,children) {
  if(layout==='cards'){
-  const result=children.map(child=>child.surface==='card' && child.kind!=='details' ? {...child,size:child.span==='full' ? 'section' : 'tile'} : {...child,span:'full'});
-  // Each run uses complete pairs; an unpaired card gets the whole final row.
-  let start=0;
-  for(let i=0;i<=result.length;i++){
-   if(i<result.length && result[i].span!=='full')continue;
-   if((i-start)%2===1)result[i-1]={...result[i-1],span:'full'};
-   start=i+1;
-  }
-  return result;
+  return children.map(child=>child.surface==='card' && child.kind!=='details' ? {...child,size:child.span==='full' ? 'section' : 'tile'} : {...child,span:'full'});
  }
  if(layout==='fields')return children.map(child=>child.kind==='field' && child.type!=='textarea' || child.kind==='group' && child.layout==='stack' ? child : {...child,span:'full'});
  return children;
@@ -44,8 +37,8 @@ export function gridOptions(node) {
  // Full-width children occupy every track, so auto-fit cannot collapse phantom
  // columns. Cap tracks by actual items and let container queries choose the fit.
  const count=node.children.filter(child=>child.span!=='full').length;
- const cards=node.layout==='cards',minimum=cards ? PRODUCT_DIMENSIONS.cardMinWidth : node.layout==='fields' ? PRODUCT_DIMENSIONS.fieldMinWidth : PRODUCT_DIMENSIONS.metricMinWidth;
- const gap=cards ? PRODUCT_DIMENSIONS.sectionGap : PRODUCT_DIMENSIONS.gap,cols={base:1};
- for(let i=2;i<=Math.min(cards ? 2 : 6,count);i++)cols[`${minimum*i+gap*(i-1)}px`]=i;
+ const minimum=node.layout==='fields' ? PRODUCT_DIMENSIONS.fieldMinWidth : PRODUCT_DIMENSIONS.metricMinWidth;
+ const gap=PRODUCT_DIMENSIONS.gap,cols={base:1};
+ for(let i=2;i<=Math.min(6,count);i++)cols[`${minimum*i+gap*(i-1)}px`]=i;
  return {cols};
 }
