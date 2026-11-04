@@ -26,7 +26,7 @@ export function checkNativeComponent(connect){
     }catch{finish(new Error(messages.NOT_INSTALLED));}
   });
 }
-export function createNativeCapture({connect,getKey,room,now=Date.now,setupTimeoutMs=90000}){
+export function createNativeCapture({connect,getKey,room,now=Date.now,setupTimeoutMs=90000,onMemoryWarning=()=>{}}){
   return ({config,signal,isCurrent=()=>true,onObservation,onProgress=()=>{},onError=()=>{},onEnded=()=>{}})=>new Promise((resolve,reject)=>{
     let port,closed=false,ready=false,timer;
     const active=()=>!closed && isCurrent();
@@ -46,6 +46,7 @@ export function createNativeCapture({connect,getKey,room,now=Date.now,setupTimeo
       port.onDisconnect.addListener(()=>fail('NOT_INSTALLED'));
       port.onMessage.addListener(event=>{
         if(!active())return;
+        if(event?.type==='memory-warning'){onMemoryWarning('感知记忆保存失败，原文保留待重试；请检查本地存储空间。');return;}
         if(event?.type==='error'){fail(event.code);return;}
         if(event?.type==='ready' && !ready){ready=true;clearTimeout(timer);resolve({stop});return;}
         if(event?.type==='state')onProgress({phase:event.phase,totalTokens:event.totalTokens,lastFinalAt:event.lastFinalAt});

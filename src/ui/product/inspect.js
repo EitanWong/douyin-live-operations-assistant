@@ -5,6 +5,12 @@ import {recordText} from './collection.js';
 
 const Inspection=createContext(null);
 const EntryScope=createContext(false);
+// Enlargement serves detailed content, rather than the container around it.
+export function canInspect(node) {
+  if(!node)return false;
+  if(node.inspectable || ['chart','svg','table','bars'].includes(node.kind) || node.collection?.mode==='records')return true;
+  return (node.children || []).some(canInspect);
+}
 export function InspectionContents({children}) {return h(EntryScope.Provider,{value:true},children);}
 export function viewLabel(node) {
   const first=node.children?.find(child=>child.tag==='h3' || child.tag==='h4' || child.tag==='strong' || child.layout==='row' && child.children?.some(part=>part.tag==='h3'));
@@ -19,13 +25,13 @@ function findNode(node,id) {
 export function InspectButton({node,label=viewLabel(node)}) {
   const inspection=useContext(Inspection);
   const covered=useContext(EntryScope);
-  if(!inspection || covered)return null;
+  if(!inspection || covered || !canInspect(node))return null;
   return h(Button,{className:'product-expand',variant:'subtle',size:'xs',title:`放大查看：${label}`,'aria-label':`放大查看：${label}`,'aria-haspopup':'dialog',onClick:()=>inspection.open(node.id)},
     h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.7,strokeLinecap:'round',strokeLinejoin:'round','aria-hidden':true},h('path',{d:'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M3 3l6 6m12-6-6 6M3 21l6-6m12 6-6-6'})));
 }
 export function Inspectable({node,children,independent=false}) {
   const covered=useContext(EntryScope);
-  if(covered && !independent)return children;
+  if(!canInspect(node) || covered && !independent)return children;
   return h(EntryScope.Provider,{value:false},h('div',{className:'product-inspectable'},h(InspectButton,{node}),h(InspectionContents,null,children)));
 }
 export function InspectionProvider({content,shadow,pageKey,disabled,render,children}) {

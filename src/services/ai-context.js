@@ -28,8 +28,10 @@ export function assembleAIContext(prompt,config) {
   const {chunks,contextQuery:retrievalContext,...retrievalMeta}=retrieval;
   retrievalMeta.contextQueryChars=retrievalContext?.length || 0;
   const memories=chunks.map(row=>({...row,id:row.entryId,chunkId:row.id}));
+  const perceptionHistory=prompt.getPerceptionMemory?.(query) || null;
+  if(perceptionHistory)perceptionHistory.records=perceptionHistory.records.filter(row=>!media?.observations?.some(current=>current.id===row.id && current.at===row.at));
   return {
-    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta,accounts:config.contextSources?.accounts===false ? [] : prompt.getAccountContext?.(query) || prompt.accountContext || []},
+    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta,perceptionHistory,accounts:config.contextSources?.accounts===false ? [] : prompt.getAccountContext?.(query) || prompt.accountContext || []},
     media_context:compactMediaContext(media,now,{maxAgeMs:(config.media?.contextAgeSec ?? 60)*1000}),
     context_meta:{schemaVersion:1,assembledAt:now,liveObservedAt:prompt.liveContext?.observedAt ?? null,
       sourcePolicy:'media_context.scene separates recent speech, visual samples and multimodal observations; inspect ages and sampling coverage before claiming current activity. Viewer memories are limited observed events or operator notes, not verified personality. Current structured live observations for metrics; media recognition for sampled scene clues; local passages for background; web results for external facts. Conflicts and missing evidence stay unknown.',

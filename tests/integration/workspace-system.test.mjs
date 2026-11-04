@@ -30,9 +30,9 @@ test('主播页面导航固定，筛选集中，切换账本保留原表单',asy
     p.node('[data-anchor-view="overview"]').click();assert.equal(p.node('[data-anchor-picker]'),filters.querySelector('[data-anchor-picker]'));
   }finally{f.close();}
 });
-test('设置卡片独立参与布局，说明收纳但字段与操作仍唯一',()=>{
+test('复杂设置卡片独立参与布局，说明收纳但字段与操作仍唯一',()=>{
   const f=fixture(),p=f.p;try{
-    for(const key of ['gift','welcome','likes','bot','diagnostics','features','moderation']){
+    for(const key of ['gift','welcome','likes','bot','diagnostics','moderation']){
       const page=p.node(`[data-page="${key}"]`);assert.ok(page.querySelector('[data-workspace-body]'),key);assert.equal(page.querySelectorAll('.settings-column').length,0,key);
       assert.ok(page.querySelector('[data-workspace-help] .intro'),key);
     }

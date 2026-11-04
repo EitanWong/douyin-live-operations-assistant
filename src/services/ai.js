@@ -36,6 +36,7 @@ export function makeAIRequest(prompt, config) {
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {}),current_time:currentTime(prompt)};
   if(prompt.intentRouting)request.messages[0].content=`${CURRENT_FACTS_INSTRUCTION}\n${PUBLIC_DATA_INSTRUCTION}\nclock和weather使用各自的工具JSON格式，不含query或reply。\n`+request.messages[0].content;
   if(!prompt.searchResults)request.messages[0].content=`${VISUAL_ANSWER_INSTRUCTION}\n`+request.messages[0].content;
+  if(data.live_context && data.recent_chat)delete data.live_context.recentChat;
   request.messages[0].content='context_meta.budget.omissions 列出按预算省略的资料；缺少明细不等于没有发生，不能将截取明细求和冒充完整汇总。\n'+request.messages[0].content;
   request.messages[1].content='';
   const wireBudget=Math.floor((98000-JSON.stringify(request).length)/2);

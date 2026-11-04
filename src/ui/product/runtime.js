@@ -9,7 +9,7 @@ import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
 import {gridOptions,cardRuns} from './layout.js';
 import {WorkspaceFit} from './fit.js';
-import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel} from './inspect.js';
+import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel,canInspect} from './inspect.js';
 import {recordText} from './collection.js';
 import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
 import {componentTheme,componentVariables,paletteScale} from '../theme-palette.js';
@@ -85,7 +85,7 @@ function Card({node,bridge,props}) {
   const first=node.children[0],heading=first?.tag==='h3' || first?.layout==='row' && first.children.some(child=>child.tag==='h3') ? first : null;
   const label=viewLabel(node);
   return h(Paper,{...props,'data-card-size':node.size,component:Stack,gap:0,withBorder:true,p:0,radius:'md'},
-    heading ? h('header',{className:'product-card-heading'},h(View,{node:heading,bridge}),h(InspectButton,{node,label})) : h('div',{className:'product-card-utility'},h(InspectButton,{node,label})),
+    heading ? h('header',{className:'product-card-heading'},h(View,{node:heading,bridge}),h(InspectButton,{node,label})) : canInspect(node) ? h('div',{className:'product-card-utility'},h(InspectButton,{node,label})) : null,
     h('div',{className:'product-card-body',tabIndex:0,role:'region','aria-label':label},h(InspectionContents,null,h(Stack,{className:'product-card-content',gap:'var(--product-gap)'},renderChildren(heading ? node.children.slice(1) : node.children,bridge)))));
 }
 function View({node,bridge}) {
@@ -152,7 +152,7 @@ function Workspace({bridge,shadow,onReady}) {
       h(motion.aside,{className:'product-sidebar','aria-label':'功能侧边栏',initial:false,inert:compact && !menu,'aria-hidden':compact && !menu,animate:sidebarReveal},h('div',{className:'product-sidebar-inner'},state.sidebar.toggle ? h('div',{className:'product-nav-toggle'},h(Button,{className:'product-nav-button',variant:'subtle',fullWidth:true,'aria-label':state.sidebar.toggle.label,title:state.sidebar.toggle.label,'aria-expanded':!state.sidebar.collapsed,'aria-controls':'product-navigation',onClick:()=>bridge.activate(state.sidebar.toggle.id),leftSection:icon(state.sidebar.toggle.icon)},state.sidebar.toggle.label)) : null,nav)),
       h('div',{className:'product-main'},
         h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},h(Chevron,{open:menu}),menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge))),
-        h('div',{className:'product-subviews'},state.subviews.length ? h(Tabs,{id:'product-sections',value:selectedView,variant:'pills',className:'product-subview-tabs',onChange:value=>{if(value)bridge.activate(value);}},h(Tabs.List,{'aria-label':`${state.title}分类`},state.subviews.map(node=>h(Tabs.Tab,{key:node.id,value:node.id,disabled:node.disabled},node.text)))) : null,headings.length>2 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const id=e.currentTarget.value;if(bridge.reveal(id))setJump({id});}}) : null),
+        h('div',{className:'product-subviews'},state.subviews.length ? h(Tabs,{id:'product-sections',value:selectedView,variant:'pills',className:'product-subview-tabs',onChange:value=>{if(value)bridge.activate(value);}},h(Tabs.List,{'aria-label':`${state.title}分类`},state.subviews.map(node=>h(Tabs.Tab,{key:node.id,value:node.id,disabled:node.disabled},node.text)))) : null,headings.length>3 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const id=e.currentTarget.value;if(bridge.reveal(id))setJump({id});}}) : null),
         h('main',{className:'product-content',ref:main,key:state.key,id:selectedView ? `product-sections-panel-${selectedView}` : undefined,'aria-label':state.title,'aria-labelledby':selectedView ? `product-sections-tab-${selectedView}` : undefined},h(PageEntrance,{key:`${state.key}:${selectedView || ''}`},h(View,{node:state.content,bridge}))),
         h('footer',{className:'product-status','aria-label':'运行状态与消息'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite',role:'region','aria-label':'消息与提醒，可滚动',tabIndex:0},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null))))));
 }

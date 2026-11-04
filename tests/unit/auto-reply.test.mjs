@@ -50,7 +50,8 @@ test('AI 接收有界直播摘要与时间、未知值，不发送原始 UID、U
   assert.equal(context.pk.selfScore,100); assert.equal(context.pk.opponentScore,120);
   assert.equal(context.game.type,'guess'); assert.equal(context.game.target,undefined);
   const request=makeAIRequest(prompt,r.engine.config.ai), data=JSON.parse(request.messages[1].content);
-  assert.deepEqual(data.live_context,context);
+  const {recentChat,...facts}=context;
+  assert.deepEqual(data.live_context,facts);assert.deepEqual(data.recent_chat,recentChat);
   assert.doesNotMatch(JSON.stringify(data),/-secret|https:\/\/secret|隐藏统计999/);
   assert.match(request.messages[0].content,/stale 比分不能当作当前事实/);
   r.advance(181000); r.chat('@小助手 现在呢'); await settle();
