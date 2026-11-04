@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {Panel} from '../../src/ui/panel.js';
 import {copy,DEFAULTS} from '../../src/core/engine.js';
+import {createWorkspaceBridge} from '../../src/ui/product/bridge.js';
+import {cardRuns} from '../../src/ui/product/layout.js';
 
 function fixture(){
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/123',pretendToBeVisual:true});
@@ -48,6 +50,31 @@ test('互动设置与独立工具按有名分区组织，开关保留表单语�
     const input=p.node('[data-field="welcome.requireFan"]');assert.equal(input.getAttribute('role'),'switch');
     const before=input.checked;input.closest('label').click();assert.equal(input.checked,!before);assert.equal(p.dirty,true);
   }finally{f.close();}
+});
+
+test('连接诊断按账号摘要、三组诊断和高级折叠区排列，发送反馈紧随连接操作',()=>{
+  const f=fixture(),p=f.panel;let bridge;
+  try{
+    p.tab('diagnostics');
+    const page=p.node('[data-page=diagnostics]'),identity=page.querySelector('.identity');
+    assert.ok(identity.contains(p.node('[data-manual-identity]')),'账号识别与手动补充共用一个区域');
+    const connection=p.node('[data-action=diagnose]').closest('.workspace-card');
+    assert.ok(connection.contains(p.node('[data-deliveries]')),'发送反馈不单独占一列');
+    for(const selector of ['[data-import-income-file]','[data-import-file]'])assert.equal(p.node(selector).hidden,true,'导入按钮调用原文件控件，文件控件不重复展示');
+    bridge=createWorkspaceBridge(p);
+    const body=bridge.getSnapshot().content.children.find(node=>node.classes?.split(/\s/u).includes('workspace-grid'));
+    const runs=cardRuns(body.children);
+    assert.equal(runs.length,3);
+    assert.equal(runs[0][0].span,'full');
+    const title=node=>node.children[0]?.children[0]?.text;
+    assert.deepEqual(runs[1].map(title),['直播连接','采集与存储','互动过滤']);
+    assert.deepEqual(runs[2].map(node=>node.title),['高级页面适配与去重','弹幕备用采集与场次识别','运行记录','配置与运行记录','使用说明']);
+    const input=p.node('[data-field="selfId"]');
+    input.value='123456789';input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));
+    p.tab('welcome');p.tab('diagnostics');
+    assert.equal(p.node('[data-field="selfId"]'),input);assert.equal(input.value,'123456789');
+    for(const action of ['diagnose','debug-send','recover-events','import-income','import','export-log'])assert.equal(page.querySelectorAll(`[data-action="${action}"]`).length,1);
+  }finally{bridge?.destroy();f.close();}
 });
 
 test('抽奖的弹幕与礼物参与独立分组，礼物长目录不撑高奖品与规则',()=>{
