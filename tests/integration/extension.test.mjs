@@ -810,7 +810,7 @@ test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保�
   dom.window.postMessage=(data,origin)=>dom.window.setTimeout(()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{data,origin,source:dom.window})),0);
   const listeners=[];let moves=0;const leases=[];
   Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{sendMessage:async request=>{
-    if(request.type==='init')return {ok:true,value:{}};
+    if(request.type==='init')return {ok:true,value:{'live-assistant:config:1':{automation:{monitorRoom:false}}}};
     if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
     if(request.type==='collection-state'){leases.push(request.active);return {ok:true,value:{awake:request.active}};}
     return {ok:true,value:true};
@@ -829,6 +829,39 @@ test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保�
     assert.equal((await wake()).active,false);
     await new Promise(resolve=>setTimeout(resolve,30));assert.equal(leases.at(-1),false);
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
+});
+
+test('构建后的未开播页持有后台监控租约，后台唤醒查询房间，用户暂停后释放', {timeout:15000},async()=>{
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+  const page=dom.window,listeners=[],leases=[];let reads=0;
+  Object.assign(page,{TextDecoder,TextEncoder,structuredClone,
+    fetch:async path=>({ok:true,text:async()=>{
+      if(!path.includes('/room/web/enter'))return JSON.stringify({data:{}});
+      reads++;return JSON.stringify({data:{data:[{web_rid:'1',id_str:'100',status:4,owner:{id_str:'9'}}]}});
+    }}),chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async request=>{
+      if(request.type==='init')return {ok:true,value:{'live-assistant:config:1':{automation:{autoStart:true},incomeEnabled:false}}};
+      if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
+      if(request.type==='collection-state'){leases.push(request.active);return {ok:true,value:{awake:request.active}};}
+      return {ok:true,value:true};
+    }}}});
+  page.__STORE__={roomStore:{roomInfo:{roomId:'100',room:{web_rid:'1',status:4}}}};
+  const wake=()=>new Promise(resolve=>listeners[0]({type:'collection-wake'},{},resolve));
+  try {
+    page.eval(await readFile(file('page.js'),'utf8'));await evalContent(page);
+    const deadline=Date.now()+6000;
+    while(!leases.includes(true) && Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.ok(leases.includes(true),'未开播等待仍有系统待机保护');
+    const before=reads;assert.equal((await wake()).active,true);
+    await new Promise(resolve=>setTimeout(resolve,30));assert.ok(reads>before,'后台唤醒触发房间接口查询');
+    const panel=page.document.querySelector('#douyin-live-assistant').shadowRoot;
+    const rendered=Date.now()+3000;
+    while(!/等待开播/.test(panel.querySelector('[data-state]').textContent) && Date.now()<rendered)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.match(panel.querySelector('[data-state]').textContent,/等待开播/);
+    const stop=panel.querySelector('[data-action=stop]');assert.equal(stop.hidden,false);assert.equal(stop.disabled,false);stop.click();
+    const stopped=Date.now()+2000;
+    while(leases.at(-1)!==false && Date.now()<stopped)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(leases.at(-1),false);assert.equal((await wake()).active,false);
+  } finally {page.dispatchEvent(new page.Event('pagehide'));page.close();}
 });
 
 test('后台场次榜单校准与原始礼物共用持久事务，来源隔离和重启后不重复补差',async()=>{

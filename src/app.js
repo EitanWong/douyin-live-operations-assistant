@@ -18,6 +18,7 @@ import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from 
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
 import {createNativeCapture,checkNativeComponent} from './browser/native-perception.js';
 import { RoomContext } from './browser/room-context.js';
+import {RoomMonitor} from './browser/room-monitor.js';
 import { Engine, DEFAULTS, copy, mergeConfig, validateConfig } from './core/engine.js';
 import { matchesGiveawayChat } from './core/giveaway.js';
 import { DouyinAdapter, RoomLock, pickElement, watchAudienceContributions } from './browser/adapter.js';
@@ -60,8 +61,12 @@ export function boot(options = {}) {
   let predictionIdentityWrite=Promise.resolve();
   const predictions=createPredictionClient({transport:options.predictions ? async(...args)=>{await predictionIdentityWrite;return options.predictions(...args);} : undefined,context:()=>({room,anchor:String(engine?.config.anchorId || config.anchorId || '')})});
   const runtimeWriter = new RuntimeWriter(snapshot => set(runtimeKey, snapshot));
-  // 自动开启只在本页首次进入时保持武装；只有用户明确点击暂停才关闭。
+  // 等待开播和跨场次继续武装；用户明确暂停后本页不再自动启动或刷新。
   let autoStartArmed = true, resumeAutoStart = false, manualPause = false, autoStartNext = 0, autoStartError = '';
+  let roomMonitor;
+  const liveEnded=()=>Boolean(engine?.liveMode.endedAt);
+  const broadcastLive=()=>!liveEnded() && Boolean(identity.live?.status==='live' || engine.liveMode.boundaryAt || network.collection?.active);
+  const liveConnection=()=>demo || !liveEnded() && adapter.healthy();
   const viewers = new Map(), giftActivity = new Map(), giftLedger = new GiftLedger();
   // 账本写入与场控发送解耦：存储短暂失败时保留最新连击进度并自动重试，
   // 不让一次扩展后台/IndexedDB 抖动造成收入遗漏。
@@ -111,7 +116,7 @@ export function boot(options = {}) {
     if (persistenceDisabled || sendingScheduled || senderActive || !engine?.senderEnabled() || engine.busy || closed || suspended || !roomContext.current()) return;
     const now = Date.now();
     if (!engine.queue.some(job => engine.giftReady(job, now)) && ![...engine.gifts.values()].some(gift => gift.due <= now && gift.count > gift.credited)) return;
-    if (!demo && engine.config.mode !== 'preview' && !adapter.healthy()) return;
+    if (!demo && (liveEnded() || engine.config.mode !== 'preview' && !liveConnection())) return;
     sendingScheduled = true;
     queueMicrotask(async () => {
       sendingScheduled = false;
@@ -119,7 +124,7 @@ export function boot(options = {}) {
       const beforeJob = engine.selectNextJob(engine.queue, Date.now())?.id;
       const beforeSent = engine.stats.submitted + engine.stats.previews;
       senderActive = true;
-      try { await engine.tick(demo || engine.config.mode === 'preview' || adapter.healthy()); }
+      try { await engine.tick(!liveEnded() && (demo || engine.config.mode === 'preview' || liveConnection())); }
       catch (error) { reportPersistenceError(error, '即时发送异常，消息保留'); }
       finally {
         senderActive = false;
@@ -297,8 +302,13 @@ export function boot(options = {}) {
   let stoppedBroadcast = '';
   const stopEndedTools = () => {
     const state = engine.liveMode;
-    const key = state.endedAt ? JSON.stringify([state.roomId,state.endedAt]) : '';
-    if (key && key !== stoppedBroadcast) {media.stop();tools?.notify('stop', '直播已结束，已停止工具任务');}
+    const key = state.endedAt ? state.roomId || 'ended' : '';
+    if (key && key !== stoppedBroadcast) {
+      const armed=autoStartArmed || engine.running || engine.resumeRequested;
+      media.stop();tools?.notify('stop', '直播已结束，已停止工具任务');
+      engine.stop('直播已结束，清空本场互动并等待下次开播');
+      autoStartArmed=armed && !manualPause;autoStartNext=0;
+    }
     stoppedBroadcast = key;
   };
   const adapter = makeAdapter({
@@ -390,7 +400,7 @@ export function boot(options = {}) {
       const previousAcknowledgement = JSON.stringify(acknowledgedRuntimeAlert);
       const nextStatus = {...status,contextInvalidated:status.contextInvalidated || persistenceDisabled};
       acknowledgedRuntimeAlert = reconcileRuntimeAlertState(nextStatus,acknowledgedRuntimeAlert);
-      network = {...nextStatus,acknowledgedRuntimeAlert};
+      network = {...nextStatus,roomMonitor:roomMonitor?.status,acknowledgedRuntimeAlert};
       if (network.contextInvalidated) reportPersistenceError(contextFailure(), '扩展连接已失效');
       refresh(); wakeSender();
       if ((status.ingestion?.gaps || 0)+(status.bridgeGaps || 0)+(status.frameGaps || 0)+(status.capture?.gaps || 0) !== previousGaps || JSON.stringify(acknowledgedRuntimeAlert) !== previousAcknowledgement) persistRuntime();
@@ -475,6 +485,20 @@ export function boot(options = {}) {
     if (next.anchor) void registerProfile(next.anchor.name).catch(error => reportPersistenceError(error, '主播资料保存失败'));
   }
   const identityReader = demo ? null : options.identityFactory ? options.identityFactory(applyIdentity) : new IdentityReader({ page, room, onIdentity:applyIdentity });
+  if(!demo)roomMonitor=new RoomMonitor({page:window,
+    context:()=>({current:roomContext.current(),suspended,blocked:persistenceDisabled || closed,
+      enabled:!manualPause && (engine.running || engine.resumeRequested || engine.config.automation.monitorRoom),
+      live:liveEnded()?'ended':broadcastLive()?'live':'unknown',
+      healthy:adapter.healthy(),lastActivity:Math.max(network.lastFrame || 0,network.lastPoll || 0),
+      dirty:Boolean(panel?.dirty || panel?.busyActions.size || starting)}),
+    read:()=>identityReader.refreshRoom?.(),checkpoint:()=>persistRuntime(true),
+    onStatus:status=>{network={...network,roomMonitor:status};options.onMonitorStatus?.(status);refresh();},
+    onError:error=>log('error',`自动刷新暂缓：${error.message}`)
+  });
+  const wakeRoom=async()=>{
+    if(closed || suspended || !roomContext.current())return;
+    adapter.sync?.();await roomMonitor?.wake();await tryAutoStart();
+  };
   // 首屏渲染前安装，不重建连接、不改变 binaryType、不发送 ACK 或心跳。
   if (!demo) { adapter.restoreCollection?.(runtimeSnapshot?.collection); adapter.hook(); }
   else network = adapter.status = { hook: true, sockets: 1, frames: 1, events: 0, errors: 0, connected: true, lastFrame: Date.now() };
@@ -567,9 +591,9 @@ export function boot(options = {}) {
     } finally { starting = false; }
   }
   async function tryAutoStart() {
-    if (persistenceDisabled || !engine || engine.running || !engine.config.automation.autoStart || !autoStartArmed || manualPause || closed || suspended || starting || Date.now() < autoStartNext) return;
+    if (persistenceDisabled || !engine || engine.running || !engine.config.automation.autoStart && !engine.resumeRequested || !autoStartArmed || manualPause || closed || suspended || starting || liveEnded() || Date.now() < autoStartNext) return;
     // 预览模式不需要直播连接；自动模式等连接 open 后再申请锁和检查输入框。
-    if (!demo && engine.config.mode !== 'preview' && !adapter.healthy()) return;
+    if (!demo && (!broadcastLive() || engine.config.mode !== 'preview' && !adapter.healthy())) return;
     autoStartNext = Date.now() + 2000;
     try {
       const started = await start({ automatic: true });
@@ -711,7 +735,7 @@ export function boot(options = {}) {
     tools.ready = tools.start();
     if (demo) applyIdentity({ anchor:{ id:'1234567890', name:'模拟主播' }, self:{ id:'9876543210', name:'我的场控账号（模拟）' } });
     else void identityReader.refresh().catch(e => log('error', `自动识别暂不可用：${e.message}`));
-    let lastDateCheck = 0, lastStorageCheck = 0, lastPKRefresh = 0, lastContributionCheck = 0, lastLiveCheck = Date.now(), contributionCheckBusy = false, incomeDay = giftDate(), waitingForConnection = false;
+    let lastDateCheck = 0, lastStorageCheck = 0, lastPKRefresh = 0, lastContributionCheck = 0, contributionCheckBusy = false, incomeDay = giftDate(), waitingForConnection = false;
     const sampleContributions = async () => {
       if (closed || suspended || persistenceDisabled || !engine.config.incomeEnabled ||
         !(repository.recordContributionSnapshot || repository.recordContribution) || !adapter.readAudienceContributions || contributionCheckBusy ||
@@ -745,14 +769,10 @@ export function boot(options = {}) {
       tools.notify('tick');
       if(!persistenceDisabled && roomContext.current())void predictions.pulse(predictionPulse({engine,network,identity,connected:(demo || adapter.healthy()) && (!identity.live?.status || identity.live.status==='live')}));
       if (demo) { network.lastFrame = adapter.status.lastFrame = Date.now(); }
-      if (!demo && identityReader.refreshRoom && roomContext.current() && Date.now() - lastLiveCheck >= 15000) {
-        lastLiveCheck = Date.now();
-        // Query failures and a disconnected socket are unknown state, never a broadcast end.
-        void identityReader.refreshRoom().catch(() => {});
-      }
+      void roomMonitor?.tick();
       if (Date.now() - lastDateCheck >= 60000) { lastDateCheck = Date.now(); refresh(); const day = giftDate(); if (day !== incomeDay) { incomeDay = day; refreshIncome(); } }
       if (Date.now()-lastContributionCheck >= 5000) void sampleContributions();
-      if (!roomContext.current()) { media.stop(); playground?.cancel();accountRefresh.close();void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
+      if (!roomContext.current()) { roomMonitor?.close();media.stop(); playground?.cancel();accountRefresh.close();void tools.close(); log('error', '直播间地址已切换；场控保持当前状态，当前页不再处理新消息'); clearInterval(timer); stopContributionWatch(); adapter.stopDOM?.(); identityReader?.close(); pickCleanup?.(); return; }
       adapter.sync?.();
       if ((engine.pk.current()?.phase === 'active' || panel.isPKVisible()) && Date.now() - lastPKRefresh >= 1000) { lastPKRefresh = Date.now(); refresh(); }
       if (adapter.checkStorage && !persistenceDisabled && Date.now()-lastStorageCheck >= 15000) { lastStorageCheck = Date.now(); void adapter.checkStorage().catch(error=>reportPersistenceError(error,'存储用量检查失败')); }
@@ -762,9 +782,11 @@ export function boot(options = {}) {
       const waiting = engine.running && !demo && engine.config.mode !== 'preview' && !adapter.healthy();
       if (waiting !== waitingForConnection) { waitingForConnection = waiting; if (engine.running) log('system', waiting ? '直播数据重连中，暂缓发送；连接恢复后继续' : '直播数据连接已恢复，继续场控'); }
       const tickEpoch = engine.epoch;
-      try { await engine.tick(demo || engine.config.mode === 'preview' || adapter.healthy()); }
+      try { await engine.tick(!liveEnded() && (demo || engine.config.mode === 'preview' || liveConnection())); }
       catch (e) { if (engine.epoch === tickEpoch) reportPersistenceError(e, '运行异常，场控保持运行'); }
     }, 250);
+    const wake=()=>{void wakeRoom().catch(error=>log('error',`直播间恢复检测：${error.message}`));};
+    window.addEventListener('online',wake);document.addEventListener('visibilitychange',wake);document.addEventListener('resume',wake);
     panel.updateGifts([...giftActivity.values()].reverse());
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, engine.config.gift.yuanPerDiamond);
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
@@ -775,10 +797,11 @@ export function boot(options = {}) {
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
       const wasRunning = engine.running || engine.resumeRequested;
       suspended = true; closed = !event.persisted; stopContributionWatch();
+      roomMonitor?.suspend();
       engine.resumeRequested = wasRunning && !manualPause;
       engine.stop(event.persisted ? '页面进入缓存，保留运行状态' : '页面刷新或关闭，保留运行状态', { preserveWork:true });
       clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null; void persistRuntime(true).catch(() => {});
-      if (closed) { webKnowledge.close();accountRefresh.close();predictions.close();workbench?.close();playground?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
+      if (closed) {roomMonitor?.close();window.removeEventListener('online',wake);document.removeEventListener('visibilitychange',wake);document.removeEventListener('resume',wake); webKnowledge.close();accountRefresh.close();predictions.close();workbench?.close();playground?.close();foundationSettings?.close();edge.close();localAgentTasks?.close();clearInterval(timer); identityReader?.close(); adapter.closeEvents?.(); }
       clearTimeout(renderTimer); renderTimer = null; clearTimeout(viewerTimer); viewerTimer = null; clearTimeout(giftTimer); giftTimer = null; clearTimeout(incomeTimer); incomeTimer = null;
       clearTimeout(panel.logTimer); panel.logTimer = null; clearTimeout(panel.toastTimer); clearTimeout(incomeRetryTimer); incomeRetryTimer = null; adapter.stopDOM?.(); pickCleanup?.();
       journalCommitter?.pause();
@@ -794,6 +817,7 @@ export function boot(options = {}) {
       void drainIncome();
       adapter.sync?.();
       if (!demo) { try { adapter.observeDOM(); } catch (e) { log('error', e.message); } void identityReader.refresh().catch(e => log('error', e.message)); }
+      wake();
       refresh(); refreshGifts(); void loadIncome({profiles:true});
     });
     void drainIncome();
@@ -820,7 +844,7 @@ export function boot(options = {}) {
     }});
     const installCommand=panel.root.querySelector('[data-native-install-command]');
     if(installCommand && /^[a-p]{32}$/u.test(options.nativeExtensionId || ''))installCommand.textContent=`npm run native:install -- --extension-id=${options.nativeExtensionId}`;
-    options.onReady?.({ engine, panel, adapter, tools,media,predictions, stop: pause, rememberUser, refreshIncome, checkpoint:() => persistRuntime(true) });
+    options.onReady?.({ engine, panel, adapter, tools,media,predictions, stop: pause, rememberUser, refreshIncome, wake:wakeRoom, checkpoint:() => persistRuntime(true) });
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });
   return engine;
