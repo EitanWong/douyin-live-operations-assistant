@@ -36,9 +36,19 @@ test('搜索后的最终答案、查询、来源、缓存标记与用量同时�
  assert.ok(progress.some(row=>row.trace?.some(event=>event.stage==='search')),'进行中也投影真实链路');
  assert.ok(!JSON.stringify(result.trace).includes('test-key'),'链路不包含请求凭据或完整提示词');
 });
+test('PK问答测试记录两路查询、来源性质和排除原因，供扩展内检查实际依据',async()=>{
+ let calls=0;const f=fixture({search:async()=>({results:[
+  {index:1,title:'错误文章',url:'https://seo.example/pk',content:'PK视频播放量翻倍，按播放量排名。'},
+  {index:2,title:'玩法',url:'https://guide.example/pk',content:'本玩法按PK分结算。'}
+ ]}),request:d=>respond(d,++calls===1 ? plan('web-search','','抖音PK规则') : '{"answer":"本玩法按PK分结算。","sources":[1]}')});
+ const result=await f.service.run({question:'抖音PK规则'});
+ assert.equal(result.queries.length,2);assert.equal(result.excludedSources.length,1);assert.equal(result.sourceReview[0].kind,'third-party');
+ assert.ok(result.trace.some(row=>row.stage==='verification' && /排除1/u.test(row.detail)));
+ assert.equal(result.checks.every(row=>row.pass),true);
+});
 test('可绕过缓存重查，有效缓存也可复用且标原采集时间',async()=>{
  let searches=0,calls=0;const found={id:'00000000-0000-4000-8000-000000000000',cached:true,query:'规则',searchedAt:123,results:[{index:1,content:'已核实规则',url:'https://rules.example/'}]};
- const f=fixture({knowledge:{revision:async()=>0,candidates:async()=>[{id:found.id,query:'规则'}],find:async()=>found},
+ const f=fixture({knowledge:{revision:async()=>0,candidates:async()=>[found],find:async()=>found},
   search:async()=>{searches++;return {...found,cached:false};},request:d=>{calls++;respond(d,calls===1 ? plan('knowledge','已核实规则。[1]',found.id) : calls===2 ? plan('web-search','','规则') : '已核实规则。[1]');}});
  const cached=await f.service.run({question:'规则是什么'});assert.equal(cached.cached,true);assert.equal(cached.searchedAt,123);assert.equal(searches,0);
  const fresh=await f.service.run({question:'规则是什么',fresh:true});assert.equal(fresh.cached,false);assert.equal(searches,1);
@@ -78,7 +88,7 @@ test('基本检查发现超长、代主持和缺来源；预设场景只检查�
   const result=await f.service.run({question:'你好'});assert.ok(result.status==='failed' || result.checks.some(c=>!c.pass));
  }
  const skip=fixture({request:d=>respond(d,plan('skip'))});assert.equal((await skip.service.run({question:'噪声'})).status,'skipped');
- assert.equal(AI_TEST_CASES.length,12);assert.ok(AI_TEST_CASES.every(c=>c.fixture && c.criteria.length));
+ assert.equal(AI_TEST_CASES.length,15);assert.ok(AI_TEST_CASES.every(c=>c.fixture && c.criteria.length));
 });
 test('非法输入不调用模型，断开的页面不能继续测试',async()=>{
  const f=fixture();for(const question of ['', '字'.repeat(1001)])await assert.rejects(f.service.run({question}),/问题/u);
@@ -116,8 +126,8 @@ test('固定评测使用隔离资料和实际模型请求，不读取现场、�
  }
 });
 
-test('无引用答案在问答测试内保留并显示可核对原因，不会被判成完全达标',async()=>{
+test('引用修订仍失败在问答测试内显示真实原因，不会被判成完全达标',async()=>{
  let count=0;const f=fixture({search:async()=>({results:[{index:1,content:'上海小雨。'}]}),request:d=>respond(d,++count===1 ? plan('web-search','','上海天气') : '上海小雨。')});
  const result=await f.service.run({question:'上海天气'});
- assert.equal(result.answer,'上海小雨。');assert.match(result.citationWarning,/引用/);assert.ok(result.checks.some(c=>!c.pass));
+ assert.equal(result.status,'failed');assert.equal(result.answer,'');assert.match(result.error,/引用/);assert.equal(result.calls.cloud,3);assert.equal(result.trace.at(-1).status,'failed');
 });

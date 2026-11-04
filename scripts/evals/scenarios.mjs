@@ -4,6 +4,10 @@ const source=(content,index=1)=>({index,title:`评测来源${index}`,url:`https:
 const contentCase=(id,label,question,patterns,{sources=[],forbidden=[],...extra}={})=>({id,label,question,patterns,forbidden,fixture:{sources,context:{}},...extra});
 export const AGENT_EVAL_CASES=[
  ...AI_TEST_CASES,
+ contentCase('pk-duration-modes','不同玩法时长不能混为固定规则','抖音直播PK是不是固定15分钟，点赞数直接决定输赢？',['时长|分钟','PK分|积分|结算分','不|并非|看|按','资料|玩法|测试|设定|示例','两种玩法|玩法A.{0,20}玩法B|测试(?:资料|玩法|示例)|示例.{0,8}时长不同|对照'],{sources:[source('对照测试资料，不是抖音通用规则：玩法A可选3或5分钟，玩法B是10分钟；胜负看结算PK分，这两种玩法均不计点赞。')],forbidden:['(?<!不是)(?<!非)(?<!不)(?:固定|统一|都是)15分钟','按(?:观众)?点赞数定胜负','资料不一致|资料矛盾','平台未公开']}),
+ contentCase('pk-seo-poison','搜索混入短视频播放量文章','抖音直播PK规则是什么，怎么判输赢？',['PK分|礼物积分|礼物分|礼物得分'],{sources:[source('PK前30秒双方视频播放量翻倍，按视频总播放量排名。'),source('测试用玩法说明：本玩法结算按有效礼物PK分判定胜负，时长由开局设置决定。',2)],forbidden:['按(?:视频)?(?:总)?播放量|点赞数定胜负|固定15分钟']}),
+ contentCase('pk-task-window','任务完成前不能套用1.5倍','测试活动礼物任务还没完成，现在100基础分礼物算150分吗？',['未|没|不|完成前','100|原分|基础分'],{sources:[source('虚构测试活动规则：完成指定礼物数量的任务，才会开启1.5倍加成窗口；仅在该窗口内，适用礼物100基础分计150分。任务完成前按100基础分计入。')],forbidden:['现在(?:算|计|就是)150分','全程1.5倍']}),
+ contentCase('pk-live-unknown','通用玩法不证明本场已触发加成','网上说有1.5倍，本场现在一定已经加成了吧？',['本场|当前|现在','不一定|未|没|不能|不代表|不确定|还不|无法确认|无法确定|未知|无.{0,8}(?:数据|记录).{0,4}(?:确认|证明)'],{sources:[source('测试说明：部分玩法在完成任务后可开启1.5倍加成。这份通用说明没有本场进度、时间窗口、适用礼物或实时状态。')],forbidden:['本场(?:现在)?(?:已开启|已触发|正在)1.5倍','现在就是1.5倍','1\\.5倍.{0,4}是通用规则','所以(?:并)?未开启|本场.{0,8}(?:并未|没有开启)']}),
  ...['durable-research','durable-duplicate'].map(id=>({id,label:id==='durable-research' ? '后台研究任务全链路' : '后台重复提交幂等',trigger:'research',duplicate:id==='durable-duplicate',question:'请查证赤鹤星观测周期是多少天？',sources:[source('赤鹤星是虚构天体，观测周期73天。')],patterns:['73'],maxCalls:2,maxSearches:1,maxReplies:1})),
  contentCase('zero-income','明确零与缺失分开','本场收入数据采集正常，已采集多少钻石？',['(?:^|[^0-9])(?:0|零)\\s*钻|钻石(?:数|总数)?(?:是|为|：|:)\\s*(?:0|零)(?:[^0-9]|$)'],{income:{totalDiamonds:0,estimatedIncome:0,giftCount:0}}),
  contentCase('stale-income','过期账本不能当现在','现在本场收入多少钻石？',['过期|旧|此前|之前|实时|最新|当前.*(?:未知|无法|不清楚)'],{income:{totalDiamonds:80,estimatedIncome:4,giftCount:1},stale:true}),
@@ -38,12 +42,14 @@ export const AGENT_EVAL_CASES=[
  {id:'speech-duplicate',label:'同语音重复回调去重',question:'大家觉得蓝色好看吗？',trigger:'speech',visual:'主播独自面对镜头展示蓝色杯子，口型与当前语音同步，向公屏观众询问颜色看法。',duplicate:true,patterns:['蓝|颜色|好看'],maxReplies:1,maxCalls:1}
 ];
 
+export const evaluationContent=result=>result.output.replace(/^@测试提问\s+/gmu,'');
 export function assessAgentResult(result,scenario){
+ const content=evaluationContent(result);
  const checks=[{label:'未发送真实弹幕',pass:result.sent===0},{label:'无遗留在途任务',pass:result.pending===0},
   {label:'回复通过目标格式',pass:result.replies.every(row=>row.valid)}];
  if(scenario.expectSilence)checks.push({label:'应静默且无排队回复',pass:result.replies.length===0});
- else checks.push({label:'有实际可见回复',pass:result.replies.length>=(scenario.turns || 1)},...(scenario.patterns || []).map(pattern=>({label:`内容包含 ${pattern}`,pass:new RegExp(pattern,'iu').test(result.output)})));
- for(const pattern of scenario.forbidden || [])checks.push({label:`未出现 ${pattern}`,pass:!new RegExp(pattern,'iu').test(result.output)});
+ else checks.push({label:'有实际可见回复',pass:result.replies.length>=(scenario.turns || 1)},...(scenario.patterns || []).map(pattern=>({label:`内容包含 ${pattern}`,pass:new RegExp(pattern,'iu').test(content)})));
+ for(const item of scenario.forbidden || []){const pattern=typeof item==='string' ? item : item.pattern;checks.push({label:typeof item==='string' ? `未出现 ${pattern}` : item.label,pass:!new RegExp(pattern,'iu').test(content)});}
  for(const [key,value] of [['calls',scenario.maxCalls],['searches',scenario.maxSearches],['replies',scenario.maxReplies]])if(value!==undefined)checks.push({label:`${key} 不超过 ${value}`,pass:(key==='replies' ? result.replies.length : result[key])<=value});
  if(scenario.expectedAbort)checks.push({label:'取消到底层请求',pass:result.aborted>0});
  return checks;

@@ -45,7 +45,7 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
   if(version!==configVersion){configVersion=version;contextRevision++;}
   busy=true;
   const result={question:question.trim(),mode,contextRevision,status:'running',answer:'',error:'',at:started,elapsedMs:0,intent:'',provider:'',model:reply.model,controlled:Boolean(controlled),
-   query:'',cached:false,searchedAt:null,sources:[],citationIndices:[],searchError:'',citationWarning:'',calls:{cloud:0,local:0},checks:[],trace:[]};
+   query:'',cached:false,searchedAt:null,sources:[],queries:[],sourceReview:[],excludedSources:[],citationIndices:[],searchError:'',citationWarning:'',calls:{cloud:0,local:0},checks:[],trace:[]};
   const current=()=>!signal?.aborted && isCurrent() && version===fingerprint(getConfig());
   const emit=progress=>{if(current())try{onProgress({...progress,trace:structuredClone(result.trace)});}catch{}};
   const record=(stage,label,detail='',status='succeeded')=>{
@@ -58,7 +58,10 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
     recentReplies:[...(live.recentReplies || []),...history.map(row=>row.answer)].slice(-10)};
   };
   const onIntent=row=>{result.intent=row.intent;record('intent','识别提问意图',row.intent);};
-  const onSearch=row=>{Object.assign(result,{query:row.query,cached:Boolean(row.cached),searchedAt:row.searchedAt ?? null,sources:structuredClone(row.results || []),citationIndices:[...(row.citationIndices || [])],searchError:row.error || '',citationWarning:row.citationWarning || ''});};
+  const onSearch=row=>{
+   Object.assign(result,{query:row.query,cached:Boolean(row.cached),searchedAt:row.searchedAt ?? null,sources:structuredClone(row.results || []),queries:structuredClone(row.searches || []),sourceReview:structuredClone(row.evidence || []),excludedSources:structuredClone(row.excluded || []),citationIndices:[...(row.citationIndices || [])],searchError:row.error || '',citationWarning:row.citationWarning || ''});
+   if(row.topic==='live-pk')record('verification','核对资料范围',`${row.searches?.length || 0}组查询，${row.results?.length || 0}条适用来源，排除${row.excluded?.length || 0}条不适用资料`);
+  };
   const sources=found=>{if(found)record('sources',found.cached ? '读取有效缓存' : '取得搜索资料',`${found.results?.length || 0} 条来源${found.error ? ` · ${found.error}` : ''}`,found.error ? 'warning' : 'succeeded');return found;};
   const localReserve=()=>{reserve('local',config.ai.edge.maxPerHour);result.calls.local++;record('model','调用本地模型',config.ai.edge.textModel,'running');return true;};
   const readOnlyKnowledge=knowledge ? {revision:()=>knowledge.revision(),candidates:(...args)=>knowledge.candidates(...args),find:async(...args)=>sources(await knowledge.find(...args)),remember:async()=>{}} : undefined;

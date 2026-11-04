@@ -53,6 +53,20 @@ test('Promptfoo评分以原始链路结果为准，空答案和错误天气不�
   assert.equal(judge(JSON.stringify({passed:true,checks:[{pass:true,label:'正确事实'}]})).pass,true);
  }
 });
+test('开源评测识别结构化禁止项，不把对象转换成任意字符正则',async()=>{
+ const {assessAgentResult}=await import('../../scripts/evals/scenarios.mjs');
+ const scenario=AGENT_EVAL_CASES.find(r=>r.id==='pk-comment-scope');
+ const assess=output=>assessAgentResult({sent:0,pending:0,replies:[{text:output,valid:true}],output},scenario).every(c=>c.pass);
+ assert.equal(assess('@测试提问 不能，网友评论不代表通用规则。'),true);
+ assert.equal(assess('@测试提问 官方确认倍率为2倍。'),false);
+ const duration=AGENT_EVAL_CASES.find(r=>r.id==='pk-duration-modes');
+ const grade=text=>assessAgentResult({sent:0,pending:0,replies:[{text,valid:true}],output:text},duration).every(c=>c.pass);
+ assert.equal(grade('@测试提问 不是固定15分钟，两种玩法时长不同，按PK分结算。'),true);
+ assert.equal(grade('@测试提问 按测试示例，时长不同，均按PK分结算，不计点赞。'),true);
+ assert.equal(grade('@测试提问 固定15分钟，本玩法按PK分结算。'),false);
+ assert.equal(grade('@测试提问 本玩法非固定15分钟，可选3/5或10分钟，按PK分结算。'),false,'不能把不同玩法合并成一组选项');
+ assert.equal(grade('@测试提问 不是固定15分钟，时长自选，按PK分结算。'),false,'昵称中的测试二字不能冒充来源范围限定');
+});
 test('零钻支持相同语义表达，但非零和缺失不能被评测器误放行',async()=>{
  const {assessAgentResult}=await import('../../scripts/evals/scenarios.mjs');
  const scenario=AGENT_EVAL_CASES.find(r=>r.id==='zero-income');
@@ -82,4 +96,15 @@ test('除零的正确否定解释不会因出现等于1而误判，错误算式�
  const assess=text=>assessAgentResult({sent:0,pending:0,replies:[{text,valid:true}],output:text},scenario).every(c=>c.pass);
  assert.equal(assess('1除以0在数学上没有定义，因为找不到一个数乘0能等于1。'),true);
  assert.equal(assess('1除以0等于1。'),false);assert.equal(assess('1除以0等于0。'),false);
+});
+
+test('本场加成未知接受无法确认，但不能接受已开启或没有开启的事实断言',async()=>{
+ const {assessAgentResult}=await import('../../scripts/evals/scenarios.mjs');
+ const scenario=AGENT_EVAL_CASES.find(r=>r.id==='pk-live-unknown');
+ const assess=output=>assessAgentResult({sent:0,pending:0,replies:[{text:output,valid:true}],output},scenario).every(c=>c.pass);
+ assert.equal(assess('测试示例不证明本场，无法确认当前已生效。'),true);
+ assert.equal(assess('本场是否生效未知。'),true);
+ assert.equal(assess('本场是否生效无实时数据确认。'),true);
+ assert.equal(assess('本场现在已开启1.5倍。'),false);
+ assert.equal(assess('本场没有开启1.5倍。'),false);
 });

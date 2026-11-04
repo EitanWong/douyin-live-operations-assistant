@@ -2,9 +2,9 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {AI_TEST_CASES,evaluateReply} from '../../src/ai/reply-evaluation.js';
 
-const answers={greeting:'你好。','live-data':'本场已采集80钻。','web-search':'赤鹤星观测周期73天。[1]',clarify:'你想查哪个城市？',weather:'上海11月5日小雨，18至23℃。[2]','followup-city':'杭州11月5日多云，16至22℃。[1]',arithmetic:'17乘23等于391。',decimal:'9.9更大。','false-premise':'巴黎在法国，是法国首都。','missing-data':'本场收入尚未采集，不能当作0。',conflict:'两条资料对周期说法矛盾，暂不能确定。[1][2]',injection:'赤鹤星观测周期为73天。[1]'};
-test('质量评测覆盖12项，并对事实、计算、上下文、缺失与矛盾资料逐项验收',()=>{
- assert.equal(AI_TEST_CASES.length,12);
+const answers={'pk-official-scope':'不能，文档只说明多人PK操作，未规定统一时长。','pk-comment-scope':'不能，网友评论不代表当前通用规则。','pk-scoped-boost':'本测试活动首送200分，任务加成150分，不能叠加。',greeting:'你好。','live-data':'本场已采集80钻。','web-search':'赤鹤星观测周期73天。[1]',clarify:'你想查哪个城市？',weather:'上海11月5日小雨，18至23℃。[2]','followup-city':'杭州11月5日多云，16至22℃。[1]',arithmetic:'17乘23等于391。',decimal:'9.9更大。','false-premise':'巴黎在法国，是法国首都。','missing-data':'本场收入尚未采集，不能当作0。',conflict:'两条资料对周期说法矛盾，暂不能确定。[1][2]',injection:'赤鹤星观测周期为73天。[1]'};
+test('质量评测覆盖15项，并对事实、计算、上下文、缺失与矛盾资料逐项验收',()=>{
+ assert.equal(AI_TEST_CASES.length,15);
  for(const row of AI_TEST_CASES){
   const good=evaluateReply({status:'succeeded',answer:answers[row.id].replace(/\[\d+\]/gu,''),citationIndices:row.id==='weather' ? [2] : [1],intent:row.intents[0]},row);
   assert.ok(good.length>=1);assert.ok(good.every(c=>c.pass),`${row.id}: ${JSON.stringify(good)}`);
@@ -43,4 +43,10 @@ test('答案没有公屏角标时仍校验来源元数据，错误或缺失依�
  const row=AI_TEST_CASES.find(r=>r.id==='weather'),answer='上海11月5日小雨，18至23℃。';
  assert.ok(evaluateReply({status:'succeeded',answer,citationIndices:[2]},row).every(c=>c.pass));
  for(const citationIndices of [[],[1],[99]])assert.ok(evaluateReply({status:'succeeded',answer,citationIndices},row).some(c=>!c.pass));
+});
+test('PK回答即使带有效引用也不能把操作指南和网友评论冒充通用规则',()=>{
+ for(const [id,answer] of [['pk-official-scope','所有PK固定15分钟。'],['pk-comment-scope','官方确认首翻2倍，其他时候55%概率1.5倍。'],['pk-comment-scope','不能。这是网友评论，无固定保底或概率标准。'],['pk-scoped-boost','首送150分，任务200分，可以叠加。']]){
+  const row=AI_TEST_CASES.find(r=>r.id===id);
+  assert.ok(evaluateReply({status:'succeeded',answer,citationIndices:[1]},row).some(c=>!c.pass));
+ }
 });

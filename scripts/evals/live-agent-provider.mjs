@@ -7,7 +7,7 @@ import {createLocalAgentTasks} from '../../src/ai/local-agent.js';
 import {MediaEvidence} from '../../src/services/media.js';
 import {evaluateReply} from '../../src/ai/reply-evaluation.js';
 import {IDBFactory,IDBKeyRange} from 'fake-indexeddb';
-import {AGENT_EVAL_CASES,assessAgentResult} from './scenarios.mjs';
+import {AGENT_EVAL_CASES,assessAgentResult,evaluationContent} from './scenarios.mjs';
 
 const flush=()=>new Promise(setImmediate);
 const completion=(details,text)=>details.onload({status:200,responseText:JSON.parse(details.data).stream
@@ -25,6 +25,7 @@ export function fetchTransport(details){
 export async function runAgentCase(scenario,{key,workspaceId,request=fetchTransport}={}){
  if(!key || !workspaceId)throw new Error('需要 QWEN_API_KEY 和 QWEN_WORKSPACE_ID；请勿将密钥写入评测配置。');
  if(scenario.trigger==='research')return runResearchCase(scenario,{key,workspaceId,request});
+ const started=Date.now(),modelTimings=[];
  let now=1793764800000,calls=0,searches=0,sent=0,aborted=0,late;
  const replies=[],diagnostics=[],intents=[],lookups=[];
  const sources=scenario.fixture?.sources || scenario.sources || [];
@@ -40,7 +41,8 @@ export async function runAgentCase(scenario,{key,workspaceId,request=fetchTransp
    else completion(details,scenario.fault==='long' ? JSON.stringify({intent:'chat',reply:'长'.repeat(100)}) : '{"intent":"unknown"}');
    return;
   }
-  const handle=request(details);
+  const modelStarted=Date.now();
+  const handle=request({...details,onload:response=>{modelTimings.push(Date.now()-modelStarted);details.onload(response);}});
   return {abort(){aborted++;handle?.abort?.();}};
  };
  const search=createSearchClient({now:()=>now,getKey:()=> 'fixture-search-key',request:details=>{
@@ -90,10 +92,10 @@ export async function runAgentCase(scenario,{key,workspaceId,request=fetchTransp
    if(turn+1<(scenario.turns || 1)){now+=130000;}
   }
   const result={id:scenario.id,label:scenario.label,question:scenario.question,output:replies.map(row=>row.text).join('\n'),replies,calls,searches,sent,
-   pending:Number(Boolean(engine.activeAI))+engine.researchAI.size+engine.queue.length,
+   elapsedMs:Date.now()-started,modelTimings,pending:Number(Boolean(engine.activeAI))+engine.researchAI.size+engine.queue.length,
    aborted,faultInjected:Boolean(scenario.fault),intents,lookups,diagnostics};
   result.checks=assessAgentResult(result,scenario);
-  if(scenario.criteria)result.checks.push(...evaluateReply({status:replies.length ? 'succeeded' : 'failed',answer:result.output,citationIndices:lookups.at(-1)?.citationIndices || []},scenario));
+  if(scenario.criteria)result.checks.push(...evaluateReply({status:replies.length ? 'succeeded' : 'failed',answer:evaluationContent(result),citationIndices:lookups.at(-1)?.citationIndices || []},scenario));
   if(scenario.intents)result.checks.push({label:'意图符合问题类型',pass:intents.some(intent=>scenario.intents.includes(intent))});
   if(scenario.sources===true)result.checks.push({label:'实际查证且有有效引用',pass:lookups.some(row=>row.results?.length && row.citationIndices?.length && !row.citationWarning)});
   result.passed=result.checks.every(row=>row.pass);return result;

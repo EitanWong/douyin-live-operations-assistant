@@ -95,7 +95,7 @@ test('质量汇总将内容检查失败计为待改进，重新运行和清空�
  let calls=0;const f=fixture({run:async({question})=>result(question,{checks:[{label:'给出正确低温',pass:++calls%2===0}]})});
  try{
   f.panel.node('[data-playground-suite]').click();for(let i=0;i<100 && f.ui.busy;i++)await flush();
-  assert.match(f.panel.node('[data-playground-summary]').textContent,/已运行 12\/12，达标 6，待改进 6/u);
+  assert.match(f.panel.node('[data-playground-summary]').textContent,/已运行 15\/15，达标 7，待改进 8/u);
   f.panel.node('[data-playground-clear]').click();assert.match(f.panel.node('[data-playground-summary]').textContent,/尚未运行/u);
   assert.equal(f.ui.records.length,0);
  }finally{f.close();}
