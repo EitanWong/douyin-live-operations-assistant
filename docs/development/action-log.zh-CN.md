@@ -1931,3 +1931,5 @@ Promptfoo接入首轮完整保留：评分脚本单行返回被框架按表达�
 | 中止两批旧代码/默认并行度的中间回归，冻结最新源码后限制全量并行度 | 避免与另一任务同时大量启动 jsdom，且不把旧冻结树算为最新验收 | 中间输出保留为 full-test.log、partial-test-before-silent.log 与 targeted-final.log；最终全量使用 node --test --test-concurrency=2 tests，与 npm test 相同测试集合，结果随后追加 |
 
 已完成独立调度模块提交 7aaf7e5；其余集成、构建后回归、说明与最终验证回执随后按项目流程提交和推送。crapper/dryer/mutator 不可用，三项未执行。
+
+全量首轮为 1375/1377，保留完整失败证据：下播后的唤醒把旧缓存的 active 与本次页面返回值合并，造成租约迟延释放；新构建链路测试仅等待 30ms，早于 100ms 界面刷新。专项重跑稳定复现前者、后者偶发。修复为本次页面唤醒结果与独立监控租约合并，去掉缓存采集状态的重复所有权；界面断言改等可见状态，不放宽目标。两项复测及最新完整回归随后追加。功能已提交 a86b386 并推送工作分支，草稿 PR #15：https://github.com/EitanWong/douyin-live-operations-assistant/pull/15，目标为 dev。

@@ -121,7 +121,7 @@ if (room) {
       if (contextInvalidated) { reply({active:false}); return; }
       void roomWake?.().catch(()=>{});
       void (async()=>{
-        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}})===true || collectionActive();reply({active});void updateCollectionLease(active).catch(()=>{});}
+        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}})===true || monitorActive;reply({active});void updateCollectionLease(active).catch(()=>{});}
         catch {reply({active:false});}
       })();
       return true;

@@ -854,6 +854,8 @@ test('构建后的未开播页持有后台监控租约，后台唤醒查询房�
     const before=reads;assert.equal((await wake()).active,true);
     await new Promise(resolve=>setTimeout(resolve,30));assert.ok(reads>before,'后台唤醒触发房间接口查询');
     const panel=page.document.querySelector('#douyin-live-assistant').shadowRoot;
+    const rendered=Date.now()+3000;
+    while(!/等待开播/.test(panel.querySelector('[data-state]').textContent) && Date.now()<rendered)await new Promise(resolve=>setTimeout(resolve,20));
     assert.match(panel.querySelector('[data-state]').textContent,/等待开播/);
     const stop=panel.querySelector('[data-action=stop]');assert.equal(stop.hidden,false);assert.equal(stop.disabled,false);stop.click();
     const stopped=Date.now()+2000;
