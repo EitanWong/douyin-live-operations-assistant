@@ -15,6 +15,35 @@ function fixture() {
   page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
   return {dom,page,client,require,requests,displayed,sender:new PageRequestSender(page)};
 }
+test('真实@沿用原生rtf_content格式、UTF-16偏移和字符串UID，重复提交只发一次',async()=>{
+  const f=fixture();
+  try {
+    const text='🙂 @懒二🐑 你好',mentions=[{id:'4143433474648240',start:3,length:5}];
+    const prepared=f.sender.prepare('chat');
+    const result=await f.sender.commit(prepared.token,text,mentions);
+    assert.equal(result.submitted,true);
+    assert.deepEqual(JSON.parse(f.requests[0].params.rtf_content),[
+      {type:2,value:JSON.stringify({uid:'4143433474648240',webcast_uid:''}),start:3,length:5}
+    ]);
+    assert.equal(f.requests[0].params.content,text);
+    await f.sender.commit(prepared.token,text,mentions);assert.equal(f.requests.length,1);
+    assert.equal(f.displayed[0].payload.rtf_content_v2.text,text);
+  } finally {f.dom.window.close();}
+});
+test('无效@片段和未验证的管理员@请求在提交前拒绝',async()=>{
+  const f=fixture();
+  try {
+    for(const mentions of [null,{},[{id:9007199254740992,start:0,length:5}], [{id:'0',start:0,length:5}],
+      [{id:'123',start:1,length:4}], [{id:'123',start:0,length:4}], [{id:'123',start:0,length:99}],
+      [{id:'123',start:0,length:5},{id:'456',start:0,length:5}]]) {
+      const ticket=f.sender.prepare('chat');
+      assert.equal((await f.sender.commit(ticket.token,'@懒二🐑 你好',mentions)).submitted,false,JSON.stringify(mentions));
+    }
+    const admin=f.sender.prepare('admin');
+    assert.equal((await f.sender.commit(admin.token,'@懒二🐑 你好',[{id:'123',start:0,length:5}])).submitted,false);
+    assert.equal(f.requests.length,0);
+  } finally {f.dom.window.close();}
+});
 test('网页请求拦截器同步重入同一票据时，聊天和管理操作都只提交一次',async t=>{
   for(const kind of ['chat','admin','mute','ban'])await t.test(kind,async()=>{
     const f=fixture();

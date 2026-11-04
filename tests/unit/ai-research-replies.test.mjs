@@ -10,8 +10,21 @@ function fixture(){
    return Promise.resolve('你好。');
   }});
  engine.setIdentity({self:{id:'self',name:'助手'}});engine.start();
- return {engine,pending,spoken,advance:ms=>now+=ms,chat:async text=>{engine.ingest({type:'chat',id:`q${++id}`,user:{id:`v${id}`,name:`观众${id}`},text});await flush();}};
+ return {engine,pending,spoken,advance:ms=>now+=ms,chat:async(text,user)=>{engine.ingest({type:'chat',id:`q${++id}`,user:user || {id:`v${id}`,name:`观众${id}`},text});await flush();}};
 }
+test('查询等待、截短昵称答复及刷新中断反馈都携带实际提问者UID',async()=>{
+ const f=fixture(),g=fixture(),sent=[];const user={id:'9007199254740993123',name:'名字很长的观众🐑还有后缀'};
+ for(const {engine} of [f,g]){engine.config.mode='auto';engine.send=async(text,current,options)=>{sent.push({text,mentions:options.mentions});return {submitted:true};};}
+ try {
+  await f.chat('@助手 查询天气',user);f.advance(1000);await f.engine.tick();
+  const expected={id:user.id,start:0,length:sent[0].text.indexOf(' ')};
+  assert.deepEqual(sent[0].mentions,[expected]);
+  const snapshot=f.engine.snapshot();g.advance(1000);assert.equal(g.engine.restore(snapshot),true);
+  g.advance(10000);await g.engine.tick();assert.match(sent.at(-1).text,/查询已中断/);assert.deepEqual(sent.at(-1).mentions,[expected]);
+  f.pending[0].resolve('尚未知。');await flush();f.advance(10000);await f.engine.tick();
+  assert.match(sent.at(-1).text,/尚未知/);assert.deepEqual(sent.at(-1).mentions,[expected]);
+ }finally{f.engine.stop();g.engine.stop();}
+});
 test('查询接受后一秒内发出带实际提问者@的自然反馈，最终答复保留@且不重复提示',async()=>{
  const f=fixture();try{
   await f.chat('@助手 查询PK规则');f.advance(1000);await f.engine.tick();

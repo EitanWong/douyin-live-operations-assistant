@@ -27,7 +27,7 @@ if(room && !Object.hasOwn(window,'__douyinAssistantPageV2')) {
     onCapture:record=>enqueue(captures,record,true),onPK:event=>enqueue(priority,event),
     onEvent:event=>{if(!event.type.startsWith('pk-'))enqueue(events,event);}});
   const send=async command=>{
-    const {operation,channel,token,text,action,target,count,sequence,id,lotteryId,allowPassword,config,recordId}=command,sender=adapter.requestSender;
+    const {operation,channel,token,text,mentions,action,target,count,sequence,id,lotteryId,allowPassword,config,recordId}=command,sender=adapter.requestSender;
     if(typeof id!=='string' || id.length>64 || jobs.has(id) || jobs.size>=128)throw new Error('请求标识无效');
     if(canceled.delete(id))return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const controller=new AbortController();jobs.set(id,controller);
@@ -49,7 +49,7 @@ if(room && !Object.hasOwn(window,'__douyinAssistantPageV2')) {
       if(operation==='commit-lottery')return await sender.commitLottery(token,{signal:controller.signal});
       if(operation==='stop-lottery')return await sender.stopLottery(token);
       if(operation==='commit-moderation')return await sender.commitModeration(token);
-      if(operation==='commit' && typeof text==='string' && text.length<=200)return await sender.commit(token,text);
+      if(operation==='commit' && typeof text==='string' && text.length<=200)return await sender.commit(token,text,mentions);
       return {submitted:false,reason:'请求参数无效'};
     } finally {jobs.delete(id);}
   };

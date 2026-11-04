@@ -3,6 +3,7 @@ import { ModerationRequests } from './moderation-requests.js';
 import { LikeRequests } from './like-requests.js';
 import { LotteryRequests } from './lottery-requests.js';
 import { GiftRequests } from './gift-requests.js';
+import { encodeChatMentions } from '../core/chat-mentions.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
 // remain in charge. Cookies, signatures and remote code never cross the bridge;
 // paid gifts use fixed, budget-bound preparation and commit operations.
@@ -112,22 +113,27 @@ export class PageRequestSender {
       return {available:true,token};
     } catch { return {available:false}; }
   }
-  commit(token, text) {
+  commit(token, text, mentions = []) {
     const ticket = this.tickets.get(token);
     if (!ticket) return Promise.resolve({submitted:false,reason:'请求准备已失效'});
     if (ticket.result) return ticket.result; // A duplicate bridge delivery never sends twice.
+    let richText;
+    try { richText=encodeChatMentions(text,mentions); }
+    catch (error) { return Promise.resolve({submitted:false,reason:error.message}); }
     // Publish the receipt before page code can synchronously re-enter commit.
-    ticket.result = Promise.resolve().then(()=>this.perform(ticket,text));
+    ticket.result = Promise.resolve().then(()=>this.perform(ticket,text,richText));
     return ticket.result;
   }
-  async perform(ticket,text) {
+  async perform(ticket,text,richText) {
     const current = this.context();
     if (!current || current.path !== ticket.context.path || current.roomId !== ticket.context.roomId || current.userId !== ticket.context.userId || Date.now()-ticket.at > 10000) return {submitted:false,reason:'房间、账号或请求准备已变更'};
     if (typeof text !== 'string' || !text.trim() || [...text].length > 50) return {submitted:false,reason:'消息长度无效'};
     if (ticket.channel === 'admin' && !current.admin) return {submitted:false,reason:'管理员身份已变更'};
     const params = {room_id:current.roomId,content:text};
     const admin = ticket.channel === 'admin';
+    if (admin && richText) return {submitted:false,reason:'真实@请使用普通聊天通道'};
     if (!admin) params.type = 0;
+    if (richText) params.rtf_content=richText;
     // These are navigation context fields, not authentication material.
     const query = new URL(this.page.location.href).searchParams;
     if (admin) {
@@ -197,5 +203,5 @@ export class RequestBridgeClient {
   stopLike(token) {return this.call('stop-like',{token},800);}
   commitModeration(token) {return this.call('commit-moderation',{token},10000);}
   prepare(channel) {return this.call('prepare',{channel},800);}
-  commit(token,text) {return this.call('commit',{token,text},10000);}
+  commit(token,text,mentions=[]) {return this.call('commit',{token,text,mentions},10000);}
 }

@@ -994,6 +994,20 @@ test('旧版请求发送器没有能力探测方法时安全回退页面控件',
   adapter.requestSender={prepare:async()=>({available:false})};
   assert.equal(adapter.requestAvailable('chat'),false);
 });
+test('结构化@通过普通聊天请求提交，能力缺失不降级成纯文本@',async()=>{
+  const dom=setup();const prepared=[],committed=[];
+  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
+  const mentions=[{id:'4143433474648240',start:0,length:5}];
+  adapter.requestSender={prepare:async channel=>{prepared.push(channel);return {available:true,token:'ticket'};},commit:async(...args)=>{committed.push(args);return {submitted:true,transport:'request'};}};
+  try {
+    const result=await adapter.send('@懒二🐑 你好',()=>true,{channel:'admin',mentions});
+    assert.deepEqual(prepared,['chat']);assert.equal(result.channelUsed,'chat');
+    assert.deepEqual(committed,[['ticket','@懒二🐑 你好',mentions]]);
+    adapter.requestSender.prepare=async()=>({available:false});
+    const unavailable=await adapter.send('@懒二🐑 你好',()=>true,{mentions});
+    assert.equal(unavailable.submitted,false);assert.match(unavailable.reason,/@/);assert.equal(committed.length,1);
+  } finally {dom.window.close();}
+});
 test('管理员选项缺失时只发普通弹幕，不开启默认至尊弹幕', async () => {
   const f = privilegeComposer({admin:false});
   try {

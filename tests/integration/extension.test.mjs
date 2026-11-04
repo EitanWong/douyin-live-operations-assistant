@@ -964,6 +964,22 @@ test('MAIN 忽略页面伪造的发送命令和事件，提前取消也不会迟
     assert.equal((await bridge.call({type:'send-api',id:'canceled',operation:'prepare-like'})).available,false);assert.equal(prepares,0);
   } finally {page.close();}
 });
+test('构建后的隔离桥将真实@范围传到MAIN并序列化原生rtf_content',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/123',runScripts:'outside-only'}),page=dom.window,requests=[];
+  try {
+    Object.assign(page,{TextDecoder,TextEncoder});
+    page.__STORE__={roomStore:{roomInfo:{roomId:'7698776476925443611',room:{web_rid:'123'}}},userStore:{userInfo:{id_str:'789'}},singletonStore:{message:{queuePush(){}}}};
+    const client={defaults:{baseURL:'https://live.douyin.com',withCredentials:true},request:async request=>{requests.push(request);return {data:{status_code:0,data:{msg_id_str:'123',content:request.params.content,user:{id_str:'789'}}}};}};
+    const require=()=>({ZP:client});require.m={request:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
+    page.webpackChunkdouyin_live_v2=[];page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
+    page.eval(await readFile(file('page.js'),'utf8'));
+    const bridge=new RequestBridgeClient(page,pageTransport(page));const ticket=await bridge.prepare('chat');
+    assert.equal(ticket.available,true);
+    const result=await bridge.commit(ticket.token,'@懒二🐑 你好',[{id:'4143433474648240',start:0,length:5}]);
+    assert.equal(result.submitted,true);
+    assert.deepEqual(JSON.parse(requests[0].params.rtf_content),[{type:2,value:'{"uid":"4143433474648240","webcast_uid":""}',start:0,length:5}]);
+  } finally {page.close();}
+});
 
 test('福袋记录按来源房间和账号持久化，后台重启后接管者可读且不能越房写入',async()=>{
   const w=await worker(),key='live-assistant:rewards:1:789',records=[{kind:'luckyBag',key:'luckyBag:activity',status:'unknown',at:Date.now()}];

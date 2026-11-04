@@ -16,6 +16,7 @@ import { PKTracker, PK_EVENT_TYPES } from '../pk/model.js';
 import { PKOperations, PK_OPERATIONS_DEFAULTS, buildPKStrategyContext, strategyRegime, exhibitionGiftNotice, unlightedExhibitionGifts } from '../pk/operations.js';
 import { milestoneThankYou, recognizeMilestone } from './milestones.js';
 import { AudienceProfiles, audienceAddress, audienceTitle, renderAudienceTemplate, validAudienceAI } from './audience.js';
+import { normalizeChatText, resolveChatMentions } from './chat-mentions.js';
 import { AnchorStats } from './anchor-stats.js';
 import { audienceReplyContext, giftReplyContext, isIntrusiveReply, liveReplyContext, observedReplyEvent } from './reply-context.js';
 import { SEARCH_DEFAULTS, validateSearchEndpoint } from '../services/search.js';
@@ -240,7 +241,7 @@ export function renderTemplate(template, variables) {
   return template.replace(/\{([a-zA-Z]+)\}/g, (original, key) => Object.hasOwn(variables, key) ? String(variables[key]) : original);
 }
 export function cleanMessage(text, config) {
-  const s = String(text || '').replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
+  const s = normalizeChatText(text);
   if (!s) return { ok: false, reason: '空消息' };
   if ([...s].length > config.sending.maxLength) return { ok: false, reason: '消息超长，请缩短话术' };
   if (config.blockedWords.some(w => w && s.toLocaleLowerCase().includes(w.toLocaleLowerCase()))) return { ok: false, reason: '命中屏蔽词' };
@@ -388,7 +389,7 @@ export class Engine {
     // interruption reply instead of silently forgetting or repeating a paid call.
     for(const row of (Array.isArray(snapshot.pendingLookups) ? snapshot.pendingLookups : []).slice(0,2)){
       if(typeof row?.text!=='string' || !Number.isFinite(row.at) || this.now()<row.at || this.now()-row.at>=RESEARCH_TIMEOUT_MS || row.aiChat?.contextKey!==this.chatContextKey())continue;
-      this.enqueue('ai',row.text,{priority:95,expires:this.now()+RESEARCH_TIMEOUT_MS,aiChat:{...row.aiChat,observedAt:this.now()}});
+      this.enqueue('ai',row.text,{priority:95,expires:this.now()+RESEARCH_TIMEOUT_MS,mentionTargets:row.mentionTargets,aiChat:{...row.aiChat,observedAt:this.now()}});
     }
     this.rebuildGiftIndex();
     this.resumeRequested = Boolean(snapshot.running);
@@ -1196,10 +1197,11 @@ export class Engine {
     prompt.canFollowup=()=>this.calls.filter(at=>this.now()-at<3600000).length<this.config.ai.maxPerHour;
     active.current=prompt.isCurrent;
     const replyExtra=()=>{
-      if(chatContext===null)return task.extra;
+      const extra={...task.extra,...(active.lookup && mention ? {mentionTargets:[{id:event.user.id,name:mention.slice(1,-1)}]} : {})};
+      if(chatContext===null)return extra;
       const aiChat={contextKey:chatContext,observedAt:active.lookup ? this.now() : now,replyMode:task.data.replyMode,
         pacingMode:active.lookup ? 'direct' : task.data.pacingMode || (direct ? 'direct' : 'contextual'),userKey:turnViewerKey(event?.user),facts:replyFacts,lookup:Boolean(active.lookup)};
-      return {...task.extra,aiChat,...(direct || active.lookup ? {priority:95} : {}),...(active.lookup ? {expires:this.now()+RESEARCH_TIMEOUT_MS} : {})};
+      return {...extra,aiChat,...(direct || active.lookup ? {priority:95} : {}),...(active.lookup ? {expires:this.now()+RESEARCH_TIMEOUT_MS} : {})};
     };
     const nameBudget=Math.min(10,Math.max(1,prompt.maxLength-6));
     const mention=event?.type==='chat' && event.user?.name ? `@${[...event.user.name.replace(/[@\r\n]/gu,'')].slice(0,nameBudget).join('')} ` : '';
@@ -1211,7 +1213,7 @@ export class Engine {
       if(active.lookup)return;
       if(this.researchAI.size>=2)throw Object.assign(new Error('并行查询已满'),{code:'LOOKUP_BUSY'});
       active.lookup=true;active.lookupAt=this.now();active.lookupId=++this.serial;
-      active.recovery={at:this.now(),text:noticeText('上次查询已中断，请重新提问。'),aiChat:replyExtra()?.aiChat};
+      active.recovery={at:this.now(),text:noticeText('上次查询已中断，请重新提问。'),aiChat:replyExtra()?.aiChat,mentionTargets:replyExtra()?.mentionTargets};
       this.researchAI.add(active);
       if(this.activeAI===active){this.activeAI=null;this.aiBusy=false;}
       this.log('ai','联网查询已接收，完成后自动回复');this.changed();queueMicrotask(()=>this.drainChatAI());
@@ -1418,7 +1420,8 @@ export class Engine {
         if (this.epoch !== epoch) return;
         this.selfTexts.set(batch.text, now + 120000);
         const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.kind === 'giveaway' ? 'admin' : q.channel || 'chat';
-        const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.conversationReady(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, beforeClick:async()=>{
+        const mentions=batch.text.includes('@') ? resolveChatMentions(batch.text,this.audience.snapshot().map(([,user])=>user),batch.jobs.flatMap(job=>job.mentionTargets || [])) : [];
+        const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.conversationReady(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, mentions, beforeClick:async()=>{
           this.deliveries.clicked(delivery);
           try {
             await checkpointForSend(true);

@@ -585,11 +585,13 @@ export class DouyinAdapter {
     if (!isCurrent() || !this.roomContext.current()) return {submitted:false,reason:'管理操作已取消'};
     return this.requestSender.commitModeration(prepared.token);
   }
-  async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat' } = {}) {
+  async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat', mentions = [] } = {}) {
     if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
     if (!this.healthy()) return { submitted: false, retryable: true, reason: '直播数据重连中，本条未发送' };
     const temporary = reason => Object.assign(new Error(reason), { retryable: true });
-    let prepared = await this.requestSender.prepare(channel), requestFallback = '';
+    const mentionFallback=mentions.length && channel==='admin' ? '真实@使用普通弹幕通道' : '';
+    if (mentions.length) channel='chat';
+    let prepared = await this.requestSender.prepare(channel), requestFallback = mentionFallback;
     // 未提交前确认无管理员能力时，可安全使用普通弹幕；提交后的未知结果不重发。
     if (!prepared?.available && channel === 'admin') {
       const ordinary = await this.requestSender.prepare('chat');
@@ -607,9 +609,10 @@ export class DouyinAdapter {
       await beforeClick();
       if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
       // 从这里开始请求可能已经送达，未知结果不能转 UI 再发一次。
-      const result = await this.requestSender.commit(prepared.token,text);
+      const result = await this.requestSender.commit(prepared.token,text,mentions);
       return {...result,channelUsed:channel,...(requestFallback ? {modeFallback:requestFallback} : {})};
     }
+    if (mentions.length) return {submitted:false,reason:'真实@请求暂不可用，本条未发送'};
     let input;
     try { input = this.findInput(); this.findSend(input); }
     catch (error) {
