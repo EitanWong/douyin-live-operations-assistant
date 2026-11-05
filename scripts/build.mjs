@@ -101,7 +101,8 @@ await build({entryPoints:[`${root}extension/indicator-frame.js`],bundle:true,for
 await build({entryPoints:[`${root}extension/fanclub-frame.js`],bundle:true,format:'iife',target:'chrome120',outfile:`${ext}/fanclub-frame.js`});
 await build({entryPoints:[`${root}src/data/fanclub.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/fanclub-data.js`});
 await mkdir(`${ext}/icons`,{recursive:true});
-for (const size of [16,48,128]) await writeFile(`${ext}/icons/${size}.png`,await readFile(`${root}extension/icons/${size}.png`));
+const iconPaths = Object.values(JSON.parse(await readFile(`${ext}/manifest.json`, 'utf8')).icons);
+for (const name of iconPaths) await copyFile(`${root}extension/${name}`, `${ext}/${name}`);
 let chartLicenses='';
 for(const name of ['echarts/LICENSE','echarts/NOTICE','echarts/licenses/LICENSE-d3','zrender/LICENSE','tslib/LICENSE.txt','tslib/CopyrightNotice.txt'])chartLicenses+=`${name}\n${await readFile(`${root}node_modules/${name}`,'utf8')}\n\n`;
 chartLicenses += `chinese-dictionary (vendor/chinese-dictionary)\n${await readFile(`${root}vendor/chinese-dictionary/LICENSE`,'utf8')}\n`;
@@ -128,7 +129,7 @@ if (development) {
   await writeFile(`${ext}/manifest.json`, JSON.stringify(manifest, null, 2));
   for (const name of ['development-reload.js', 'development-content.js']) await writeFile(`${ext}/${name}`, await readFile(`${root}extension/${name}`));
   const hash = createHash('sha256');
-  for (const name of ['manifest.json','content.js','page.js','indicator-frame.js','fanclub-frame.js','fanclub-data.js','background.js','popup.js','popup.html','popup.css','solid-glass.css','theme.js','ai.js','search.js','gifts.js','durable-storage.js','protocol-cache.js','development-reload.js','development-content.js']) hash.update(await readFile(`${ext}/${name}`));
+  for (const name of ['manifest.json','content.js','page.js','indicator-frame.js','fanclub-frame.js','fanclub-data.js','background.js','popup.js','popup.html','popup.css','solid-glass.css','theme.js','ai.js','search.js','gifts.js','durable-storage.js','protocol-cache.js','development-reload.js','development-content.js',...iconPaths]) hash.update(await readFile(`${ext}/${name}`));
   const revision = hash.digest('hex');
   await writeFile(`${ext}/background.js`, `${await readFile(`${ext}/background.js`, 'utf8')}\nimport { installDevelopmentReload } from './development-reload.js';\ninstallDevelopmentReload({ chrome, revision:'${revision}', endpoint:'http://127.0.0.1:${developmentPort}/build', beforeReload:async()=>{ await storageReady; await giftStore.tail; } });\n`);
   // 最后发布构建标识；构建中或失败时，Chrome 不会读到半成品更新通知。

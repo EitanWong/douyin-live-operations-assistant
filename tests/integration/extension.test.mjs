@@ -97,6 +97,20 @@ test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   assert.doesNotMatch(main,/window\.postMessage/);
 });
 
+test('扩展管理页与工具栏提供匹配尺寸的本地图标', async()=>{
+  const manifest=JSON.parse(await readFile(file('manifest.json'),'utf8'));
+  assert.ok(manifest.action.default_icon,'工具栏应显式指定图标，避免浏览器缩放不合适的尺寸');
+  for(const size of [16,32,48,128]) {
+    const path=manifest.icons[size];
+    assert.ok(path,`缺少 ${size}px 图标`);
+    const png=await readFile(file(path));
+    assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+    assert.equal(png.readUInt32BE(16),size);
+    assert.equal(png.readUInt32BE(20),size);
+  }
+  for(const size of [16,32])assert.equal(manifest.action.default_icon[size],manifest.icons[size]);
+});
+
 test('粉丝团跨域快照只转交同标签主页，拒绝错误来源、UID、过量成员并持久化回放',async()=>{
   const w=await worker(),frameURL='https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html?anchor_id=123&room_id=456&user_id=321&fans_level=6&light_status=1';
   const sender={frameId:2,url:frameURL,tab:{id:1,url:'https://live.douyin.com/1'}};
