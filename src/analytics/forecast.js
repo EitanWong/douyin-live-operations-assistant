@@ -77,7 +77,7 @@ function pkForecast(pk,now){
   totals.forEach((value,j)=>{counts[j].final.push(value);if(value===top)counts[j][ties>1?'draw':'win']++;});
  }
  const rows=counts.map((c,i)=>({name:competitors[i].name || '昵称未采集',isSelf:competitors[i].isSelf,win:c.win/paths,draw:c.draw/paths,loss:1-(c.win+c.draw)/paths,...distribution(c.final)}));
- return {status:'ready',unit:'pk-points',method:'joint-score-path-simulation',sampleSize:trend.length,rows,probability:rows.find(r=>r.isSelf)?.win ?? null,calibration:'uncalibrated',basis:'按近期计分速度和当前赛制延续推演；不把PK积分当钻石，不重复乘已计入比分的加成；未来道具变化未知'};
+ return {status:'ready',battleKey:pk.key,remainingMs:pk.remainingMs,unit:'pk-points',method:'joint-score-path-simulation',sampleSize:trend.length,rows,probability:rows.find(r=>r.isSelf)?.win ?? null,calibration:'uncalibrated',basis:'按近期计分速度和当前赛制延续推演；不把PK积分当钻石，不重复乘已计入比分的加成；未来道具变化未知'};
 }
 function viewerForecasts(data){
  const model=data.model || {},mature=model.trials>=50 && model.positives>=5 && model.trials-model.positives>=10;

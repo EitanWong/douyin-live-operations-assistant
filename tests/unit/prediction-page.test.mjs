@@ -22,3 +22,13 @@ test('blocked or quarantined collection cannot establish continuous prediction c
  }
  assert.equal(predictionPulse({engine,network:{ingestion:{state:'healthy',blocked:false,quarantined:0}},identity:{},connected:true}).connected,true);
 });
+
+test('AI receives bounded warehouse and validated local model evidence without viewer identities or database paths',async()=>{
+ const {predictionContext}=await import('../../src/analytics/page.js'),now=Date.now();
+ const report={scope:'1:2',asOf:now,modelVersion:'v2',warehouse:{room:'1',asOf:now,database:'/private/file',eventCounts:{chat:12},observedUsers:4,opponents:[{room:'3',eventCounts:{chat:8},observedUsers:2}]},
+  localModel:{scope:'1:2',asOf:now,rows:[{target:'diamonds',horizonMinutes:5,point:100,low:50,high:150,trainedAt:now-1,calibration:'temporal-holdout',userId:'private'}]}};
+ const context=predictionContext(report,'2',now);
+ assert.equal(context.warehouse.eventCounts.chat,12);assert.equal(context.warehouse.opponents[0].eventCounts.chat,8);
+ assert.equal(context.localModel.rows[0].point,100);assert.ok(!JSON.stringify(context).includes('private'));
+ report.localModel.scope='1:9';assert.equal(predictionContext(report,'2',now).localModel,null);
+});

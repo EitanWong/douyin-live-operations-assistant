@@ -8,6 +8,7 @@ import { IdentityReader } from '../src/browser/identity.js';
 import { EventInbox, failureCode } from '../src/runtime/inbox.js';
 import { roomFromURL } from '../src/browser/room-context.js';
 import { StorageMirror } from './storage-mirror.js';
+import {createDataCapture,runReadOnlyCollector} from './data-capture.js';
 
 async function startContent() {
 const jsonBytes = value => {
@@ -16,6 +17,16 @@ const jsonBytes = value => {
 };
 const room = roomFromURL(location);
 if (room) {
+  let collectionRole;
+  try{collectionRole=(await chrome.runtime.sendMessage({type:'data-context'}))?.value;}catch{}
+  if(collectionRole?.readOnly || new URL(location.href).searchParams.get('assistant_data_collector')==='1'){
+    const collector=await runReadOnlyCollector({room,window,document,message:async payload=>{
+      const response=await chrome.runtime.sendMessage(payload);
+      if(!response?.ok)throw Error(response?.error || '本地采集后台不可用');return response.value;
+    }});
+    chrome.runtime.onMessage.addListener((request,sender,reply)=>{if(request.type==='collection-wake')reply(collector.wake());});
+    collector.start();return;
+  }
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
   const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint, activeAdapter;
   let lastCollectionActive, collectionPower = {awake:false}, monitorActive=false, roomWake;
@@ -128,6 +139,7 @@ if (room) {
     if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
   });
   let bridgeTimer,bridgeAck,bridgePending=false,bridgeStopped=false;
+  const archiveBatch=createDataCapture(message);
   const drainBridge=async()=>{
     if(bridgeStopped || bridgePending || contextInvalidated)return;
     bridgePending=true;let more=false;
@@ -135,6 +147,8 @@ if (room) {
       const batch=await message({type:'page-command',command:{type:'drain',ack:bridgeAck,paused:Boolean(activeAdapter?.flowPaused)}});
       if(bridgeStopped || !batch || typeof batch!=='object')return;
       if(batch.batchId==null || batch.batchId!==bridgeAck){
+        await archiveBatch(batch);
+        if(bridgeStopped || contextInvalidated)return;
         for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
         for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
         // This acknowledges admission to the bounded content queues, not disk durability.

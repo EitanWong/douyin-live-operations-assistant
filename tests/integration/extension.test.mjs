@@ -1,3 +1,4 @@
+import {createDataCapture,runReadOnlyCollector} from '../../extension/data-capture.js';
 import {createEdgeClient} from '../../src/browser/edge-client.js';
 import {createNativeASRClient} from '../../src/browser/native-asr-client.js';
 import {RoomContext,roomFromURL} from '../../src/browser/room-context.js';
@@ -277,20 +278,21 @@ test('MAIN 未确认批次可重读且仍占容量，重复确认不删除下一
   }finally{page.close();}
 });
 
-for(const mode of ['lost-response','pagehide'])test(`内容桥在 ${mode} 后恢复 MAIN 已读取批次且不重复交付`,async()=>{
+for(const mode of ['lost-response','pagehide','archive-pagehide'])test(`内容桥在 ${mode} 后恢复 MAIN 已读取批次且不重复交付`,async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window;
-  let captured,adapter,release,reads=0;const timers=[],handled=[],saved=[];
-  Object.assign(page,{EventInbox,roomFromURL,RoomContext,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},DEFAULTS:{},copy:value=>value,
+  let captured,adapter,release,reads=0,archiveBlocked=false;const timers=[],handled=[],saved=[];
+  Object.assign(page,{EventInbox,roomFromURL,RoomContext,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},DEFAULTS:{},copy:value=>value,
     DouyinAdapter:class {constructor(options){Object.assign(this,options);captured=options;}hook(){}emitStatus(){}},
     setTimeout:callback=>{timers.push(callback);return timers.length;},clearTimeout(){},
     chrome:{runtime:{onMessage:{addListener(){}},sendMessage:async request=>{
       if(request.type==='init')return {ok:true,value:{}};
+      if(request.type==='data-records' && mode==='archive-pagehide' && !archiveBlocked){archiveBlocked=true;await new Promise(resolve=>{release=resolve;});return {ok:true,value:true};}
       if(request.type==='protocol-append'){saved.push(request.record);return {ok:true,value:true};}
       if(request.type==='page-command' && request.command.type==='drain'){
         const value=page.__douyinAssistantPageV2.call(request.command);reads++;
         if(reads===1){
           if(mode==='lost-response')throw Error('response lost after MAIN executed');
-          await new Promise(resolve=>{release=resolve;});
+          if(mode==='pagehide')await new Promise(resolve=>{release=resolve;});
         }
         return {ok:true,value};
       }
@@ -300,7 +302,7 @@ for(const mode of ['lost-response','pagehide'])test(`内容桥在 ${mode} 后恢
   try {
     await evalPage(page);captured.onEvent({type:'chat',id:'retained'});captured.onCapture({rawBase64:'AQ=='});
     await page.eval(`(async()=>{${await rawEntry('content')}})()`);await new Promise(setImmediate);
-    if(mode==='pagehide'){
+    if(mode==='pagehide' || mode==='archive-pagehide'){
       page.dispatchEvent(new page.Event('pagehide'));release();await new Promise(setImmediate);
       assert.deepEqual(handled,[]);
       page.dispatchEvent(new page.PageTransitionEvent('pageshow',{persisted:true}));
@@ -370,8 +372,9 @@ test('后台拒绝非直播页面与子frame，保存读取可复用', async()=>
 for(const scenario of ['newer-success','both-fail','external-change'])test(`内容脚本保存失败不回滚较新的配置：${scenario}`,async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,key='live-assistant:config:1';
   let api,listener;const requests=[];
-  Object.assign(page,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},DouyinAdapter:class {},
+  Object.assign(page,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},DouyinAdapter:class {},
     chrome:{runtime:{onMessage:{addListener:fn=>{listener=fn;}},sendMessage:request=>{
+      if(request.type==='data-context')return Promise.resolve({ok:true,value:null});
       if(request.type==='init')return Promise.resolve({ok:true,value:{[key]:'initial'}});
       return new Promise(resolve=>requests.push({request,resolve}));
     }}},boot:options=>{api=options;}
@@ -636,7 +639,7 @@ test('内容脚本持续突发按序交接并回收已消费槽位，回放不�
   const gate = new Promise(resolve => { release = resolve; });
   const replayGate = new Promise(resolve => { replayRelease = resolve; });
   Object.assign(dom.window, {
-    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,
+    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,
     RequestBridgeClient,
     DouyinAdapter:class { constructor(options) { Object.assign(this, options); } emitStatus() {} },
     IdentityReader:class {},
@@ -678,7 +681,7 @@ test('存储水位阻塞的新事件不会挡住持久日志恢复与释放容�
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter,recovered=false;const handled=[];
   Object.assign(dom.window,{
-    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,
+    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,
     RequestBridgeClient,
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     IdentityReader:class {},
@@ -1097,9 +1100,10 @@ test('抽奖结果持久保存在后台数据库，重启可恢复，拒绝越�
 
 test('上下文同步失效时更新诊断并停止重试，取消保活失败不覆盖恢复提示',async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});let adapter,failedCalls=0;
-  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     chrome:{runtime:{sendMessage:message=>{
+      if(message.type==='data-context')return Promise.resolve({ok:true,value:null});
       if(message.type==='init')return Promise.resolve({ok:true,value:{}});
       failedCalls++;throw Error('Extension context invalidated');
     },onMessage:{addListener(){}}}},
@@ -1123,7 +1127,7 @@ test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不�
     alarms:{create(){},onAlarm:{addListener(){}}},power:{requestKeepAwake(){},releaseKeepAwake(){}},
     tabs:{query:async()=>keeper?[tab]:[],sendMessage:()=>new Promise(resolve=>listeners[0]({type:'collection-wake'},{},resolve))}};
   keeper=installCollectionKeeper(chrome,{wakeTimeoutMs:50});await keeper.refresh();
-  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},boot:()=>{},
     chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async message=>{
       if(message.type==='init')return {ok:true,value:{}};
@@ -1142,7 +1146,7 @@ test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不�
 test('事件桥短暂失联时暂停发送资格，后台恢复后继续接收，无需刷新',async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter,drains=0;const timers=[],handled=[];
-  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {
       constructor(options){Object.assign(this,options);}
       emitStatus(){}
