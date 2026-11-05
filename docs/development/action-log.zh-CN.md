@@ -2683,3 +2683,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 证据目录：output/giveaway-participation-2026-11-05/，包含全部红测、专项、最终全测/构建日志、browser-evidence.json、compact-record-entry.png、round-list.png、round-detail.png和narrow-detail.png。浏览器批量点击测试出现过动态nth选择器失效与折叠入口被裁切的问题，改用每次重新定位首个入口与键盘展开完成测量，没有为自动化修改产品布局。近期活动是在线倾向的代理信号，无法证明静默观众已经离场；UI和说明已明确此限制。本次未执行真实直播长时验证、原生宿主回归或远端CI核验（改动范围为抽奖与共享展示层）。
 
 最终检查补充：`npm run check`、`npm run agent:check`、`git diff --check`全部通过；索引与最终源码一致。4184自有演示服务已停止。远端dev已fetch，随后核对无新增提交后按项目约定提交并推送dev；不推送main、不创建发布标签。
+
+最终交付回执：功能提交 **ef9a35cade5eadabbee51bab8e99f64fbf1c14e8** 已推送origin/dev，远端分支SHA核对一致，提交后工作区干净。完整1549项回归、最终构建/语法/索引检查与105组浏览器验收证据见上。本回执另作纯文档提交同步dev；最终文档提交/远端SHA另记于证据目录delivery-receipt.json。重新加载原路径扩展并刷新直播页后使用；远端CI未核验。crapper、dryer、mutator不可用且未执行。
