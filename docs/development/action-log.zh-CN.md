@@ -2871,3 +2871,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 | 核实crapper、dryer、mutator可用性 | 如实报告专用检查缺口 | 三项均不可用，未执行；普通回归不替代这些检查 |
 
 最终验证：JavaScript **1606/1606**，0失败/取消/跳过，224.546秒；专项23/23。正式build、check、agent:check和git diff --check通过，索引与源码一致；没有原生源码或依赖变化，不重复运行原生安装与模型下载。fetch确认远端dev没有新增提交，按日常集成流程提交推送，不直推main、不创建版本或标签。
+
+交付回执：功能提交 **16ce332d61b9b8a3d339bedd783635da987cc591** 已成功推送origin/dev（9c8ee5d..16ce332），git ls-remote核对SHA一致，提交后工作区干净。dist/chrome-extension已更新，现有扩展未重载；用户重载新版后在“AI 设置 → 本地与性能”首张卡片顶部使用入口。最终文档提交与推送SHA保存在output/local-ai-entry-2026-11-06/delivery-receipt.json。
