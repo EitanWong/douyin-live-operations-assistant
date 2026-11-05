@@ -18,6 +18,20 @@
     <button id="open" class="primary">打开直播间面板<svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h12m-5-5 5 5-5 5"/></svg></button>
     <p class="hint">收入统计已整合到「主播数据 → 收入账本」。<br>开始后默认自动发送；模块按需启用。</p>
     <details>
+      <summary>本地数据归档与对手采集</summary>
+      <p class="hint" id="data-status" role="status">正在检查本地数据组件…</p>
+      <button id="data-enable">启用本地整场归档</button>
+      <button id="data-disable">暂停新增归档</button>
+      <button id="data-retry">检查连接并继续落盘</button>
+      <label>数据保存文件夹<input id="data-directory" type="text" autocomplete="off" spellcheck="false" placeholder="/完整路径/直播数据"></label>
+      <button id="data-relocate">保存位置并迁移已有数据</button>
+      <p class="hint">填写本机或已挂载磁盘的完整文件夹路径。成功后自动保存为 live.sqlite3，旧库保留为恢复副本；不会覆盖目标文件夹中的已有数据库。切换失败时保留待写数据。</p>
+      <label>对手直播间号或链接<input id="data-room" type="text" autocomplete="off" placeholder="https://live.douyin.com/…"></label>
+      <button id="data-opponent-open">打开对手只读采集页</button>
+      <button id="data-opponent-stop">停止本房发起的对手采集</button>
+      <p class="hint">先安装本地数据组件。仅保存浏览器实际收到的数据；对手页不启动场控、不发送互动。关闭页面或登录验证会造成缺测。数据库与训练说明见项目本地数据引擎文档。</p>
+    </details>
+    <details>
       <summary>AI 服务访问权限</summary>
       <label>接口地址<input id="endpoint" type="url" placeholder="https://…/chat/completions" autocomplete="url" spellcheck="false"></label>
       <button id="allow">授权这个服务域名</button>

@@ -1,3 +1,5 @@
+import {createNativeASRClient} from '../src/browser/native-asr-client.js';
+import {createEdgeClient} from '../src/browser/edge-client.js';
 import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
 import { boot } from '../src/app.js';
 import { DouyinAdapter } from '../src/browser/adapter.js';
@@ -5,6 +7,8 @@ import { RequestBridgeClient } from '../src/browser/request-sender.js';
 import { IdentityReader } from '../src/browser/identity.js';
 import { EventInbox, failureCode } from '../src/runtime/inbox.js';
 import { roomFromURL } from '../src/browser/room-context.js';
+import { StorageMirror } from './storage-mirror.js';
+import {createDataCapture,runReadOnlyCollector} from './data-capture.js';
 
 async function startContent() {
 const jsonBytes = value => {
@@ -13,16 +17,27 @@ const jsonBytes = value => {
 };
 const room = roomFromURL(location);
 if (room) {
+  let collectionRole;
+  try{collectionRole=(await chrome.runtime.sendMessage({type:'data-context'}))?.value;}catch{}
+  if(collectionRole?.readOnly || new URL(location.href).searchParams.get('assistant_data_collector')==='1'){
+    const collector=await runReadOnlyCollector({room,window,document,message:async payload=>{
+      const response=await chrome.runtime.sendMessage(payload);
+      if(!response?.ok)throw Error(response?.error || '本地采集后台不可用');return response.value;
+    }});
+    chrome.runtime.onMessage.addListener((request,sender,reply)=>{if(request.type==='collection-wake')reply(collector.wake());});
+    collector.start();return;
+  }
   // 面板初始化期间也必须完整保留事件；礼物、进场和弹幕统一按到达顺序回放。
   const events = []; let eventsBytes = 0, initialGaps = 0, receive, panel, incomeChanged, checkpoint, activeAdapter;
-  let lastCollectionActive, collectionPower = {awake:false};
+  let lastCollectionActive, collectionPower = {awake:false}, monitorActive=false, roomWake;
+  const collectionActive=()=>!contextInvalidated && (monitorActive || liveStatus.collection?.active===true);
   let captureWrites = Promise.resolve(), capturePending = 0, capturePendingBytes = 0, captureSaved = 0, captureGaps = 0, captureErrors = 0;
   // 事件桥不传递密钥；发送桥只允许本房弹幕及经权限核对的禁言/拉黑票据。
   const receivePacket = data => {
     if (data.type === 'event') {
       const event = data.event;
       let valid = true;
-      try { valid = Boolean(event) && ['anchor-fanclub','room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','anchor-exhibition-retention','pk-rank-season'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
+      try { valid = Boolean(event) && ['anchor-fanclub','room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','link-state','guest-link-state','fansclub-push','anchor-exhibition','anchor-exhibition-retention','pk-rank-season'].includes(event.type) && String(event.user?.name || '').length <= 200 && String(event.text || '').length <= 10000; }
       catch { valid = false; }
       if (!valid) return;
       if (receive) receive(event);
@@ -47,7 +62,7 @@ if (room) {
     }
     if (data.type === 'status' && data.status) {
       liveStatus = { ...data.status };
-      void updateCollectionLease(liveStatus.collection?.active === true && !contextInvalidated);
+      void updateCollectionLease(collectionActive());
     }
   };
   let liveStatus = { hook:false, sockets:0, frames:0, events:0, errors:0, connected:false, lastFrame:0 };
@@ -83,23 +98,9 @@ if (room) {
     activeAdapter?.sync();
   };
   window.addEventListener('pagehide',()=>{void updateCollectionLease(false);});
-  const values = new Map(Object.entries(await message({ type:'init' })));
-  let writes = Promise.resolve();
-  const write = (key,value,remove=false) => {
-    const previous = values.get(key); if (remove) values.delete(key); else values.set(key,value);
-    const previousWrite = writes;
-    const task = (async () => {
-      try { await previousWrite; } catch {}
-      try { return await message({type:remove?'delete':'set',key,value}); }
-      catch (error) {
-        if (previous === undefined) values.delete(key); else values.set(key,previous);
-        throw error;
-      }
-    })();
-    writes=task; void task.catch(()=>{}); return task;
-  };
-  const set = (key,value) => write(key,value);
-  const del = key => write(key,undefined,true);
+  const storageMirror=new StorageMirror(await message({type:'init'}),message),values=storageMirror.values;
+  const set = (key,value) => storageMirror.write(key,value);
+  const del = key => storageMirror.write(key,undefined,true);
   const journal = {
     append: (event,id) => message({type:'event-append',event,id}),
     pending: after => message({type:'event-list',after}),
@@ -116,8 +117,9 @@ if (room) {
     }
     if (request.type === 'collection-wake') {
       if (contextInvalidated) { reply({active:false}); return; }
+      void roomWake?.().catch(()=>{});
       void (async()=>{
-        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}});reply({active:active===true});void updateCollectionLease(active===true).catch(()=>{});}
+        try {const active=await message({type:'page-command',command:{type:'collection-pulse'}})===true || monitorActive;reply({active});void updateCollectionLease(active).catch(()=>{});}
         catch {reply({active:false});}
       })();
       return true;
@@ -126,25 +128,32 @@ if (room) {
       void (async () => {
         try {
           if (!checkpoint) throw new Error('页面正在初始化');
-          await checkpoint(); await writes; reply({ok:true});
+          await checkpoint(); await storageMirror.writes; reply({ok:true});
         } catch (error) { reply({ok:false,error:error.message}); }
       })();
       return true;
     }
-    if (request.type === 'storage') { for (const [key,change] of Object.entries(request.changes)) { if (change.newValue === undefined) values.delete(key); else values.set(key,change.newValue); } }
+    if (request.type === 'storage') storageMirror.observe(request.changes);
     if (request.type === 'income-updated') incomeChanged?.();
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
     if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
   });
-  let bridgeTimer,bridgePending=false,bridgeStopped=false;
+  let bridgeTimer,bridgeAck,bridgePending=false,bridgeStopped=false;
+  const archiveBatch=createDataCapture(message);
   const drainBridge=async()=>{
     if(bridgeStopped || bridgePending || contextInvalidated)return;
     bridgePending=true;let more=false;
     try {
-      const batch=await message({type:'page-command',command:{type:'drain',paused:Boolean(activeAdapter?.flowPaused)}});
+      const batch=await message({type:'page-command',command:{type:'drain',ack:bridgeAck,paused:Boolean(activeAdapter?.flowPaused)}});
       if(bridgeStopped || !batch || typeof batch!=='object')return;
-      for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
-      for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
+      if(batch.batchId==null || batch.batchId!==bridgeAck){
+        await archiveBatch(batch);
+        if(bridgeStopped || contextInvalidated)return;
+        for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
+        for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
+        // This acknowledges admission to the bounded content queues, not disk durability.
+        bridgeAck=batch.batchId;
+      }
       receivePacket({type:'status',status:batch.status});activeAdapter?.sync();more=batch.more===true;
     } catch(error) {
       if(!contextInvalidated)liveStatus={...liveStatus,connected:false,bridgeError:error.message};
@@ -169,6 +178,7 @@ if (room) {
     get eventHead() { return this.inbox.head; }
     restoreCollection(saved) {
       if (!saved) return;
+      this.domStatus={pending:0,bytes:0,gaps:Number(saved.domGaps)||0};
       this.inbox.health.gaps = Number(saved.gaps) || 0; this.inbox.health.giftGaps = Number(saved.giftGaps) || 0;
       this.priorBridgeGaps = Number(saved.bridgeGaps) || 0; this.priorFrameGaps = Number(saved.frameGaps) || 0; this.priorCaptureGaps = Number(saved.captureGaps) || 0;
     }
@@ -257,9 +267,9 @@ if (room) {
     const requestId=crypto.randomUUID();let aborted=false;
     void (async()=>{
       try {
-        await writes;
+        await storageMirror.writes;
         if(aborted)return;
-        const response = await message({requestId,type:details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
+        const response = await message({requestId,type:['weather','public-data'].includes(details.operation) ? details.operation : details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
         if(!aborted)details.onload(response);
       } catch (e) { if(!aborted)details.onload({status:0,responseText:'',error:e.message}); }
     })();
@@ -274,7 +284,7 @@ if (room) {
     recordContributionSnapshot: snapshot => message({type:'contribution-snapshot',...snapshot}),
     report: (room, month, {includeAllSessions = false} = {}) => message({ type:'income-report', room, month, includeAllSessions })
   };
-  boot({ page:window, nativeConnect:()=>chrome.runtime.connect({name:'native-perception'}), nativeExtensionId:chrome.runtime.id, agentTasks:{submit:job=>message({type:'agent-submit',...job}),list:()=>message({type:'agent-list'}),cancel:id=>message({type:'agent-cancel',id})}, giveawayStorage:{get:key=>message({type:'giveaway-read',key}),set:(key,value)=>message({type:'giveaway-write',key,value})}, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onReady:api=>{panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>{try{return resolveReplyConfig({...panel.config.ai,endpoint:panel.root.querySelector('[data-field="ai.endpoint"]').value,pipeline:panel.readPipeline()}).endpoint;}catch{return panel.root.querySelector('[data-field="ai.endpoint"]').value;}};} });
+  boot({ page:window, predictions:(action,value,anchor)=>message({type:'prediction',action,value,anchor}), vadFactory:async args=>(await import(chrome.runtime.getURL('speech-vad.js'))).captureSpeech({...args,assets:chrome.runtime.getURL('vad/')}), nativeASR:createNativeASRClient({connect:()=>chrome.runtime.connect({name:'native-asr'})}), edge:createEdgeClient({connect:()=>chrome.runtime.connect({name:'edge-ai'})}), accountCollector:{search:query=>message({type:'account-search',query}),collect:url=>message({type:'account-collect',url}),cancel:()=>message({type:'account-cancel'})}, nativeConnect:()=>chrome.runtime.connect({name:'native-perception'}), nativeExtensionId:chrome.runtime.id, nativeDeployment:action=>message({type:'native-deployment',action}), agentTasks:{submit:job=>message({type:'agent-submit',...job}),list:()=>message({type:'agent-list'}),cancel:id=>message({type:'agent-cancel',id})}, giveawayStorage:{get:key=>message({type:'giveaway-read',key}),set:(key,value)=>message({type:'giveaway-write',key,value})}, rewardStorage:{get:key=>message({type:'rewards-read',key}),set:(key,records)=>message({type:'rewards-write',key,records})}, get:(key,fallback)=>values.get(key) ?? fallback, all:()=>Object.fromEntries(values), set, del, request, repository, journal, adapterFactory:options=>new ExtensionAdapter(options), identityFactory:onIdentity=>new IdentityReader({page:window,room,onIdentity}), onMonitorStatus:status=>{monitorActive=status.active;void updateCollectionLease(collectionActive());}, onReady:api=>{roomWake=api.wake;panel=api.panel; incomeChanged=api.refreshIncome; checkpoint=api.checkpoint; panel.readEndpoint=()=>{try{return resolveReplyConfig({...panel.config.ai,endpoint:panel.root.querySelector('[data-field="ai.endpoint"]').value,pipeline:panel.readPipeline()}).endpoint;}catch{return panel.root.querySelector('[data-field="ai.endpoint"]').value;}};} });
 }
 
 }

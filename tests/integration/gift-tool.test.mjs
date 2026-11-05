@@ -25,22 +25,28 @@ test('送礼网关在传输前验证序号、账号及预算，不允许调用�
     assert.equal(calls.length,1);
   }finally{await scope.close();await gateway.call('gift.stop','t');await gateway.close();}
 });
-test('送礼界面搜索全部目录、展示锁定原因、要求预算，发送与停止的控件状态一致',async()=>{
+test('送礼界面搜索全部目录、展示锁定原因、要求预算，发送与停止的控件状态一致',async t=>{
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/123',pretendToBeVisual:true});
   for(const name of ['document','window','location','MutationObserver','HTMLElement'])globalThis[name]=dom.window[name];
   globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:value=>value};
   const gifts=[{id:'463',name:'小心心',priceUnits:10,available:true,categories:['推荐']},{id:'789',name:'嘉年华',priceUnits:300000,available:true,categories:['特效']},
     {id:'685',name:'粉丝团灯牌',priceUnits:10,available:false,reason:'请先点亮粉丝团',categories:['粉丝团']}];
-  let panel,commits=0;
+  let panel,commits=0,reads=0,now=100000;
+  t.mock.method(Date,'now',()=>now);
   const lock={held:false,acquire:async()=>{lock.held=true;return true;},release:()=>{lock.held=false;}};
   const host=new ToolRuntime({registry:new ToolRegistry([autoGiftTool]),room:'123',createLock:()=>lock,changed:(id,state)=>panel?.updateToolState(id,state),
-    operations:toolOperations({selfId:()=>'789',transport:{giftSnapshot:async()=>({available:true,balanceUnits:1234,gifts,at:Date.now()}),
+    services:{isToolVisible:id=>panel.open && panel.activeTab===id},
+    operations:toolOperations({selfId:()=>'789',transport:{giftBalance:async()=>{reads++;return {available:true,balanceUnits:1200,at:now};},giftSnapshot:async()=>({available:true,balanceUnits:1234,gifts,at:Date.now()}),
       prepareGift:async()=>({available:true,token:'t',balanceUnits:1234}),
       commitGift:async(token,count)=>{commits++;return {submitted:true,count,costUnits:10*count,balanceUnits:1224};},stopGift:async()=>{}}})});
   panel=new Panel({config:copy(DEFAULTS),room:'123',tools:new ToolRegistry([autoGiftTool]),callbacks:{toolAction:(...args)=>host.invoke(...args)}});
   const until=async predicate=>{for(let i=0;i<60 && !predicate();i++)await flush();assert.ok(predicate());};
   try {
-    await host.start();panel.node('[data-tab=auto-gift]').click();panel.node('[data-action=auto-gift-refresh]').click();
+    await host.start();host.notify('tick');await flush();assert.equal(reads,0);
+    panel.node('[data-tab=auto-gift]').click();host.notify('tick');
+    await until(()=>panel.node('[data-auto-gift-balance]').textContent.includes('120'));
+    assert.equal(reads,1);assert.match(panel.node('[data-auto-gift-updated]').textContent,/每 5 秒自动更新/);
+    panel.node('[data-action=auto-gift-refresh]').click();
     await until(()=>panel.node('[data-auto-gift-balance]').textContent.includes('123.4'));
     assert.match(panel.root.querySelector('[data-page=auto-gift]').textContent,/共 3 种 · 当前显示 3 种/);
     const select=panel.node('[data-auto-gift=giftId]'),search=panel.node('[data-auto-gift-search]');
@@ -49,6 +55,11 @@ test('送礼界面搜索全部目录、展示锁定原因、要求预算，发�
     search.value='';search.dispatchEvent(new dom.window.Event('input'));select.value='685';select.dispatchEvent(new dom.window.Event('change'));
     assert.match(panel.node('[data-auto-gift-selection]').textContent,/点亮/);assert.equal(panel.node('[data-action=auto-gift-start]').disabled,true);
     select.value='463';select.dispatchEvent(new dom.window.Event('change'));
+    const options=[...select.options];now+=5000;host.notify('tick');
+    await until(()=>reads===2 && host.state('auto-gift').balanceUnits===1200);
+    assert.equal(select.value,'463');assert.deepEqual([...select.options],options);assert.equal(commits,0);
+    panel.toggleOpen();now+=5000;host.notify('tick');await flush();assert.equal(reads,2);
+    panel.toggleOpen();host.notify('tick');await until(()=>reads===3);
     panel.node('[data-action=auto-gift-start]').click();await until(()=>!panel.node('[data-action=auto-gift-start]').disabled);
     assert.equal(commits,0);assert.match(panel.node('.toast').textContent,/消费上限/);
     panel.node('[data-auto-gift=budget]').value='3';panel.node('[data-auto-gift=target]').value='4';panel.node('[data-action=auto-gift-start]').click();

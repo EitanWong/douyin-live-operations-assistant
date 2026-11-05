@@ -16,8 +16,30 @@ export function installCollectionKeeper(chrome, {wakeTimeoutMs = 5000} = {}) {
     try { const u = new URL(url); return u.origin === 'https://live.douyin.com' && Boolean(roomFromURL(u)); }
     catch { return false; }
   };
+  const protectTabs = async leases => {
+    if(!chrome.tabs.get || !chrome.tabs.update)return;
+    const savedKey='live-assistant:collection-discardable';
+    const originals=(await session.get(savedKey))[savedKey] || {};
+    for(const id of new Set([...Object.keys(leases),...Object.keys(originals)])) {
+      try {
+        const tab=await chrome.tabs.get(Number(id));
+        if(leases[id] && tab?.url===leases[id]) {
+          if(!Object.hasOwn(originals,id)) {
+            originals[id]=tab.autoDiscardable!==false;
+            // Save before changing the browser so worker termination is recoverable.
+            await session.set({[savedKey]:originals});
+          }
+          if(tab.autoDiscardable!==false)await chrome.tabs.update(Number(id),{autoDiscardable:false});
+        } else if(Object.hasOwn(originals,id)) {
+          await chrome.tabs.update(Number(id),{autoDiscardable:originals[id]});delete originals[id];
+        }
+      } catch { /* Closed tabs are reconciled on the next wake. */ }
+    }
+    await session.set({[savedKey]:originals});
+  };
   const apply = async leases => {
     await session.set({[key]:leases});
+    await protectTabs(leases);
     const awake = Object.keys(leases).length > 0;
     try {
       if (awake) chrome.power.requestKeepAwake('system');

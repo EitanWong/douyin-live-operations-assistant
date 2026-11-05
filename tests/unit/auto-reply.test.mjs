@@ -50,7 +50,8 @@ test('AI 接收有界直播摘要与时间、未知值，不发送原始 UID、U
   assert.equal(context.pk.selfScore,100); assert.equal(context.pk.opponentScore,120);
   assert.equal(context.game.type,'guess'); assert.equal(context.game.target,undefined);
   const request=makeAIRequest(prompt,r.engine.config.ai), data=JSON.parse(request.messages[1].content);
-  assert.deepEqual(data.live_context,context);
+  const {recentChat,...facts}=context;
+  assert.deepEqual(data.live_context,facts);assert.deepEqual(data.recent_chat,recentChat);
   assert.doesNotMatch(JSON.stringify(data),/-secret|https:\/\/secret|隐藏统计999/);
   assert.match(request.messages[0].content,/stale 比分不能当作当前事实/);
   r.advance(181000); r.chat('@小助手 现在呢'); await settle();
@@ -59,12 +60,13 @@ test('AI 接收有界直播摘要与时间、未知值，不发送原始 UID、U
 });
 
 test('自动判断繁忙时合并待判断弹幕，@ 对话优先且菜单不受 AI 等待影响', async () => {
-  const r=room({bot:{enabled:true}}); let finish;
-  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;});};
+  const r=room({bot:{enabled:true}}); let finish,firstFinish;
+  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;if(r.prompts.length===1)firstFinish=resolve;});};
   r.chat('第一条');r.chat('第二条');r.chat('第三条');r.chat('@小助手 你好');
   r.chat('@小助手 菜单');
-  assert.equal(r.prompts.length,1); assert.equal(r.engine.queue[0].kind,'bot');
-  finish('[SKIP]');await settle();
+  assert.equal(r.prompts.length,2); assert.equal(r.engine.queue[0].kind,'bot');
+  assert.equal(r.prompts[0].signal.aborted,true,'明确点名立即取消普通插话');
+  firstFinish('[SKIP]');await settle();
   assert.equal(r.prompts[1].target.text,'@小助手 你好');
   finish('你好。');await settle();
   assert.equal(r.prompts.length,2,'普通公屏判断应让出短暂空间，不紧跟点名对话');
@@ -90,22 +92,50 @@ test('游戏与 @聊天并行，不把普通四字聊天或新问题当作答题
 });
 
 test('暂停、关闭模块、失效和调用限额不会让待回复绕过控制', async () => {
-  const r=room();let finish;
-  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;});};
+  const r=room();let finish,firstFinish;
+  r.engine.ai=prompt=>{r.prompts.push(prompt);return new Promise(resolve=>{finish=resolve;if(r.prompts.length===1)firstFinish=resolve;});};
   r.chat('@小助手 第一个');r.chat('@小助手 第二个');
   r.engine.stop();r.engine.start();finish('迟到回复');await settle();
   assert.equal(r.prompts.length,1);assert.equal(r.engine.queue.length,0);
-  r.chat('@小助手 新请求');r.chat('@小助手 过期请求');r.advance(45001);
+  r.chat('@小助手 新请求');r.chat('@小助手 过期请求');r.advance(120001);
   finish('已经过期');await settle();assert.equal(r.prompts.length,2);assert.equal(r.engine.queue.length,0);
   r.chat('@小助手 最后一个');r.chat('@小助手 等待中');
   r.engine.update({...r.engine.config,ai:{...r.engine.config.ai,chatEnabled:false}});
   finish('关闭后不发送');await settle();
   assert.equal(r.engine.queue.length,0);assert.equal(r.engine.chatAIQueue.length,0);
 
-  const limited=room({ai:{enabled:true,chatEnabled:true,maxPerHour:1}});
+  const limited=room({ai:{enabled:true,chatEnabled:true,maxPerHour:1,edge:{enabled:false}}});
   limited.chat('普通弹幕');limited.chat('@小助手 你好');await settle();
   assert.equal(limited.prompts.length,1);
-  limited.advance(45001);await limited.engine.tick(false);
+  limited.advance(120001);await limited.engine.tick(false);
   assert.equal(limited.engine.chatAIQueue.length,0);
   assert.equal(limited.prompts.length,1);
+});
+
+test('@ 提问优先于每句都接的普通积压，同一观众不受普通调用冷却丢弃',async()=>{
+  const r=room({version:2,ai:{enabled:true,chatEnabled:true,replyFrequency:'every',intervalSec:60,userCooldownSec:60}});
+  let finish;r.engine.ai=p=>{r.prompts.push(p);return new Promise(resolve=>{finish=resolve;});};
+  r.chat('@小助手 第一个问题');r.chat('普通问题一');r.chat('普通问题二');r.chat('@小助手 上海今天天气怎么样');
+  finish('第一个回答');await settle();
+  assert.equal(r.prompts.length,2);assert.equal(r.prompts[1].target.text,'@小助手 上海今天天气怎么样');
+  finish('上海晴。');await settle();assert.ok(r.engine.queue.some(q=>q.text==='上海晴。'));r.engine.stop();
+});
+
+test('@ 回复在礼物持续积压时仍可及时发送',async()=>{
+  const r=room();r.engine.ai=async()=> '正在回答你的问题。';
+  r.chat('@小助手 帮忙看看');await settle();
+  for(let i=0;i<5;i++)r.engine.enqueue('gift',`礼物感谢${i}`);
+  await r.engine.tick();
+  assert.ok(r.logs.some(row=>row.kind==='preview' && row.text.includes('正在回答你的问题')));
+  await r.engine.tick();assert.ok(r.logs.some(row=>row.kind==='preview' && row.text.includes('礼物感谢')));r.engine.stop();
+});
+
+test('普通弹幕填满等待队列也为新的@提问让位',async()=>{
+ const r=room({ai:{enabled:true,chatEnabled:true,replyFrequency:'every'}});let finish;
+ r.engine.ai=p=>{r.prompts.push(p);return new Promise(resolve=>{finish=resolve;});};
+ try{
+  r.chat('@小助手 正在回复');for(let i=0;i<20;i++)r.chat(`普通积压${i}`);
+  r.chat('@小助手 新提问');finish('第一个回答');await settle();
+  assert.equal(r.prompts.at(-1).target.text,'@小助手 新提问');finish('新的回答');await settle();
+ }finally{r.engine.stop();}
 });

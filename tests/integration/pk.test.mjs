@@ -1,4 +1,5 @@
 import {RoomContext} from '../../src/browser/room-context.js';
+import {ObservationBuffer} from '../../extension/observation-buffer.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
@@ -92,12 +93,12 @@ test('扩展 MAIN 桥接在普通背压期间只发布一份 PK，普通消息�
   dom.window.DEFAULTS = {}; dom.window.copy = value => ({...value});
   dom.window.postMessage = value => published.push(value);
   try {
-    dom.window.RoomContext=RoomContext;dom.window.eval(source.replace(/^import .*;\n/gm,''));
+    dom.window.RoomContext=RoomContext;dom.window.ObservationBuffer=ObservationBuffer;dom.window.eval(source.replace(/^import .*;\n/gm,''));
     const pk = {id:'pk-1',type:'pk-score',scores:[{anchorId:self,score:1000}]};
     options.onEvent({id:'chat-1',type:'chat'});options.onPK(pk);options.onEvent(pk);
     const paused=dom.window.__douyinAssistantPageV2.call({type:'drain',paused:true});
     assert.deepEqual(Array.from(paused.priority,event=>event.id),['pk-1']);assert.equal(paused.events.length,0);
-    const resumed=dom.window.__douyinAssistantPageV2.call({type:'drain'});
+    const resumed=dom.window.__douyinAssistantPageV2.call({type:'drain',ack:paused.batchId});
     assert.deepEqual(Array.from(resumed.events,event=>event.id),['chat-1']);assert.equal(resumed.priority.length,0);
   } finally { dom.window.close(); }
 });
@@ -144,11 +145,12 @@ test('MAIN 积压 PK 按序交接，结束后迟到旧开始不会复活战局',
   dom.window.DEFAULTS={};dom.window.copy=value=>({...value});
   dom.window.postMessage=value=>{if(value.type==='event'){published.push(value.event);engine.ingest(value.event);}};
   try {
-    dom.window.RoomContext=RoomContext;dom.window.eval(source.replace(/^import .*;\n/gm,''));
+    dom.window.RoomContext=RoomContext;dom.window.ObservationBuffer=ObservationBuffer;dom.window.eval(source.replace(/^import .*;\n/gm,''));
     for(let index=0;index<130;index++)options.onEvent({id:`chat-${index}`,type:'chat',text:'积压',user:{id:`u-${index}`}});
     options.onPK({id:'old-start',type:'pk-start',battleId:'42',roomId:room,at:now-30000,startedAt:now-30000,durationMs:300000});
     options.onPK({id:'new-end',type:'pk-end',battleId:'42',roomId:room,at:now,scores:[{anchorId:self,score:100},{anchorId:rival,score:50}]});
-    const drain=()=>{const data=dom.window.__douyinAssistantPageV2.call({type:'drain'});for(const event of [...data.priority,...data.events]){published.push(event);engine.ingest(event);}};
+    let ack;
+    const drain=()=>{const data=dom.window.__douyinAssistantPageV2.call({type:'drain',ack});ack=data.batchId;for(const event of [...data.priority,...data.events]){published.push(event);engine.ingest(event);}};
     drain();drain();
     assert.equal(published.length,132);assert.ok(published.findIndex(event=>event.id==='old-start')<published.findIndex(event=>event.id==='new-end'));
     options.onPK({id:'late-start',type:'pk-start',battleId:'42',roomId:room,at:now-30000,startedAt:now-30000,durationMs:300000});drain();

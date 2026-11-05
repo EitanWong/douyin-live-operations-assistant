@@ -10,7 +10,8 @@ export function runtimeAlertState(network = {}) {
       events:healthCount(ingestion.gaps),
       bridge:healthCount(network.bridgeGaps),
       frames:healthCount(network.frameGaps),
-      capture:healthCount(network.capture?.gaps)
+      capture:healthCount(network.capture?.gaps),
+      dom:healthCount(network.dom?.gaps)
     },
     storageHigh:healthCount(storage.ratio) >= 0.8
   };
@@ -25,10 +26,15 @@ export function normalizeRuntimeAlertState(state = {}) {
       events:healthCount(state.gaps?.events),
       bridge:healthCount(state.gaps?.bridge),
       frames:healthCount(state.gaps?.frames),
-      capture:healthCount(state.gaps?.capture)
+      capture:healthCount(state.gaps?.capture),
+      dom:healthCount(state.gaps?.dom)
     },
     storageHigh:Boolean(state.storageHigh)
   };
+}
+
+export function collectionGapCount(network = {}) {
+  return Object.values(runtimeAlertState(network).gaps).reduce((sum,count)=>sum+count,0);
 }
 
 export function hasUnacknowledgedRuntimeAlert(network = {}, acknowledged = {}) {

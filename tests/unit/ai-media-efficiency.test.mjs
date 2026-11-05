@@ -4,10 +4,27 @@ import {MediaEvidence,MEDIA_DEFAULTS,createMediaClient,validateMediaRequest} fro
 import {makeAIRequest} from '../../src/services/ai.js';
 import {mergeConfig} from '../../src/core/engine.js';
 import {createDisplayCapture} from '../../src/browser/live-media.js';
+import {makeEdgeMessages,fitEdgeMessages} from '../../src/ai/edge-prompt.js';
 const now=1800000000000,config=mergeConfig();
 const image=i=>`data:image/jpeg;base64,${Buffer.from('jpeg'+i).toString('base64')}`;
 const row=(kind,id,text,age=0)=>({kind,id,text,at:now-age-1000,endedAt:now-age,receivedAt:now,isFinal:true,inputSource:'native',transport:'websocket'});
 const payload=(media,ai=config.ai)=>JSON.parse(makeAIRequest({now,context:[{text:'弹幕里的问题'}],target:{type:'chat',text:'主播刚才说什么，手里是什么？'},task:{kind:'ai'},mediaContext:media,maxLength:50},ai).messages[1].content);
+test('穿着问题的最新画面独立可用，连续语音及端侧预算不能挤掉衣服证据',async()=>{
+ const store=new MediaEvidence({now:()=>now});store.add(row('video','clothes','主画面只有一人，穿白色上衣、黑色裤子，下半身部分遮挡。',14000));
+ for(let i=0;i<5;i++)store.add(row('audio','speech'+i,'新的语音原话'+i,i*1000));
+ const prompt={now,context:[{text:'无关历史'.repeat(20)}],task:{kind:'ai'},target:{text:'@Eitan 主播今天穿什么衣服呀'},mediaContext:store.context(60),maxLength:80};
+ const cloud=JSON.parse(makeAIRequest(prompt,config.ai).messages[1].content);
+ assert.equal(cloud.media_context.availability.visual,'available');assert.equal(cloud.media_context.scene.visualId,'clothes');
+ const messages=makeEdgeMessages(prompt,config.ai),input=JSON.parse(messages[1].content);
+ assert.equal(input.media_context.availability.visual,'available');assert.ok(input.media.some(r=>r.id==='clothes' && r.text.includes('白色上衣')));
+ const fitted=await fitEdgeMessages(messages,m=>JSON.stringify(m).length,JSON.stringify(messages).length-10),data=JSON.parse(fitted[1].content);
+ assert.ok(data.media.some(r=>r.id==='clothes'));assert.match(JSON.stringify(data),/白色上衣/u);
+});
+test('缓存画面过期、未来时间或只有音频时不能声称看见衣服',()=>{
+ for(const observations of [[row('video','old','红色衣服',61000)],[row('video','future','蓝色衣服',-5000)],[row('video','unknown','[UNKNOWN]')],[row('audio','audio','我穿白色衣服')]]){
+  const data=payload({observations});assert.equal(data.media_context.availability.visual,'unavailable');assert.equal(data.media_context.scene.visualId,null);
+ }
+});
 test('回复上下文只序列化一次音画原文，scene和moment按ID引用，不更改原始观察',()=>{
  const store=new MediaEvidence({now:()=>now});store.add(row('audio','a','刚才的原话独一份'));store.add(row('omni','v','手里是蓝色茶杯独一份'));
  const raw=store.context(60),before=JSON.stringify(raw),input=payload(raw),text=JSON.stringify(input);

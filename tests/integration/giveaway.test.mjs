@@ -79,6 +79,26 @@ test('抽奖口令优先报名并立即生成 @ 确认，不触发关键词或 A
     assert.equal(api.engine.queue.filter(row=>row.kind==='keyword').length,0);assert.equal(aiCalls,0);
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
 });
+
+test('自定义口令支持直接与@报名，重复消息有真实@目标且优先于AI；记录仅在详情浏览器展开',async t=>{
+ let clock=Date.now();t.mock.method(Date,'now',()=>clock);
+ const dom=page(),values=new Map();let api,onEvent,aiCalls=0;
+ boot({page:dom.window,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true};},onReady:value=>{api=value;}});
+ try{
+  await api.tools.ready;api.engine.config.selfId='9';api.engine.setIdentity({self:{id:'9',name:'场控'}});api.engine.running=true;api.engine.config.ai.enabled=true;api.engine.config.ai.chatEnabled=true;api.engine.requestChatAI=()=>{aiCalls++;};
+  await api.tools.invoke('giveaway','start',{prize:'报名礼盒',winners:1,durationSec:300,chatEnabled:true,keyword:'我要报名',giftEnabled:false});
+  for(const [id,text] of [['one','@场控 参与抽奖'],['two','@场控 我要报名'],['three','我要报名']])await onEvent({type:'chat',id,source:'socket',at:Date.now(),text,mentions:text.startsWith('@')?['9']:[],user:{id:'1',name:'小雨'}});
+  const r=api.tools.state('giveaway').rounds[0];assert.equal(r.entrants.length,1);assert.equal(aiCalls,0);assert.equal(r.config.presenceBias,true);
+  assert.deepEqual(r.feedback.find(row=>row.kind==='entry').mentionTargets,[{id:'1',name:'小雨'}]);assert.match(r.feedback.find(row=>row.kind==='duplicate').text,/已经参与成功.*请勿重复参与/);
+  assert.ok(api.engine.queue.find(row=>row.giveaway?.kind==='duplicate').mentionTargets.some(row=>row.id==='1'));
+  for(const type of ['like','enter']) {
+   clock+=1000;
+   await onEvent({type,id:`activity-${type}`,source:'socket',at:clock,receivedAt:clock,user:{id:'1',name:'小雨'}});
+   assert.equal(api.tools.state('giveaway').rounds[0].entrants[0].lastSeenAt,clock,`${type}通过应用入口更新活动记录`);
+  }
+  const history=api.panel.node('[data-giveaway-history]');assert.ok(history.matches('[data-record-browser]'));assert.ok(history.querySelector('[data-record-item]'));assert.equal(history.querySelectorAll('[data-record-item] table').length,1);
+ }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
+});
 test('应用入口在猜数字和 AI 聊天中优先登记抽奖，其他点名弹幕仍可正常触发 AI',async()=>{
   const dom=page(),values=new Map();let api,onEvent;const prompts=[];
   boot({page:dom.window,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),

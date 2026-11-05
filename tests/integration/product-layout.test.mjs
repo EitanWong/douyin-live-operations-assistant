@@ -17,16 +17,28 @@ test('整行说明不能创造空列，字段与指标的列数按实际项目�
  const children=[{kind:'field'},{kind:'field'},{span:'full'},{span:'full'}];
  assert.deepEqual(gridOptions({layout:'fields',children}),{cols:{base:1,'412px':2}});
  assert.deepEqual(gridOptions({layout:'metrics',children:children.slice(0,2)}),{cols:{base:1,'292px':2}});
- assert.deepEqual(gridOptions({layout:'cards',children}),{cols:{base:1,'656px':2}});
 });
 
-test('卡片按原顺序成对排成完整行，通栏内容两侧的单张卡片填满所在行',()=>{
+test('卡片保留原顺序与显式通栏，不提前限定双列或把尾项强制换行',()=>{
  const children=[{id:'a',surface:'card'},{id:'b',surface:'card'},{id:'c',surface:'card'},{id:'note',kind:'text'},{id:'d',surface:'card'}];
  const result=layoutChildren('cards',children);
  assert.deepEqual(result.map(node=>node.id),['a','b','c','note','d']);
- assert.deepEqual(result.map(node=>node.span),[undefined,undefined,'full','full','full']);
+ assert.deepEqual(result.map(node=>node.span),[undefined,undefined,undefined,'full',undefined]);
  assert.ok(children.every(node=>node.span===undefined),'投影不改变原表单与规则状态');
- assert.deepEqual(gridOptions({layout:'cards',children:result}),{cols:{base:1,'656px':2}});
+});
+
+test('长短卡片共用等高规格，独立折叠区通栏避免关闭时出现空壳',()=>{
+ const children=[{id:'short',surface:'card',children:[]},{id:'long',surface:'card',children:Array(20).fill({kind:'field'})},{id:'advanced',kind:'details',surface:'card'},{id:'last',surface:'card'}];
+ const result=layoutChildren('cards',children);
+ assert.deepEqual(result.map(node=>node.size),['tile','tile','section','tile']);
+ assert.deepEqual(result.map(node=>node.span),[undefined,undefined,'full',undefined]);
+ assert.deepEqual(result.map(node=>node.id),children.map(node=>node.id));
+ assert.ok(children.every(node=>node.size===undefined && node.span===undefined));
+});
+
+test('显式通栏配置与普通卡片保留宽度角色，行高由所在行内容决定',()=>{
+ const result=layoutChildren('cards',[{surface:'card',span:'full'},{surface:'card'},{surface:'card'}]);
+ assert.deepEqual(result.map(node=>node.size),['section','tile','tile']);
 });
 
 test('纯数据网格使用指标宽度，PK 速度与可信度不会占用表单的大列宽',()=>{
@@ -44,4 +56,9 @@ test('可见组件接管后旧宽度观察器不再改折叠状态，回退时�
   layout.apply();assert.equal(detail.open,true);
   layout.setSuspended(false);assert.equal(detail.open,false);assert.equal(detail.querySelector('input').value,'草稿');
  }finally{layout.destroy();dom.window.close();}
+});
+
+test('主播列表每条记录横排资料和操作，不再堆成三层',()=>{
+ const dom=new JSDOM('<div class="profile-card"><div><strong>主播 · 当前</strong><small>直播间 123 · UID 456</small></div><a href="https://live.douyin.com/123">打开并配置 ↗</a></div>');
+ try{assert.equal(describeLayout(dom.window.document.querySelector('.profile-card')).layout,'row');}finally{dom.window.close();}
 });

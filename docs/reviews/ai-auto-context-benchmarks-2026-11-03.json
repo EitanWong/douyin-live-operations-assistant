@@ -1,0 +1,195 @@
+{
+  "date": "2026-11-03",
+  "environment": "Independent Chrome for Testing 151, real MV3 offscreen/Worker/WebGPU; no cloud key or live Douyin account used",
+  "scope": "Single-device functionality and warm performance probes, not accuracy benchmarks or production P95",
+  "q4_large_failure": {
+    "device": {
+      "value": {
+        "webgpu": true,
+        "memoryGB": 16,
+        "cores": 10,
+        "maxBufferMB": 4095.9999961853027,
+        "maxStorageMB": 4095.9999961853027,
+        "shaderF16": true,
+        "storageFreeMB": 194511
+      }
+    },
+    "large": {
+      "id": "large",
+      "error": "端侧模型加载或推理失败，请检查 WebGPU、模型下载和设备内存。",
+      "diagnostic": {
+        "name": "Error",
+        "message": "Can't create a session. ERROR_CODE: 6, ERROR_MESSAGE: std::bad_alloc"
+      }
+    },
+    "selected": "qwen-0.5b",
+    "prepared": {
+      "id": "small",
+      "value": {
+        "phase": "ready",
+        "firstTokenMs": 188.80000001192093,
+        "tokensPerSecond": 50.01041883353092,
+        "totalMs": 668.7000000476837,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-0.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4"
+      }
+    },
+    "offlineReply": {
+      "id": "answer",
+      "value": "目前领先30分。"
+    },
+    "replyMs": 210
+  },
+  "q4f16_before_quality_gate": {
+    "device": {
+      "value": {
+        "webgpu": true,
+        "memoryGB": 16,
+        "cores": 10,
+        "maxBufferMB": 4095.9999961853027,
+        "maxStorageMB": 4095.9999961853027,
+        "shaderF16": true,
+        "storageFreeMB": 192866
+      }
+    },
+    "large": {
+      "id": "large",
+      "value": {
+        "phase": "ready",
+        "firstTokenMs": 558.6999999880791,
+        "tokensPerSecond": 37.7536573862672,
+        "totalMs": 1194.3999999761581,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-1.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4f16"
+      }
+    },
+    "selected": "qwen-1.5b",
+    "prepared": {
+      "id": "large",
+      "value": {
+        "phase": "ready",
+        "firstTokenMs": 558.6999999880791,
+        "tokensPerSecond": 37.7536573862672,
+        "totalMs": 1194.3999999761581,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-1.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4f16"
+      }
+    },
+    "offlineReply": {
+      "id": "answer",
+      "value": "\"{}!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    },
+    "replyMs": 1791
+  },
+  "final_with_chinese_self_test": {
+    "device": {
+      "value": {
+        "webgpu": true,
+        "memoryGB": 16,
+        "cores": 10,
+        "maxBufferMB": 4095.9999961853027,
+        "maxStorageMB": 4095.9999961853027,
+        "shaderF16": true,
+        "storageFreeMB": 189611
+      }
+    },
+    "large": {
+      "id": "large",
+      "error": "端侧模型加载或推理失败，请检查 WebGPU、模型下载和设备内存。",
+      "diagnostic": {
+        "name": "Error",
+        "message": "中文结构化上下文自检失败，模型未启用"
+      }
+    },
+    "selected": "qwen-0.5b",
+    "prepared": {
+      "id": "small",
+      "value": {
+        "selfTestPassed": true,
+        "phase": "ready",
+        "firstTokenMs": 262,
+        "tokensPerSecond": 48.6815415821501,
+        "totalMs": 755,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-0.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4"
+      }
+    },
+    "offlineReply": {
+      "id": "answer",
+      "value": "目前领先20分。"
+    },
+    "replyMs": 348,
+    "factualProbePassed": true
+  },
+  "limitations": [
+    "1.5B q4 allocation failed on this device. q4f16 met speed thresholds but failed structured Chinese grounding and was rejected after the quality gate was added.",
+    "0.5B originally answered a score difference incorrectly without a computed summary. The final application prompt includes the score summary computed in code.",
+    "Passing the single fixed Chinese self-test detects basic runtime incompatibility; it does not prove general language or factual accuracy.",
+    "Cold download time and end-to-end platform delivery latency were not benchmarked.",
+    "No authenticated Douyin field collection, long live soak, WER, or naturalness blind evaluation was performed."
+  ],
+  "integrated_final": {
+    "device": {
+      "value": {
+        "webgpu": true,
+        "memoryGB": 16,
+        "cores": 10,
+        "maxBufferMB": 4095.9999961853027,
+        "maxStorageMB": 4095.9999961853027,
+        "shaderF16": true,
+        "storageFreeMB": 189549
+      }
+    },
+    "large": {
+      "id": "large",
+      "error": "端侧模型加载或推理失败，请检查 WebGPU、模型下载和设备内存。",
+      "diagnostic": {
+        "name": "Error",
+        "message": "中文结构化上下文自检失败，模型未启用"
+      }
+    },
+    "selected": "qwen-0.5b",
+    "prepared": {
+      "id": "small",
+      "value": {
+        "selfTestPassed": true,
+        "phase": "ready",
+        "firstTokenMs": 231.80000001192093,
+        "tokensPerSecond": 50.7399577167019,
+        "totalMs": 704.8000000119209,
+        "generatedTokens": 24,
+        "model": "onnx-community/Qwen2.5-0.5B-Instruct",
+        "device": "webgpu",
+        "dtype": "q4"
+      }
+    },
+    "offlineReply": {
+      "id": "answer",
+      "value": "目前领先20分。"
+    },
+    "replyMs": 408,
+    "factualProbePassed": true
+  },
+  "browser_ui": {
+    "errors": [],
+    "settingsReloadPassed": true,
+    "desktopAndNarrow": true,
+    "overflow": [
+      {
+        "width": 402,
+        "overflow": 0
+      }
+    ],
+    "localOnly": true,
+    "textModel": "auto",
+    "incomeSource": false
+  }
+}

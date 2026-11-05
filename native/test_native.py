@@ -114,8 +114,6 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
                 sent.append(event)
                 if event['type'] == 'input_audio_buffer.append':
                     self_test.assertEqual(base64.b64decode(event['audio']), bytes(3200))
-                    now[0] += 100
-                    pump.image = (b'jpeg', now[0])
                 if event['type'] == 'input_audio_buffer.commit':
                     observer.event({'type':'response.created','response':{'id':'r'}})
                     observer.event({'type':'response.done','response':{'id':'r','status':'completed','output':[{'type':'message','content':[{'type':'text','text':'主播挥手。'}]}],'usage':{'total_tokens':12}}})
@@ -125,12 +123,14 @@ class Runtime(unittest.IsolatedAsyncioTestCase):
             async def readexactly(self, size):
                 self.chunks += 1
                 if self.chunks > 85: raise asyncio.IncompleteReadError(b'', size)
+                now[0] += 100
+                pump.image = (b'jpeg', now[0])
                 return bytes(size)
         pump = MediaPump(Socket(), observer, emitted.append, now=lambda: now[0])
         pump.ready = True
         pump.image = (b'jpeg', now[0])
         with self.assertRaisesRegex(ValueError, 'DECODE_FAILED'): await pump.audio(Audio())
-        self.assertEqual(len([e for e in sent if e['type'] == 'input_audio_buffer.append']), 85)
+        self.assertEqual(len([e for e in sent if e['type'] == 'input_audio_buffer.append']), 1)
         self.assertEqual(len([e for e in sent if e['type'] == 'input_audio_buffer.commit']), 1)
         self.assertEqual(emitted[0]['row']['text'], '主播挥手。')
         self.assertEqual(emitted[0]['row']['at'], 10000)

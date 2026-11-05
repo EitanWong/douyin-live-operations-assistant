@@ -133,7 +133,7 @@ test('键盘缩放、恢复默认、标题栏移动及视口缩小后恢复偏�
     f.pointer(f.view,'pointermove',500,180); f.tick(); f.pointer(f.view,'pointerup',500,180);
     assert.equal(w.manual,true); assert.ok(w.px.value>100);
     grip.dispatchEvent(new f.view.KeyboardEvent('keydown',{key:'Home',bubbles:true}));
-    assert.equal(w.width,620); assert.equal(w.manual,false);
+    assert.equal(w.width,998); assert.equal(w.manual,false);
     assert.equal(f.view.localStorage.getItem('douyin-live-assistant:window'),null);
   } finally { f.dispose(); }
 });
@@ -141,7 +141,10 @@ test('键盘缩放、恢复默认、标题栏移动及视口缩小后恢复偏�
 test('减少动态效果移除空间动画，修改系统偏好会终止在途运动', () => {
   const f=floatingFixture({reduced:true}),w=f.floating;
   try {
-    w.setOpen(false); f.tick(50);
+    w.setOpen(false);
+    assert.equal(w.shell.hidden,true,'减少动态效果时立即关闭，不等待动画帧');
+    assert.equal(f.frames.size,0);
+    f.tick(50);
     assert.match(w.panel.style.transform,/scale\(1\)/);
     assert.match(w.panel.style.transform,/translate3d\(0,0px,0\)/);
     f.pointer(w.launcher,'pointerdown',w.x.value,w.y.value);
@@ -163,4 +166,54 @@ test('保存的吸附边和纵向比例适配新视口；销毁清理动画和�
   assert.equal(w.presence.value,value); assert.equal(f.frames.size,0);
   f.pointer(w.launcher,'pointerdown',100,100); assert.equal(w.gesture,null);
   f.dom.window.close();
+});
+
+
+test('玻璃展开和收起的每一帧保留外部背景采样，内容淡入不降低窗口祖先透明度', () => {
+  const f=floatingFixture(),w=f.floating;
+  try {
+    w.setOpen(false);f.settle();w.setOpen(true);
+    assert.ok(Number(w.panel.style.transform.match(/scale\(([^)]+)\)/)[1])>=.96,'文字不能随整个窗口从极小尺寸放大');
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-material-opacity')),0,'玻璃与边缘应从不可见状态连续过渡');
+    for(let i=0;i<36;i++){
+      f.tick();
+      assert.equal(w.shell.hidden,false);
+      assert.equal(Number(w.shell.style.opacity || 1),1,'祖先 opacity<1 会创建 backdrop root，遮断玻璃对页面的模糊采样');
+      assert.equal(Number(w.panel.style.opacity || 1),1);
+    }
+    w.setOpen(false);
+    for(let i=0;i<10;i++){
+      f.tick();assert.equal(Number(w.shell.style.opacity || 1),1);
+    }
+    w.setOpen(true);f.settle();assert.equal(w.shell.hidden,false);
+  } finally {f.dispose();}
+});
+
+
+test('开合的玻璃和文字错峰过渡，文字只在接近原尺寸时出现，退出不留整块残影', () => {
+  const f=floatingFixture(),w=f.floating;
+  try {
+    w.setOpen(false);f.settle();w.setOpen(true);
+    f.tick(32);
+    const material=Number(w.panel.style.getPropertyValue('--window-material-opacity'));
+    const content=Number(w.panel.style.getPropertyValue('--window-content-opacity'));
+    assert.ok(material>0 && material<1);
+    assert.ok(content<material,'玻璃先建立，文字随后淡入，避免微缩字和密集线条同时涌现');
+    const origin=w.panel.style.transformOrigin;f.tick(48);
+    const position=w.presence.value,velocity=w.presence.velocity;
+    w.setOpen(false);
+    assert.equal(w.presence.value,position);assert.equal(w.presence.velocity,velocity);
+    assert.equal(w.panel.style.transformOrigin,origin,'中途反向不能切换缩放锚点');
+    for(let i=0;i<90;i++){
+      f.tick(8);
+      const scale=Number(w.panel.style.transform.match(/scale\(([^)]+)\)/)[1]);
+      assert.ok(scale>=.96 && scale<=1.001,'退出过程中保持内容的原始大小');
+    }
+    f.settle();assert.equal(w.panel.hidden,true);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-material-opacity')),0);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-content-opacity')),0);
+    w.setOpen(true);f.settle();assert.equal(w.panel.hidden,false);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-material-opacity')),1);
+    assert.equal(Number(w.panel.style.getPropertyValue('--window-content-opacity')),1);
+  } finally {f.dispose();}
 });

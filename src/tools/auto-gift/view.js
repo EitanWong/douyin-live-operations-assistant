@@ -34,7 +34,7 @@ export const autoGiftView={
   template:()=>`<section class="page" role="tabpanel" id="page-auto-gift" aria-labelledby="tab-auto-gift" data-page="auto-gift" hidden>
     <h2>自动送礼</h2><p class="intro">使用当前登录账号，向当前直播间的主播定时送礼。点击开始后立即送出第一批，消耗账户钻石。</p>
     <div class="actions"><button type="button" data-action="auto-gift-refresh">读取礼物与余额</button><strong data-auto-gift-balance aria-live="polite">钻石余额：未读取</strong></div>
-    <p class="hint" data-auto-gift-updated>请先打开网页礼物面板，再读取最新目录。</p>
+    <p class="hint" data-auto-gift-updated>余额每 5 秒自动更新；礼物目录请手动读取。</p>
     <div class="grid">
       <label class="field"><span>搜索礼物名称或 ID</span><input type="search" data-auto-gift-search placeholder="例如：小心心、嘉年华"></label>
       <label class="field"><span>礼物分类</span><select data-auto-gift-category><option value="">全部分类</option></select></label>
@@ -62,7 +62,7 @@ export const autoGiftView={
     panel.disabled('[data-action=auto-gift-acknowledge]',active || state.loading);
     panel.text('[data-action=auto-gift-refresh]',state.loading?'正在读取…':'刷新礼物与余额');
     panel.text('[data-auto-gift-balance]',`${panel.demo?'模拟':''}钻石余额：${formatDiamonds(state.balanceUnits)}`);
-    panel.text('[data-auto-gift-updated]',state.at?`读取时间：${new Date(state.at).toLocaleTimeString()} · 每批发送前重新核对`:'请先打开网页礼物面板，再读取最新目录。');
+    panel.text('[data-auto-gift-updated]',state.balanceError?`余额更新失败：${state.balanceError} · 将自动重试`:state.balanceAt?`余额更新时间：${new Date(state.balanceAt).toLocaleTimeString()} · 每 5 秒自动更新`:'打开此页自动读取余额，每 5 秒更新；礼物目录请手动读取。');
     panel.text('[data-auto-gift-status]',`${panel.demo?'模拟演练 · ':''}${state.reason || '请先读取礼物与余额'}`);
     panel.text('[data-auto-gift-progress]',`本次${panel.demo?'模拟':''}已送出 ${state.accepted || 0} 个 · 消费 ${formatDiamonds(state.spentUnits || 0)} 钻 · ${state.batches || 0} 批`);
     panel.root.querySelector('[data-auto-gift-pending]').hidden=!state.pending;

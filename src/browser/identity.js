@@ -9,7 +9,8 @@ export function identityUser(value) {
   if (!value || typeof value !== 'object') return null;
   const id = numericId(value.id_str) || numericId(value.id) || numericId(value.uid);
   if (!id || id === '0') return null;
-  return { id, name: String(value.nickname || value.nick_name || value.name || '').slice(0, 60) };
+  const secUid = value.sec_uid || value.secUid;
+  return { id, name: String(value.nickname || value.nick_name || value.name || '').slice(0, 60), ...(typeof secUid === 'string' && /^[\w=-]{1,160}$/u.test(secUid) ? {secUid} : {}) };
 }
 function roomAdmins(info, expectedRoom) {
   const roomId = String(info?.web_rid || info?.webRid || '');

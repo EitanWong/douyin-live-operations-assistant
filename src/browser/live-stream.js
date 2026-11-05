@@ -40,10 +40,10 @@ function initialStreams(page,room){
   if(text && text.length<8*1024*1024){try{const rows=streamCandidates(parse(decodeURIComponent(text)),room);if(rows.length)return rows;}catch{}}
   return [];
 }
-export async function resolveLiveStream({page=globalThis,room=roomFromURL(page.location),signal}){
+export async function resolveLiveStream({page=globalThis,room=roomFromURL(page.location),signal,fresh=false}){
   if(!room || page.location.origin!=='https://live.douyin.com' || roomFromURL(page.location)!==room)throw new Error('请在当前抖音直播间启动直接拉流');
   if(signal?.aborted)throw new Error('直接拉流已停止');
-  const initial=initialStreams(page,room);if(initial.length)return initial;
+  const initial=fresh ? [] : initialStreams(page,room);if(initial.length)return initial;
   const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});
   const timer=setTimeout(abort,10000);
   try{

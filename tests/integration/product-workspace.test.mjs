@@ -11,6 +11,69 @@ function setup(){
 }
 const find=(node,kind)=>node?.kind===kind ? node : node?.children?.map(n=>find(n,kind)).find(Boolean);
 
+test('页面与嵌入模块的管理/说明从正文分离，弹窗操作仍映射原控制器',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page=ai]');
+  page.innerHTML='<section class="workspace-card"><h3>主配置</h3><input value="原草稿"></section><details data-workspace-utility="help"><summary>页面说明</summary><p>本页使用方法</p></details><section data-tool-panel="nested"><h3>嵌入模块</h3><details data-workspace-utility="manage"><summary>模块管理</summary><p role="status">运行中</p><button>停用模块</button></details><details data-workspace-utility="help"><summary>模块说明</summary><p>模块使用方法</p></details></section><section hidden><details data-workspace-utility="manage"><summary>隐藏模块</summary><button>不该出现</button></details></section>';
+  let disabled=0;page.querySelector('button').onclick=()=>{disabled++;page.querySelector('[role=status]').textContent='已停用';};
+  f.bridge.refresh();const before=f.bridge.getSnapshot();
+  assert.deepEqual(before.utilities.help.map(n=>n.title),['页面说明','模块说明']);
+  assert.deepEqual(before.utilities.manage.map(n=>n.title),['模块管理']);
+  assert.doesNotMatch(JSON.stringify(before.content),/本页使用方法|模块使用方法|停用模块|隐藏模块/);
+  assert.equal(f.bridge.activate(find(before.utilities.manage[0],'button').id),true);assert.equal(disabled,1);
+  const after=f.bridge.getSnapshot();assert.match(JSON.stringify(after.utilities.manage),/已停用/);
+  assert.equal(after.content,before.content,'工具状态变化不重建正文布局');
+  f.bridge.navigate('anchor');assert.deepEqual(f.bridge.getSnapshot().utilities,{help:[],manage:[]});
+  assert.equal(f.bridge.activate(find(before.utilities.manage[0],'button').id),false,'切页后旧弹窗操作失效');
+ }finally{f.close();}
+});
+
+test('状态更新复用未变化的视图与图表，格式函数变化仍正确发布',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page=ai]');page.innerHTML='<div data-pred-chart="online"></div>';
+  const formatter=value=>`在线 ${value}`;
+  f.panel.predictionCharts={options:{online:{series:[{data:[1,2,3]}],tooltip:{formatter}}}};
+  f.bridge.refresh();const before=f.bridge.getSnapshot();
+  const status=f.root.querySelector('.shell-status');status.innerHTML='<span>运行中</span>';f.bridge.refresh();
+  assert.equal(f.bridge.getSnapshot().status,'运行中');
+  assert.equal(f.bridge.getSnapshot().content,before.content,'只更新状态时不重新提交图表');
+  const nextFormatter=value=>`人数 ${value}`;
+  f.panel.predictionCharts.options.online={series:[{data:[1,2,3]}],tooltip:{formatter:nextFormatter}};
+  f.bridge.refresh();assert.equal(find(f.bridge.getSnapshot().content,'chart').option.tooltip.formatter(4),'人数 4');
+ }finally{f.close();}
+});
+
+test('后台页面更新不读取前台图表，导航后显示后台最新内容',async()=>{
+ const f=setup();try{
+  let reads=0;
+  f.root.querySelector('[data-page=ai]').innerHTML='<div data-anchor-chart="online"></div>';
+  f.panel.anchorDashboard={charts:{instances:new Map([['online',{getOption(){reads++;return {series:[]};}}]])}};
+  f.bridge.refresh();await Promise.resolve();reads=0;
+  f.root.querySelector('[data-page=anchor]').innerHTML='<p>后台最新统计</p>';
+  await Promise.resolve();assert.equal(reads,0);
+  f.bridge.navigate('anchor');assert.match(JSON.stringify(f.bridge.getSnapshot().content),/后台最新统计/);
+ }finally{f.close();}
+});
+
+test('移除后重新挂回的同一控件仍可操作，销毁后不能再触发源控件',()=>{
+ const f=setup();try{
+  const button=f.root.querySelector('[data-action=test-ai]'),parent=button.parentElement;
+  let calls=0;button.onclick=()=>calls++;
+  const action=find(f.bridge.getSnapshot().content,'button');button.remove();f.bridge.refresh();
+  assert.equal(f.bridge.activate(action.id),false);parent.append(button);f.bridge.refresh();
+  assert.equal(f.bridge.activate(action.id),true);assert.equal(calls,1);
+  f.bridge.destroy();assert.equal(f.bridge.activate(action.id),false);assert.doesNotThrow(()=>f.bridge.navigate('ai'));
+ }finally{f.close();}
+});
+
+test('抽奖字段组标题与普通卡片共用标题栏语义',()=>{
+ const f=setup();try{
+  f.root.querySelector('[data-page=ai]').innerHTML='<div class="workspace-grid"><fieldset class="giveaway-config"><legend>奖品与开奖时间</legend><input aria-label="秒数" value="300"></fieldset></div>';f.bridge.refresh();
+  const card=f.bridge.getSnapshot().content.children[0].children[0];
+  assert.equal(card.children[0].tag,'h3');assert.equal(card.children[0].children[0].text,'奖品与开奖时间');
+ }finally{f.close();}
+});
+
 test('成熟 UI 适配层仅使用一份表单状态，编辑保留数值并派发原事件一次',()=>{
  const f=setup();try{let changes=0;const source=f.root.querySelector('[data-field="ai.model"]');source.addEventListener('input',()=>changes++);
  const field=find(f.bridge.getSnapshot().content,'field');assert.equal(field.label,'模型名');assert.equal(field.value,'qwen-plus');f.bridge.change(field.id,'custom-model');assert.equal(source.value,'custom-model');assert.equal(changes,1);assert.equal(find(f.bridge.getSnapshot().content,'field').value,'custom-model');
@@ -21,6 +84,18 @@ test('操作通过原控制器执行一次，导航不重置草稿，服务消�
  const f=setup();try{let calls=0;const button=f.root.querySelector('[data-action="test-ai"]');button.addEventListener('click',()=>calls++);const action=find(f.bridge.getSnapshot().content,'button');f.bridge.activate(action.id);assert.equal(calls,1);
  f.bridge.navigate('anchor');assert.equal(f.panel.activeTab,'anchor');f.bridge.navigate('ai');assert.equal(f.root.querySelector('input').value,'qwen-plus');
  const toast=f.root.querySelector('.toast');toast.hidden=false;toast.textContent='连接失败';await Promise.resolve();assert.match(JSON.stringify(f.bridge.getSnapshot().messages),/连接失败/);
+ }finally{f.close();}
+});
+
+test('侧栏偏好由原控制器或跨窗口同步更新时，组件界面立即读取新状态',async()=>{
+ const f=setup();try{
+  f.panel.navigation={side:'left',collapsed:false};f.bridge.refresh();
+  let updates=0;const unsubscribe=f.bridge.subscribe(()=>updates++);
+  f.panel.navigation.collapsed=true;f.root.querySelector('.workspace').dataset.navCollapsed='true';
+  await Promise.resolve();assert.equal(f.bridge.getSnapshot().sidebar.collapsed,true);assert.equal(updates,1);
+  f.panel.navigation.side='right';f.root.querySelector('.workspace').dataset.navSide='right';
+  await Promise.resolve();assert.equal(f.bridge.getSnapshot().sidebar.side,'right');assert.equal(updates,2);
+  assert.equal(f.root.querySelector('input').value,'qwen-plus');unsubscribe();
  }finally{f.close();}
 });
 test('表格快照保留列与行、数字排序值及导出边界，移除的控件不能被旧操作执行',()=>{
@@ -74,7 +149,7 @@ test('布局边界展开透明包装，卡片/字段/操作区各有唯一语义
   f.bridge.refresh();const section=f.bridge.getSnapshot().content.children[0];
   assert.equal(section.layout,'cards');assert.equal(section.role,'tabpanel');assert.equal(section.label,'连接与模型');
   assert.deepEqual(section.children.map(n=>n.children[0]?.children?.[0]?.text || n.children[0]?.text),['组合','回复','感知','测试']);
-  assert.equal(section.children[0].span,'full');assert.equal(section.children[1].surface,'card');
+  assert.equal(section.children[0].span,undefined);assert.equal(section.children[1].surface,'card');
   const fields=section.children[1].children[1];assert.equal(fields.layout,'fields');assert.deepEqual(fields.children.map(n=>n.value),['draft','保留内容']);assert.equal(fields.children[1].span,'full');
   assert.equal(section.children[3].layout,'row');assert.equal(section.children[3].span,'full');
   const field=fields.children[0];f.bridge.change(field.id,'仍可编辑');assert.equal(f.root.querySelector('input').value,'仍可编辑');
@@ -82,11 +157,11 @@ test('布局边界展开透明包装，卡片/字段/操作区各有唯一语义
  }finally{f.close();}
 });
 
-test('单张配置卡片之后的高级折叠区跨整行，不再因兼容卡片类名预留空列',()=>{
+test('高级折叠区通栏且正文有界，普通配置保留统一卡片角色',()=>{
  const f=setup();try{
   f.root.querySelector('[data-page="ai"]').innerHTML='<div class="workspace-grid"><section class="settings-group workspace-card"><h3>参与设置</h3><input value="draft"></section><details class="advanced workspace-card"><summary>定位</summary><input value="xpath"></details><details class="workspace-card"><summary>工具管理</summary><button>停用</button></details></div>';
   f.bridge.refresh();const [config,...advanced]=f.bridge.getSnapshot().content.children[0].children;
-  assert.equal(config.span,'full');assert.deepEqual(advanced.map(node=>node.span),['full','full']);
+  assert.equal(config.span,undefined);assert.equal(config.size,'tile');assert.deepEqual(advanced.map(node=>node.span),['full','full']);assert.ok(advanced.every(node=>node.size==='section'));
  }finally{f.close();}
 });
 
@@ -110,5 +185,13 @@ test('PK 播报开关保留无重复文案的可访问标签，间隔优先使�
   f.bridge.refresh();const option=f.bridge.getSnapshot().content.children[0],[,interval,toggle]=option.children;
   assert.equal(option.layout,'row');assert.equal(interval.label,'汇报间隔 / 秒');assert.equal(toggle.labelHidden,true);assert.equal(toggle.label,'定时汇报每日任务与展馆');
   f.bridge.change(toggle.id,true);assert.equal(f.root.querySelector('input[type=checkbox]').checked,true);
+ }finally{f.close();}
+});
+
+
+test('已有业务分页的表格明确标记搜索范围，源控制器已有搜索时不重复接管',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page=ai]');page.innerHTML='<details data-collection-source><summary>粉丝团成员</summary><label><span>搜索已采集成员</span><input type="search"></label><div><table><thead><tr><th>成员</th></tr></thead><tbody><tr><td>末页</td></tr></tbody></table></div><div class="anchor-pagination"><button>下一页</button></div></details>';f.bridge.refresh();
+  const table=find(f.bridge.getSnapshot().content,'table');assert.equal(table.scope,'page');assert.equal(table.sourceControlled,true);assert.equal(table.caption,'粉丝团成员');
  }finally{f.close();}
 });

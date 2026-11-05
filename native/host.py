@@ -6,9 +6,11 @@ output and provider error text are never forwarded to the extension.
 import asyncio
 import base64
 import contextlib
+from collections import deque
 import json
 from pathlib import Path
 import shutil
+import struct
 import sys
 import threading
 import time
@@ -17,6 +19,7 @@ from importlib.metadata import version
 
 from protocol import read_message, write_message, parse_config, session_settings, Observer, INSTRUCTIONS
 from resolver import media_url
+from stream_source import StreamSource
 
 ROOT = Path(__file__).resolve().parent
 clock = lambda: int(time.time() * 1000)
@@ -76,7 +79,7 @@ def ffmpeg_args(binary, url):
 
 
 class MediaPump:
-    def __init__(self, ws, observer, send=emit, now=clock):
+    def __init__(self, ws, observer, send=emit, now=clock, visual_interval=None):
         self.ws, self.observer, self.emit, self.now = ws, observer, send, now
         self.image = None
         self.audio_sent = False
@@ -84,6 +87,12 @@ class MediaPump:
         self.started = self.window_at = self.now()
         self.committed_at = 0
         self.awaiting_commit = False
+        self.request_visual = False
+        self.visual_interval = visual_interval or max(12000, 3600000 / getattr(observer, 'max_calls', 120))
+        self.last_visual = self.started - self.visual_interval + 8000
+        self.audio_at = None
+        self.speech_until = 0
+        self.prefix = deque(maxlen=3)
         self.tasks = []
 
     async def send(self, value):
@@ -114,18 +123,34 @@ class MediaPump:
                 raise ValueError('DECODE_FAILED')
 
     async def images(self):
-        previous = None
         while True:
             await asyncio.sleep(0.1)
             if self.now() - self.started > 20000 and not self.ready:
                 raise ValueError('DECODE_FAILED')
-            if self.image and self.audio_sent and self.image[1] != previous:
-                previous = self.image[1]
+            if self.image and self.audio_sent and not self.ready:
                 await self.send({'type': 'input_image_buffer.append', 'image': base64.b64encode(self.image[0]).decode()})
                 if not self.ready:
                     self.ready = True
                     self.emit({'type': 'ready'})
                     self.emit({'type': 'state', 'phase': 'observing', 'totalTokens': self.observer.total_tokens})
+
+    async def append_audio(self, chunk, at):
+        if self.audio_at is None:
+            self.audio_at = at
+        await self.send({'type': 'input_audio_buffer.append', 'audio': base64.b64encode(chunk).decode()})
+        self.audio_sent = True
+
+    async def commit(self, now, visual):
+        if visual:
+            await self.send({'type': 'input_image_buffer.append', 'image': base64.b64encode(self.image[0]).decode()})
+            self.last_visual = now
+        self.observer.begin(self.audio_at, now, respond=visual)
+        self.committed_at = now
+        self.window_at = now
+        self.audio_at = None
+        self.awaiting_commit = True
+        self.request_visual = visual
+        await self.send({'type': 'input_audio_buffer.commit'})
 
     async def audio(self, stream):
         while True:
@@ -133,19 +158,28 @@ class MediaPump:
                 chunk = await asyncio.wait_for(stream.readexactly(3200), 18)
             except (asyncio.IncompleteReadError, TimeoutError):
                 raise ValueError('DECODE_FAILED') from None
-            await self.send({'type': 'input_audio_buffer.append', 'audio': base64.b64encode(chunk).decode()})
-            self.audio_sent = True
             now = self.now()
+            samples = struct.unpack('<1600h', chunk)
+            audible = sum(value * value for value in samples) / len(samples) >= (32768 * 0.003) ** 2
+            if audible:
+                self.speech_until = now + 800
+            if audible or now < self.speech_until or not self.audio_sent:
+                for prefix, at in self.prefix:
+                    await self.append_audio(prefix, at)
+                self.prefix.clear()
+                await self.append_audio(chunk, now - 100)
+            else:
+                self.prefix.append((chunk, now - 100))
             if self.ready and (not self.image or now - self.image[1] > 5000):
                 raise ValueError('DECODE_FAILED')
-            if self.observer.responding and now - self.committed_at > 25000:
+            if (self.observer.responding or self.awaiting_commit) and now - self.committed_at > 25000:
                 raise ValueError('MODEL_FAILED')
-            if self.ready and now - self.window_at >= 8000 and not self.observer.responding:
-                self.observer.begin(self.window_at, now)
-                self.committed_at = now
-                self.window_at = now
-                self.awaiting_commit = True
-                await self.send({'type': 'input_audio_buffer.commit'})
+            visual = now - self.last_visual >= self.visual_interval
+            segment = self.audio_at is not None and (now - self.audio_at >= 8000 or self.speech_until and now >= self.speech_until)
+            if self.ready and not self.observer.responding and not self.awaiting_commit and (visual or segment):
+                if self.audio_at is None:
+                    await self.append_audio(chunk, now - 100)
+                await self.commit(now, visual)
 
     async def receive(self):
         async for raw in self.ws:
@@ -153,8 +187,11 @@ class MediaPump:
             if event.get('type') == 'input_audio_buffer.committed':
                 if not self.awaiting_commit:
                     continue
+                self.observer.event(event)
+                if self.request_visual:
+                    await self.send({'type': 'response.create'})
                 self.awaiting_commit = False
-                await self.send({'type': 'response.create'})
+                continue
             self.observer.event(event)
         raise ValueError('MODEL_FAILED')
 
@@ -199,42 +236,70 @@ async def attempt(config, observer, candidate, binary):
         process = await asyncio.create_subprocess_exec(*ffmpeg_args(binary, candidate['url']),
                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
-            await MediaPump(ws, observer).run(process)
+            await MediaPump(ws, observer, visual_interval=config['visual_interval']).run(process)
         finally:
             await terminate(process)
 
 
-async def session(message):
+async def run_session(config, observer, binary):
+    async with asyncio.timeout(config['minutes'] * 60):
+        for generation in range(5):
+            try:
+                emit({'type': 'state', 'phase': 'resolving'})
+                resolve = config.get('resolve', resolve_streams)
+                rows = await resolve(config['room'])
+                for candidate in rows:
+                    observer.pending.clear()
+                    observer.text.clear()
+                    observer.responding = False
+                    try:
+                        await attempt(config, observer, candidate, binary)
+                        return
+                    except ValueError as error:
+                        if str(error) != 'DECODE_FAILED':
+                            raise
+                raise ValueError('DECODE_FAILED')
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                code = str(error) if str(error) in ['RESOLVE_FAILED', 'DECODE_FAILED', 'MODEL_FAILED', 'LIMIT', 'SESSION_LIMIT'] else 'MODEL_FAILED'
+                if code in ['LIMIT', 'SESSION_LIMIT', 'MODEL_FAILED'] or generation == 4:
+                    raise ValueError(code) from None
+                emit({'type': 'state', 'phase': 'recovering', 'totalTokens': observer.total_tokens})
+                await asyncio.sleep(min(2 ** generation, 8))
+
+
+async def session(message, resolve=None):
     try:
         config = parse_config(message)
+        if resolve:
+            config['resolve'] = resolve
         runtime = json.loads((ROOT / 'runtime.json').read_text()) if (ROOT / 'runtime.json').exists() else {}
         binary = runtime.get('ffmpeg') or shutil.which('ffmpeg')
         if not binary or not Path(binary).is_file():
             raise ValueError('DECODE_FAILED')
-        observer = Observer(config['model'], emit, config['calls'], config['tokens'])
-        async with asyncio.timeout(config['minutes'] * 60):
-            for generation in range(5):
-                try:
-                    emit({'type': 'state', 'phase': 'resolving'})
-                    rows = await resolve_streams(config['room'])
-                    # Fresh URLs on each generation; alternate both quality and transport.
-                    candidate = rows[generation % len(rows)]
-                    observer.pending.clear()
-                    observer.text.clear()
-                    observer.responding = False
-                    await attempt(config, observer, candidate, binary)
-                except asyncio.CancelledError:
+        calls = []
+        while True:
+            observer = Observer(config['model'], emit, config['calls'], config['tokens'])
+            observer.calls = calls
+            try:
+                await run_session(config, observer, binary)
+            except TimeoutError:
+                pass
+            except ValueError as error:
+                if str(error) not in ['SESSION_LIMIT', 'LIMIT']:
                     raise
-                except Exception as error:
-                    code = str(error) if str(error) in ['RESOLVE_FAILED', 'DECODE_FAILED', 'MODEL_FAILED', 'LIMIT'] else 'MODEL_FAILED'
-                    if code in ['LIMIT', 'MODEL_FAILED'] or generation == 4:
-                        raise ValueError(code) from None
-                    emit({'type': 'state', 'phase': 'recovering', 'totalTokens': observer.total_tokens})
-                    await asyncio.sleep(min(2 ** generation, 8))
+                if str(error) == 'LIMIT':
+                    retry_at = min(observer.calls, default=clock()) + 3600000
+                    emit({'type':'state', 'phase':'waiting', 'retryAt':retry_at})
+                    await asyncio.sleep(max(0, retry_at - clock()) / 1000)
+            calls = observer.calls
+            emit({'type':'state', 'phase':'renewing', 'totalTokens':0})
+            # A fresh provider session has no growing conversation history.
+            # Observations already emitted remain in the room's memory writer.
+            await asyncio.sleep(0)
     except asyncio.CancelledError:
         raise
-    except TimeoutError:
-        emit({'type': 'error', 'code': 'LIMIT'})
     except Exception as error:
         code = str(error) if str(error) in ['INVALID', 'RESOLVE_FAILED', 'DECODE_FAILED', 'MODEL_FAILED', 'LIMIT'] else 'MODEL_FAILED'
         emit({'type': 'error', 'code': code})
@@ -261,11 +326,42 @@ async def main():
                 loop.call_soon_threadsafe(deliver, None)
     threading.Thread(target=reader, daemon=True).start()
     task = None
+    streams = StreamSource(emit, resolve_streams)
+    local = None
+    local_task = None
+    async def local_request(message):
+        nonlocal local
+        try:
+            if local is None:
+                from local_asr import LocalASR
+                runtime = json.loads((ROOT / 'runtime.json').read_text()) if (ROOT / 'runtime.json').exists() else {}
+                local = LocalASR(runtime.get('asrModelDir'))
+            action = message.get('action')
+            if action == 'prepare':
+                value = await asyncio.to_thread(local.prepare)
+            elif action == 'infer':
+                value = await asyncio.to_thread(local.infer, message.get('data'))
+            elif action == 'status':
+                value = local.status
+            else:
+                raise ValueError()
+            emit({'id': message.get('id'), 'value': value})
+        except Exception:
+            emit({'id': message.get('id'), 'error': 'SenseVoice 本地识别不可用，请检查组件、模型安装及设备测速结果'})
     try:
         while True:
             message = await queue.get()
             if message is None or message.get('type') == 'stop':
                 return
+            if message.get('type') == 'streams' and task:
+                streams.receive(message)
+                continue
+            if message.get('type') == 'local-asr' and not task:
+                if local_task and not local_task.done():
+                    emit({'id': message.get('id'), 'error': '本地语音繁忙'})
+                else:
+                    local_task = asyncio.create_task(local_request(message))
+                continue
             if message.get('type') == 'probe' and not task:
                 try:
                     runtime = json.loads((ROOT / 'runtime.json').read_text()) if (ROOT / 'runtime.json').exists() else {}
@@ -283,8 +379,11 @@ async def main():
             if message.get('type') != 'start' or task:
                 emit({'type': 'error', 'code': 'INVALID'})
                 return
-            task = asyncio.create_task(session(message))
+            task = asyncio.create_task(session(message, streams.resolve))
     finally:
+        if local_task:
+            local_task.cancel()
+            await asyncio.gather(local_task, return_exceptions=True)
         if task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

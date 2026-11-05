@@ -24,14 +24,25 @@ export class ToolScope {
   clearTimeout(id) { if (this.timers.delete(id)) this.cancel(id); }
   listen(target, name, callback, options) {
     if (!this.active) throw new Error('工具已停用');
+    const signal=options?.signal;
+    if(signal?.aborted)return ()=>{};
+    let forget,attached=false;
+    const cleanup=()=>{
+      if(!attached)return;
+      attached=false;forget?.();
+      target.removeEventListener(name,listener,options);
+      signal?.removeEventListener('abort',cleanup);
+    };
     const listener = (...args) => {
       if (!this.active) return;
+      if(options?.once)cleanup();
       try { this.run(() => callback(...args)).catch(this.onError); } catch (error) { this.onError(error); }
     };
     target.addEventListener(name, listener, options);
-    const cleanup = () => target.removeEventListener(name, listener, options);
-    const forget = this.defer(cleanup);
-    return () => { forget(); cleanup(); };
+    attached=true;forget=this.defer(cleanup);
+    signal?.addEventListener('abort',cleanup,{once:true});
+    if(signal?.aborted)cleanup();
+    return cleanup;
   }
   run(callback) {
     // Register before invoking: a synchronous callback may initiate teardown.

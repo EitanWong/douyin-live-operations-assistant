@@ -2,10 +2,12 @@ import { readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { checkIndex } from './lib/agent-index.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+if (!await checkIndex(root)) throw new Error('Agent 索引缺失或过期；运行 npm run agent:index 并提交生成差异。');
 const dist = resolve(process.env.DOUYIN_DIST_DIR || `${root}dist`);
-for (const file of ['audience-memory.js','assistant-config.js','assistant-skills.js','local-agent.js','knowledge-retrieval.js','media-session.js','completion-stream.js','chrome-extension/durable-storage.js','product-ui.js','ai-pipeline.js','theme-palettes.js','douyin-live-assistant.user.js','ai-intent.js','tool-runtime.js','live-stream-codecs.js', 'chrome-extension/background.js', 'chrome-extension/popup.js', 'chrome-extension/ai.js','chrome-extension/search.js','chrome-extension/content.js', 'chrome-extension/page.js', 'chrome-extension/indicator-frame.js']) {
+for (const file of ['demo-app.js','window-presence.js','audience-memory.js','assistant-config.js','assistant-skills.js','local-agent.js','knowledge-retrieval.js','media-session.js','completion-stream.js','chrome-extension/durable-storage.js','product-ui.js','ai-pipeline.js','theme-palettes.js','douyin-live-assistant.user.js','ai-intent.js','tool-runtime.js','live-stream-codecs.js', 'chrome-extension/edge-worker.js','chrome-extension/edge-offscreen.js','chrome-extension/account-page.js','chrome-extension/speech-vad.js','chrome-extension/background.js', 'chrome-extension/popup.js', 'chrome-extension/ai.js','chrome-extension/search.js','chrome-extension/content.js', 'chrome-extension/page.js', 'chrome-extension/indicator-frame.js']) {
   execFileSync(process.execPath, ['--check', resolve(dist, file)], {stdio:'inherit'});
 }
 async function checkDirectory(directory) {

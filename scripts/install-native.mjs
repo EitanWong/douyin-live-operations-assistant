@@ -1,31 +1,24 @@
-import {execFileSync} from 'node:child_process';
-import {mkdir,copyFile,writeFile,chmod,rm} from 'node:fs/promises';
-import {homedir} from 'node:os';
-import {join} from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {installNative} from './lib/native-install.mjs';
+import {bootstrapNativeDeployment,registeredNativeDeployment} from './lib/native-deployment.mjs';
+import {rm} from 'node:fs/promises';
 
-const root=fileURLToPath(new URL('../',import.meta.url));
-const args=Object.fromEntries(process.argv.slice(2).map(value=>{const index=value.indexOf('=');return [value.slice(0,index),value.slice(index+1)];}));
-const id=args['--extension-id'];
-if(!['darwin','linux'].includes(process.platform))throw new Error('当前自动安装器支持 macOS / Linux。Windows 请使用 WSL 之外的原生宿主安装方案，暂不支持自动注册。');
-const folder=join(homedir(),'.local','share','douyin-live-assistant','native');
-const manifests=process.platform==='darwin' ? join(homedir(),'Library','Application Support','Google','Chrome','NativeMessagingHosts') : join(homedir(),'.config','google-chrome','NativeMessagingHosts');
-const manifest=join(manifests,'com.douyin_live_assistant.perception.json');
-if(process.argv.includes('--uninstall')){await rm(manifest,{force:true});await rm(folder,{recursive:true,force:true});console.log('本地感知组件已卸载。');process.exit(0);}
-if(!/^[a-p]{32}$/u.test(id || ''))throw new Error('请传入 chrome://extensions 中的扩展 ID：npm run native:install -- --extension-id=扩展ID');
-const python=args['--python'] || 'python3';
-execFileSync(python,['-c','import sys; assert sys.version_info >= (3,11), "需要 Python 3.11 或更高版本"'],{stdio:'inherit'});
-const ffmpeg=execFileSync(python,['-c','import shutil,sys; p=shutil.which(sys.argv[1]); assert p, "请先安装 FFmpeg"; print(p)',args['--ffmpeg'] || 'ffmpeg'],{encoding:'utf8'}).trim();
-await mkdir(folder,{recursive:true,mode:0o700});
-execFileSync(python,['-m','venv',join(folder,'.venv')],{stdio:'inherit'});
-const runtime=join(folder,'.venv','bin','python');
-execFileSync(runtime,['-m','pip','install','--disable-pip-version-check','-r',join(root,'native','requirements.lock.txt')],{stdio:'inherit'});
-for(const name of ['host.py','protocol.py','resolver.py','requirements.txt','requirements.lock.txt'])await copyFile(join(root,'native',name),join(folder,name));
-await writeFile(join(folder,'runtime.json'),JSON.stringify({ffmpeg}),{mode:0o600});
-const shellQuote=value=>`'${value.replaceAll("'","'\\''")}'`;
-const launcher=join(folder,'launch');await writeFile(launcher,`#!/bin/sh\nexec ${shellQuote(runtime)} ${shellQuote(join(folder,'host.py'))} "$@"\n`,{mode:0o700});await chmod(launcher,0o700);
-await mkdir(manifests,{recursive:true});
-await writeFile(manifest,JSON.stringify({name:'com.douyin_live_assistant.perception',description:'Douyin native stream perception',path:launcher,type:'stdio',allowed_origins:[`chrome-extension://${id}/`]},null,2),{mode:0o600});
-// Import/decoder checks contain no live stream or model requests.
-execFileSync(runtime,['-c','import streamget; from websockets.asyncio.client import connect'],{stdio:'inherit'});
-console.log(`本地感知组件已注册到 Chrome。扩展 ID：${id}\n在 AI 设置选择“本地原生拉流”及 Omni 实时组合后启动。\n组件位置：${folder}`);
+const flags=new Set(['--uninstall','--doctor','--without-asr','--foreground','--status']);
+const values=new Set(['--extension-id','--python','--ffmpeg','--asr-model-dir','--browser']);
+const args={};
+for(const argument of process.argv.slice(2)){
+  const at=argument.indexOf('=');
+  if(flags.has(argument)){args[argument]=true;continue;}
+  const key=argument.slice(0,at),value=argument.slice(at+1);
+  if(at<0 || !values.has(key) || !value)throw new Error(`不支持的安装参数：${argument}`);
+  args[key]=value;
+}
+try{
+ if(args['--status'])console.log(JSON.stringify(await (await registeredNativeDeployment({args})).deployment.status({resume:true}),null,2));
+ else if(args['--uninstall']){
+  let agent;try{agent=await registeredNativeDeployment({args});}catch(error){if(error.code!=='ENOENT')throw error;}
+  if(agent && ['queued','running'].includes((await agent.deployment.status()).phase))throw new Error('后台安装尚未结束，请完成后再卸载');
+  await installNative({args});if(agent)await rm(agent.manifest);
+ }
+ else if(args['--doctor'] || args['--foreground'])await installNative({args});
+ else await bootstrapNativeDeployment({args});
+}catch(error){console.error(`安装未完成：${error.message}`);process.exitCode=1;}

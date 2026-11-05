@@ -35,7 +35,7 @@ DOUYIN_DIST_DIR=/tmp/douyin-build npm run build
 DOUYIN_DIST_DIR=/tmp/douyin-build npm run check
 ```
 
-`npm run check` 检查源码、工具脚本、测试和生成的 JavaScript。`npm test` 会为需要产物的用例创建临时构建，并在结束后清理，不读取或覆盖 Chrome 正在使用的 `dist/`。
+修改 JavaScript 源码、测试或脚本后先运行 `npm run agent:index` 并提交索引差异；查询命令与边界见 [Agent 导航](agent-guide.zh-CN.md)。`npm run check` 校验索引新鲜度以及源码、工具脚本、测试和生成的 JavaScript。`npm test` 会为需要产物的用例创建临时构建，并在结束后清理，不读取或覆盖 Chrome 正在使用的 `dist/`。
 
 ## 测试分类
 
@@ -45,6 +45,10 @@ DOUYIN_DIST_DIR=/tmp/douyin-build npm run check
 | `npm run test:integration` | JSDOM 页面流程、扩展 bundle、后台接口与开发更新 |
 | `npm test` | 全部测试 |
 | `npm run benchmark:runtime` | Node 本地调度和堆内存诊断，结果随机器变化 |
+| `npm run benchmark:workspace` | 当前页状态与后台页更新的 DOM 投影基准，不代表浏览器帧率 |
+| `npm run agent:find -- 关键词` | 查找文件、符号、资源调用和测试名称 |
+| `npm run agent:impact -- 文件路径` | 查找反向依赖和候选回归测试 |
+| `npm run agent:index` / `npm run agent:check` | 生成 / 只读校验开发索引 |
 
 共用工具放在 `tests/helpers/`，用例按被验证的层归类。修复数据丢失、重试或生命周期问题时，应覆盖触发故障的路径和恢复后的结果。性能基准与功能回归分开，不用机器相关毫秒值作为普通单元测试门槛。
 

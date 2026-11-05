@@ -12,11 +12,42 @@ const samples = [
   ['小包（回老家版）','粉丝团灯牌',1,1], ['LILAC','守护天使',1,6000],
   ['LILAC','玫瑰之约',1,6000], ['阿莫西西多','点亮粉丝团',1,9]
 ];
-const waitFor = async predicate => {
-  const deadline = Date.now() + 2000;
+const waitFor = async (predicate,timeout=2000) => {
+  const deadline = Date.now() + timeout;
   while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
   assert.ok(predicate(), '等待状态更新超时');
 };
+
+test('采集本场观众贡献并开始场控后保留统计，但不产生播报或手动播报入口',async()=>{
+  const dom=new JSDOM('<body></body>',{url:`https://live.douyin.com/${room}`,pretendToBeVisual:true});
+  for (const name of ['document','window','location','MutationObserver','HTMLElement']) globalThis[name]=dom.window[name];
+  globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};
+  const ledger=new GiftLedger();let api;
+  ledger.startSession(Date.now()-1000,'platform','current');
+  for (const [id,name,count] of [['1','甲',1200],['2','乙',100]]) ledger.observe({id,groupId:id,giftId:'g',count,unitValue:1,final:true,user:{id,name}},room,`uid:${id}`);
+  const values=new Map([[`live-assistant:income:${room}`,ledger.serialize()],[`live-assistant:config:${room}`,{anchorId:'123',mode:'auto',automation:{autoStart:false},audienceBroadcast:{enabled:true,intervalSec:30}}]]);
+  const get=(key,fallback)=>structuredClone(values.get(key) ?? fallback), set=async(key,value)=>values.set(key,structuredClone(value));
+  const store=new GiftStore({get,set,all:async()=>Object.fromEntries(values)});
+  const engine=boot({page:dom.window,get,set,del:key=>values.delete(key),repository:store,request:()=>{},
+    adapterFactory:()=>({status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>false,sync(){},send(){assert.fail('不应发送贡献榜');}}),
+    identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
+  try {
+    await api.panel.callbacks.income();
+    await waitFor(()=>engine.liveData()?.income);
+    const income=engine.liveData().income;
+    assert.equal(income.totalDiamonds,1300);assert.equal(income.audience.length,2);
+    assert.equal(Object.hasOwn(engine.config,'audienceBroadcast'),false);
+    engine.start();await engine.tick();
+    const realNow=engine.now;engine.now=()=>realNow()+600000;await engine.tick();engine.now=realNow;
+    api.panel.tab('anchor');
+    assert.equal(api.panel.node('[data-anchor-gift-stat="totalDiamonds"]').textContent,'1,300');
+    assert.equal(api.panel.node('[data-anchor-gift-stat="audienceCount"]').textContent,'2');
+    assert.equal(api.panel.node('[data-anchor-broadcast-preview]'),null);
+    assert.equal(api.panel.node('[data-action="broadcast-anchor"]'),null);
+    assert.equal(api.panel.callbacks.broadcastAnchor,undefined);
+    assert.equal(engine.queue.length,0);assert.equal(engine.stats.submitted,0);assert.equal(engine.stats.previews,0);
+  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});
 
 test('扩展后台断连时标明待入账；导出不依赖后台，恢复后样本全部入账且重复导入不重计', async () => {
   const dom = new JSDOM('<body></body>', {url:`https://live.douyin.com/${room}`,pretendToBeVisual:true});

@@ -71,7 +71,7 @@ class Pipeline(unittest.IsolatedAsyncioTestCase):
                     finally:
                         task.cancel();await asyncio.gather(task,return_exceptions=True);await terminate(process)
                     self.assertTrue(any(e['type']=='ready' for e in emitted))
-                    self.assertGreater(len([e for e in received if e['type']=='input_audio_buffer.append']), 10)
-                    self.assertGreater(len([e for e in received if e['type']=='input_image_buffer.append']), 2)
+                    self.assertLessEqual(len([e for e in received if e['type']=='input_audio_buffer.append']), 3)
+                    self.assertEqual(len([e for e in received if e['type']=='input_image_buffer.append']), 2)
                     self.assertEqual(len([e for e in received if e['type']=='response.create']), 1)
                     self.assertIsNotNone(process.returncode)

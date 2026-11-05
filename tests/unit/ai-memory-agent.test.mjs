@@ -12,7 +12,7 @@ test('观众记忆跨刷新去重、同名不混淆、按主播隔离且只导�
  const restored=new AudienceMemory({anchor:'10',state:memory.snapshot(),now:()=>time});
  const context=restored.context({id:'1'});assert.equal(context.recentStatements.length,1);assert.match(context.recentStatements[0].text,/陶瓷/);assert.ok(!JSON.stringify(context).includes('跑步'));assert.ok(!JSON.stringify(context).includes('"id":"1"'));
  assert.equal(new AudienceMemory({anchor:'11',state:memory.snapshot(),now:()=>time}).context({id:'1'}),null);
- time+=31*86400000;assert.equal(restored.context({id:'1'}),null);
+ time+=31*86400000;assert.match(restored.context({id:'1'}).recentStatements[0].text,/陶瓷/);assert.match(restored.context({id:'1'}).coverage,/historical/);
 });
 test('礼物记忆保留累计连击事实，不把重复广播累加，不推测财富或人格；删除后可纠正',()=>{
  const memory=new AudienceMemory({anchor:'10',now:()=>now});
@@ -47,12 +47,12 @@ test('检索缓存不让同ID更新、停用、来源和房间内容串用',asyn
  search.clear();assert.match(search([row],'茶具').chunks[0].content,/温水/);
 });
 
-test('忘记和清空在刷新重放后仍生效，活跃观众的旧内容也按30天过期',()=>{
+test('忘记和清空在刷新重放后仍生效，活跃观众的旧内容保留并标注历史时间',()=>{
  let time=now;let memory=new AudienceMemory({anchor:'10',now:()=>time});
  const chat={id:'message-1',type:'chat',source:'socket',receivedAt:time,user:{id:'1',name:'青山'},text:'旧的兴趣'};
  memory.observe(chat);memory.forget('uid:1');memory=new AudienceMemory({anchor:'10',state:memory.snapshot(),now:()=>time});memory.observe(chat);assert.equal(memory.context(chat.user),null);
  time+=1;memory.observe({...chat,id:'message-2',receivedAt:time});assert.equal(memory.context(chat.user).recentStatements.length,1);
- time+=29*86400000;memory.observe({...chat,type:'enter',receivedAt:time});time+=2*86400000;assert.equal(memory.context(chat.user).recentStatements.length,0);
+ time+=29*86400000;memory.observe({...chat,type:'enter',receivedAt:time});time+=2*86400000;assert.equal(memory.context(chat.user).recentStatements.length,1);assert.equal(memory.context(chat.user).recentStatements[0].at,now+1);
  memory.clear();memory.observe({...chat,type:'enter',receivedAt:time});assert.equal(memory.list().length,0);
 });
 

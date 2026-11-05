@@ -73,13 +73,13 @@ export function pkChartOptions(data, {windowMs = 180000, now = Date.now(), width
 }
 
 export class LiveCharts {
-  constructor(root) {
-    this.root=root;this.instances=new Map();this.windowMs=180000;this.lastRender=0;
+  constructor(root, attribute = 'data-pk-chart') {
+    this.root=root;this.attribute=attribute;this.instances=new Map();this.windowMs=180000;this.lastRender=0;
     const view=root.host.ownerDocument.defaultView;
     this.view=view;
     if (view.ResizeObserver) {
       this.observer=new view.ResizeObserver(()=>this.queueResize());
-      for(const element of root.querySelectorAll('[data-pk-chart]'))this.observer.observe(element);
+      for(const element of root.querySelectorAll(`[${attribute}]`))this.observer.observe(element);
     }
     this.themeObserver=new view.MutationObserver(()=>{this.lastSignature='';if(this.lastData)this.render(this.lastData,true);});
     this.themeObserver.observe(root.host,{attributes:true,attributeFilter:['data-theme']});
@@ -90,7 +90,7 @@ export class LiveCharts {
     this.lastData=data;
     const target=this.root.querySelector('[data-pk-chart="scores"]');
     // No chart work in a hidden tab, collapsed panel or DOM-only tests.
-    if (!target.closest('[data-page]').getBoundingClientRect().width) return;
+    if (!(target.closest('[data-anchor-content]') || target.closest('[data-page]')).getBoundingClientRect().width) return;
     if(!force && Date.now()-this.lastRender<750) {
       if(!this.timer)this.timer=this.view.setTimeout(()=>{this.timer=null;this.render(this.lastData,true);},750-(Date.now()-this.lastRender));
       return;
@@ -130,7 +130,7 @@ export class LiveCharts {
     this.resizeFrame=this.view.requestAnimationFrame(()=>{
       this.resizeFrame=null;
       for(const [name,chart] of this.instances) {
-        const element=this.root.querySelector(`[data-pk-chart="${name}"]`);
+        const element=this.root.querySelector(`[${this.attribute}="${name}"]`);
         if(element.clientWidth && element.clientHeight)chart.resize();
       }
       // Resizing stays direct. Rebuild data/axis density after the gesture rests.
@@ -139,5 +139,56 @@ export class LiveCharts {
     });
   }
   resize() {this.queueResize();if(this.lastData)this.render(this.lastData,true);}
-  destroy() {this.view.clearTimeout(this.timer);this.view.clearTimeout(this.resizeTimer);this.view.cancelAnimationFrame(this.resizeFrame);this.observer?.disconnect();this.themeObserver.disconnect();this.media?.removeEventListener('change',this.onTheme);for(const chart of this.instances.values())chart.dispose();this.instances.clear();}
+  destroy() {this.view.clearTimeout(this.timer);this.view.clearTimeout(this.resizeTimer);this.view.cancelAnimationFrame?.(this.resizeFrame);this.observer?.disconnect();this.themeObserver.disconnect();this.media?.removeEventListener('change',this.onTheme);for(const chart of this.instances.values())chart.dispose();this.instances.clear();}
+}
+
+export function anchorChartOptions(data, colors) {
+  const base={animation:false,textStyle:{color:colors.text,fontFamily:'"PingFang SC","Microsoft YaHei",sans-serif',fontSize:11},
+    aria:{enabled:true},tooltip:{trigger:'axis',renderMode:'richText',confine:true},
+    legend:{top:0,left:0,type:'scroll',right:0,itemWidth:12,itemHeight:8,textStyle:{color:colors.text,fontSize:11}},
+    grid:{left:8,right:12,top:44,bottom:8,containLabel:true}};
+  const axis={axisLabel:{color:colors.text,hideOverlap:true},axisLine:{lineStyle:{color:colors.line}},axisTick:{show:false}};
+  const numeric={type:'value',minInterval:1,splitNumber:4,axisLabel:{color:colors.text,formatter:value=>value>=10000 ? `${+(value/10000).toFixed(1)}万` : value},splitLine:{lineStyle:{color:colors.line,type:'dashed'}}};
+  const gifts={...base,color:[colors.gift,colors.calibration,colors.text],
+    xAxis:{...axis,type:'category',data:data.trend.map(row=>row.label)},yAxis:[{...numeric,name:'钻石'},{...numeric,name:'场次',splitLine:{show:false}}],
+    series:[{name:'已采集礼物',type:'bar',stack:'diamonds',barMaxWidth:24,data:data.trend.map(row=>row.giftDiamonds)},
+      {name:'榜单补差',type:'bar',stack:'diamonds',barMaxWidth:24,data:data.trend.map(row=>row.calibrationDiamonds)},
+      {name:'开播场次',type:'line',yAxisIndex:1,symbolSize:5,lineStyle:{width:2,type:'dashed'},data:data.trend.map(row=>row.sessions)}]};
+  const users=data.audience.slice(0,10).reverse();
+  const audience={...base,color:[colors.gift,colors.calibration],grid:{...base.grid,right:40},
+    xAxis:numeric,yAxis:{...axis,type:'category',data:users.map(row=>`${row.name || row.userId} · ${row.userId.slice(-4)}`),axisLabel:{color:colors.text,width:90,overflow:'truncate'}},
+    series:[{name:'已采集礼物',type:'bar',stack:'diamonds',barMaxWidth:16,data:users.map(row=>row.giftDiamonds)},
+      {name:'榜单补差',type:'bar',stack:'diamonds',barMaxWidth:16,data:users.map(row=>row.calibrationDiamonds)}]};
+  return {gifts,audience};
+}
+
+export class AnchorCharts extends LiveCharts {
+  constructor(root) { super(root,'data-anchor-chart'); }
+  render(data,force=false) {
+    this.lastData=data;
+    const target=this.root.querySelector('[data-anchor-chart="gifts"]');
+    if (!target?.closest('[data-anchor-content]')?.getBoundingClientRect().width) return;
+    if (!force && this.lastRenderedData===data) return;
+    const signature=JSON.stringify(data);
+    if (!force && this.lastSignature===signature) return;
+    this.lastSignature=signature;
+    const style=this.view.getComputedStyle(this.root.host);
+    const options=anchorChartOptions(data,{gift:style.getPropertyValue('--sg-brand').trim(),calibration:style.getPropertyValue('--sg-success').trim(),text:style.getPropertyValue('--sg-muted').trim(),line:style.getPropertyValue('--sg-border').trim()});
+    for (const name of ['gifts','audience']) {
+      const element=this.root.querySelector(`[data-anchor-chart="${name}"]`), empty=this.root.querySelector(`[data-anchor-chart-empty="${name}"]`);
+      const hasData=name==='gifts' ? data.sessions>0 : data.audience.length>0;
+      element.hidden=!hasData; empty.hidden=hasData;
+      if (!hasData) { this.instances.get(name)?.dispose(); this.instances.delete(name); continue; }
+      if (!element.clientWidth || !element.clientHeight) continue;
+      try {
+        let chart=this.instances.get(name);
+        if (!chart) { chart=init(element,null,{renderer:'svg'}); this.instances.set(name,chart); }
+        chart.setOption(options[name],{notMerge:true,lazyUpdate:false}); chart.resize();
+      } catch {
+        this.instances.get(name)?.dispose(); this.instances.delete(name);
+        element.hidden=true; empty.hidden=false; empty.textContent='图表暂不可用，请查看趋势数值与观众统计榜。';
+      }
+    }
+    this.lastRenderedData=data;
+  }
 }

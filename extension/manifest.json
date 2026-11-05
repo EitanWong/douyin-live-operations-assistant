@@ -1,19 +1,121 @@
 {
   "manifest_version": 3,
   "name": "抖音直播运营助手",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "抖音直播互动助手，支持自动感谢、欢迎、AI互动、定时消息和多主播月度礼物账本。",
-  "permissions": ["storage", "unlimitedStorage", "alarms", "power", "scripting", "nativeMessaging"],
-  "host_permissions": ["https://live.douyin.com/*"],
-  "optional_host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
-  "background": { "service_worker": "background.js", "type": "module" },
-  "action": { "default_title": "抖音直播运营助手", "default_popup": "popup.html" },
-  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
-  "content_scripts": [
-    { "matches": ["https://live.douyin.com/*"], "js": ["page.js"], "run_at": "document_start", "world": "MAIN" },
-    { "matches": ["https://live.douyin.com/*"], "js": ["content.js"], "run_at": "document_start", "world": "ISOLATED" },
-    { "matches": ["https://lf-normal-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html*"], "js": ["indicator-frame.js"], "run_at": "document_idle", "world": "ISOLATED", "all_frames": true },
-    { "matches": ["https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html*"], "js": ["fanclub-frame.js"], "run_at": "document_idle", "world": "ISOLATED", "all_frames": true }
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "power",
+    "scripting",
+    "nativeMessaging",
+    "offscreen"
   ],
-  "minimum_chrome_version": "120"
+  "host_permissions": [
+    "https://live.douyin.com/*",
+    "https://www.douyin.com/*",
+    "https://geocoding-api.open-meteo.com/*",
+    "https://api.open-meteo.com/*",
+    "https://wttr.in/*",
+    "https://air-quality-api.open-meteo.com/*",
+    "https://api.frankfurter.dev/*",
+    "https://raw.githubusercontent.com/*",
+    "https://date.nager.at/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "抖音直播运营助手",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png"
+    }
+  },
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://live.douyin.com/*"
+      ],
+      "js": [
+        "page.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://live.douyin.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": [
+        "https://lf-normal-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/live_pc_indicator_container_douyin/pages/index.html*"
+      ],
+      "js": [
+        "indicator-frame.js"
+      ],
+      "run_at": "document_idle",
+      "world": "ISOLATED",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://lf-webcast-gr-sourcecdn.bytegecko.com/obj/byte-gurd-source-gr/webcast/mono/h5/fansclub_h5_douyin/pages/member_list/index.html*"
+      ],
+      "js": [
+        "fanclub-frame.js"
+      ],
+      "run_at": "document_idle",
+      "world": "ISOLATED",
+      "all_frames": true
+    },
+    {
+      "matches": [
+        "https://www.douyin.com/user/*",
+        "https://www.douyin.com/video/*",
+        "https://www.douyin.com/note/*"
+      ],
+      "js": [
+        "account-page.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "minimum_chrome_version": "120",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "speech-vad.js",
+        "vad/*",
+        "vad/ort/*"
+      ],
+      "matches": [
+        "https://live.douyin.com/*"
+      ]
+    }
+  ]
 }

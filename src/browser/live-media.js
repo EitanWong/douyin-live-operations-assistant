@@ -37,19 +37,20 @@ function frame(video,canvas) {
 }
 
 // getDisplayMedia 必须在点击调用栈内调用；不用麦克风替代直播音频。
-export async function createDisplayCapture({config,onSample,onEnded,onError,onSkip=()=>{},isCurrent=()=>true,signal,sourceFactory},env=globalThis) {
+export async function createDisplayCapture({config,onSample,onEnded,onError,onSkip=()=>{},isCurrent=()=>true,signal,sourceFactory,vadFactory},env=globalThis) {
   if(!sourceFactory && !env.navigator?.mediaDevices?.getDisplayMedia)throw new Error('当前浏览器不支持屏幕共享，请使用支持共享标签页音频的Chrome桌面版');
   const source=sourceFactory ? await sourceFactory({config,onEnded,onError,isCurrent,signal}) : null;
   if(sourceFactory && !source?.stream){source?.stop();throw new Error('未取得原始流媒体轨道');}
   const stream=sourceFactory ? source.stream : await env.navigator.mediaDevices.getDisplayMedia({video:true,audio:config.audioEnabled,preferCurrentTab:true,systemAudio:'exclude'});
   const inputSource=source?.source || 'display';
-  let closed=false,video,canvas,recorder,recordTimer,frameTimer,visualTimer,omniFrameTimer,decoding=false,releasePreparation;
+  let closed=false,video,canvas,recorder,recordTimer,frameTimer,visualTimer,omniFrameTimer,decoding=false,releasePreparation,vad;
   const collect=frames=>{try{const data=frame(video,canvas);if(data && !closed){frames.push({data,at:Date.now()});if(frames.length>3)frames.shift();}}catch(error){onError(error);}};
   const cancelled=new Promise(resolve=>{releasePreparation=resolve;});
   const stop=()=>{
     if(closed)return;closed=true;clearTimeout(recordTimer);clearTimeout(omniFrameTimer);clearInterval(frameTimer);clearInterval(visualTimer);
     signal?.removeEventListener('abort',stop);releasePreparation();
     if(recorder?.state==='recording')recorder.stop();
+    void vad?.stop();
     if(source)source.stop();else for(const track of stream.getTracks())track.stop();
     if(video){video.pause();video.srcObject=null;}
   };
@@ -66,7 +67,14 @@ export async function createDisplayCapture({config,onSample,onEnded,onError,onSk
       const sample=()=>{collect(frames);if(frames.length && !closed){const selected=frames.splice(0);void onSample({kind:'video',data:selected.at(-1).data,frames:selected,at:selected[0].at,endedAt:selected.at(-1).at,inputSource});}};
       if(!config.omniEnabled){visualTimer=setInterval(()=>collect(frames),Math.max(1000,config.videoIntervalSec*1000/3));frameTimer=setInterval(sample,config.videoIntervalSec*1000);sample();}
     }
-    if(config.audioEnabled){
+    if(config.audioEnabled && !config.omniEnabled && vadFactory){
+      try{
+        vad=await vadFactory({stream:new env.MediaStream(stream.getAudioTracks()),signal,onError,
+          onSpeech:segment=>{if(!closed)void onSample({kind:'audio',data:base64(encodeWav(segment.samples)),at:segment.at,endedAt:segment.endedAt,inputSource});}});
+        if(closed){await vad.stop();return {stop};}
+      }catch(error){if(closed)throw error;onError(new Error('语音停顿检测不可用，使用定时分段识别'));}
+    }
+    if(config.audioEnabled && !vad){
       if(!env.MediaRecorder || !env.AudioContext || !env.OfflineAudioContext)throw new Error('当前浏览器缺少音频分段识别支持');
       const audioStream=new env.MediaStream(stream.getAudioTracks());
       const record=()=>{
@@ -126,5 +134,6 @@ export class LiveMediaAnalyzer {
     }catch(error){this.error(error,sample.kind,session);}
     finally{if(this.busy.get(sample.kind)===token)this.busy.delete(sample.kind);}
   }
+  detach(){const session=this.actor.getSnapshot().context.session;if(session)session.detach=true;this.stop();}
   stop(){if(this.state==='idle'){this.notify();return;}this.actor.send({type:'STOP'});}
 }

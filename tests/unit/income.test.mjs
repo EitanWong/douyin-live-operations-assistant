@@ -419,7 +419,7 @@ test('v4旧账本恢复逐用户钻石，缺少历史连击时保守抵扣且不
     let report=await restarted.report('1','2026-10');
     assert.equal(report.summary.totalDiamonds,1000);assert.equal(report.summary.calibrationDiamonds,900);
     assert.equal(report.summary.estimatedIncome,50);assert.equal(report.summary.giftCount,1);
-    assert.equal(values['live-assistant:income:1'].version,5);
+    assert.equal(values['live-assistant:income:1'].version,6);
     report=await new GiftStore(options).report('1','2026-10');
     assert.equal(report.summary.totalDiamonds,1000);assert.equal(report.summary.estimatedIncome,50);
   }

@@ -1,6 +1,17 @@
 import {compactMediaContext,optionalMediaRows} from '../ai/media-context.js';
 import {retrieveMemories} from './knowledge.js';
 import {DOUYIN_RULES} from '../data/douyin-rules.js';
+import {selectLiveSources} from '../ai/context-policy.js';
+
+export function applyPromptSources(prompt,config){
+ if(!prompt.liveContext)return prompt;
+ const liveContext=selectLiveSources(structuredClone(prompt.liveContext),config.contextSources);
+ // A stale ledger is unavailable current evidence. Keep historical questions
+ // on the separately dated giftHistory, never a tempting stale current total.
+ if(liveContext.income?.stale)liveContext.income={at:liveContext.income.at,stale:true,totalDiamonds:null,estimatedIncome:null,
+  unavailableReason:'本场账本观测已过期，当前钻石与金额未知；不能视为0。'};
+ return {...prompt,liveContext};
+}
 
 export function currentAIPrompt(prompt) {
   const current=prompt.getAIContext?.();
@@ -17,9 +28,14 @@ export function assembleAIContext(prompt,config) {
   const {chunks,contextQuery:retrievalContext,...retrievalMeta}=retrieval;
   retrievalMeta.contextQueryChars=retrievalContext?.length || 0;
   const memories=chunks.map(row=>({...row,id:row.entryId,chunkId:row.id}));
+  const perceptionHistory=prompt.getPerceptionMemory?.(query) || null;
+  const sessionMemory=prompt.getSessionMemory?.(query) || null;
+  const conversationHistory=prompt.getConversationMemory?.(query) || null;
+  if(sessionMemory)sessionMemory.records=sessionMemory.records.filter(row=>!media?.observations?.some(current=>current.id===row.id && current.at===row.at));
+  if(perceptionHistory)perceptionHistory.records=perceptionHistory.records.filter(row=>![...(media?.observations || []),...(sessionMemory?.records || [])].some(current=>current.id===row.id && current.at===row.at));
   return {
-    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta},
-    media_context:compactMediaContext(media,now),
+    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta,sessionMemory,perceptionHistory,conversationHistory,accounts:config.contextSources?.accounts===false ? [] : prompt.getAccountContext?.(query) || prompt.accountContext || []},
+    media_context:compactMediaContext(media,now,{maxAgeMs:(config.media?.contextAgeSec ?? 60)*1000}),
     context_meta:{schemaVersion:1,assembledAt:now,liveObservedAt:prompt.liveContext?.observedAt ?? null,
       sourcePolicy:'media_context.scene separates recent speech, visual samples and multimodal observations; inspect ages and sampling coverage before claiming current activity. Viewer memories are limited observed events or operator notes, not verified personality. Current structured live observations for metrics; media recognition for sampled scene clues; local passages for background; web results for external facts. Conflicts and missing evidence stay unknown.',
       knowledgeMethod:retrieval.method,mediaCoverage:media?.coverage || null}
@@ -34,7 +50,7 @@ export function applyContextBudget(input,limit){
   const candidates=(value,path=[],out=[])=>{
     if(!value || typeof value!=='object')return out;
     for(const [key,child] of Object.entries(value)){
-      const next=[...path,key];if(next[0]==='target' || next[0]==='data' || next.join('.')==='context_meta.budget')continue;
+      const next=[...path,key];if(['target','data','web_search'].includes(next[0]) || next.join('.')==='context_meta.budget')continue;
       if(Array.isArray(child) && child.length){
         const removable=next.join('.')==='media_context.observations' ? optionalMediaRows(data.media_context) : child;
         if(removable.length)out.push({parent:value,key,path:next.join('.'),chars:JSON.stringify(removable).length,removable});

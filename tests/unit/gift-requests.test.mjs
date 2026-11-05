@@ -18,6 +18,28 @@ function fixture(locks=webLocks()) {
   const sender={page,context:()=>context,nativeGiftApi:()=>api};
   return {dom,page,api,gift,calls,sender,requests:new GiftRequests(sender),setContext:value=>{context=value;}};
 }
+test('钱包自动查询只读余额，不读取礼物目录或送礼，保留十分之一钻与账号校验',async()=>{
+  const f=fixture();try {
+    f.api.Xq=()=>assert.fail('钱包查询不加载目录');
+    assert.equal((await f.requests.balance()).balanceUnits,500);
+    f.api.sb=async()=>({data:{status_code:0,data:{diamond_x10:0,user_id:'789'}}});
+    assert.equal((await f.requests.balance()).balanceUnits,0);
+    f.api.sb=async()=>({data:{status_code:0,data:{diamond_x10:90,user_id:'999'}}});
+    assert.equal((await f.requests.balance()).available,false);assert.equal(f.calls.length,0);
+  }finally{f.dom.window.close();}
+});
+test('礼物模块未加载时钱包只用同源网页客户端，取消或账号变化拒绝迟到余额',async()=>{
+  const f=fixture(),reads=[];try {
+    f.sender.nativeGiftApi=()=>null;
+    f.sender.client=()=>({request:async options=>{reads.push(options);return {data:{status_code:0,data:{diamond:8,user_id:'789'}}};}});
+    assert.equal((await f.requests.balance()).balanceUnits,80);
+    assert.equal(reads[0].url,'/webcast/wallet/info/');assert.equal(reads[0].method,'get');
+    const controller=new AbortController();controller.abort();
+    assert.equal((await f.requests.balance({signal:controller.signal})).available,false);assert.equal(reads.length,1);
+    f.sender.client=()=>({request:async()=>{f.setContext({roomId:'other',userId:'789',path:'123'});return {data:{status_code:0,data:{diamond:8}}};}});
+    assert.equal((await f.requests.balance()).available,false);assert.equal(f.calls.length,0);
+  }finally{f.dom.window.close();}
+});
 test('未打开礼物面板仍能通过网页已加载客户端读取目录，沿用签名和会话且仅请求目录',async()=>{
   const f=fixture(),reads=[];
   try {

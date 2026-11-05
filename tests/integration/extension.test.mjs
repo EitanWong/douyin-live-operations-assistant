@@ -1,5 +1,10 @@
+import {createDataCapture,runReadOnlyCollector} from '../../extension/data-capture.js';
+import {createEdgeClient} from '../../src/browser/edge-client.js';
+import {createNativeASRClient} from '../../src/browser/native-asr-client.js';
 import {RoomContext,roomFromURL} from '../../src/browser/room-context.js';
 import { ProtocolCache } from '../../extension/protocol-cache.js';
+import { ObservationBuffer } from '../../extension/observation-buffer.js';
+import { StorageMirror } from '../../extension/storage-mirror.js';
 import { fanclubFrameContext, cleanFanclubSnapshot } from '../../src/data/fanclub.js';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,16 +42,18 @@ function connectNative(page) {
 function nativeEvent(page,event) {nativeQueues.get(page).events.push(event);}
 async function rawEntry(entry) {
   let source=(await readFile(new URL(`../../extension/${entry}.js`,import.meta.url),'utf8')).replace(/^import .*;\n/gm,'');
-  if(entry==='content')source=`const failureCode = ${failureCode.toString()};\n`+source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
+  if(entry==='content')source=`const failureCode = ${failureCode.toString()};\nconst StorageMirror = ${StorageMirror.toString()};\n`+source.replace('async function startContent() {\n','').replace(/\n}\nstartContent\(\);\s*$/,'');
   return source;
 }
-async function evalPage(page) {page.RoomContext=RoomContext;page.eval(await rawEntry('page'));}
+async function evalPage(page) {page.RoomContext=RoomContext;page.ObservationBuffer=ObservationBuffer;page.eval(await rawEntry('page'));}
 async function evalContent(page) {page.structuredClone=structuredClone;connectNative(page);page.eval(await readFile(file('content.js'),'utf8'));}
 function pageTransport(page) {return async request=>({ok:true,value:await page.__douyinAssistantPageV2.call(request.command)});}
 test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，重复批次只发一次，停止票据立即失效',async()=>{
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,requests=[];
   try {
     Object.assign(page,{TextDecoder,TextEncoder});
+    // Regression: a native successful response need not have a LikeMessage,
+    // and the room may not expose an IM subscription service at all.
     page.__STORE__={roomStore:{roomInfo:{roomId:'7700231539170609947',room:{web_rid:'1',status:2,room_auth:{Digg:true}}}},userStore:{userInfo:{id_str:'987654321'}}};
     const client={defaults:{baseURL:page.location.origin,withCredentials:true},request:async request=>{requests.push(request);return {data:{status_code:0,data:{}}};}};
     const require=()=>({ZP:client});require.m={request:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
@@ -67,25 +74,46 @@ test('构建后的 MAIN 与隔离点赞桥无本人 IM 回执也完成三批，�
     assert.equal(requests.length,3);
   }finally{page.close();}
 });
-async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{"choices":[]}') {
+async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{"choices":[]}',overrides={}) {
   let usedBytes = 0, listener,changed; const sent=[], requests=[]; let allowed=true;
   const WorkerDurableStorage = class extends DurableStorage {
     constructor(options = {}) { super({...options, indexedDB: options.indexedDB || indexedDB, IDBKeyRange}); }
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
   const code=(await readFile(file('background.js'),'utf8'));
-  vm.runInNewContext(code,{atob,btoa,queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};}});
+  vm.runInNewContext(code,{atob,btoa,queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};},...overrides});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
-  return {values,indexedDB,durable,sent,requests,changed,usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
+  return {values,indexedDB,durable,sent,requests,changed,route:(m,s,reply)=>listener(m,s,reply),usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
 }
+test('通用后台路由不抢答离屏准备的存储消息',async()=>{
+ const w=await worker(),replies=[],sender={url:'chrome-extension://test/'};
+ for(const target of ['edge-offscreen','edge-background'])assert.equal(w.route({target,action:'preparation-read'},sender,value=>replies.push(value)),undefined);
+ await new Promise(setImmediate);assert.deepEqual(replies,[]);
+});
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
-  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*']);
+  assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*','https://geocoding-api.open-meteo.com/*','https://api.open-meteo.com/*','https://wttr.in/*','https://air-quality-api.open-meteo.com/*','https://api.frankfurter.dev/*','https://raw.githubusercontent.com/*','https://date.nager.at/*']);
   for(const name of [m.background.service_worker,m.action.default_popup,...Object.values(m.icons),...m.content_scripts.flatMap(s=>s.js)]) await access(file(name));
   assert.equal(m.content_scripts[0].world,'MAIN'); assert.equal(m.content_scripts[1].world,'ISOLATED');
+  assert.match(m.content_security_policy.extension_pages,/wasm-unsafe-eval/u);
+  for(const name of ['edge-worker.js','edge-offscreen.js','speech-vad.js','ort/ort-wasm-simd-threaded.asyncify.mjs','ort/ort-wasm-simd-threaded.asyncify.wasm','ort/ort-wasm-simd-threaded.jsep.mjs','ort/ort-wasm-simd-threaded.jsep.wasm','vad/silero_vad_v5.onnx','vad/ort/ort-wasm-simd-threaded.mjs','vad/ort/ort-wasm-simd-threaded.wasm'])await access(file(name));
   const main=await readFile(file('page.js'),'utf8'); assert.doesNotMatch(main,/chrome\.storage|GM_getValue|api-key:|GM_xmlhttpRequest/);
   assert.doesNotMatch(main,/window\.postMessage/);
+});
+
+test('扩展管理页与工具栏提供匹配尺寸的本地图标', async()=>{
+  const manifest=JSON.parse(await readFile(file('manifest.json'),'utf8'));
+  assert.ok(manifest.action.default_icon,'工具栏应显式指定图标，避免浏览器缩放不合适的尺寸');
+  for(const size of [16,32,48,128]) {
+    const path=manifest.icons[size];
+    assert.ok(path,`缺少 ${size}px 图标`);
+    const png=await readFile(file(path));
+    assert.equal(png.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+    assert.equal(png.readUInt32BE(16),size);
+    assert.equal(png.readUInt32BE(20),size);
+  }
+  for(const size of [16,32])assert.equal(manifest.action.default_icon[size],manifest.icons[size]);
 });
 
 test('粉丝团跨域快照只转交同标签主页，拒绝错误来源、UID、过量成员并持久化回放',async()=>{
@@ -236,10 +264,73 @@ test('MAIN 观察器在隔离脚本读取前完整缓存事件，分页读取只
     await evalPage(dom.window);
     for(let n=0;n<160;n++)captured.onEvent({type:n % 2 ? 'chat' : 'gift',id:String(n),text:`消息${n}`});
     assert.equal(received.length,0);
-    const drain=()=>received.push(...dom.window.__douyinAssistantPageV2.call({type:'drain'}).events);
+    let ack;
+    const drain=()=>{const batch=dom.window.__douyinAssistantPageV2.call({type:'drain',ack});received.push(...batch.events);ack=batch.batchId;};
     drain();drain();drain();
     assert.equal(received.length,160); assert.equal(received[159].id,'159'); assert.equal(received.filter(e=>e.type==='chat').length,80);
   } finally {dom.window.close();}
+});
+test('MAIN 未确认批次可重读且仍占容量，重复确认不删除下一批，暂停仍传递优先事件',async()=>{
+  let captured;
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window;
+  Object.assign(page,{DouyinAdapter:class {constructor(options){captured=options;}hook(){}},DEFAULTS:{},copy:value=>value});
+  try {
+    await evalPage(page);
+    for(let i=0;i<4096;i++)captured.onEvent({type:'chat',id:String(i)});
+    const call=command=>page.__douyinAssistantPageV2.call({type:'drain',...command});
+    const first=call();
+    assert.deepEqual(Array.from(call().events,e=>e.id),Array.from(first.events,e=>e.id),'响应丢失后重读同一批');
+    captured.onEvent({type:'chat',id:'overflow'});
+    assert.equal(call().status.bridgeGaps,1,'在途未确认事件仍占有界缓冲容量');
+    assert.equal(call().status.bridgePending,4096);
+    captured.onCapture({rawBase64:'AQ=='});
+    const second=call({ack:first.batchId});
+    assert.equal(second.events[0].id,'128');assert.equal(second.captures.length,1);
+    assert.equal(call({ack:first.batchId}).events[0].id,'128','重复旧确认不得删除新批次');
+    captured.onPK({type:'pk-score',id:'urgent'});
+    const paused=call({ack:second.batchId,paused:true});
+    assert.equal(paused.events.length,0);assert.equal(paused.priority[0].id,'urgent');
+    const received=[...first.events,...second.events];let batch=call({ack:paused.batchId});
+    while(batch.events.length){received.push(...batch.events);batch=call({ack:batch.batchId});}
+    assert.deepEqual(received.map(e=>e.id),Array.from({length:4096},(_,i)=>String(i)));
+    assert.equal(batch.status.bridgePending,0);assert.equal(batch.status.captureBridgePending,0);
+  }finally{page.close();}
+});
+
+for(const mode of ['lost-response','pagehide','archive-pagehide'])test(`内容桥在 ${mode} 后恢复 MAIN 已读取批次且不重复交付`,async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window;
+  let captured,adapter,release,reads=0,archiveBlocked=false;const timers=[],handled=[],saved=[];
+  Object.assign(page,{EventInbox,roomFromURL,RoomContext,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},DEFAULTS:{},copy:value=>value,
+    DouyinAdapter:class {constructor(options){Object.assign(this,options);captured=options;}hook(){}emitStatus(){}},
+    setTimeout:callback=>{timers.push(callback);return timers.length;},clearTimeout(){},
+    chrome:{runtime:{onMessage:{addListener(){}},sendMessage:async request=>{
+      if(request.type==='init')return {ok:true,value:{}};
+      if(request.type==='data-records' && mode==='archive-pagehide' && !archiveBlocked){archiveBlocked=true;await new Promise(resolve=>{release=resolve;});return {ok:true,value:true};}
+      if(request.type==='protocol-append'){saved.push(request.record);return {ok:true,value:true};}
+      if(request.type==='page-command' && request.command.type==='drain'){
+        const value=page.__douyinAssistantPageV2.call(request.command);reads++;
+        if(reads===1){
+          if(mode==='lost-response')throw Error('response lost after MAIN executed');
+          if(mode==='pagehide')await new Promise(resolve=>{release=resolve;});
+        }
+        return {ok:true,value};
+      }
+      return {ok:true,value:[]};
+    }}},boot:options=>{adapter=options.adapterFactory({onEvent:event=>handled.push(event.id)});adapter.hook();}
+  });
+  try {
+    await evalPage(page);captured.onEvent({type:'chat',id:'retained'});captured.onCapture({rawBase64:'AQ=='});
+    await page.eval(`(async()=>{${await rawEntry('content')}})()`);await new Promise(setImmediate);
+    if(mode==='pagehide' || mode==='archive-pagehide'){
+      page.dispatchEvent(new page.Event('pagehide'));release();await new Promise(setImmediate);
+      assert.deepEqual(handled,[]);
+      page.dispatchEvent(new page.PageTransitionEvent('pageshow',{persisted:true}));
+    }else await timers.shift()();
+    await new Promise(setImmediate);await adapter.inbox.whenIdle();
+    await timers.shift()();await new Promise(setImmediate);
+    assert.deepEqual(handled,['retained']);assert.equal(saved.length,1);
+    assert.equal(page.__douyinAssistantPageV2.call({type:'drain'}).status.bridgePending,0);
+  }finally{release?.();adapter?.closeEvents();page.close();}
 });
 test('隔离脚本把 MAIN 原始协议帧送入独立持久化通道', async () => {
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
@@ -295,6 +386,33 @@ test('后台拒绝非直播页面与子frame，保存读取可复用', async()=>
   assert.equal((await w.send({type:'set',key:'live-assistant:runtime:1',value:{version:1}})).ok,true);
   assert.equal((await w.send({type:'init'})).value['live-assistant:config:1'].mode,'auto');
   assert.equal((await w.send({type:'init'})).value['live-assistant:runtime:1'].version,1);
+});
+
+for(const scenario of ['newer-success','both-fail','external-change'])test(`内容脚本保存失败不回滚较新的配置：${scenario}`,async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window,key='live-assistant:config:1';
+  let api,listener;const requests=[];
+  Object.assign(page,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},DouyinAdapter:class {},
+    chrome:{runtime:{onMessage:{addListener:fn=>{listener=fn;}},sendMessage:request=>{
+      if(request.type==='data-context')return Promise.resolve({ok:true,value:null});
+      if(request.type==='init')return Promise.resolve({ok:true,value:{[key]:'initial'}});
+      return new Promise(resolve=>requests.push({request,resolve}));
+    }}},boot:options=>{api=options;}
+  });
+  try{
+    await page.eval(`(async()=>{${await rawEntry('content')}})()`);
+    const first=api.set(key,'first');const rejected=assert.rejects(first,/storage failed/);
+    const second=scenario==='external-change'?null:api.set(key,'second');
+    const secondRejected=scenario==='both-fail'?assert.rejects(second,/storage failed/):null;
+    await new Promise(setImmediate);
+    if(scenario==='external-change')listener({type:'storage',changes:{[key]:{newValue:'external'}}});
+    requests.shift().resolve({ok:false,error:'storage failed'});await rejected;await new Promise(setImmediate);
+    if(second){
+      assert.equal(api.get(key),'second','旧请求失败不得覆盖较新的乐观保存');
+      requests.shift().resolve(scenario==='both-fail'?{ok:false,error:'storage failed'}:{ok:true,value:true});
+      await (secondRejected||second);
+    }
+    assert.equal(api.get(key),scenario==='newer-success'?'second':scenario==='both-fail'?'initial':'external');
+  }finally{page.close();}
 });
 
 test('外观偏好只允许已知模式并可由扩展页或直播页经后台访问', async()=>{
@@ -378,6 +496,10 @@ test('事件日志先持久化、后台重启后可回放，并严格隔离主�
   assert.equal((await restarted.send({type:'event-list'})).value[0].event.type,'room-sync');
   assert.equal((await restarted.send({type:'event-ack',key:observed.value.key})).ok,true);
   assert.equal((await restarted.send({type:'event-list'})).value.length,0);
+  const linked=await restarted.send({type:'event-append',id:'event-uuid-00000005',event:{type:'link-state',id:'link-1',linkedUsers:[{id:'12345',name:'连线主播'}]}});
+  assert.equal(linked.ok,true,'连线事件可通过后台白名单持久化');
+  assert.equal((await restarted.send({type:'event-list'})).value[0].event.type,'link-state');
+  assert.equal((await restarted.send({type:'event-ack',key:linked.value.key})).ok,true);
   assert.equal((await restarted.send({type:'event-ack-many',keys:['live-assistant:event:2:foreign-000000000000']})).ok,false);
   assert.equal((await restarted.send({type:'event-ack-many',keys:Array(101).fill(batch.value.key)})).ok,false);
 });
@@ -385,6 +507,23 @@ test('AI网络需指定域名权限且不携带Cookies、不跟随跳转', async
   const w=await worker(); const m={type:'ai',url:'https://ai.example/v1/chat/completions',data:JSON.stringify({model:'model',messages:[]}),headers:{Authorization:'Bearer dummy',Cookie:'not-forwarded'}};
   assert.equal((await w.send(m)).ok,true); assert.equal(w.requests[0].opts.credentials,'omit'); assert.equal(w.requests[0].opts.redirect,'error'); assert.equal(w.requests[0].opts.headers.Cookie,undefined);
   w.deny(); assert.equal((await w.send(m)).ok,false); assert.equal(w.requests.length,1);
+});
+test('天气GET经过后台固定接口和域名验证，不携带AI密钥或Cookie并支持实际取消',async()=>{
+ const w=await worker(),url='https://geocoding-api.open-meteo.com/v1/search?name=横店&count=20&language=zh&format=json';
+ const result=await w.send({type:'weather',url,headers:{Authorization:'Bearer must-not-forward'}});
+ assert.equal(result.ok,true);assert.equal(w.requests[0].opts.method,'GET');assert.equal(w.requests[0].opts.body,undefined);assert.equal(w.requests[0].opts.credentials,'omit');assert.equal(w.requests[0].opts.redirect,'error');assert.equal(w.requests[0].opts.headers.Authorization,undefined);
+ assert.equal((await w.send({type:'weather',url:url.replace('open-meteo.com','evil.test')})).ok,false);assert.equal(w.requests.length,1);
+ assert.equal((await w.send({type:'weather',url},{tab:{url:'https://example.org/'}})).ok,false);w.deny();assert.equal((await w.send({type:'weather',url})).ok,false);
+ let signal;const delayed=await worker({},new IDBFactory(),'{}',{fetch:async(_url,options)=>{signal=options.signal;return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(Object.assign(Error('cancel'),{name:'AbortError'}))));}});
+ const pending=delayed.send({type:'weather',url,requestId:'abcdefab-1234-1234-1234-abcdefabcdef'},{frameId:0,tab:{id:1,url:'https://live.douyin.com/1'}});
+ for(let i=0;i<100 && !signal;i++)await new Promise(r=>setTimeout(r,5));assert.ok(signal);
+ await delayed.send({type:'ai-request-cancel',id:'abcdefab-1234-1234-1234-abcdefabcdef'},{frameId:0,tab:{id:1,url:'https://live.douyin.com/1'}});assert.equal(signal.aborted,true);assert.equal((await pending).ok,false);
+});
+test('公共工具走同一无密钥GET通道，仅接受已登记的路径和参数',async()=>{
+ const w=await worker(),urls=['https://api.frankfurter.dev/v2/rate/CNY/USD','https://raw.githubusercontent.com/NateScarlet/holiday-cn/master/2026.json','https://date.nager.at/api/v3/PublicHolidays/2026/US','https://air-quality-api.open-meteo.com/v1/air-quality?latitude=29.15698&longitude=120.31478&timezone=auto&current=us_aqi,pm2_5,pm10'];
+ for(const url of urls){assert.equal((await w.send({type:'public-data',url,headers:{Authorization:'Bearer do-not-forward'}})).ok,true);const {opts}=w.requests.at(-1);assert.equal(opts.method,'GET');assert.equal(opts.headers.Authorization,undefined);assert.equal(opts.body,undefined);}
+ for(const url of [urls[0]+'?key=secret',urls[1].replace('NateScarlet','other'),'https://api.frankfurter.dev:444/v2/rate/CNY/USD'])assert.equal((await w.send({type:'public-data',url})).ok,false);
+ assert.equal(w.requests.length,4);
 });
 test('音视频后台接收有界媒体包，拒绝网页伪造、远程图片与权限缺失，并持久保存独立密钥',async()=>{
   const w=await worker(),body={model:'vision-test',stream:false,temperature:0,max_tokens:500,messages:[{role:'system',content:'描述画面'},{role:'user',content:[{type:'text',text:'这一帧'},{type:'image_url',image_url:{url:`data:image/jpeg;base64,${'A'.repeat(120000)}`}}]}]};
@@ -398,6 +537,16 @@ test('音视频后台接收有界媒体包，拒绝网页伪造、远程图片�
   const key='live-assistant:media-key:https://vision.test';
   assert.equal((await w.send({type:'set',key,value:'media-key'})).ok,true);
   const restarted=await worker(w.values,w.indexedDB);assert.equal((await restarted.send({type:'init'})).value[key],'media-key');
+  w.deny();assert.equal((await w.send(message)).ok,false);assert.equal(w.requests.length,1);
+});
+
+test('扩展后台接受 Omni 音画组合，仅允许本地媒体并检查权限',async()=>{
+  const w=await worker(),body={model:'qwen3.5-omni-flash',stream:true,temperature:0,max_tokens:500,modalities:['text'],messages:[{role:'system',content:'描述音画'},{role:'user',content:[{type:'text',text:'描述直播'},{type:'image_url',image_url:{url:'data:image/jpeg;base64,/9j/2Q=='}},{type:'input_audio',input_audio:{format:'wav',data:'data:audio/wav;base64,UklGRiQAAABXQVZF'}}]}]};
+  const message={type:'media',url:'https://vision.test/v1/chat/completions',data:JSON.stringify(body),headers:{Authorization:'Bearer media-test',Cookie:'secret'}};
+  assert.equal((await w.send(message)).ok,true);assert.equal(w.requests.length,1);
+  assert.equal(w.requests[0].opts.headers.Cookie,undefined);assert.equal(w.requests[0].opts.credentials,'omit');
+  const remote=structuredClone(body);remote.messages[1].content[2].input_audio.data='https://example.com/audio.wav';
+  assert.equal((await w.send({...message,data:JSON.stringify(remote)})).ok,false);
   w.deny();assert.equal((await w.send(message)).ok,false);assert.equal(w.requests.length,1);
 });
 
@@ -491,13 +640,25 @@ test('积压运行快照超过1MiB仍保存，普通配置保留大小校验', a
   assert.equal((await w.durable().get('live-assistant:runtime:1')).queue[0].text.length, 1100000);
   assert.equal((await w.send({type:'set',key:'live-assistant:config:1',value:payload})).ok, false);
 });
+test('直播记忆独立持久化并按房间加载，缓存清理及后台重启不删除记忆',async()=>{
+ const w=await worker(),key='live-assistant:live-memory:1:10',otherKey='live-assistant:live-memory:2:20';
+ const payload={version:1,anchor:'10',audience:{version:2,anchor:'10',viewers:[]},perception:{observations:Array.from({length:120},(_,i)=>({id:String(i),kind:'audio',text:'原文'.repeat(5000),at:10+i,endedAt:11+i,inputSource:'native'}))}};
+ assert.equal((await w.send({type:'set',key,value:payload})).ok,true);
+ const other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
+ assert.equal((await w.send({type:'set',key,value:payload},other)).ok,false);
+ assert.equal((await w.send({type:'set',key:otherKey,value:{...payload,anchor:'20',audience:{version:2,anchor:'20',viewers:[]}}},other)).ok,true);
+ assert.equal((await w.send({type:'init'})).value[otherKey],undefined);
+ await w.send({type:'storage-clear-cache'});
+ const restored=await worker(w.values,w.indexedDB);
+ assert.equal((await restored.send({type:'init'})).value[key].perception.observations.length,120);
+});
 test('内容脚本持续突发按序交接并回收已消费槽位，回放不会覆盖在途任务', async () => {
   const dom = new JSDOM('<body></body>', {url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter, release, replayRelease, blocked = false; const handled = [];
   const gate = new Promise(resolve => { release = resolve; });
   const replayGate = new Promise(resolve => { replayRelease = resolve; });
   Object.assign(dom.window, {
-    EventInbox,roomFromURL,
+    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,
     RequestBridgeClient,
     DouyinAdapter:class { constructor(options) { Object.assign(this, options); } emitStatus() {} },
     IdentityReader:class {},
@@ -539,7 +700,7 @@ test('存储水位阻塞的新事件不会挡住持久日志恢复与释放容�
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter,recovered=false;const handled=[];
   Object.assign(dom.window,{
-    EventInbox,roomFromURL,
+    EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,
     RequestBridgeClient,
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     IdentityReader:class {},
@@ -592,12 +753,17 @@ test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中�
     const root = dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot;
     assert.ok(root);
     const emit = event => nativeEvent(dom.window,event);
+    emit({type:'link-state',id:'link-1',roomId:'server-room',linkedUsers:[{id:anchorId},{id:'12345'}]});
+    const linkDeadline=Date.now()+2000;
+    while(Date.now()<linkDeadline && root.querySelector('[data-live-mode]').textContent!=='连线中')await new Promise(resolve=>setTimeout(resolve,25));
+    assert.equal(root.querySelector('[data-live-mode]').textContent,'连线中');
     emit({type:'pk-score',id:'pk-score-1',battleId:'two-battle',roomId:'server-room',scores:[{anchorId:'12345',score:0},{anchorId,score:65249}]});
     const deadline = Date.now()+2000;
     while (Date.now()<deadline && root.querySelector('[data-pk-self-score]').textContent !== '65,249') await new Promise(resolve=>setTimeout(resolve,25));
     assert.equal(root.querySelector('[data-pk-self-score]').textContent, '65,249');
     assert.equal(root.querySelector('[data-pk-opponent-score]').textContent, '0');
     assert.equal(root.querySelector('[data-pk-state]').textContent, 'PK 进行中');
+    assert.equal(root.querySelector('[data-live-mode]').textContent,'PK 中');
     assert.equal(root.querySelector('[data-pk-self-speed]').textContent, '0');
     assert.notEqual(root.querySelector('[data-pk-self-win]').textContent, '未知');
     assert.equal(values['live-assistant:runtime:1']?.wasRunning || false, false);
@@ -785,7 +951,7 @@ test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保�
   dom.window.postMessage=(data,origin)=>dom.window.setTimeout(()=>dom.window.dispatchEvent(new dom.window.MessageEvent('message',{data,origin,source:dom.window})),0);
   const listeners=[];let moves=0;const leases=[];
   Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{sendMessage:async request=>{
-    if(request.type==='init')return {ok:true,value:{}};
+    if(request.type==='init')return {ok:true,value:{'live-assistant:config:1':{automation:{monitorRoom:false}}}};
     if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
     if(request.type==='collection-state'){leases.push(request.active);return {ok:true,value:{awake:request.active}};}
     return {ok:true,value:true};
@@ -804,6 +970,39 @@ test('构建后的 MAIN 与隔离脚本处理后台唤醒，暂停场控仍保�
     assert.equal((await wake()).active,false);
     await new Promise(resolve=>setTimeout(resolve,30));assert.equal(leases.at(-1),false);
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
+});
+
+test('构建后的未开播页持有后台监控租约，后台唤醒查询房间，用户暂停后释放', {timeout:15000},async()=>{
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+  const page=dom.window,listeners=[],leases=[];let reads=0;
+  Object.assign(page,{TextDecoder,TextEncoder,structuredClone,
+    fetch:async path=>({ok:true,text:async()=>{
+      if(!path.includes('/room/web/enter'))return JSON.stringify({data:{}});
+      reads++;return JSON.stringify({data:{data:[{web_rid:'1',id_str:'100',status:4,owner:{id_str:'9'}}]}});
+    }}),chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async request=>{
+      if(request.type==='init')return {ok:true,value:{'live-assistant:config:1':{automation:{autoStart:true},incomeEnabled:false}}};
+      if(request.type==='event-list'||request.type==='protocol-list')return {ok:true,value:[]};
+      if(request.type==='collection-state'){leases.push(request.active);return {ok:true,value:{awake:request.active}};}
+      return {ok:true,value:true};
+    }}}});
+  page.__STORE__={roomStore:{roomInfo:{roomId:'100',room:{web_rid:'1',status:4}}}};
+  const wake=()=>new Promise(resolve=>listeners[0]({type:'collection-wake'},{},resolve));
+  try {
+    page.eval(await readFile(file('page.js'),'utf8'));await evalContent(page);
+    const deadline=Date.now()+6000;
+    while(!leases.includes(true) && Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.ok(leases.includes(true),'未开播等待仍有系统待机保护');
+    const before=reads;assert.equal((await wake()).active,true);
+    await new Promise(resolve=>setTimeout(resolve,30));assert.ok(reads>before,'后台唤醒触发房间接口查询');
+    const panel=page.document.querySelector('#douyin-live-assistant').shadowRoot;
+    const rendered=Date.now()+3000;
+    while(!/等待开播/.test(panel.querySelector('[data-state]').textContent) && Date.now()<rendered)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.match(panel.querySelector('[data-state]').textContent,/等待开播/);
+    const stop=panel.querySelector('[data-action=stop]');assert.equal(stop.hidden,false);assert.equal(stop.disabled,false);stop.click();
+    const stopped=Date.now()+2000;
+    while(leases.at(-1)!==false && Date.now()<stopped)await new Promise(resolve=>setTimeout(resolve,20));
+    assert.equal(leases.at(-1),false);assert.equal((await wake()).active,false);
+  } finally {page.dispatchEvent(new page.Event('pagehide'));page.close();}
 });
 
 test('后台场次榜单校准与原始礼物共用持久事务，来源隔离和重启后不重复补差',async()=>{
@@ -877,6 +1076,22 @@ test('MAIN 忽略页面伪造的发送命令和事件，提前取消也不会迟
     assert.equal((await bridge.call({type:'send-api',id:'canceled',operation:'prepare-like'})).available,false);assert.equal(prepares,0);
   } finally {page.close();}
 });
+test('构建后的隔离桥将真实@范围传到MAIN并序列化原生rtf_content',async()=>{
+  const dom=new JSDOM('',{url:'https://live.douyin.com/123',runScripts:'outside-only'}),page=dom.window,requests=[];
+  try {
+    Object.assign(page,{TextDecoder,TextEncoder});
+    page.__STORE__={roomStore:{roomInfo:{roomId:'7698776476925443611',room:{web_rid:'123'}}},userStore:{userInfo:{id_str:'789'}},singletonStore:{message:{queuePush(){}}}};
+    const client={defaults:{baseURL:'https://live.douyin.com',withCredentials:true},request:async request=>{requests.push(request);return {data:{status_code:0,data:{msg_id_str:'123',content:request.params.content,user:{id_str:'789'}}}};}};
+    const require=()=>({ZP:client});require.m={request:function(){return ['API_DOMAIN','interceptors.request.use','/webcast/privilege/subscribe'];}};
+    page.webpackChunkdouyin_live_v2=[];page.webpackChunkdouyin_live_v2.push=value=>value[2](require);
+    page.eval(await readFile(file('page.js'),'utf8'));
+    const bridge=new RequestBridgeClient(page,pageTransport(page));const ticket=await bridge.prepare('chat');
+    assert.equal(ticket.available,true);
+    const result=await bridge.commit(ticket.token,'@懒二🐑 你好',[{id:'4143433474648240',start:0,length:5}]);
+    assert.equal(result.submitted,true);
+    assert.deepEqual(JSON.parse(requests[0].params.rtf_content),[{type:2,value:'{"uid":"4143433474648240","webcast_uid":""}',start:0,length:5}]);
+  } finally {page.close();}
+});
 
 test('福袋记录按来源房间和账号持久化，后台重启后接管者可读且不能越房写入',async()=>{
   const w=await worker(),key='live-assistant:rewards:1:789',records=[{kind:'luckyBag',key:'luckyBag:activity',status:'unknown',at:Date.now()}];
@@ -904,9 +1119,10 @@ test('抽奖结果持久保存在后台数据库，重启可恢复，拒绝越�
 
 test('上下文同步失效时更新诊断并停止重试，取消保活失败不覆盖恢复提示',async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});let adapter,failedCalls=0;
-  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},
     chrome:{runtime:{sendMessage:message=>{
+      if(message.type==='data-context')return Promise.resolve({ok:true,value:null});
       if(message.type==='init')return Promise.resolve({ok:true,value:{}});
       failedCalls++;throw Error('Extension context invalidated');
     },onMessage:{addListener(){}}}},
@@ -930,7 +1146,7 @@ test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不�
     alarms:{create(){},onAlarm:{addListener(){}}},power:{requestKeepAwake(){},releaseKeepAwake(){}},
     tabs:{query:async()=>keeper?[tab]:[],sendMessage:()=>new Promise(resolve=>listeners[0]({type:'collection-wake'},{},resolve))}};
   keeper=installCollectionKeeper(chrome,{wakeTimeoutMs:50});await keeper.refresh();
-  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {constructor(options){Object.assign(this,options);}emitStatus(){}},boot:()=>{},
     chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async message=>{
       if(message.type==='init')return {ok:true,value:{}};
@@ -949,7 +1165,7 @@ test('后台唤醒与内容脚本租约更新没有循环等待，活跃页不�
 test('事件桥短暂失联时暂停发送资格，后台恢复后继续接收，无需刷新',async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'});
   let adapter,drains=0;const timers=[],handled=[];
-  Object.assign(dom.window,{EventInbox,roomFromURL,RequestBridgeClient,IdentityReader:class {},
+  Object.assign(dom.window,{EventInbox,roomFromURL,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},
     DouyinAdapter:class {
       constructor(options){Object.assign(this,options);}
       emitStatus(){}
@@ -996,7 +1212,7 @@ test('构建后台独立交换百炼 WebRTC SDP，要求直播页、服务授权
 
 test('配色与材质经同一后台白名单保存，直播页和弹窗共享，拒绝任意键和值',async()=>{
  const w=await worker(),popup={url:'chrome-extension://test/popup.html'};
- for(const [kind,initial,next] of [['palette','original','teal'],['material','glass','liquid']]){
+ for(const [kind,initial,next] of [['palette','original','teal'],['material','liquid','solid']]){
   assert.equal((await w.send({type:'appearance-get',kind})).value,initial);
   assert.equal((await w.send({type:'appearance-set',kind,value:next},popup)).ok,true);
   assert.equal((await w.send({type:'appearance-get',kind})).value,next);
@@ -1004,4 +1220,23 @@ test('配色与材质经同一后台白名单保存，直播页和弹窗共享�
  }
  assert.equal((await w.send({type:'appearance-get',kind:'api-key'})).ok,false);
  assert.equal((await w.send({type:'appearance-set',kind:'palette',value:'blue'},{frameId:0,tab:{url:'https://evil.example/'}})).ok,false);
+});
+
+
+test('扩展搜索超过8秒仍等待结果，与服务30秒查证预算一致',async()=>{
+ const timers=[];let release,signal;
+ const w=await worker({},new IDBFactory(),'',{setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout:()=>{},fetch:async(url,options)=>{signal=options.signal;await new Promise(resolve=>{release=resolve;});return {status:200,url,text:async()=>'{}'};}});
+ const pending=w.send({type:'search',url:'https://api.bochaai.com/v1/web-search',data:JSON.stringify({query:'抖音PK规则',count:3,summary:true,freshness:'noLimit'})});
+ await new Promise(setImmediate);
+ try{for(const timer of timers)if(timer.ms<=8000)timer.fn();assert.equal(signal.aborted,false);assert.ok(timers.some(t=>t.ms===30000));}finally{release();await pending;}
+});
+
+test('天气备用接口通过扩展固定GET通道，拒绝任意路径和敏感参数',async()=>{
+ const w=await worker(),url='https://wttr.in/29.15698,120.31478?format=j1';
+ assert.equal((await w.send({type:'weather',url,headers:{Authorization:'Bearer secret'},body:'private'})).ok,true);
+ assert.equal(w.requests[0].opts.method,'GET');
+ assert.equal(w.requests[0].opts.body,undefined);
+ assert.equal(w.requests[0].opts.headers.Authorization,undefined);
+ for(const bad of [url+'&key=secret',url.replace('/29.15698,120.31478','/London'),url.replace('https:','http:'),url.replace('29.15698','99')])assert.equal((await w.send({type:'weather',url:bad})).ok,false);
+ assert.equal(w.requests.length,1);
 });

@@ -22,7 +22,7 @@ export function createMediaSession(owner){
         source=value;sendBack({type:'READY'});
       },error=>{if(current())sendBack({type:'FAILED',error});});
     }catch(error){sendBack({type:'FAILED',error});}
-    return ()=>{closed=true;session.controller.abort();source?.stop();};
+    return ()=>{closed=true;session.controller.abort(session.detach ? 'detach' : undefined);source?.stop();};
   });
   const machine=createMachine({id:'live-perception',initial:'idle',context:{session:null},states:{
     idle:{on:{START:{target:'active',actions:assign({session:({event})=>event.session})}}},

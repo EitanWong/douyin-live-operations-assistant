@@ -73,7 +73,7 @@ test('互动指令优先于关键词和普通聊天，同一条帧只运行一�
   assert.equal(engine.stats.aiCalls,1);
 });
 
-test('菜单本地响应，@普通聊天交给 AI；AI 服务关闭时未知文本静默', async () => {
+test('菜单本地响应，@普通聊天交给 AI；AI 服务关闭时提供互动入口', async () => {
   const {engine,chat} = fixture(c=>{c.ai.enabled=true;});
   const prompts=[]; let finish;
   engine.ai=prompt=>{prompts.push(prompt); return new Promise(resolve=>{finish=resolve;});};
@@ -87,9 +87,10 @@ test('菜单本地响应，@普通聊天交给 AI；AI 服务关闭时未知文�
   assert.equal(engine.queue.length,2);
   assert.equal(engine.queue.filter(item=>item.kind==='bot').length,1);
   const quiet=fixture();
-  quiet.chat('@小明'); quiet.chat('@小明 随便聊聊');
+  quiet.chat('@小明 随便聊聊');
   assert.equal(quiet.engine.stats.aiCalls,0);
-  assert.equal(quiet.engine.queue.length,0);
+  assert.equal(quiet.engine.queue.length,1);
+  assert.match(quiet.engine.queue[0].text,/菜单/);
 });
 
 test('菜单按开关生成，最短字数限制下可翻页，不列出禁用玩法', () => {
@@ -105,7 +106,8 @@ test('移除一次性随机玩法及全部别名，旧开关也无法重新启�
   const {engine,chat}=fixture(c=>{Object.assign(c.bot,{diceEnabled:true,coinEnabled:true,rpsEnabled:true,choiceEnabled:true});});
   engine.ai=async()=>assert.fail('已移除的玩法不调用AI');
   for (const command of ['骰子','掷骰子','roll','硬币','抛硬币','coin','猜拳 石头','石头剪刀布','rps rock','选择 唱歌/聊天','帮我选 唱歌/聊天','choose a/b']) chat(`@小明 ${command}`);
-  assert.equal(engine.queue.length,0);
+  assert.equal(engine.queue.length,1);
+  assert.match(engine.queue[0].text,/菜单/);
   assert.equal(engine.bot.session,null);
   assert.equal(engine.stats.aiCalls,0);
   assert.deepEqual(BOT_COMMANDS.map(item=>item.key),['idiomEnabled','guessEnabled','truthEnabled','dareEnabled']);

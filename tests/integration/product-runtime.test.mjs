@@ -8,32 +8,235 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createWorkspaceBridge} from '../../src/ui/product/bridge.js';
 
+async function waitFor(predicate,message){
+ const deadline=Date.now()+5000;
+ while(!predicate()){
+  assert.ok(Date.now()<deadline,message);
+  await new Promise(resolve=>setTimeout(resolve,10));
+ }
+}
+
+function animationFrameGate(view){
+ const request=view.requestAnimationFrame.bind(view),cancel=view.cancelAnimationFrame.bind(view),frames=new Map();
+ let paused=false,serial=0;
+ const schedule=id=>{const frame=frames.get(id);frame.handle=request(time=>{
+  frame.handle=null;if(paused)return;frames.delete(id);frame.callback(time);
+ });};
+ return {
+  request(callback){const id=++serial;frames.set(id,{callback,handle:null});schedule(id);return id;},
+  cancel(id){const frame=frames.get(id);if(frame?.handle!=null)cancel(frame.handle);frames.delete(id);},
+  pause(){paused=true;},
+  resume(){paused=false;for(const [id,frame] of frames)if(frame.handle==null)schedule(id);},
+ };
+}
+
 test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现 TanStack 表格，销毁后清理',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'product-ui-')), dom=new JSDOM('<div id="host"></div>',{url:'https://live.douyin.com/123',pretendToBeVisual:true});
  const previous=Object.fromEntries(['window','document','HTMLElement','Element','getComputedStyle','MutationObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
  const navigatorDescriptor=Object.getOwnPropertyDescriptor(globalThis,'navigator');
  let runtime,bridge;
  try{
+  const animationFrames=animationFrameGate(dom.window);
+  dom.window.requestAnimationFrame=animationFrames.request;dom.window.cancelAnimationFrame=animationFrames.cancel;
   Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,Element:dom.window.Element,getComputedStyle:dom.window.getComputedStyle,MutationObserver:dom.window.MutationObserver,requestAnimationFrame:dom.window.requestAnimationFrame.bind(dom.window),cancelAnimationFrame:dom.window.cancelAnimationFrame.bind(dom.window)});
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:dom.window.navigator});
-  dom.window.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+  dom.window.HTMLElement.prototype.scrollTo=()=>Promise.resolve(); // Modern CSSOM scrolling can return a completion promise; effects must not return it.
+  dom.window.scrollTo=()=>{}; // jsdom has no scrolling layout; Motion measures auto heights in the real browser.
+  const reducedQuery=new dom.window.EventTarget();reducedQuery.matches=false;
+  dom.window.matchMedia=query=>query.includes('prefers-reduced-motion') ? reducedQuery : {matches:false,addEventListener(){},removeEventListener(){}};
+  dom.window.document.fonts=new dom.window.EventTarget(); // jsdom does not implement FontFaceSet.
   dom.window.ResizeObserver=class{observe(){}disconnect(){}unobserve(){}};
   const root=document.querySelector('#host').attachShadow({mode:'open'});root.innerHTML='<div class="workspace"><button data-tab="ai" aria-label="AI 设置">AI</button><header data-workspace-toolbar><div class="foot"><small>未保存草稿</small><button data-action="save">保存设置</button></div></header><div data-workspace-views><button role="tab" aria-selected="true">模型设置</button><button role="tab" aria-selected="false">额度设置</button></div><section data-page="ai"><div class="workspace-grid"><div class="ai-service-grid" data-workspace-contents><section class="ai-card"><h3>回复模型</h3><div class="grid"><label class="field"><span>模型名</span><input value="qwen-plus"><small>模型名称按服务商提供的完整 ID 填写。</small></label></div><label class="toggle"><input type="checkbox">启用 AI</label><label class="field"><span>接话频率</span><input type="range" min="0" max="4" step="1" value="2" aria-valuetext="克制陪伴"></label><table><thead><tr><th>观众</th><th>钻石</th></tr></thead><tbody><tr><td>甲</td><td>9</td></tr></tbody></table><details><summary>高级参数</summary><label class="field"><span>测试高级字段</span><input value="draft"></label></details></section></div></div></section></div>';
+  const simple=document.createElement('section');simple.className='workspace-card';simple.innerHTML='<h3>直接设置</h3><label class="toggle"><input type="checkbox">简单开关</label><details><summary>操作说明</summary><p>修改后保存。</p></details><div class="stats"><div><b>2</b><span>已启用</span></div></div><img alt="礼物图标" src="data:image/png;base64,iVBORw0KGgo=">';root.querySelector('[data-page=ai]>.workspace-grid').append(simple);
+  let simpleChanges=0;simple.querySelector('input').addEventListener('change',()=>simpleChanges++);
   let saves=0,changes=0;root.querySelector('button[data-action]').onclick=()=>saves++;root.querySelector('input').addEventListener('input',()=>changes++);
   let sections=0;for(const button of root.querySelectorAll('[data-workspace-views] button'))button.onclick=()=>{sections++;for(const sibling of button.parentElement.children)sibling.setAttribute('aria-selected',String(sibling===button));};
-  const panel={root,host:root.host,activeTab:'ai',tab(){}};bridge=createWorkspaceBridge(panel);
+  const toggle=document.createElement('button');toggle.dataset.sidebarToggle='';toggle.setAttribute('aria-label','折叠侧边栏');toggle.innerHTML='<svg viewBox="0 0 24 24"><path d="M9 3v18"/></svg>';root.querySelector('.workspace').prepend(toggle);
+  const utilities=document.createElement('div');utilities.innerHTML='<details data-workspace-utility="help"><summary>模型使用说明</summary><p>使用完整模型名称后保存。</p><ol><li>选择服务</li><li>填写模型并保存</li><li>测试连接</li></ol><ul><li>核对服务权限</li></ul></details><details data-workspace-utility="manage"><summary>测试工具</summary><p role="status">运行中</p><button>停用测试工具</button></details>';root.querySelector('[data-page=ai]').append(utilities);
+  let toolDisables=0;utilities.querySelector('button').onclick=()=>{toolDisables++;utilities.querySelector('[role=status]').textContent='工具已停用';};
+  const progress=document.createElement('div');progress.className='stat-progress';progress.setAttribute('aria-label','后台当前文件下载');progress.setAttribute('aria-valuemax','100');progress.setAttribute('aria-valuenow','10');simple.append(progress);
+  const panel={root,host:root.host,activeTab:'ai',navigation:{side:'left',collapsed:false},tab(){}};
+  toggle.onclick=()=>{panel.navigation.collapsed=!panel.navigation.collapsed;root.querySelector('.workspace').dataset.navCollapsed=String(panel.navigation.collapsed);toggle.setAttribute('aria-label',panel.navigation.collapsed ? '展开侧边栏' : '折叠侧边栏');};bridge=createWorkspaceBridge(panel);
   await build({entryPoints:['src/ui/product/runtime.js'],bundle:true,format:'esm',platform:'browser',loader:{'.css':'text'},define:{'process.env.NODE_ENV':'"production"'},outfile:join(dir,'runtime.mjs')});
   const {mountProductWorkspace}=await import(pathToFileURL(join(dir,'runtime.mjs')).href);
   const container=document.createElement('div');root.append(container);runtime=mountProductWorkspace({container,bridge});
   await new Promise(resolve=>setTimeout(resolve,70));const ui=container.shadowRoot;
-  assert.ok(ui.querySelector('.mantine-SimpleGrid-root[data-layout=cards] [data-surface=card]'));assert.equal(ui.querySelectorAll('[data-layout=fields] input[aria-label="模型名"]').length,1);assert.ok(ui.querySelector('.mantine-SimpleGrid-root input[aria-label="模型名"]'));assert.equal(ui.querySelector('h3').textContent,'回复模型');assert.match(ui.querySelector('table').textContent,/甲9/);assert.match(ui.querySelector('.product-status').textContent,/未保存草稿/);assert.doesNotMatch(ui.querySelector('.product-toolbar').textContent,/未保存草稿/);
+  await waitFor(()=>ui.querySelector('[role=progressbar][aria-label="后台当前文件下载"]')?.getAttribute('aria-valuenow')==='10','初始下载进度');
+  progress.setAttribute('aria-valuenow','30');
+  await waitFor(()=>ui.querySelector('[role=progressbar][aria-label="后台当前文件下载"]')?.getAttribute('aria-valuenow')==='30','仅进度属性变化也刷新共享展示层');
+  const helpButton=ui.querySelector('.product-utility-actions button[aria-label="使用说明"]'),manageButton=ui.querySelector('.product-utility-actions button[aria-label="工具管理"]');
+  assert.ok(helpButton.querySelector('svg'));assert.ok(manageButton.querySelector('svg'));assert.equal(ui.querySelector('.product-content [data-workspace-utility]'),null);assert.doesNotMatch(ui.querySelector('.product-content').textContent,/模型使用说明|停用测试工具/);
+  helpButton.focus();helpButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'打开使用说明');
+  let utilityDialog=ui.querySelector('[role=dialog]');assert.match(utilityDialog.textContent,/使用完整模型名称后保存/);assert.ok(ui.querySelector('.product-shell').hasAttribute('inert'));
+  assert.equal(utilityDialog.querySelectorAll('ol>li').length,3,'真实弹窗保留编号列表，布局容器不得覆盖语义标签');assert.equal(utilityDialog.querySelectorAll('ul>li').length,1);
+  utilityDialog.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===helpButton,'Escape关闭说明并返回焦点');
+  manageButton.focus();manageButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'打开工具管理');utilityDialog=ui.querySelector('[role=dialog]');
+  [...utilityDialog.querySelectorAll('button')].find(n=>n.textContent==='停用测试工具').click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(toolDisables,1);assert.match(utilityDialog.textContent,/工具已停用/);
+  utilityDialog.querySelector('button[aria-label="关闭工具管理"]').click();await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===manageButton,'关闭管理并返回焦点');assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);
+  helpButton.focus();helpButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'切换子页前说明已打开');root.querySelectorAll('[data-workspace-views] button')[1].click();bridge.refresh();
+  await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===helpButton,'子页切换后关闭旧说明并返回焦点');assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);
+  root.querySelectorAll('[data-workspace-views] button')[0].click();bridge.refresh();
+  await waitFor(()=>ui.querySelector('[role=tab][aria-selected=true]')?.textContent==='模型设置','原子页已恢复');
+  manageButton.focus();manageButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'移除模块前管理已打开');utilities.querySelector('[data-workspace-utility=manage]').hidden=true;bridge.refresh();
+  await waitFor(()=>!ui.querySelector('[role=dialog]'),'模块移除后关闭旧管理视图');assert.ok(!ui.querySelector('button[aria-label="工具管理"]'),'缺少管理内容就不显示图标');
+  utilities.querySelector('[data-workspace-utility=manage]').hidden=false;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.ok(ui.querySelector('button[aria-label="工具管理"]'),'内容重新可用后恢复入口');
+  utilities.hidden=true;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));assert.ok(!ui.querySelector('.product-utility-actions'),'没有辅助功能时不保留空工具组或分隔线');
+  utilities.hidden=false;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
+  sections=0;
+  const sidebarToggle=ui.querySelector('.product-nav-toggle button');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'true');assert.equal(ui.getElementById(sidebarToggle.getAttribute('aria-controls'))?.getAttribute('aria-label'),'功能导航');
+  sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(ui.querySelector('.product-shell').dataset.sidebarCollapsed,'true');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'false');assert.equal(sidebarToggle.getAttribute('title'),'展开侧边栏');assert.ok(sidebarToggle.querySelector('svg'));sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(panel.navigation.collapsed,false);
+  assert.ok(ui.querySelector('.product-card-grid[data-layout=cards] .product-card-run [data-surface=card]'));assert.equal(ui.querySelectorAll('[data-layout=fields] input[aria-label="模型名"]').length,1);assert.ok(ui.querySelector('.mantine-SimpleGrid-root input[aria-label="模型名"]'));assert.equal(ui.querySelector('h3').textContent,'回复模型');assert.match(ui.querySelector('table').textContent,/甲9/);assert.match(ui.querySelector('.product-status').textContent,/未保存草稿/);assert.doesNotMatch(ui.querySelector('.product-toolbar').textContent,/未保存草稿/);
+  assert.equal(ui.querySelector('[data-card-size=tile]').querySelectorAll('.product-expand').length,1,'卡片内表格、指标、折叠区共用一个放大入口');
+  const direct=[...ui.querySelectorAll('[data-surface=card]')].find(card=>card.querySelector('h3')?.textContent==='直接设置');
+  assert.equal(direct.querySelectorAll('.product-expand,.product-inspectable,.product-card-utility').length,0,'开关、短说明、汇总数字和小图标不产生放大入口或预留空间');
+  direct.querySelector('input[aria-label="简单开关"]').click();assert.equal(simple.querySelector('input').checked,true);assert.equal(simpleChanges,1);
+  assert.equal(ui.querySelector('[role=dialog]'),null,'直接操作不弹出视图');
+  const extra=document.createElement('h3');extra.textContent='补充说明';simple.append(extra);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(Boolean(ui.querySelector('select[aria-label="跳转到本页分区"]')),false,'少量分区直接浏览，不额外占用一行分区工具栏');
+  const expand=ui.querySelector('button[aria-label="放大查看：回复模型"]');assert.ok(expand,'卡片提供明确的放大入口');expand.focus();expand.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'打开放大视图');
+  const enlarged=ui.querySelector('[role=dialog]');assert.ok(enlarged);assert.match(enlarged.textContent,/回复模型/);assert.ok(ui.querySelector('.product-shell').hasAttribute('inert'));
+  assert.equal(enlarged.querySelectorAll('.product-expand').length,0,'独立视图不重复嵌套放大入口');
+  const enlargedInput=enlarged.querySelector('input[aria-label="模型名"]'),inputSetter=Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set;
+  inputSetter.call(enlargedInput,'enlarged-draft');enlargedInput.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(root.querySelector('input').value,'enlarged-draft');assert.equal(changes,1,'放大视图沿用唯一的原字段与事件');
+  assert.equal(ui.querySelector('.product-content input[aria-label="模型名"]').value,'enlarged-draft','主界面同步同一份草稿');
+  let outerEscape=false;const onEscape=event=>{if(event.key==='Escape' && !event.defaultPrevented)outerEscape=true;};root.addEventListener('keydown',onEscape);
+  enlargedInput.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===expand,'关闭放大视图并返回焦点');
+  assert.equal(outerEscape,false);assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);root.removeEventListener('keydown',onEscape);changes=0;
   const slider=ui.querySelector('.mantine-Slider-root [role=slider]');assert.ok(slider,'组件界面使用真正的Mantine滑块，不将range包成文本框');assert.equal(slider.getAttribute('aria-valuetext'),'克制陪伴');slider.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'End',bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));assert.equal(root.querySelector('input[type=range]').value,'4');
   const tabs=[...ui.querySelectorAll('[role=tab]')];assert.deepEqual(tabs.map(n=>n.textContent),['模型设置','额度设置']);tabs[0].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));assert.equal(sections,1);assert.equal(ui.querySelector('[role=tab][aria-selected=true]').textContent,'额度设置');
   const input=ui.querySelector('input[aria-label="模型名"]');assert.ok(input);const description=input.closest('.mantine-InputWrapper-root').querySelector('.mantine-InputWrapper-description');assert.ok(input.compareDocumentPosition(description) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,'说明位于输入框之后，不使同排输入框错位');const setter=Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set;setter.call(input,'new-model');input.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));
+  const card=input.closest('[data-card-size="tile"]'),body=card?.querySelector('.product-card-body');
+  assert.ok(card,'长短内容都进入统一规格卡片');assert.ok(body?.contains(input),'所有原字段位于可滚动卡片正文');
+  assert.equal(body.tabIndex,0,'鼠标与键盘均可进入滚动区');assert.equal(body.getAttribute('aria-label'),'回复模型');
+  assert.equal(card.querySelector('.product-card-heading h3')?.textContent,'回复模型','标题固定在滚动正文之外');
   await new Promise(resolve=>setTimeout(resolve,25));assert.equal(root.querySelector('input').value,'new-model');assert.equal(changes,1);
   [...ui.querySelectorAll('button')].find(b=>b.textContent==='保存设置').click();assert.equal(saves,1);
   ui.querySelector('input[type=checkbox]').click();assert.equal(root.querySelector('input[type=checkbox]').checked,true);
-  [...ui.querySelectorAll('button')].find(b=>b.textContent.includes('高级参数')).click();await new Promise(resolve=>setTimeout(resolve,240));assert.notEqual(ui.querySelector('.product-disclosure-body').style.display,'none');
+  const disclosure=[...ui.querySelectorAll('button')].find(b=>b.textContent.includes('高级参数'));
+  const reveal=ui.getElementById(disclosure.getAttribute('aria-controls'));
+  const page=ui.querySelector('.product-content'),otherBody=direct.querySelector('.product-card-body'),scrolls=[];
+  Object.defineProperties(body,{scrollHeight:{configurable:true,value:1200},clientHeight:{configurable:true,value:250}});
+  body.scrollTo=options=>{scrolls.push(options);body.scrollTop=Math.min(options.top,950);};
+  body.scrollTop=31;page.scrollTop=45;otherBody.scrollTop=23;disclosure.focus();
+  assert.equal(reveal.getAttribute('aria-hidden'),'true');assert.ok(reveal.hasAttribute('inert'));
+  disclosure.click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(reveal.hasAttribute('inert'),false);
+  reducedQuery.matches=true;reducedQuery.dispatchEvent(new dom.window.Event('change'));
+  await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(Number(reveal.style.opacity),1,'运行中开启减少动态效果应立即结束内容淡入');
+  assert.equal(body.scrollTop,950,'展开结束后自动滚到所属卡片正文底部');
+  assert.equal(scrolls.at(-1)?.behavior,'instant','减少动态效果时立即定位');
+  assert.equal(page.scrollTop,45,'不滚动整个页面');assert.equal(otherBody.scrollTop,23,'不滚动相邻卡片');assert.equal(ui.activeElement,disclosure,'滚动不抢走展开按钮焦点');
+  const completedScrolls=scrolls.length;
+  setter.call(input,'updated-while-open');input.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(scrolls.length,completedScrolls,'内容刷新不重复把阅读位置拉到底');
+  const nested=document.createElement('details');nested.innerHTML='<summary>更多参数</summary><p>展开后仍滚动所属卡片。</p>';root.querySelector('details:not([data-workspace-utility])').append(nested);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
+  const parentBody=reveal.querySelector('.product-disclosure-body');Object.defineProperties(parentBody,{scrollHeight:{configurable:true,value:1000},clientHeight:{configurable:true,value:1000}});
+  [...reveal.querySelectorAll('button')].find(button=>button.textContent==='更多参数').click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(scrolls.length,completedScrolls+1,'多层折叠也滚动最外层卡片，不停在没有滚动范围的内部包装');
+  reducedQuery.matches=false;reducedQuery.dispatchEvent(new dom.window.Event('change'));
+  const draft=reveal.querySelector('input');setter.call(draft,'retained-draft');draft.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));
+  await new Promise(resolve=>setTimeout(resolve,25));
+  // Hold visual time while React commits each reversal, even on a busy runner.
+  animationFrames.pause();
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','收起状态已提交');
+  assert.equal(reveal.getAttribute('aria-hidden'),'true');assert.ok(reveal.hasAttribute('inert'));
+  assert.equal(scrolls.length,completedScrolls+1,'收起不触发到底部滚动');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='false','第一次反转展开已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','第二次反转收起已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='false','最终展开已提交');
+  assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(reveal.hasAttribute('inert'),false);
+  assert.equal(reveal.querySelector('input'),draft);assert.equal(draft.value,'retained-draft');
+  assert.equal(root.querySelector('details input').value,'retained-draft');
+  animationFrames.resume();await waitFor(()=>scrolls.length>completedScrolls+1,'正常展开动画完成并滚动');
+  assert.equal(scrolls.at(-1)?.behavior,'smooth','正常展开动画完成后平滑滚动');
+  const settledScrolls=scrolls.length;
+  animationFrames.pause();
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','再次收起已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='false','反转展开已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','最终收起已提交');
+  animationFrames.resume();await waitFor(()=>Number(reveal.style.opacity)===0,'最终收起动画已结束');
+  assert.equal(scrolls.length,settledScrolls,'快速反转且最终关闭时没有迟到的展开滚动');
+  // Large projected datasets must stay bounded and keep original action ownership.
+  const dataset=document.createElement('section');dataset.innerHTML='<h3>互动记录</h3><table aria-label="互动记录"><thead><tr><th>观众</th><th>状态</th><th>钻石</th><th>操作</th></tr></thead><tbody></tbody></table>';
+  const rows=dataset.querySelector('tbody');let acted=-1;
+  const metrics=document.createElement('div');metrics.className='stats';metrics.innerHTML=Array.from({length:4},(_,i)=>`<div><b>${i}</b><span>指标 ${i}</span></div>`).join('');dataset.prepend(metrics);
+  for(let i=0;i<63;i++){const row=rows.insertRow();row.innerHTML=`<td>${i===61?'青山 ＡＢＣ':'观众'+i}</td><td>${i%2?'已确认':'待确认'}</td><td>${i*10}</td><td><button>查看 ${i}</button></td>`;row.querySelector('button').onclick=()=>{acted=i;};}
+  root.querySelector('[data-page=ai]').append(dataset);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.ok(ui.querySelector('[data-layout=metrics].mantine-Group-root'),'指标采用可铺满尾行的 Mantine 等高布局');
+  const collection=[...ui.querySelectorAll('.product-data-set')].find(n=>n.querySelector('table')?.textContent.includes('观众0'));
+  assert.ok(collection,'表格使用统一的数据浏览区');
+  assert.equal(collection.querySelectorAll('tbody tr').length,20);
+  const next=()=>[...collection.querySelectorAll('button')].find(b=>b.textContent==='下一页');
+  next().click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.match(collection.querySelector('tbody').textContent,/观众20/);
+  [...collection.querySelectorAll('tbody button')].find(b=>b.textContent==='查看 20').click();assert.equal(acted,20,'分页操作必须映射回原始行');
+  const search=collection.querySelector('input[type=search]');assert.ok(search);
+  setter.call(search,'青山 abc');search.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(collection.querySelectorAll('tbody tr').length,1);assert.match(collection.querySelector('tbody').textContent,/青山 ＡＢＣ/);
+  collection.querySelector('tbody button').click();assert.equal(acted,61,'搜索后的操作不能错用结果索引');
+  setter.call(search,'');search.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  const category=collection.querySelector('select[aria-label="筛选状态"]');assert.ok(category);assert.equal(collection.querySelector('select[aria-label="筛选钻石"]'),null);
+  category.value='已确认';category.dispatchEvent(new dom.window.Event('change',{bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.ok([...collection.querySelectorAll('tbody tr')].every(row=>row.cells[1].textContent==='已确认'));
+  next().click();await new Promise(resolve=>setTimeout(resolve,25));
+  rows.replaceChildren(rows.firstElementChild);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(collection.querySelector('input[type=search]'),search,'实时刷新不能重建搜索输入或丢失焦点');
+  assert.equal(collection.querySelector('select[aria-label="筛选状态"]')?.value,'已确认','刷新后仍应如实展示已生效的筛选条件');
+  assert.match(collection.textContent,/没有匹配/);
+  [...collection.querySelectorAll('button')].find(b=>b.textContent==='重置筛选').click();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.match(collection.querySelector('tbody').textContent,/观众0/);assert.equal(root.querySelector('details input').value,'retained-draft');
+  // Record lists share paging/search, while editable rule drafts remain mounted.
+  const records=document.createElement('div');records.dataset.profiles='';let profileAction=-1;
+  for(let i=0;i<45;i++){const item=document.createElement('div');item.innerHTML=`<b>${i===44?'末页主播':'主播'+i}</b><button>打开主播 ${i}</button>`;item.querySelector('button').onclick=()=>{profileAction=i;};records.append(item);}
+  root.querySelector('[data-page=ai]').append(records);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  const recordBrowser=ui.querySelector('.product-data-set[aria-label="主播列表"]');assert.ok(recordBrowser);
+  assert.equal(recordBrowser.querySelectorAll('.product-record-scroll button').length,20);
+  const recordSearch=recordBrowser.querySelector('input[type=search]');setter.call(recordSearch,'末页');recordSearch.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(recordBrowser.querySelectorAll('.product-record-scroll button').length,1);recordBrowser.querySelector('.product-record-scroll button').click();assert.equal(profileAction,44);
+  const drafts=document.createElement('div');drafts.dataset.list='keywords';drafts.innerHTML=Array.from({length:30},(_,i)=>`<div class="editor-row"><label><span>规则 ${i}</span><textarea>草稿 ${i}</textarea></label></div>`).join('');root.querySelector('[data-page=ai]').append(drafts);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(ui.querySelector('.product-edit-scroll').querySelectorAll('textarea').length,30,'编辑集合用内部滚动保留全部草稿');
+  const retainedDraft=ui.querySelector('.product-edit-scroll textarea');
+  drafts.prepend(drafts.lastElementChild);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.ok([...ui.querySelectorAll('.product-edit-scroll textarea')].find(field=>field.value==='草稿 0')===retainedDraft,'规则排序不重建同组草稿');
+  // Dialogs render through Mantine in this shadow root and edit the original controls.
+  const dialog=document.createElement('div');dialog.dataset.knowledgeDialog='';dialog.hidden=true;
+  dialog.innerHTML='<h3 data-memory-dialog-title>添加知识</h3><div data-knowledge-dialog-body><label class="field"><span>资料标题</span><input autofocus value="初稿"></label><button data-memory-cancel>取消</button><button data-confirm>确定</button></div>';
+  const add=document.createElement('button');add.textContent='添加知识';add.onclick=()=>{dialog.hidden=false;};
+  let committed='';dialog.querySelector('[data-memory-cancel]').onclick=()=>{dialog.hidden=true;};dialog.querySelector('[data-confirm]').onclick=()=>{committed=dialog.querySelector('input').value;dialog.hidden=true;};
+  root.querySelector('[data-page=ai]').append(add,dialog);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  {const trigger=[...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识');trigger.focus();trigger.click();}await new Promise(resolve=>setTimeout(resolve,40));
+  const popup=ui.querySelector('[role="dialog"]');assert.ok(popup);assert.match(popup.textContent,/添加知识/);
+  const popupInput=popup.querySelector('input');setter.call(popupInput,'已核对的资料');popupInput.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,25));
+  assert.equal(dialog.querySelector('input').value,'已核对的资料');
+  [...popup.querySelectorAll('button')].find(b=>b.textContent==='确定').click();await new Promise(resolve=>setTimeout(resolve,30));assert.equal(committed,'已核对的资料');assert.equal(ui.querySelector('[role="dialog"]'),null);
+  {const trigger=[...ui.querySelectorAll('button')].find(b=>b.textContent==='添加知识');trigger.focus();trigger.click();}await new Promise(resolve=>setTimeout(resolve,30));
+  [...ui.querySelector('[role="dialog"]').querySelectorAll('button')].find(b=>b.textContent==='取消').click();await new Promise(resolve=>setTimeout(resolve,30));assert.equal(ui.querySelector('[role="dialog"]'),null);
+  assert.equal(ui.activeElement?.textContent,'添加知识','关闭弹窗后焦点回到可见的触发按钮');
+  {const trigger=ui.activeElement;trigger.click();}await new Promise(resolve=>setTimeout(resolve,30));
+  let collapsed=false;root.addEventListener('keydown',event=>{if(event.key==='Escape' && !event.defaultPrevented)collapsed=true;});
+  ui.querySelector('[role="dialog"] input').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(collapsed,false,'Escape关闭知识弹窗时不触发外层面板收起');assert.equal(ui.querySelector('[role="dialog"]'),null);assert.equal(ui.activeElement?.textContent,'添加知识');
+  const history=document.createElement('section');history.dataset.recordBrowser='抽奖记录';
+  root.querySelector('[data-page=ai]').append(history);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.ok([...ui.querySelectorAll('button')].find(button=>button.textContent==='查看抽奖记录'),'尚无历史时也提供紧凑入口和空状态');
+  for(let i=0;i<25;i++){const record=document.createElement('details');record.dataset.recordItem=String(i);record.innerHTML=`<summary>第 ${i+1} 轮礼盒</summary><p>详情 ${i+1}：近期活动权重</p>`;history.append(record);}
+  root.querySelector('[data-page=ai]').append(history);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  const historyTrigger=[...ui.querySelectorAll('button')].find(n=>n.textContent==='查看抽奖记录');assert.ok(historyTrigger);
+  assert.doesNotMatch(ui.querySelector('.product-content').textContent,/详情 25/,'记录详情不堆在页面底部');
+  historyTrigger.focus();historyTrigger.click();await new Promise(resolve=>setTimeout(resolve,60));
+  let historyDialog=ui.querySelector('[role=dialog]');assert.equal(historyDialog.querySelectorAll('[data-record-open]').length,20);
+  const historySearch=historyDialog.querySelector('input[type=search]');setter.call(historySearch,'第 25');historySearch.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,30));
+  historyDialog.querySelector('[data-record-open]').click();await new Promise(resolve=>setTimeout(resolve,30));assert.match(historyDialog.textContent,/详情 25/);assert.equal(ui.querySelectorAll('[role=dialog]').length,1,'二级详情复用同一弹窗，不叠遮罩');
+  assert.equal(historyDialog.querySelector('.product-disclosure'),null,'打开轮次直接呈现详情，不再套一层折叠');
+  const replacement=history.lastElementChild.cloneNode(true);replacement.querySelector('p').textContent='实时更新后的详情 25';history.lastElementChild.replaceWith(replacement);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.match(historyDialog.textContent,/实时更新后的详情 25/,'详情按稳定业务键订阅实时记录');
+  historyDialog.querySelector('[data-record-detail-heading]').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(historyDialog.querySelector('input[type=search]').value,'第 25','返回保留搜索');assert.match(ui.activeElement.textContent,/第 25 轮/,'返回聚焦原记录入口');
+  historyDialog.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,250));
+  assert.equal(ui.querySelector('[role=dialog]'),null);assert.equal(ui.activeElement,historyTrigger);
   assert.equal(document.documentElement.getAttribute('data-mantine-color-scheme'),null);assert.equal(document.body.querySelector('[data-portal]'),null);
   runtime.destroy();runtime=null;assert.equal(container.shadowRoot.childNodes.length,0);
  }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);if(navigatorDescriptor)Object.defineProperty(globalThis,'navigator',navigatorDescriptor);else delete globalThis.navigator;dom.window.close();await rm(dir,{recursive:true,force:true});}

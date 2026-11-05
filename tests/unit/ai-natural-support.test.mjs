@@ -30,12 +30,13 @@ test('本次已知大礼物在关闭记忆时仍可郑重答谢，不把欢迎�
  assert.equal(input(wire({type:'enter'},{kind:'welcome',data},ai)).target.support.level,'unknown');
  assert.equal(input(wire({type:'speech',text:'大家晚上好'},{kind:'ai'},ai)).target.support,undefined);
 });
-test('真实路由与联网后的回复共同要求善意幽默、更多耐心、无讽刺奉承，审核不使用支持优待',async()=>{
+test('路由可用支持证据调整表达，查证阶段只读问题和来源，审核不使用支持优待',async()=>{
  const m=memory();gift(m,'1');const bodies=[];
- const client=createAIClient({getKey:()=> 'key',request:d=>{bodies.push(JSON.parse(d.data));d.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:bodies.length===1 ? '{"intent":"web-search","query":"今天的赛事结果","reply":""}' : '今天的赛果还没确认。'}}]})});},search:async()=>({results:[{title:'赛果',url:'https://example.com',snippet:'仍待公布'}]})});
+ const client=createAIClient({getKey:()=> 'key',request:d=>{bodies.push(JSON.parse(d.data));d.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:bodies.length===1 ? '{"intent":"web-search","query":"今天的赛事结果","reply":""}' : '{"answer":"今天的赛果还没确认。","sources":[1]}'}}]})});},search:async()=>({results:[{index:1,title:'赛果',url:'https://example.com',content:'仍待公布'}]})});
  await client({now,context:[],target:{type:'chat',text:'今天谁赢了',memory:m.context({id:'1'})},task:{kind:'ai'},maxLength:50},{...config.ai,search:{...config.ai.search,enabled:true}});
  assert.equal(bodies.length,2);
- for(const req of bodies){assert.equal(input(req).target.support.level,'substantial');assert.match(req.messages[0].content,/善意幽默/);assert.match(req.messages[0].content,/不阴阳怪气/);assert.match(req.messages[0].content,/不降低事实.*隐私.*安全/);assert.match(req.messages[0].content,/多一点耐心/);assert.match(req.messages[0].content,/不.*过度讨好/);}
+ for(const req of bodies.slice(0,1)){assert.equal(input(req).target.support.level,'substantial');assert.match(req.messages[0].content,/善意幽默/);assert.match(req.messages[0].content,/不阴阳怪气/);assert.match(req.messages[0].content,/不降低事实.*隐私.*安全/);assert.match(req.messages[0].content,/多一点耐心/);assert.match(req.messages[0].content,/不.*过度讨好/);}
+ assert.equal(input(bodies[1]).target.support,undefined);assert.equal(input(bodies[1]).evidence_context,undefined);assert.match(bodies[1].messages[0].content,/只返回JSON对象/);
  const moderation=wire({type:'chat',text:'测试审核',memory:m.context({id:'1'})},{kind:'moderation'});assert.equal(input(moderation).target.support,undefined);assert.doesNotMatch(moderation.messages[0].content,/多一点耐心/);
 });
 test('支持者仍遵守接话滑块与公共上限，不因送礼绕过静默或克制节奏',async()=>{

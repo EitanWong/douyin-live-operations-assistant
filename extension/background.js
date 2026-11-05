@@ -1,3 +1,8 @@
+import {installNativeASRBridge} from './native-asr.js';
+import {installEdgeBridge} from './edge-background.js';
+import {requestNativeDeployment} from './native-deployment.js';
+import {collectAccount} from './account-collector.js';
+import {createAccountResearch} from './account-research.js';
 import {installNativePerceptionBridge} from './native-perception.js';
 import {createBackgroundAI} from './ai-background.js';
 import {APPEARANCE_PREFERENCES} from '../src/ui/appearance.js';
@@ -8,26 +13,45 @@ import { ProtocolCache } from './protocol-cache.js';
 import { fanclubFrameContext, cleanFanclubSnapshot } from '../src/data/fanclub.js';
 import { validateEndpoint } from '../src/services/ai.js';
 import { validateSearchEndpoint, validateSearchBody } from '../src/services/search.js';
+import {validateWeatherURL} from '../src/services/weather.js';
+import {validatePublicDataURL} from '../src/services/public-data.js';
 import {validateMediaRequest,MEDIA_REQUEST_LIMIT} from '../src/services/media.js';
 import { GiftStore } from '../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
 import { installCollectionKeeper } from './collection-keeper.js';
 import {parseGiveawayState} from '../src/core/giveaway.js';
+import {createPredictionBackground} from './prediction-background.js';
+import {mergeLiveMemory} from '../src/ai/live-memory.js';
+import {persistNativeMemory} from './live-memory.js';
+import {LocalDataEngine,nativeDataRequest} from './local-data.js';
+import {createOpponentCollector} from './opponent-collector.js';
+import {parsePulse} from '../src/analytics/schema.js';
 
 const collectionKeeper = installCollectionKeeper(chrome);
-installNativePerceptionBridge(chrome);
+installNativePerceptionBridge(chrome,{onStart:async room=>{await storageReady;return readRecord(`live-assistant:config:${room}`);},onObservation:async(room,row,scope)=>{await storageReady;await persistNativeMemory({room,row,scope,read:readRecord,write:writeRecord,transaction:work=>giftStore.transaction(work)});}});
+installEdgeBridge(chrome);
+installNativeASRBridge(chrome);
+const accountCollections=new Map();
 
 const durableStorage = new DurableStorage({ local:chrome.storage.local });
 const storageReady = (async()=>{ await chrome.storage.local.setAccessLevel({ accessLevel:'TRUSTED_CONTEXTS' }); await durableStorage.migrate(); })();
 void storageReady.catch(()=>{});
 const durableKey = isDurableKey;
 const readRecord = async key => durableKey(key) ? durableStorage.get(key) : (await chrome.storage.local.get(key))[key];
+let predictionHost;
+let localData;
+const dataEngine=()=>localData ||=new LocalDataEngine({request:nativeDataRequest(chrome)});
+const opponentCollector=createOpponentCollector(chrome);
 const readAll = async () => durableStorage.getAll(['live-assistant:config:','live-assistant:profile:']);
 const writeRecord = async (key,value) => {
   if (!durableKey(key)) return writeStorage(key,value);
   await durableStorage.set(key,value);
   await notifyChanges({[key]:{newValue:value}});
 };
+const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),
+  collect:(url,options)=>collectAccount(chrome,url,options),archive:async({room,anchor,source,records,at})=>{
+    await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor,kind:'account',receivedAt:at,payload:{source,records}});void dataEngine().flush();
+  }});
 const deleteRecord = async keys => {
   const list = Array.isArray(keys) ? keys : [keys], durable = list.filter(durableKey), local = list.filter(key=>!durableKey(key));
   if (durable.length) await durableStorage.remove(durable);
@@ -48,12 +72,12 @@ const roomFromUrl = value => {
   } catch { return null; }
 };
 const isRoom = sender => sender.frameId === 0 && Boolean(roomFromUrl(sender.tab?.url)) && (!sender.url || roomFromUrl(sender.url) === roomFromUrl(sender.tab.url));
-const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|income-calibration:\d+|event:\d+:[a-z\d-]+|(?:api-key|search-key|media-key):https?:\/\/[^\s/]+)$/.test(key);
+const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|live-memory:\d+:(?:\d{1,40}|unknown)|income-calibration:\d+|event:\d+:[a-z\d-]+|(?:api-key|search-key|media-key):https?:\/\/[^\s/]+)$/.test(key);
 const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
 };
-const eventTypes = new Set(['anchor-fanclub','room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season']);
+const eventTypes = new Set(['anchor-fanclub','room-likes','gift','like','chat','enter','start','end','pk-start','pk-score','pk-end','pk-multiplier','pk-card','pk-contribution','pk-effect','anchor-pk-tasks','room-state','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','link-state','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season']);
 const validEvent = (event, maxBytes) => {
   try {
     const size = jsonLength(event);
@@ -111,6 +135,7 @@ const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
+  if(['edge-offscreen','edge-background'].includes(message?.target))return;
   if (message?.type === 'fanclub-frame') {
     void (async()=>{
       try {
@@ -153,8 +178,60 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
     try {
       await storageReady;
       let value;
-      if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
-      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:','live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
+      if(message.type==='data-configure' && extensionPage){value=await dataEngine().configure(message.enabled);if(message.enabled)void dataEngine().flush();}
+      else if(message.type==='data-flush' && extensionPage){await dataEngine().flush();value=await dataEngine().status();}
+      else if(message.type==='data-relocate' && extensionPage){
+        if(typeof message.directory!=='string' || message.directory.length>4096 || typeof message.expectedDatabase!=='string' || message.expectedDatabase.length>4096)throw Error('存储位置无效，请刷新状态后重试');
+        value=await nativeDataRequest(chrome,120000)('relocate',{directory:message.directory,expectedDatabase:message.expectedDatabase});
+        void dataEngine().flush();
+      }
+      else if(message.type==='data-status' && extensionPage){
+        const status=await dataEngine().status();let native=null;
+        try{native=await nativeDataRequest(chrome)('status');}catch{ /* Report unavailable explicitly; never enable implicitly. */ }
+        value={...status,native};
+      }else if(message.type==='data-context' && isRoom(sender))value=await opponentCollector.context(sender);
+      else if(message.type==='data-records' && isRoom(sender)){
+        if(!await dataEngine().enabled()){value=false;reply({ok:true,value});return;}
+        if(!Array.isArray(message.records) || message.records.length>32 || jsonLength(message.records)>650000)throw Error('本地归档批次无效');
+        const room=roomFromUrl(sender.tab.url),config=await readRecord(`live-assistant:config:${room}`);
+        const collector=await opponentCollector.context(sender);
+        for(const row of message.records){
+          if(!row || typeof row.id!=='string' || row.id.length>100 || !['event','protocol','coverage'].includes(row.kind) || row.receivedAt>Date.now() || row.kind==='event' && !(validEvent(row.payload,500000) || row.payload?.type==='anchor-exhibition-retention' && jsonLength(row.payload)<12000))throw Error('本地归档事件无效');
+          await dataEngine().enqueue({...row,id:`${room}:${sender.documentId || sender.tab.id}:${row.id}`,room,anchor:String(config?.anchorId || ''),payload:row.kind==='coverage' && collector?{...row.payload,ownerRoom:collector.ownerRoom}:row.payload});
+        }
+        void dataEngine().flush();value=true;
+      }else if(['data-opponent-open','data-opponent-stop','data-opponent-list'].includes(message.type) && extensionPage){
+        const tab=await chrome.tabs.get(message.tabId),owner={frameId:0,tab,url:tab.url};
+        if(message.type==='data-opponent-open'){
+          if(!await dataEngine().enabled())throw Error('请先启用本地归档');
+          value=await opponentCollector.open(owner,message.room);
+        }else value=await opponentCollector[message.type==='data-opponent-stop'?'stop':'list'](owner);
+      }else if(message.type==='prediction' && isRoom(sender)){
+        predictionHost ||=createPredictionBackground({readRecord});
+        value=await predictionHost.handle(message,roomFromUrl(sender.tab.url));
+        if(message.action==='pulse' && await dataEngine().enabled()){
+          const room=roomFromUrl(sender.tab.url),at=Date.now(),pulse=parsePulse(message.value,at);
+          await dataEngine().enqueue({id:`pk-state:${crypto.randomUUID()}`,room,anchor:message.anchor,kind:'pk-state',receivedAt:at,payload:pulse});
+          void dataEngine().flush();
+        }
+        if(message.action==='report' && !value.simulated && await dataEngine().enabled()){
+          const room=roomFromUrl(sender.tab.url);
+          await dataEngine().enqueue({id:`report:${room}:${message.anchor}:${value.asOf}`,room,anchor:message.anchor,kind:'forecast',receivedAt:value.asOf,payload:value});
+          void dataEngine().flush();
+          value=await dataEngine().enrich(room,message.anchor,value);
+        }
+      }else if(message.type==='account-search' && isRoom(sender)){
+        if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
+        await chrome.tabs.create({url:`https://www.douyin.com/search/${encodeURIComponent(message.query.trim())}?type=general`,active:true});value=true;
+      }else if(message.type==='account-collect' && isRoom(sender)){
+        const key=sender.tab.id;if(accountCollections.has(key))throw new Error('账号采集正在进行');
+        const controller=new AbortController();accountCollections.set(key,controller);
+        try{
+          value=await accountResearch.collect(roomFromUrl(sender.tab.url),message.url,{signal:controller.signal});
+        }finally{accountCollections.delete(key);}
+      }else if(message.type==='account-cancel' && isRoom(sender)){accountCollections.get(sender.tab.id)?.abort();value=true;}
+      else if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
+      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:',`live-assistant:live-memory:${roomFromUrl(sender.tab.url)}:`,'live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
       else if (['rewards-read','rewards-write'].includes(message.type) && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
         if (typeof message.key !== 'string' || !new RegExp(`^live-assistant:rewards:${room}:[1-9]\\d{0,24}$`).test(message.key)) throw new Error('活动记录范围无效');
@@ -173,6 +250,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           const state=parseGiveawayState(message.value,room);await durableStorage.set(key,state);value=true;
         }
       }
+      else if(message.type==='native-deployment' && isRoom(sender))value=await requestNativeDeployment(chrome,message.action);
       else if (['agent-submit','agent-list','agent-cancel'].includes(message.type) && isRoom(sender)) value=await getAIBackground().handle(message,roomFromUrl(sender.tab.url));
       else if(message.type==='ai-request-cancel' && isRoom(sender) && typeof message.id==='string' && /^[a-z\d-]{16,80}$/iu.test(message.id)){const key=`${sender.tab.id}:${message.id}`;cancelledAIRequests.add(key);while(cancelledAIRequests.size>128)cancelledAIRequests.delete(cancelledAIRequests.values().next().value);activeAIRequests.get(key)?.abort();value=true;}
       else if (message.type === 'collection-state' && isRoom(sender)) value = await collectionKeeper.update(sender,message.active);
@@ -190,10 +268,15 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         // Database failures retain the event journal for recovery.
         const size = jsonLength(message.value);
         if (size == null) throw Object.assign(new Error('设置无法序列化'),{code:'INVALID_CONFIG'});
-        if (!message.key.startsWith('live-assistant:runtime:') && size > 1024*1024) throw new Error('设置过大');
-        await giftStore.transaction(() => writeRecord(message.key,message.value)); value=true;
+        if (!message.key.startsWith('live-assistant:runtime:') && !message.key.startsWith('live-assistant:live-memory:') && size > 1024*1024) throw new Error('设置过大');
+        if(message.key.startsWith('live-assistant:live-memory:') && !message.key.startsWith(`live-assistant:live-memory:${roomFromUrl(sender.tab.url)}:`))throw new Error('直播记忆范围无效');
+        if(message.key.startsWith('live-assistant:live-memory:') && message.key.split(':').at(-1)!==(message.value?.anchor || 'unknown'))throw new Error('直播记忆归属无效');
+        await giftStore.transaction(async() => writeRecord(message.key,message.key.startsWith('live-assistant:live-memory:') ? mergeLiveMemory(await readRecord(message.key),message.value) : message.value)); value=true;
       }
-      else if (message.type === 'delete' && keyAllowed(message.key) && isRoom(sender)) { await deleteRecord(message.key); value=true; }
+      else if (message.type === 'delete' && keyAllowed(message.key) && isRoom(sender)) {
+        if(message.key.startsWith('live-assistant:live-memory:'))throw new Error('请通过记忆管理清空内容，保留删除标记');
+        await deleteRecord(message.key); value=true;
+      }
       else if (message.type === 'event-append' && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url), event = message.event;
         if (!validEvent(event, 12000)) throw Object.assign(new Error('直播事件无效'),{code:'INVALID_EVENT'});
@@ -268,20 +351,20 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           value={status:response.status,responseText:response.status>=200 && response.status<300 ? text : '',finalUrl:response.url};
         }finally{clearTimeout(timeout);}
       }
-      else if (['ai','search','media'].includes(message.type) && isRoom(sender)) {
-        const searching=message.type==='search';
+      else if (['ai','search','media','weather','public-data'].includes(message.type) && isRoom(sender)) {
+        const searching=message.type==='search',weather=['weather','public-data'].includes(message.type);
         const provider=message.provider || (String(message.url).endsWith('/web-search') ? 'bocha' : 'tavily');
-        const url = searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
+        const url = weather ? message.type==='weather' ? validateWeatherURL(message.url) : validatePublicDataURL(message.url) : searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
         if (!await chrome.permissions.contains({origins:[`${new URL(url).protocol}//${new URL(url).hostname}/*`]})) throw new Error(`请点击扩展图标，授权当前${searching ? '搜索' : ' AI '}服务域名后重试`);
-        if (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : 100000)) throw new Error('AI请求过大');
+        if (!weather && (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : 100000))) throw new Error('AI请求过大');
         const form=searching && provider==='searxng';
-        const body = form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
-        if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!Array.isArray(body.messages) || typeof body.model !== 'string') throw new Error('AI请求无效');
-        const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 8000 : 25000);
+        const body = weather ? null : form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
+        if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!weather && (!Array.isArray(body.messages) || typeof body.model !== 'string')) throw new Error('AI请求无效');
+        const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 30000 : 25000);
         const requestKey=typeof message.requestId==='string' && /^[a-z\d-]{16,80}$/iu.test(message.requestId) ? `${sender.tab.id}:${message.requestId}` : null;
         if(requestKey){activeAIRequests.set(requestKey,controller);if(cancelledAIRequests.delete(requestKey))controller.abort();}
         try {
-          const response = await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:message.data});
+          const response = await fetch(url,{method:weather ? 'GET' : 'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:weather ? {} : {'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:weather ? undefined : message.data});
           const text = await response.text();
           value={status:response.status,responseText:text.slice(0,200000),finalUrl:response.url};
         } finally { clearTimeout(timeout);if(requestKey)activeAIRequests.delete(requestKey); }

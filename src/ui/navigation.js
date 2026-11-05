@@ -4,20 +4,20 @@ import { bundledTools } from '../tools/bundled.js';
 
 export const NAVIGATION_GROUPS = [
   {key:'interaction',label:'直播互动',items:[
-    ['anchor','主播数据','chart-no-axes-combined'],['pk','PK 预测','swords'],
+    ['anchor','主播数据','chart-no-axes-combined'],
     ['gift','礼物感谢','gift'],['welcome','进场欢迎','hand'],['likes','点赞感谢','heart'],
     ['keywords','关键词回复','messages-square'],['bot','@机器人','bot'],['timers','定时消息','timer']
   ]},
   {key:'tools',label:'扩展工具',items:[]},
   {key:'settings',label:'设置',items:[
     ['features','功能开关','sliders-horizontal'],['appearance','外观','palette'],
-    ['moderation','内容治理','activity'],['ai','AI 设置','sparkles'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],
+    ['moderation','内容治理','activity'],['ai','AI 设置','sparkles'],['knowledge','知识库','library'],['runtime','运行规则','play'],['profiles','主播管理','users-round'],
     ['diagnostics','连接诊断','activity']
   ]}
 ];
 
-export function navigationTemplate(activeTab = 'pk', tools = bundledTools) {
-  const groups = NAVIGATION_GROUPS.map(group => group.key === 'tools' ? {...group,items:[...group.items,...tools.list().map(tool => [tool.id,tool.label,tool.icon])]} : group);
+export function navigationTemplate(activeTab = 'anchor', tools = bundledTools) {
+  const groups = NAVIGATION_GROUPS.map(group => group.key === 'tools' ? {...group,items:[...group.items,...tools.list().filter(tool=>!tool.embeddedIn).map(tool => [tool.id,tool.label,tool.icon])]} : group);
   return `<nav class="nav" aria-label="功能导航">
     <div class="compact-navigation"><label><span>功能分类</span><select data-nav-category aria-label="功能分类"></select></label><label><span>功能页面</span><select data-nav-page aria-label="功能页面"></select></label></div>
     <div class="sidebar-heading"><span class="nav-label">功能导航</span><button type="button" data-sidebar-toggle aria-expanded="true" aria-controls="assistant-navigation-items" aria-label="折叠侧边栏" title="折叠侧边栏">${icon('panel-right')}</button></div>

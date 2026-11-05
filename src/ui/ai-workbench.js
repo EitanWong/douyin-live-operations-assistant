@@ -1,11 +1,14 @@
 // UI only submits and observes. Background research never owns the public sender.
 export class AIWorkbench {
- constructor(root,{tasks,memory,saveMemory,onError=()=>{}}){Object.assign(this,{root,tasks,memory,saveMemory,onError});this.closed=false;
+ constructor(root,{tasks,memory,perceptionMemory,saveMemory,onError=()=>{}}){Object.assign(this,{root,tasks,memory,saveMemory,onError});this.closed=false;
   const run=fn=>void Promise.resolve().then(fn).catch(onError);
   root.querySelector('[data-audience-refresh]').addEventListener('click',()=>this.refreshMemory());
   root.querySelector('[data-audience-choice]').addEventListener('change',()=>this.showMemory());
   root.querySelector('[data-audience-forget]').addEventListener('click',()=>run(async()=>{memory().forget(this.choice());await saveMemory();this.refreshMemory();}));
   root.querySelector('[data-audience-clear]').addEventListener('click',()=>run(async()=>{memory().clear();await saveMemory();this.refreshMemory();}));
+  const clearPerception=root.querySelector('[data-perception-memory-clear]');
+  clearPerception.hidden=!perceptionMemory;
+  clearPerception.addEventListener('click',()=>run(async()=>{perceptionMemory().clear();await saveMemory();}));
   root.querySelector('[data-audience-note-save]').addEventListener('click',()=>run(async()=>{memory().annotate(this.choice(),this.node('[data-audience-note]').value);await saveMemory();this.node('[data-audience-note]').value='';this.showMemory();}));
   const submit=root.querySelector('[data-agent-submit]');
   submit.addEventListener('click',()=>{if(this.submitting)return;this.submitting=true;submit.disabled=true;run(async()=>{try{

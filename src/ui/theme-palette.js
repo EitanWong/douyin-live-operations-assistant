@@ -19,10 +19,6 @@ const selector=(name,condition='')=>`:host([data-palette=${name}]${condition}),:
 export const THEME_PALETTE_CSS=PALETTES.filter(([name])=>name!=='original').map(([name])=>`${selector(name)}{${accentTokens(name,true)}}\n${selector(name,'[data-theme=light]')}{${accentTokens(name,false)}}\n@media(prefers-color-scheme:light){${selector(name,':not([data-theme=dark])')}{${accentTokens(name,false)}}}`).join('\n')+`
 :host([data-palette]:not([data-palette=original])) .primary,:root[data-palette]:not([data-palette=original]) .primary{color:var(--sg-on-primary)}
 :host([data-material=solid]) .panel,:root[data-material=solid] .glass-panel{background:var(--sg-solid);backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 0 0 1px var(--sg-border),0 12px 40px var(--sg-shade)}
-@supports(backdrop-filter:blur(1px)){
- :host([data-material=liquid]) .panel,:root[data-material=liquid] .glass-panel{background:color-mix(in srgb,var(--sg-solid) 86%,transparent);backdrop-filter:blur(32px) saturate(155%);-webkit-backdrop-filter:blur(32px) saturate(155%);border-radius:22px;box-shadow:inset 0 1px 1px var(--sg-rim),inset 0 0 0 1px var(--sg-inner),0 0 0 1px var(--sg-edge),0 24px 64px -18px var(--sg-shade)}
-}
-@media(prefers-reduced-transparency:reduce){:host([data-material=liquid]) .panel,:root[data-material=liquid] .glass-panel{background:var(--sg-solid);backdrop-filter:none;-webkit-backdrop-filter:none}}
 `;
 
 export function componentTheme(name,dark){

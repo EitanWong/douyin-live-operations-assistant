@@ -3,11 +3,13 @@ import { ModerationRequests } from './moderation-requests.js';
 import { LikeRequests } from './like-requests.js';
 import { LotteryRequests } from './lottery-requests.js';
 import { GiftRequests } from './gift-requests.js';
+import { encodeChatMentions } from '../core/chat-mentions.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
 // remain in charge. Cookies, signatures and remote code never cross the bridge;
 // paid gifts use fixed, budget-bound preparation and commit operations.
 export class PageRequestSender {
   constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); this.gifts = new GiftRequests(this); }
+  giftBalance(options) { return this.gifts.balance(options); }
   giftSnapshot(options) { return this.gifts.snapshot(options); }
   giftCatalog(options) { return this.gifts.catalog(options); }
   prepareGift(config,options) { return this.gifts.prepare(config,options); }
@@ -52,10 +54,10 @@ export class PageRequestSender {
     const candidates=Object.entries(require.m).filter(([,factory])=>{
       const source=Function.prototype.toString.call(factory);
       return ['/webcast/gift/list/','/webcast/gift/send/','/webcast/wallet/info/'].every(path=>source.includes(path));
-    });
-    if (candidates.length!==1) return null;
-    const api=require(candidates[0][0]);
-    return ['Xq','hF','sb'].every(key=>typeof api?.[key]==='function') ? api : null;
+    }).map(([id])=>require(id)).filter(api=>['Xq','hF','sb'].every(key=>typeof api?.[key]==='function'));
+    // Error-reporting metadata contains the same endpoint literals. Only
+    // modules exporting the native operations participate in uniqueness.
+    return candidates.length===1 ? candidates[0] : null;
   }
   context() {
     const info = this.page.__STORE__?.roomStore?.roomInfo;
@@ -111,22 +113,27 @@ export class PageRequestSender {
       return {available:true,token};
     } catch { return {available:false}; }
   }
-  commit(token, text) {
+  commit(token, text, mentions = []) {
     const ticket = this.tickets.get(token);
     if (!ticket) return Promise.resolve({submitted:false,reason:'请求准备已失效'});
     if (ticket.result) return ticket.result; // A duplicate bridge delivery never sends twice.
+    let richText;
+    try { richText=encodeChatMentions(text,mentions); }
+    catch (error) { return Promise.resolve({submitted:false,reason:error.message}); }
     // Publish the receipt before page code can synchronously re-enter commit.
-    ticket.result = Promise.resolve().then(()=>this.perform(ticket,text));
+    ticket.result = Promise.resolve().then(()=>this.perform(ticket,text,richText));
     return ticket.result;
   }
-  async perform(ticket,text) {
+  async perform(ticket,text,richText) {
     const current = this.context();
     if (!current || current.path !== ticket.context.path || current.roomId !== ticket.context.roomId || current.userId !== ticket.context.userId || Date.now()-ticket.at > 10000) return {submitted:false,reason:'房间、账号或请求准备已变更'};
     if (typeof text !== 'string' || !text.trim() || [...text].length > 50) return {submitted:false,reason:'消息长度无效'};
     if (ticket.channel === 'admin' && !current.admin) return {submitted:false,reason:'管理员身份已变更'};
     const params = {room_id:current.roomId,content:text};
     const admin = ticket.channel === 'admin';
+    if (admin && richText) return {submitted:false,reason:'真实@请使用普通聊天通道'};
     if (!admin) params.type = 0;
+    if (richText) params.rtf_content=richText;
     // These are navigation context fields, not authentication material.
     const query = new URL(this.page.location.href).searchParams;
     if (admin) {
@@ -156,7 +163,7 @@ export class PageRequestSender {
 export class RequestBridgeClient {
   constructor(page,send=payload=>page.chrome.runtime.sendMessage(payload)) { this.page=page;this.send=send;this.context=new RoomContext(page);this.room=this.context.room; }
   async call(operation,payload,timeout,{signal}={}) {
-    const read=['gift-snapshot','gift-catalog','acknowledge-gift'].includes(operation);
+    const read=['gift-snapshot','gift-balance','gift-catalog','acknowledge-gift'].includes(operation);
     const unavailable=()=>operation.startsWith('prepare') || read ? {available:false,reason:'页面请求未完成，请刷新数据后重试'}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
     if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const id=this.page.crypto.randomUUID();
@@ -181,6 +188,7 @@ export class RequestBridgeClient {
     finally {this.page.clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
   }
   prepareModeration(action,target) {return this.call('prepare-moderation',{action,target},800);}
+  giftBalance(options) {return this.call('gift-balance',{},20000,options);}
   giftSnapshot(options) {return this.call('gift-snapshot',{},20000,options);}
   giftCatalog(options) {return this.call('gift-catalog',{},20000,options);}
   prepareGift(config,options) {return this.call('prepare-gift',{config},20000,options);}
@@ -195,5 +203,5 @@ export class RequestBridgeClient {
   stopLike(token) {return this.call('stop-like',{token},800);}
   commitModeration(token) {return this.call('commit-moderation',{token},10000);}
   prepare(channel) {return this.call('prepare',{channel},800);}
-  commit(token,text) {return this.call('commit',{token,text},10000);}
+  commit(token,text,mentions=[]) {return this.call('commit',{token,text,mentions},10000);}
 }

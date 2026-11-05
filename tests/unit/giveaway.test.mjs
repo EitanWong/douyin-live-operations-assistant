@@ -108,6 +108,42 @@ test('安全随机抽取通过拒绝采样去掉取模偏差',t=>{
   const samples=[0xffffffff,8];const mock=t.mock.method(crypto,'getRandomValues',buffer=>{buffer[0]=samples.shift();return buffer;});
   assert.equal(secureRandomInt(3),2);assert.equal(mock.mock.callCount(),2);
 });
+
+test('@当前账号的参与口令与直接弹幕使用同一报名规则，拒绝@他人和多余内容',()=>{
+ const r=round({keyword:'我要报名'}),identity={id:'9',name:'场控'};
+ for(const text of ['我要报名','@场控 我要报名','@场控 参与抽奖']){
+  const e={...chat('1',text),mentions:text.startsWith('@')?['9']:[]};
+  assert.equal(matchesGiveawayChat(r,e,2000,{self:identity,selfId:'9'}),true,text);
+  assert.equal(enterGiveaway(r,e,2000,{self:identity,selfId:'9'}).entrants.length,1);
+ }
+ for(const e of [{...chat('1','@别人 我要报名'),mentions:['8']},chat('1','我想我要报名'),chat('1','@场控冒充 我要报名')])
+  assert.equal(matchesGiveawayChat(r,e,2000,{self:identity,selfId:'9'}),false);
+});
+
+test('近期真实互动参与者权重提高，过期者保留机会，开奖固化权重且不把榜单当在线名单',()=>{
+ let r=createGiveaway(config({winners:1,durationSec:300,presenceBias:true}),{id:'presence',room:'123',broadcastId:'room-1',now:1000});
+ for(const id of ['1','2'])r=enterGiveaway(r,chat(id),2000);
+ r=enterGiveaway(r,{...chat('1','普通聊天',290000)},290000);
+ r=enterGiveaway(r,{type:'room-audience',ranks:[{user:{id:'2'}}],at:290000},290000);
+ const wins={'1':0,'2':0};
+ for(let ticket=0;ticket<400;ticket++){
+  const result=drawGiveaway(r,400000,max=>{assert.equal(max,400);return ticket;});
+  wins[result.awards[0].userId]++;
+  assert.equal(result.drawSnapshot.at,301000,'恢复晚开奖仍以截止时间判断');
+  assert.deepEqual(result.drawSnapshot.weights.map(row=>[row.userId,row.recent,row.weight]),[['1',true,3],['2',false,1]]);
+  assert.deepEqual(parseGiveawayState({version:2,rounds:[result]},'123').rounds[0].drawSnapshot,result.drawSnapshot);
+ }
+ assert.deepEqual(wins,{'1':300,'2':100});
+ assert.match(giveawayCSV({rounds:[drawGiveaway(r,301000,()=>0)]}),/最近活动时间/);
+ const drawn=drawGiveaway(r,301000,()=>0),snapshot=drawn.drawSnapshot;
+ assert.doesNotThrow(()=>parseGiveawayState({version:2,rounds:[{...drawn,drawSnapshot:{weights:snapshot.weights,recentMultiplier:snapshot.recentMultiplier,windowMs:snapshot.windowMs,at:snapshot.at}}]},'123'));
+ const corrupt=structuredClone(drawn);corrupt.drawSnapshot.weights[0].weight=99;
+ assert.throws(()=>parseGiveawayState({version:2,rounds:[corrupt]},'123'),/权重快照/);
+ for(const event of [{...chat('2','聊天',300000),roomId:'other'},chat('2','聊天',999),chat('2','聊天',301000)])assert.equal(enterGiveaway(r,event,300000),r);
+ const legacy={...r,config:{...r.config,presenceBias:undefined}};
+ assert.equal(parseGiveawayState({version:2,rounds:[legacy]},'123').rounds[0].config.presenceBias,false);
+ assert.equal(drawGiveaway({...r,config:{...r.config,presenceBias:false}},301000,max=>{assert.equal(max,200);return 0;}).drawSnapshot,undefined);
+});
 test('加权抽取支持超过 32 位的整数总权重，非法范围直接拒绝',t=>{
   const values=[[0x1fffff,0xffffffff],[1,5]];t.mock.method(crypto,'getRandomValues',buffer=>{buffer.set(values.shift());return buffer;});
   assert.equal(secureRandomInt(0x100000001),4);

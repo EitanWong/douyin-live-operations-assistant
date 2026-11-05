@@ -2,12 +2,20 @@
 
 ## 使用
 
+- [下载安装与首次使用](../README.md)：面向普通用户的逐步操作、升级与常见问题。
+- [版本更新日志](../CHANGELOG.md)：0.1.3 更新内容、附件和兼容边界。
+
 - [使用与配置](guides/usage.zh-CN.md)：安装、互动规则、AI、机器人和收入统计。
 - [本机实测](guides/live-testing.zh-CN.md)：开发扩展加载及真实房间验收步骤。
+- [AI 链路与中文端侧](ai-foundation.zh-CN.md)：低延迟、WebGPU 兜底、SenseVoice 安装、公开账号资料与实测边界。
+- [主播数据预测与可视化](features/anchor-prediction.zh-CN.md)：实时多维图表、收入/在线/PK/观众预测、历史参考和误差档案。
 
 ## 开发
 
+- [Agent 导航与可维护索引](development/agent-guide.zh-CN.md)：按任务定位、符号与资源查询、依赖影响、测试入口、术语及自动过期校验。
 - [项目结构与架构](development/architecture.zh-CN.md)：模块职责、消息流和持久化边界。
+- [包内工具插件开发](development/tool-plugins.zh-CN.md)：统一注册、Cordis 运行时适配、资源回收、操作网关及自动点赞／福袋红包接入。
+- [公共数据工具与免费接口](development/public-data-tools.zh-CN.md)：时间、天气、地名、空气质量、汇率、节假日的 Agent 调用契约、实际接口与免费使用范围。
 - [开发与测试](development/contributing.zh-CN.md)：本地命令、测试分类、产物管理。
 - [直播数据可视化](development/visualization.zh-CN.md)：PK 图表、活动统计、数据边界与验证。
 - [发布流程](development/release-process.zh-CN.md)：dev / main 分支与版本发布。
@@ -18,12 +26,21 @@
 - [验证记录](reviews/validation.zh-CN.md)：当前测试结果与待验收项目。
 - [稳定性审查](reviews/stability-review.zh-CN.md)：故障原因、修复及历史验证。
 - [性能审查](reviews/performance-review.zh-CN.md)：运行时重构、基准条件和结果。
+- [运行基础与开发索引优化（2026-11-05）](reviews/foundation-performance-2026-11-05.zh-CN.md)：主线程让出、视图复用、关闭释放、监控启动和可复现基准。
 
 ## 调研资料
 
+- [液态玻璃与统一交互动效](research/ui-motion-and-liquid-glass-2026-11-03.zh-CN.md)：Motion、GSAP、react-spring、Anime.js 选型，Apple 动效原则、背景模糊连续性与验证。
+- [直播收入估算、实时预测与浏览器端建模](research/live-prediction-and-income-modeling-2026-11-03.zh-CN.md)：按可执行性排序的历史收入、本场/下月预测、PK/千票榜、观众送礼与弹幕分析方案，以及端侧模型许可、MV3 架构和回测门槛。
+
 - [AI 基础层与阿里 Omni](research/ai-foundation-and-omni-2026-11-01.zh-CN.md)：实时接口官方依据、持续观察与问答分离、统一证据上下文、本地 RAG、联网与分阶段验收。
 
+- [页面响应式布局与开源参考](research/responsive-layout-and-open-source-2026-10-26.zh-CN.md)：容器断点、页面分栏、窗口默认尺寸，以及 Tabler、GridStack、React Grid Layout 的布局参考。
+- [扩展工具插件化、热更新与 Cordis 评估](research/tool-plugins-and-hot-update-2026-10-25.zh-CN.md)：当前工具耦合、MV3 更新边界、Cordis 核心独立实验、工具宿主接口与渐进实施方案。
+- [订阅商业化、支付授权与 AI 辅助破解防护](research/commercial-subscriptions-and-anti-tamper-2026-10-25.zh-CN.md)：面向“大哥”和观众的产品价值、本地/云端边界、支付、授权、防滥用和实施顺序。
+- [订阅商业化威胁模型](research/douyin-live-operations-assistant-threat-model.md)：基于当前代码的信任边界、AI 辅助逆向与拟议商业后端的攻击路径及防护重点。
 - [PK 播报与共享直播上下文](research/shared-live-context-2026-10-25.zh-CN.md)：PK 页内设置、固定格式兜底、所有 AI 共用数据与验证边界。
+- [直播数据问答、联网搜索与开源组件](research/ai-search-and-open-source-2026-10-26.zh-CN.md)：博查、Tavily、SearXNG 接入、自动意图识别、jsonrepair、来源引用和验证边界。
 - [实时直播音视频理解](research/realtime-av-understanding-2026-10-24.zh-CN.md)：采集路径、中文流式识别、视觉与全模态开源方案、成本、延迟目标和扩展接入设计。
 - [侧边栏与界面组件](research/sidebar-and-ui-components-2026-10-23.zh-CN.md)：左右布局、折叠交互、Lucide 许可与组件边界。
 - [悬浮窗口交互与动效](research/floating-window-motion-2026-10-23.zh-CN.md)：Apple 交互原则、开源组件比较、可打断弹簧与窗口响应式设计。

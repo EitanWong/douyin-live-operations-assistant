@@ -3,31 +3,7 @@ import { TRUTH_QUESTIONS, DARE_QUESTIONS, INTERACTION_TOPICS } from '../data/int
 
 const botLength = text => [...text].length;
 const botClip = (text, max) => [...text].slice(0, max).join('');
-const mentionBoundary = /[\s\u200b:：,，。!！?？]/u;
-
-// 有结构化被 @ 账号时以 UID 为准；纯文本必须完整匹配昵称，不能误回同名前缀。
-export function addressedToSelf(event, self, configuredId = '') {
-  const text = String(event.text || '').trim();
-  const ids = new Set([configuredId || self?.id, self?.secUid].filter(Boolean).map(String));
-  const mentions = Array.isArray(event.mentions) ? event.mentions.map(String) : [];
-  const structured = mentions.length > 0;
-  if (structured && !mentions.some(id => ids.has(id))) return null;
-  const name = (!configuredId || !self?.id || String(self.id) === String(configuredId)) && self?.name;
-  if (name) {
-    const token = `@${name}`;
-    let offset = text.indexOf(token);
-    while (offset >= 0) {
-      const end = offset + token.length;
-      if ((!offset || mentionBoundary.test(text[offset - 1])) && (end === text.length || mentionBoundary.test(text[end]))) {
-        return `${text.slice(0, offset)} ${text.slice(end)}`.trim().replace(/^[:：,，\s]+/u, '');
-      }
-      offset = text.indexOf(token, end);
-    }
-  }
-  if (!structured) return null;
-  // 手动 UID 也可使用结构化 @；页面未提供昵称时，移除开头的显示昵称。
-  return text.replace(/^@[^\s\u200b]+(?:[\s\u200b]+|$)/u, '').trim();
-}
+export {addressedToSelf} from './chat-mentions.js';
 
 export const BOT_COMMANDS = [
   { key:'idiomEnabled', label:'成语接龙', menu:'🔤接龙', example:'开始接龙', description:'全场接续、个人积分与冠军结算', aliases:['接龙','成语接龙','idiom'] },

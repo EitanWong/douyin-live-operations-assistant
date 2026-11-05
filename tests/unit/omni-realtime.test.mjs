@@ -6,13 +6,14 @@ function fixture(){
   const tracks=[{kind:'audio',enabled:true,stop(){this.stopped=true;},addEventListener(){}},{kind:'video',enabled:true,stop(){this.stopped=true;},addEventListener(){}}];
   const low={kind:'video',enabled:true,stop(){this.stopped=true;}};
   const stream={getTracks:()=>tracks,getAudioTracks:()=>tracks.slice(0,1)};
-  let peer,channel,sharing;const env={navigator:{mediaDevices:{getDisplayMedia:()=>sharing || Promise.resolve(stream)}},document:{createElement:type=>type==='video' ? {readyState:2,videoWidth:1920,videoHeight:1080,play:async()=>{},pause(){}} : {width:0,height:0,getContext:()=>({drawImage(){}}),captureStream:()=>({getTracks:()=>[low],getVideoTracks:()=>[low]})}},RTCPeerConnection:class{
+  const rates=[];
+  let peer,channel,sharing;const env={navigator:{mediaDevices:{getDisplayMedia:()=>sharing || Promise.resolve(stream)}},document:{createElement:type=>type==='video' ? {readyState:2,videoWidth:1920,videoHeight:1080,play:async()=>{},pause(){}} : {width:0,height:0,getContext:()=>({drawImage(){}}),captureStream:rate=>{rates.push(rate);return {getTracks:()=>[low],getVideoTracks:()=>[low]};}}},RTCPeerConnection:class{
     constructor(){peer=this;this.iceGatheringState='complete';this.connectionState='new';this.senders=[];}
     addTrack(track){const sender={track,replaceTrack:async value=>sender.track=value};this.senders.push(sender);return sender;}
     createDataChannel(){channel={readyState:'open',sent:[],send(value){this.sent.push(JSON.parse(value));},close(){this.closed=true;}};return channel;}
     createOffer=async()=>({type:'offer',sdp});setLocalDescription=async offer=>{this.localDescription=offer;};setRemoteDescription=async answer=>{this.answer=answer;};close(){this.closed=true;}
   }};
-  return {env,tracks,low,stream,get peer(){return peer;},get channel(){return channel;},share:p=>sharing=p};
+  return {env,tracks,low,stream,rates,get peer(){return peer;},get channel(){return channel;},share:p=>sharing=p};
 }
 const config={realtimeEndpoint:'https://ws.cn-beijing.maas.aliyuncs.com/api/v1/webrtc/realtime?model=qwen3.8-omni-flash-realtime',realtimeModel:'qwen3.8-omni-flash-realtime',sessionMinutes:1,sessionTokens:1000,maxPerHour:10};
 const tick=()=>new Promise(r=>setTimeout(r,0));
@@ -61,4 +62,25 @@ test('Omni 可直接使用原始直播流，既有确认门控保留且不调用
   assert.ok(f.channel);await f.channel.onmessage({data:JSON.stringify({type:'session.created',session:{id:'direct'}})});await tick();
   const session=f.channel.sent[0].session;await f.channel.onmessage({data:JSON.stringify({type:'session.updated',session})});
   const capture=await pending;assert.equal(shared,0);assert.equal(f.peer.senders.length,2);capture.stop();assert.equal(released,1);
+});
+
+test('浏览器实时视觉按已配置间隔上传；token边界的最后一条完成观察先保留再续接',async()=>{
+ const f=fixture(),b=await begin(f,{config:{...config,videoIntervalSec:12}});await ready(f,b);
+ try{
+  assert.equal(f.rates[0],1/12);
+  b.event({type:'response.created',response:{id:'last'}});
+  b.event({type:'response.done',response:{id:'last',status:'completed',usage:{total_tokens:1000},output:[{type:'message',content:[{type:'text',text:'主播拿着蓝色杯子。'}]}]}});
+  assert.equal(b.observations[0].text,'主播拿着蓝色杯子。');assert.equal(b.errors[0].mediaRenewal,'session');
+ }finally{b.controller.abort();}
+});
+
+test('借用媒体源的会话结束会移除轨道监听，不停止供后续会话使用的共享源',async()=>{
+ const f=fixture(),listeners=new Map();
+ for(const track of f.tracks){
+  track.addEventListener=(type,fn)=>listeners.set(track,fn);
+  track.removeEventListener=(type,fn)=>{if(listeners.get(track)===fn)listeners.delete(track);};
+ }
+ const b=await begin(f,{sharedSource:{stream:f.stream,source:'direct',stop(){}}});await ready(f,b);
+ assert.equal(listeners.size,2);b.controller.abort();
+ assert.equal(listeners.size,0);assert.ok(f.tracks.every(track=>!track.stopped));
 });

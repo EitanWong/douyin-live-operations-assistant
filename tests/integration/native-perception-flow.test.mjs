@@ -8,7 +8,7 @@ test('原生感知通过应用路由、统一上下文和现有回复模型；�
   for(const name of ['document','window','location','MutationObserver','HTMLElement'])globalThis[name]=dom.window[name];
   globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};
   let api,listener,disconnect,closed=0;const sent=[],requests=[],values=new Map();
-  const port={postMessage:v=>sent.push(v),disconnect:()=>closed++,onMessage:{addListener:f=>listener=f},onDisconnect:{addListener:f=>disconnect=f}};
+  const port={postMessage:v=>{if(v.type==='status')listener({type:'session',stopped:false});else sent.push(v);},disconnect:()=>{if(sent.length)closed++;},onMessage:{addListener:f=>listener=f},onDisconnect:{addListener:f=>disconnect=f}};
   try{
     boot({page:dom.window,nativeConnect:()=>port,nativeExtensionId:'a'.repeat(32),get:(k,f)=>structuredClone(values.get(k) ?? f),set:async(k,v)=>values.set(k,structuredClone(v)),del:k=>values.delete(k),all:()=>Object.fromEntries(values),
       request:d=>{requests.push(d);d.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:'杯子是蓝色的。'}}]})});},

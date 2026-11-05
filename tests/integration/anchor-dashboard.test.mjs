@@ -202,3 +202,62 @@ test('没有场次边界的旧日账不用于当前收入，零礼物场次仍�
     assert.match(view.text('[data-anchor-start]'),/11:00:00/);
   } finally {view.close();}
 });
+
+test('周期汇总和观众分页导出一致；历史筛选不改变本场最高单价',()=>{
+  const view=setup();
+  try {
+    view.engine.running=true;
+    for (const [i,session] of view.income.allSessions.entries()) {
+      session.totalDiamonds=100+i;session.giftCount=1;
+      session.audience=Array.from({length:25},(_,j)=>({userId:`uid:${j+1}`,name:j ? `观众 ${j}` : '<script>同名</script>',totalDiamonds:100+i,giftDiamonds:100+i,giftCount:1}));
+    }
+    view.income.currentSession.highestGift={unitValue:100,tiedCount:1,gifts:[{giftId:'1',name:'<img src=x>城堡',senders:[{userId:'uid:1',name:'甲'}]}]};
+    view.dashboard.render(view.engine,{income:view.income});
+    assert.match(view.text('[data-anchor-highest-gift]'),/100.*城堡/s);
+    assert.equal(view.root.querySelector('[data-anchor-highest-gift] img'),null);
+    view.root.querySelector('[data-anchor-period=month]').click();
+    assert.equal(view.root.querySelector('[data-anchor-date-field]').hidden,false);
+    assert.equal(view.root.querySelectorAll('[data-anchor-audience] tr').length,20);
+    assert.equal(view.root.querySelector('[data-anchor-audience] script'),null);
+    assert.equal(view.dashboard.exportReport().gifts.audience.length,25);
+    assert.equal(view.dashboard.exportReport().gifts.sessions,23);
+    view.root.querySelector('[data-anchor-audience-page="1"]').click();
+    assert.equal(view.root.querySelectorAll('[data-anchor-audience] tr').length,5);
+    assert.equal(view.dashboard.exportReport().gifts.audience.length,25);
+    view.select('[data-anchor-audience-sort]','giftCount');
+    const search=view.root.querySelector('[data-anchor-audience-search]');search.value='uid:25';search.dispatchEvent(new view.dom.window.Event('input',{bubbles:true}));
+    assert.equal(view.root.querySelectorAll('[data-anchor-audience] tr').length,1);
+    view.select('[data-anchor-date]','2026-08-01');
+    assert.equal(view.text('[data-anchor-gift-stat=totalDiamonds]'),'0');
+    view.dashboard.render(view.engine,{income:{...view.income,currentSession:{...view.income.currentSession,endAt:now}}});
+    assert.match(view.text('[data-anchor-highest-gift]'),/没有已确认正在直播/);
+  } finally {view.close();}
+});
+
+test('已分页的主播明细搜索全部已采集记录，重置页码且不截断导出',()=>{
+  const view=setup();
+  try {
+    for(let i=0;i<26;i++)view.stats.ingestBattle({...battle(`search-${i}`,now-i*1000),opponentName:i===25?'远页对手':'对手'+i,selfScore:i===25?10:100,opponentScore:50});
+    view.dashboard.render(view.engine,{income:view.income});
+    view.root.querySelector('[data-anchor-page="1"]').click();
+    const search=view.root.querySelector('[data-anchor-search="battleQuery"]');assert.ok(search,'PK 明细提供对手搜索');
+    search.value='远页';search.dispatchEvent(new view.dom.window.Event('input',{bubbles:true}));
+    assert.equal(view.root.querySelectorAll('[data-anchor-battles] tr').length,1);
+    assert.match(view.text('[data-anchor-battles]'),/远页对手/);
+    assert.match(view.text('[data-anchor-page-note]'),/1 条.*1 \/ 1 页/);
+    assert.equal(view.dashboard.exportReport().battles.length,26,'筛选不改变原始统计和导出');
+    view.select('[data-anchor-result-filter]','win');assert.doesNotMatch(view.text('[data-anchor-battles]'),/远页对手/);
+    view.select('[data-anchor-result-filter]','all');
+    search.value='';search.dispatchEvent(new view.dom.window.Event('input',{bubbles:true}));
+    assert.equal(view.root.querySelectorAll('[data-anchor-battles] tr').length,20);
+    view.stats.ingest({type:'anchor-fanclub',source:'native-fanclub',anchorId:'101',roomId:'100',receivedAt:now,fansCount:'45',lightedCount:'45',
+      members:Array.from({length:45},(_,i)=>({position:i+1,name:i===44?'末页成员':'成员'+i,level:10,badgeName:'同一团',intimacy:'100'}))});
+    for(let chunk=0;chunk<3;chunk++)view.stats.ingest({type:'anchor-exhibition',anchorId:'101',snapshotId:'search',receivedAt:now,section:'lighted_items',chunk,chunks:3,totalItems:25,
+      items:Array.from({length:chunk===2?5:10},(_,i)=>({giftId:String(1000+chunk*10+i),name:'礼物'+(chunk*10+i),lighted:true,received:1,threshold:2}))});
+    view.dashboard.render(view.engine,{income:view.income});
+    for(const [key,query,selector,expected] of [['memberQuery','末页','[data-anchor-fanclub-members]','末页成员'],['giftQuery','1024','[data-anchor-gifts]','礼物24']]){
+      const input=view.root.querySelector(`[data-anchor-search="${key}"]`);assert.ok(input);input.value=query;input.dispatchEvent(new view.dom.window.Event('input',{bubbles:true}));assert.match(view.text(selector),new RegExp(expected));
+    }
+    assert.equal(view.root.querySelectorAll('[data-anchor-gifts] li').length,1);
+  } finally {view.close();}
+});

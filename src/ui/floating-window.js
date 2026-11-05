@@ -1,4 +1,5 @@
 import { Spring } from './spring.js';
+import {WindowPresence,windowPresentation} from './window-presence.js';
 
 const floatingClamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
 const floatingRubber = (value, min, max) => {
@@ -39,7 +40,7 @@ export class FloatingWindow {
     const position = this.manual ? this.clampPanel(savedWindow.left, savedWindow.top) : this.attachedPosition();
     this.px = new Spring(position.left, 26, .1);
     this.py = new Spring(position.top, 26, .1);
-    this.presence = new Spring(1, 26, .001);
+    this.presence = new WindowPresence();
     this.press = new Spring(1, 32, .001);
     this.hintPresence = new Spring(0, 30, .001);
     this.channels = [this.x, this.y, this.px, this.py, this.presence, this.press, this.hintPresence];
@@ -71,7 +72,9 @@ export class FloatingWindow {
   }
   applySize(size = this.preferredSize) {
     const limits = this.sizeLimits(), v = this.viewport();
-    this.width = floatingClamp(size?.width ?? 620, limits.minWidth, limits.maxWidth);
+    // Use desktop space on first open; explicit resizing remains authoritative.
+    const defaultWidth = Math.min(1280, Math.max(620, Math.round(v.width * .78)));
+    this.width = floatingClamp(size?.width ?? defaultWidth, limits.minWidth, limits.maxWidth);
     this.height = floatingClamp(size?.height ?? Math.min(800, v.height - (v.width > 560 ? 110 : 24)), limits.minHeight, limits.maxHeight);
     this.shell.style.width = `${this.width}px`;
     this.shell.style.height = `${this.height}px`;
@@ -126,9 +129,13 @@ export class FloatingWindow {
     const anchorX = floatingClamp(x + this.launcherWidth / 2 - this.px.value, 0, this.width);
     const anchorY = floatingClamp(y + this.launcherHeight / 2 - this.py.value, 0, this.height);
     this.panel.style.transformOrigin = `${anchorX}px ${anchorY}px`;
-    const distance = this.reduced ? 0 : 1 - amount;
-    this.panel.style.transform = `translate3d(0,${(anchorY < this.height / 2 ? -10 : 10) * distance}px,0) scale(${1 - .055 * distance})`;
-    this.shell.style.opacity = String(amount);
+    const appearance=windowPresentation(amount,this.reduced);
+    this.panel.style.transform = `translate3d(0,${(anchorY < this.height / 2 ? -1 : 1)*appearance.travel}px,0) scale(${appearance.scale})`;
+    // opacity<1 on an ancestor creates a backdrop root and cuts the glass off
+    // from the page. Fade the material itself and its foreground separately.
+    this.shell.style.opacity = '1';
+    this.panel.style.setProperty('--window-material-opacity', String(appearance.material));
+    this.panel.style.setProperty('--window-content-opacity', String(appearance.content));
     this.shell.hidden = this.panel.hidden = !this.open && !this.presence.active;
     this.shell.dataset.motionState = this.presence.active ? this.open ? 'opening' : 'closing' : this.open ? 'open' : 'closed';
     const b = this.launcherBounds();
@@ -148,10 +155,9 @@ export class FloatingWindow {
     this.shell.inert = !open;
     this.shell.setAttribute('aria-hidden', String(!open));
     this.shell.dataset.interactive = String(open);
-    this.presence.frequency = open ? 26 : 34;
     this.presence.target = open ? 1 : 0;
-    this.render();
-    this.request();
+    if (this.reduced) this.finish();
+    else { this.render(); this.request(); }
   }
   listen(target, type, handler, options) {
     target.addEventListener(type, handler, options);

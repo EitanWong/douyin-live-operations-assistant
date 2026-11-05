@@ -107,14 +107,15 @@ test('用户脚本接收同源窗口外观变化，未知值安全回到系统�
   } finally { controller.destroy(); s.dom.window.close(); }
 });
 
-test('原主题默认保留；配色与材质独立持久保存，亮暗切换不覆盖皮肤',async()=>{
+test('默认液态玻璃；配色与材质独立持久保存，亮暗切换不覆盖皮肤',async()=>{
  const {PALETTE_KEY,MATERIAL_KEY}=await import('../../src/ui/appearance.js');
  const s=surface(),document=s.dom.window.document,paletteSelect=document.createElement('select'),materialSelect=document.createElement('select');document.body.append(paletteSelect,materialSelect);
  let controller=installTheme({...s,paletteSelect,materialSelect});
  try{
-  await controller.ready;assert.equal(s.target.dataset.palette,'original');assert.equal(s.target.dataset.material,'glass');assert.ok(paletteSelect.options.length>15);
+  await controller.ready;assert.equal(s.target.dataset.palette,'original');assert.equal(s.target.dataset.material,'liquid');assert.ok(paletteSelect.options.length>15);
   paletteSelect.value='teal';paletteSelect.dispatchEvent(new s.dom.window.Event('change'));materialSelect.value='liquid';materialSelect.dispatchEvent(new s.dom.window.Event('change'));await new Promise(resolve=>setImmediate(resolve));
   assert.equal(s.dom.window.localStorage.getItem(PALETTE_KEY),'teal');assert.equal(s.dom.window.localStorage.getItem(MATERIAL_KEY),'liquid');await s.choose('dark');assert.equal(s.target.dataset.palette,'teal');assert.equal(s.target.dataset.material,'liquid');
   controller.destroy();controller=installTheme({...s,paletteSelect,materialSelect});await controller.ready;assert.equal(s.target.dataset.palette,'teal');assert.equal(s.select.value,'dark');assert.equal(s.target.dataset.material,'liquid');
+  materialSelect.value='glass';materialSelect.dispatchEvent(new s.dom.window.Event('change'));await new Promise(resolve=>setImmediate(resolve));controller.destroy();controller=installTheme({...s,paletteSelect,materialSelect});await controller.ready;assert.equal(s.target.dataset.material,'glass','明确保存的原始玻璃偏好不会被新默认值覆盖');
  }finally{controller.destroy();s.dom.window.close();}
 });
