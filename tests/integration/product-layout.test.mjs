@@ -27,11 +27,11 @@ test('卡片保留原顺序与显式通栏，不提前限定双列或把尾项�
  assert.ok(children.every(node=>node.span===undefined),'投影不改变原表单与规则状态');
 });
 
-test('长短卡片与普通折叠操作共用尺寸标准，折叠区不强制通栏',()=>{
+test('长短卡片共用等高规格，独立折叠区通栏避免关闭时出现空壳',()=>{
  const children=[{id:'short',surface:'card',children:[]},{id:'long',surface:'card',children:Array(20).fill({kind:'field'})},{id:'advanced',kind:'details',surface:'card'},{id:'last',surface:'card'}];
  const result=layoutChildren('cards',children);
- assert.deepEqual(result.map(node=>node.size),['tile','tile','tile','tile']);
- assert.deepEqual(result.map(node=>node.span),[undefined,undefined,undefined,undefined]);
+ assert.deepEqual(result.map(node=>node.size),['tile','tile','section','tile']);
+ assert.deepEqual(result.map(node=>node.span),[undefined,undefined,'full',undefined]);
  assert.deepEqual(result.map(node=>node.id),children.map(node=>node.id));
  assert.ok(children.every(node=>node.size===undefined && node.span===undefined));
 });

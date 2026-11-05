@@ -1,4 +1,3 @@
-import {layoutCardFlows} from './card-flow.js';
 // Keep standard spacing when it fits; shrink only when the content needs it.
 // Column widths are stable during the probes so the required height is monotone.
 export function chooseWorkspaceFit(measure) {
@@ -20,7 +19,9 @@ export class WorkspaceFit {
     this.refresh();
   }
   refresh() {
-    const nodes=new Set([this.content,...this.content.querySelectorAll('.product-page,.product-card-slot,.product-card-content')]);
+    // Native flex wrapping and bounded bodies already handle card internals.
+    // Only outer geometry can change whether the page needs a denser layout.
+    const nodes=new Set([this.content,...this.content.querySelectorAll('.product-page')]);
     for(const node of this.observed)if(!nodes.has(node))this.observer.unobserve(node);
     for(const node of nodes)if(!this.observed.has(node))this.observer.observe(node);
     this.observed=nodes;this.schedule();
@@ -33,12 +34,10 @@ export class WorkspaceFit {
     this.owner.dataset.measuring='';
     const fit=chooseWorkspaceFit(scale=>{
       this.owner.style.setProperty('--product-density',String(scale));
-      layoutCardFlows(this.content);
       const style=this.view.getComputedStyle(this.content);
       return {required:page.getBoundingClientRect().height+Number.parseFloat(style.paddingTop)+Number.parseFloat(style.paddingBottom),available:this.content.clientHeight};
     });
     if(fit){this.owner.dataset.fit=fit.density;this.owner.style.setProperty('--product-density',String(fit.scale));}
-    layoutCardFlows(this.content);
     delete this.owner.dataset.measuring;
     for(const {node,top,left} of positions){if(node.scrollTop!==top)node.scrollTop=top;if(node.scrollLeft!==left)node.scrollLeft=left;}
   }

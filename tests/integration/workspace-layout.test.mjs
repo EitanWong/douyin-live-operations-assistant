@@ -64,17 +64,40 @@ test('连接诊断按账号摘要、三组诊断和高级折叠区排列，发�
     bridge=createWorkspaceBridge(p);
     const body=bridge.getSnapshot().content.children.find(node=>node.classes?.split(/\s/u).includes('workspace-grid'));
     const runs=cardRuns(body.children);
-    assert.equal(runs.length,2);
+    assert.equal(runs.length,7);
     assert.equal(runs[0][0].span,'full');
     const title=node=>node.children[0]?.children[0]?.text;
     assert.deepEqual(runs[1].slice(0,3).map(title),['直播连接','采集与存储','互动过滤']);
-    assert.deepEqual(runs[1].slice(3).map(node=>node.title),['高级页面适配与去重','弹幕备用采集与场次识别','运行记录','配置与运行记录','使用说明']);
+    assert.deepEqual(runs.slice(2).map(run=>run[0].title),['高级页面适配与去重','弹幕备用采集与场次识别','运行记录','配置与运行记录','使用说明']);
+    assert.ok(runs.slice(2).every(run=>run.length===1),'收起的高级区不生成空白卡片');
     const input=p.node('[data-field="selfId"]');
     input.value='123456789';input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));
     p.tab('welcome');p.tab('diagnostics');
     assert.equal(p.node('[data-field="selfId"]'),input);assert.equal(input.value,'123456789');
     for(const action of ['diagnose','debug-send','recover-events','import-income','import','export-log'])assert.equal(page.querySelectorAll(`[data-action="${action}"]`).length,1);
   }finally{bridge?.destroy();f.close();}
+});
+
+test('所有功能页在全部详情打开后仍遵循同一尺寸角色且保留原字段',()=>{
+ const f=fixture(),p=f.panel,bridge=createWorkspaceBridge(p);
+ try{
+  const visit=(node,check)=>{check(node);for(const child of node.children || [])visit(child,check);};
+  for(const page of p.root.querySelectorAll('[data-page]')){
+   const fields=[...page.querySelectorAll('input,textarea,select')],key=page.dataset.page;
+   p.tab(key);
+   for(const detail of page.querySelectorAll('details'))detail.open=true;
+   bridge.refresh();
+   visit(bridge.getSnapshot().content,node=>{
+    if(node.layout!=='cards')return;
+    for(const child of node.children){
+     if(child.kind==='details'){assert.equal(child.span,'full',key);assert.equal(child.size,'section',key);}
+     else if(child.surface==='card')assert.equal(child.size,child.span==='full' ? 'section' : 'tile',key);
+     else assert.equal(child.span,'full',key);
+    }
+   });
+   assert.deepEqual([...page.querySelectorAll('input,textarea,select')],fields,key+' 原字段不因布局或展开而替换');
+  }
+ }finally{bridge.destroy();f.close();}
 });
 
 test('直播连接默认收起长检查结果与发送测试，检查后结果可见且不展开测试记录',async()=>{

@@ -1,7 +1,7 @@
 // Translate legacy presentation once at the boundary. The visible workspace
 // uses these roles, never a second set of source-DOM layout selectors.
-export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36,textareaMinHeight:96,cardMinWidth:280,contentPadding:20,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
-export const PRODUCT_COMPACT_DIMENSIONS=Object.freeze({...PRODUCT_DIMENSIONS,controlHeight:32,headingHeight:24,textareaMinHeight:72,cardMinWidth:280,contentPadding:12,gap:6,sectionGap:8,cardPadding:8,metricMinHeight:52,chartHeight:180});
+export const PRODUCT_DIMENSIONS=Object.freeze({controlHeight:36,headingHeight:36,textareaMinHeight:96,cardMinWidth:280,cardHeight:380,cardMinHeight:240,contentPadding:20,fieldMinWidth:200,metricMinWidth:140,metricPadding:8,inlineControlWidth:160,gap:12,sectionGap:16,cardPadding:16,metricMinHeight:64,chartHeight:220});
+export const PRODUCT_COMPACT_DIMENSIONS=Object.freeze({...PRODUCT_DIMENSIONS,controlHeight:32,headingHeight:24,textareaMinHeight:72,cardMinWidth:280,cardHeight:320,contentPadding:12,gap:6,sectionGap:8,cardPadding:8,metricMinHeight:52,chartHeight:180});
 const transparent='.ai-settings,.ai-service-grid,[data-workspace-contents],[data-ai-modes],[data-custom-media],[data-perception-active],.workspace-metrics';
 const cards='.pred-visual-grid,.workspace-grid,.settings-workspace,.income-workspace,.pk-workspace,.pk-overview,.pk-analysis,.anchor-analytics,[data-list],[data-memory-list]';
 const fields='.grid,.workspace-filter-fields,.anchor-audience-controls,.income-controls,.pk-broadcast-times,.giveaway-prize-row,.bot-game-options,.feature-settings .feature-list';
@@ -28,7 +28,7 @@ export function describeLayout(node) {
 
 export function layoutChildren(layout,children) {
  if(layout==='cards'){
-  return children.map(child=>child.surface==='card' || child.kind==='details' ? {...child,size:child.span==='full' ? 'section' : 'tile'} : {...child,span:'full'});
+  return children.map(child=>child.kind==='details' ? {...child,span:'full',size:'section'} : child.surface==='card' ? {...child,size:child.span==='full' ? 'section' : 'tile'} : {...child,span:'full'});
  }
  if(layout==='fields')return children.map(child=>child.kind==='field' && child.type!=='textarea' || child.kind==='group' && child.layout==='stack' ? child : {...child,span:'full'});
  return children;
@@ -37,8 +37,8 @@ export function layoutChildren(layout,children) {
 export function cardRuns(children) {
  const runs=[];
  for(const child of children){
-  if(child.span==='full')runs.push([child]);
-  else if(!runs.length || runs.at(-1)[0].span==='full' || runs.at(-1)[0].band!==child.band)runs.push([child]);
+  if(child.span==='full' || child.kind==='details')runs.push([child]);
+  else if(!runs.length || runs.at(-1)[0].span==='full' || runs.at(-1)[0].kind==='details' || runs.at(-1)[0].band!==child.band)runs.push([child]);
   else runs.at(-1).push(child);
  }
  return runs;
@@ -49,7 +49,7 @@ export function packPageCards(children) {
  for(const child of children){
   const previous=packed.at(-1);
   if(child.kind==='details' && child.classes?.split(/\s/u).includes('workspace-help') && previous?.layout==='cards'){
-   packed[packed.length-1]={...previous,children:[...previous.children,{...child,size:'tile'}]};
+   packed[packed.length-1]={...previous,children:[...previous.children,{...child,span:'full',size:'section'}]};
   }else packed.push(child);
  }
  return packed;

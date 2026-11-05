@@ -140,11 +140,11 @@ test('布局边界展开透明包装，卡片/字段/操作区各有唯一语义
  }finally{f.close();}
 });
 
-test('高级折叠区与配置共用列宽，仅显式通栏保留完整行',()=>{
+test('高级折叠区通栏且正文有界，普通配置保留统一卡片角色',()=>{
  const f=setup();try{
   f.root.querySelector('[data-page="ai"]').innerHTML='<div class="workspace-grid"><section class="settings-group workspace-card"><h3>参与设置</h3><input value="draft"></section><details class="advanced workspace-card"><summary>定位</summary><input value="xpath"></details><details class="workspace-card"><summary>工具管理</summary><button>停用</button></details></div>';
   f.bridge.refresh();const [config,...advanced]=f.bridge.getSnapshot().content.children[0].children;
-  assert.equal(config.span,undefined);assert.deepEqual(advanced.map(node=>node.span),[undefined,undefined]);assert.ok(advanced.every(node=>node.size==='tile'));
+  assert.equal(config.span,undefined);assert.equal(config.size,'tile');assert.deepEqual(advanced.map(node=>node.span),['full','full']);assert.ok(advanced.every(node=>node.size==='section'));
  }finally{f.close();}
 });
 
