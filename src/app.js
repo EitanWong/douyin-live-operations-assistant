@@ -269,6 +269,15 @@ export function boot(options = {}) {
     }
   };
   const edge=createEdgeRouter({browser:options.edge,native:options.nativeASR,config:()=>engine?.config.ai.edge || config.ai.edge});
+  let localAttemptKey='';
+  function syncLocalModels(){
+    if(demo || closed || suspended || !options.edge || !engine.config.ai.enabled || !engine.config.ai.edge.enabled)return;
+    const key=JSON.stringify(engine.config.ai.edge);if(localAttemptKey===key)return;localAttemptKey=key;
+    foundationSettings?.status('正在自动准备本地中文回复，首次下载可能需要几分钟；其他功能可继续使用…');
+    void edge.ensure('text').then(result=>{
+      if(!closed && localAttemptKey===key)foundationSettings?.status(result.phase==='ready' ? '本地中文回复已自动就绪；直播语音会在使用时自动准备。' : '设备速度不足，继续使用已配置的云端或规则回复。');
+    },error=>{if(!closed && localAttemptKey===key)foundationSettings?.status(`本地回复暂不可用：${error.message}；可稍后点击准备重试。`);});
+  }
   const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
     snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
     changed:async()=>{accountRevision++;engine?.cancelAI();await persistRuntime(true);},onStatus:text=>{log('ai',text);foundationSettings?.showAccounts();}});
@@ -286,7 +295,15 @@ export function boot(options = {}) {
   const sourceFor=config=>config.inputSource==='display' ? undefined : directSource;
   const exchange=createSDPExchange({request,getKey:mediaKey});
   const realtimeCapture=createRenewingCapture({capture:createRealtimeCapture({exchange,env:window}),sourceFactory:directSource,env:window});
-  const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config),vadFactory:options.vadFactory},window)),
+  const captureMedia=options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config),vadFactory:options.vadFactory},window));
+  const media=new LiveMediaAnalyzer({capture:async args=>{
+    if(args.config.localAudio){
+      const result=await edge.ensure('audio',args.config.localAudioBackend);
+      if(args.signal.aborted || !args.isCurrent())throw new Error('本地语音采集已停止');
+      if(result?.phase!=='ready')throw new Error('此设备本地语音测速未达标，可在本地与性能选择其他方案');
+    }
+    return captureMedia(args);
+  },
     realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room,onMemoryWarning:message=>{log('error',message);panel?.aiSettings.showError(message);}}),recognize:createSpeechRecognizer({cloud:recognizeMedia,edge,config:()=>engine.config.ai.edge}),
     onObservation:row=>{mediaEvidence.add(row);if(engine?.config.ai.assistant.memoryEnabled && memoryScope().perception.observe(row))persistRuntime();panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
@@ -548,7 +565,6 @@ export function boot(options = {}) {
     if(media.state!=='idle')return;
     if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
     const effective=resolveMediaConfig(c.ai);validateMediaConfig(effective,true);const persistKeys=prepareMediaKeys(c,credentials);
-    if(effective.localAudio && !await edge.ready('audio'))throw new Error('请先准备本地中文语音模型并通过设备测速');
     for(const kind of ['vision','audio'])if(!(effective.localAudio && kind==='audio') && !(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
     activeMediaConfig=copy(effective);mediaAnchor=engine.config.anchorId;clearMedia();
     const started=media.start(activeMediaConfig);
@@ -619,6 +635,7 @@ export function boot(options = {}) {
       }
       if (!roomContext.current()) { lock.release(); throw new Error('直播间已切换，请刷新页面'); }
       engine.start();
+      syncLocalModels();
       syncMedia();
       if (options.journal && adapter.replayJournal) void adapter.replayJournal().catch(error => reportPersistenceError(error, '恢复事件日志失败'));
       autoStartError = '';
@@ -680,6 +697,7 @@ export function boot(options = {}) {
         await set(configKey, c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c);playground?.cancel();playground?.updateConfig(); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
+        syncLocalModels();
       },
       webKnowledge,
       startMedia,
@@ -866,8 +884,19 @@ export function boot(options = {}) {
       });
       return localAgentReady;
     };
-    foundationSettings=new FoundationSettings(panel.root,{edge,collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
+    foundationSettings=new FoundationSettings(panel.root,{edge,activateLocal:async()=>{
+      const result=await edge.ensure('text','auto');
+      if(result?.phase!=='ready')throw new Error('此设备本地回复测速未达标，尚未更改配置');
+      let audio;try{audio=await edge.ensure('audio','auto');}catch{}
+      if(closed || suspended || !roomContext.current())throw new Error('页面已关闭或切换，本地配置未更改');
+      const c=panel.read();c.ai.enabled=true;c.ai.chatEnabled=true;
+      Object.assign(c.ai.edge,{enabled:true,audioEnabled:true,autoTune:true,localOnly:true,textModel:'auto',audioBackend:'auto'});
+      c.ai.pipeline.mode=audio?.phase==='ready' ? 'local-audio' : 'text';c.ai.media.inputSource='direct';
+      await panel.callbacks.save(c,panel.root.querySelector('[data-api-key]').value.trim(),panel.root.querySelector('[data-remember-key]').checked,panel.searchCredentials(),panel.aiSettings.credentials());panel.populate(c);
+      return audio?.phase==='ready' ? '本地 AI 已启用并保存，开始场控后自动读取直播音轨；无需模型密钥。' : '本地文字 AI 已启用并保存；语音暂不可用，可稍后重试。';
+    },collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
       changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
+    syncLocalModels();
     playground=new AIPlayground(panel.root,{
       service:createAIPlayground({request,search:searchClient,knowledge:webKnowledge,edge,getConfig:()=>engine.config,getContext:c=>engine.aiContext(c),
         isCurrent:()=>!closed && !suspended && roomContext.current(),

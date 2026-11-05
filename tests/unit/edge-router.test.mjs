@@ -10,3 +10,15 @@ test('auto ASR detects installed native models, recovers to browser and reports 
  cfg={audioBackend:'native-sensevoice'};await assert.rejects(router.prepare('audio','native-sensevoice'),/native unavailable/);
  assert.equal(calls.filter(c=>c[0]==='browser').length,1);
 });
+
+test('自动准备合并并发请求，缓存就绪结果，释放后允许重新准备',async()=>{
+ let finish,calls=0,ready=false;const waiting=new Promise(resolve=>finish=resolve);
+ const router=createEdgeRouter({config:()=>({textModel:'auto',audioBackend:'auto'}),browser:{
+  ready:async()=>ready,status:async()=>({text:{phase:ready?'ready':'unprepared'}}),
+  prepare:async()=>{calls++;await waiting;ready=true;return {phase:'ready'};},release:async()=>{ready=false;}
+ }});
+ const first=router.ensure('text'),second=router.ensure('text');
+ await new Promise(setImmediate);assert.equal(calls,1);finish();
+ assert.equal((await first).phase,'ready');await second;await router.ensure('text');assert.equal(calls,1);
+ await router.release();await router.ensure('text');assert.equal(calls,2);
+});

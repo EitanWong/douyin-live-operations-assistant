@@ -1,15 +1,15 @@
 # 原生直播流实时感知
 
-本地组件使用 StreamGet 获取当前抖音房间的 HTTPS CDN 地址，由 FFmpeg 直接拉取 FLV/HLS，解码为音频和画面，再通过百炼 Omni WebSocket 观察直播。Chrome 只传控制消息和识别文字，不承担音视频采集，不调用麦克风、录屏或标签页共享。
+本地组件优先从当前已登录的直播页自动获取新的 HTTPS CDN 地址，页面不可用时回退到独立 StreamGet 解析，由 FFmpeg 直接拉取 FLV/HLS，解码为音频和画面，再通过百炼 Omni WebSocket 观察直播。Chrome 只传控制消息和识别文字，不承担音视频采集，不调用麦克风、录屏或标签页共享。
 
 ## 一次安装
 
-当前自动安装支持 macOS 和 Linux 的 Google Chrome，需 Node.js 20+、Python 3.11+ 和 FFmpeg。Chrome 扩展使用构建后的 `dist/chrome-extension` 目录；修改代码后先运行 `npm ci` 和 `npm run build`，再在 `chrome://extensions` 重载扩展。
+当前自动安装支持 macOS 和 Linux x64/arm64 的 Chrome、Chromium 和 Edge，仅需 Node.js 20+。Python、FFmpeg、中文模型和推理依赖由安装器自动准备。仅使用浏览器本地 AI 时可直接在“连接与模型”点击“一键启用本地 AI”，跳过本组件安装。Chrome 扩展使用构建后的 `dist/chrome-extension` 目录；修改代码后先运行 `npm ci` 和 `npm run build`，再在 `chrome://extensions` 重载扩展。
 
-在“AI 设置 → 直播感知”选择“本地原生拉流”，展开“本地组件安装”。复制其中已包含扩展 ID 的命令，在项目根目录运行：
+在项目根目录运行以下命令。安装器会自动发现唯一已启用的助手扩展；如有多个安装，可复制“AI 设置 → 直播感知 → 本地组件安装”中已填入当前扩展 ID 的命令：
 
 ```sh
-npm run native:install -- --extension-id=你的扩展ID
+npm run native:install
 ```
 
 可指定已有的 Python 和 FFmpeg：
@@ -18,9 +18,9 @@ npm run native:install -- --extension-id=你的扩展ID
 npm run native:install -- --extension-id=你的扩展ID --python=/opt/homebrew/bin/python3.14 --ffmpeg=/opt/homebrew/bin/ffmpeg
 ```
 
-安装器创建独立 Python 环境并安装锁定依赖，将宿主注册给该扩展 ID。安装后无需另开终端运行服务。首次升级需重载扩展，以使 `nativeMessaging` 权限生效，再刷新直播页。点击“检查本地组件”可验证宿主通信、依赖版本和 FFmpeg；此检查不获取直播流、不请求模型。
+安装器自动准备独立 Python 3.12、FFmpeg 和锁定推理依赖，下载并校验固定版本 SenseVoice int8 模型，完成真实解码与中文推理自检后才注册宿主。相同源码与参数复用已有安装；失败不会替换旧注册。注册 Chromium/Edge 使用 `--browser=chromium` 或 `--browser=edge`。只用云端感知可加 `--without-asr`。安装后无需另开终端运行服务。首次升级需重载扩展，以使 `nativeMessaging` 权限生效，再刷新直播页。点击“检查本地组件”可验证宿主通信、依赖版本和 FFmpeg；此检查不获取直播流、不请求模型。
 
-组件保存在 `~/.local/share/douyin-live-assistant/native`。更换扩展 ID、项目修改原生组件后应重新运行安装命令。Windows 和其他浏览器暂不支持自动注册。油猴与演示页可继续选择浏览器直连来源。
+组件保存在 `~/.local/share/douyin-live-assistant/native`。更换扩展 ID、项目修改原生组件后应重新运行安装命令。Windows 暂不支持原生自动注册。油猴与演示页可继续选择浏览器直连来源。
 
 ## 开始感知
 
@@ -43,16 +43,16 @@ FFmpeg 从同一条流输出 16kHz、单声道、16位 PCM，画面约每秒一�
 
 ## 恢复、额度和故障
 
-地址解析/媒体解码失败时最多尝试5轮，每轮重新解析地址并轮换候选，等待1/2/4/8秒。鉴权、余额不足或模型协议错误立即停止；本机会话和小时预算边界按下文自动续接。只有已完成且通过去重的模型响应进入上下文；迟到结果、已停止会话和其他房间的结果不接收。
+地址解析/媒体解码失败时最多尝试5轮，每轮请求新地址，逐一尝试本轮所有候选（最多12个）后才重新解析，等待1/2/4/8秒。鉴权、余额不足或模型协议错误立即停止；本机会话和小时预算边界按下文自动续接。只有已完成且通过去重的模型响应进入上下文；迟到结果、已停止会话和其他房间的结果不接收。
 
 “高级设置”的会话时长与响应 token 现在作为单次服务连接的轮换边界：到达后先保留最后完成观察，再自动建立新会话，后台任务和本场记忆继续保留。每小时视觉调用额度跨自动轮换保留，耗尽后等待原窗口恢复自动续接；手动停止取消后续轮换。服务商鉴权、余额不足、模型权限等错误仍明确报告，不反复购买失败请求。token 上限依据服务端已完成响应的用量检查，正在进行的调用可能超过剩余额度，不是账户账单硬上限；请同时设置百炼账户预算。
 
-- 未安装：确认扩展 ID、Chrome 注册目录和 Python/FFmpeg，然后重新安装、重载。
-- 无法解析：确认房间仍在直播，检查本机网络。平台接口可能调整或要求登录，解析器可读取本地进程环境变量 `DOUYIN_STREAM_COOKIES`；扩展不提取浏览器 Cookie。桌面 Chrome 不一定继承终端环境，当前未提供 Cookie 设置界面；无凭据可用时会明确失败。
+- 未安装：运行 `npm run native:doctor`；按提示核对扩展 ID 和浏览器，再重跑同一安装命令并重载扩展。
+- 无法解析：确认房间仍在直播，保持当前直播页登录并检查本机网络。工具自动通过绑定的当前文档读取新地址，无需复制 Cookie 或签名流地址；不导出浏览器 Cookie。离页后或页面接口失败会回退独立解析，解析器也兼容高级环境变量 `DOUYIN_STREAM_COOKIES`；扩展不提取浏览器 Cookie。桌面 Chrome 不一定继承终端环境，无法通过当前页面或独立解析取得有效流时会明确失败。
 - 解码失败：检查 FFmpeg 是否支持该流的编码、网络是否持续可达。不会自动切换到录屏。
 - Omni 失败：核对业务空间、地域、API Key、模型权限；服务端原始错误与签名地址不展示在界面，避免泄露凭据。
 
-卸载本组件（不删除扩展设置）：
+取消当前浏览器的本地注册（保留扩展设置、运行时和模型，避免影响其他浏览器或正在运行的宿主）：
 
 ```sh
 npm run native:install -- --uninstall
@@ -64,7 +64,9 @@ npm run native:install -- --uninstall
 npm test
 npm run build
 npm run check
-~/.local/share/douyin-live-assistant/native/.venv/bin/python -m unittest discover -s native -v
+npm run native:doctor
+# 开发原生回归使用已安装依赖的 Python 3.11+：
+python3 -m unittest discover -s native -v
 ```
 
 Python测试包含真实 FFmpeg 合成流解码、静音画面、真实本地 WebSocket 模型事件、重复提交确认和取消回收，不请求付费模型。未安装依赖时相关测试会跳过，不能记作实际链路通过；CI单独安装完整环境执行。

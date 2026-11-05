@@ -19,6 +19,7 @@ from importlib.metadata import version
 
 from protocol import read_message, write_message, parse_config, session_settings, Observer, INSTRUCTIONS
 from resolver import media_url
+from stream_source import StreamSource
 
 ROOT = Path(__file__).resolve().parent
 clock = lambda: int(time.time() * 1000)
@@ -245,12 +246,19 @@ async def run_session(config, observer, binary):
         for generation in range(5):
             try:
                 emit({'type': 'state', 'phase': 'resolving'})
-                rows = await resolve_streams(config['room'])
-                candidate = rows[generation % len(rows)]
-                observer.pending.clear()
-                observer.text.clear()
-                observer.responding = False
-                await attempt(config, observer, candidate, binary)
+                resolve = config.get('resolve', resolve_streams)
+                rows = await resolve(config['room'])
+                for candidate in rows:
+                    observer.pending.clear()
+                    observer.text.clear()
+                    observer.responding = False
+                    try:
+                        await attempt(config, observer, candidate, binary)
+                        return
+                    except ValueError as error:
+                        if str(error) != 'DECODE_FAILED':
+                            raise
+                raise ValueError('DECODE_FAILED')
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -261,9 +269,11 @@ async def run_session(config, observer, binary):
                 await asyncio.sleep(min(2 ** generation, 8))
 
 
-async def session(message):
+async def session(message, resolve=None):
     try:
         config = parse_config(message)
+        if resolve:
+            config['resolve'] = resolve
         runtime = json.loads((ROOT / 'runtime.json').read_text()) if (ROOT / 'runtime.json').exists() else {}
         binary = runtime.get('ffmpeg') or shutil.which('ffmpeg')
         if not binary or not Path(binary).is_file():
@@ -316,6 +326,7 @@ async def main():
                 loop.call_soon_threadsafe(deliver, None)
     threading.Thread(target=reader, daemon=True).start()
     task = None
+    streams = StreamSource(emit, resolve_streams)
     local = None
     local_task = None
     async def local_request(message):
@@ -342,6 +353,9 @@ async def main():
             message = await queue.get()
             if message is None or message.get('type') == 'stop':
                 return
+            if message.get('type') == 'streams' and task:
+                streams.receive(message)
+                continue
             if message.get('type') == 'local-asr' and not task:
                 if local_task and not local_task.done():
                     emit({'id': message.get('id'), 'error': '本地语音繁忙'})
@@ -365,7 +379,7 @@ async def main():
             if message.get('type') != 'start' or task:
                 emit({'type': 'error', 'code': 'INVALID'})
                 return
-            task = asyncio.create_task(session(message))
+            task = asyncio.create_task(session(message, streams.resolve))
     finally:
         if local_task:
             local_task.cancel()

@@ -2,6 +2,7 @@ import { DouyinAdapter } from '../src/browser/adapter.js';
 import { DEFAULTS, copy } from '../src/core/engine.js';
 import { RoomContext } from '../src/browser/room-context.js';
 import { ObservationBuffer } from './observation-buffer.js';
+import {resolveLiveStream} from '../src/browser/live-stream.js';
 
 // MAIN remains page-owned. Publish only native observations captured in closure;
 // the public facade cannot enqueue an event or supply a request result.
@@ -40,6 +41,7 @@ if(room && !Object.hasOwn(window,'__douyinAssistantPageV2')) {
   };
   const call=command=>{
     if(!roomContext.current())throw new Error('直播间已切换');
+    if(command.type==='resolve-stream')return resolveLiveStream({page:window,room,fresh:true});
     if(command.type==='drain'){
       const batch=observations.drain(command);
       return {...batch,status:{...adapter.status,...batch.status}};

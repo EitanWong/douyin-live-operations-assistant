@@ -4,7 +4,7 @@ import {accountSource} from '../ai/account-context.js';
 import {createAccountRefresh,ACCOUNT_COLLECTION_DEFAULTS} from '../services/account-refresh.js';
 
 export class FoundationSettings {
- constructor(root,{edge,collector,accounts,anchor,changed,onError,accountRefresh,dirty=()=>{},getContext=()=>null,targets=()=>[]}){
+ constructor(root,{edge,activateLocal,collector,accounts,anchor,changed,onError,accountRefresh,dirty=()=>{},getContext=()=>null,targets=()=>[]}){
   Object.assign(this,{root,edge,collector,accounts,anchor,changed,onError,dirty,getContext,targets});this.traces=[];this.generation=0;this.closed=false;
   this.ownsRefresh=!accountRefresh;this.accountRefresh=accountRefresh || createAccountRefresh({collector,accounts,scope:anchor,config:()=>ACCOUNT_COLLECTION_DEFAULTS,changed});
   const bind=(selector,fn)=>root.querySelector(selector).addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await fn();}catch(error){onError(error);}finally{button.disabled=false;}});
@@ -14,7 +14,11 @@ export class FoundationSettings {
    this.status(result.phase==='ready' ? `${kind==='text' ? '中文回复' : '中文语音'}已就绪 · ${result.model || result.backend || selection}${result.tokensPerSecond ? ` · ${result.tokensPerSecond.toFixed(1)} token/s · 首 token ${Math.round(result.firstTokenMs)}ms` : ''}` : '设备推理速度不足，实时兜底未启用');
   });
   bind('[data-edge-detect]',()=>this.detect());
-  bind('[data-edge-auto]',()=>{for(const key of ['enabled','audioEnabled','autoTune'])this.field(key).checked=true;this.field('localOnly').checked=false;for(const key of ['textModel','audioBackend'])this.field(key).value='auto';dirty();this.status('自动推荐已填入草稿，保存后生效；请准备模型并通过测速');});
+  bind('[data-edge-auto]',async()=>{
+   this.status('正在自动选择、下载并测速本地文字和语音模型，完成后自动保存…');
+   try{if(!activateLocal)throw new Error('一键启用需要 Chrome 扩展版');this.status(await activateLocal());}
+   catch(error){this.status(`本地 AI 未启用：${error.message}`);throw error;}
+  });
   bind('[data-edge-release]',async()=>{await edge?.release();this.status('已释放本地模型内存；缓存权重保留');});
   bind('[data-edge-status-refresh]',async()=>{const state=await edge?.status();this.status(state ? Object.entries(state).map(([kind,s])=>`${kind==='text' ? '文字' : '语音'}：${({loading:'准备中',ready:'已就绪',slow:'设备速度不足',error:'加载失败'})[s.phase] || '未准备'}${s.model || s.backend ? ` · ${s.model || s.backend}` : ''}`).join(' · ') || '尚未准备模型' : '端侧推理需要 Chrome 扩展版');});
   bind('[data-account-collect]',async()=>{
@@ -40,7 +44,7 @@ export class FoundationSettings {
   this.deviceStatus(`WebGPU ${d.webgpu ? '可用' : '不可用'} · CPU ${d.cores || '未知'} 线程 · 内存 ${d.memoryGB ? d.memoryGB+'GB' : '浏览器未提供'} · 可用存储 ${d.storageFreeMB==null ? '未知' : Math.round(d.storageFreeMB)+'MB'}。推荐：${TEXT_MODELS[r.textModel]?.label || '云端回复'}；${r.audioBackend==='native-sensevoice' ? 'SenseVoice int8' : '浏览器 Whisper'}。${r.reasons.join('；')}。准备测速通过后才可兜底。`);
  }
  deviceStatus(text){this.root.querySelector('[data-device-status]').textContent=text;}
- status(text){this.root.querySelector('[data-edge-status]').textContent=text;}
+ status(text){for(const node of this.root.querySelectorAll('[data-edge-status]'))node.textContent=text;}
  accountStatus(text){this.root.querySelector('[data-account-status]').textContent=text;}
  showTargets(){
   const field=this.root.querySelector('[data-account-target]');field.replaceChildren();const empty=field.ownerDocument.createElement('option');empty.value='';empty.textContent='选择已核对的公开主页';field.append(empty);

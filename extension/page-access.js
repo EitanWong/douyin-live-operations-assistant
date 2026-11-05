@@ -6,7 +6,7 @@ export async function accessPage(chrome,sender,command) {
   const room=roomFromURL(sender.url);
   if(sender.frameId!==0 || !Number.isInteger(sender.tab?.id) || typeof sender.documentId!=='string' ||
       !room || new URL(sender.url).origin!=='https://live.douyin.com' || room!==roomFromURL(sender.tab.url) ||
-      !['drain','send-api','cancel','collection-pulse','collection-stop'].includes(command?.type) || JSON.stringify(command).length>10000) throw new Error('页面调用来源或参数无效');
+      !['drain','send-api','cancel','collection-pulse','collection-stop','resolve-stream'].includes(command?.type) || JSON.stringify(command).length>10000) throw new Error('页面调用来源或参数无效');
   const results=await chrome.scripting.executeScript({target:{tabId:sender.tab.id,documentIds:[sender.documentId]},world:'MAIN',
     func:(room,command)=>{
       const url=new URL(location.href),current=url.pathname.match(/^\/(\d+)\/?$/)?.[1] || url.searchParams.get('room_id');

@@ -29,7 +29,7 @@ export function resolveMediaConfig(ai){
   const p=pipelineConfig(ai),base={...ai.media};
   if(p.mode==='custom')return base;
   if(p.mode==='text')return {...base,videoEnabled:false,audioEnabled:false,omniEnabled:false};
-  if(p.mode==='local-audio')return {...base,audioEnabled:true,videoEnabled:false,omniEnabled:false,transport:'sampled',localAudio:true,audioIntervalSec:4,inputSource:base.inputSource==='native' ? 'direct' : base.inputSource};
+  if(p.mode==='local-audio')return {...base,audioEnabled:true,videoEnabled:false,omniEnabled:false,transport:'sampled',localAudio:true,localAudioBackend:ai.edge?.audioBackend || 'auto',audioIntervalSec:4,inputSource:base.inputSource==='native' ? 'direct' : base.inputSource};
   const urls=aliEndpoints(ai);
   return {...base,videoEnabled:true,audioEnabled:true,omniEnabled:p.mode!=='ali-split',transport:p.mode==='ali-split' ? 'sampled' : 'webrtc',
     visionEndpoint:urls.chat,audioEndpoint:urls.chat,visionModel:p.mode==='ali-split' ? p.visionModel : p.realtimeModel,audioModel:p.audioModel,

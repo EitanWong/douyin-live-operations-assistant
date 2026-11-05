@@ -19,9 +19,42 @@ async function fixture(run,options={}){
     const config=structuredClone(api.engine.config);config.mode='preview';config.automation.autoStart=false;config.ai.enabled=true;config.ai.pipeline.mode='omni-llm';config.ai.pipeline.workspaceId='workspace';config.ai.media.inputSource='native';config.ai.model='text-model';
     const save=async c=>api.panel.callbacks.save(c,'reply-secret',false,{}, {pipeline:{key:'omni-secret',remember:false}});
     await save(config);
-    await run({api,config,save,requests,dom,get source(){return source;},get opened(){return opened;},get closed(){return closed;}});
+    await run({api,config,save,requests,values,dom,get source(){return source;},get opened(){return opened;},get closed(){return closed;}});
   }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 }
+
+test('本地语音首次使用自动准备并拉流，停止准备中的感知不会迟到启动',async()=>{
+ let finish,prepared=0,captured=0,warmed=false;
+ const pending=new Promise(resolve=>finish=resolve);
+ await fixture(async f=>{
+  f.config.ai.pipeline.mode='local-audio';f.config.ai.edge.audioBackend='native-sensevoice';
+  await f.save(f.config);
+  const starting=f.api.panel.callbacks.startMedia(f.config,{});
+  await wait(()=>prepared===1);
+  assert.equal(f.api.media.state,'starting');f.api.panel.callbacks.stopMedia();finish({phase:'ready'});
+  await starting;await new Promise(setImmediate);assert.equal(captured,0);
+  await f.api.panel.callbacks.startMedia(f.config,{});assert.equal(captured,1);assert.equal(prepared,1);
+ },{boot:{nativeASR:{ready:async()=>warmed,prepare:async()=>{prepared++;const result=await pending;warmed=true;return result;},status:async()=>({phase:'ready'}),close(){}},
+  mediaCapture:async()=>{captured++;return {stop(){}};}}});
+});
+
+test('一键启用自动选择并准备本地文字和语音，保存免密钥配置且不启动发送',async()=>{
+ const prepared=new Set(),calls=[];
+ const edge={detect:async()=>({webgpu:true}),ready:async kind=>prepared.has(kind),
+  status:async()=>({text:{phase:prepared.has('text')?'ready':'unprepared'},audio:{phase:prepared.has('audio')?'ready':'unprepared'}}),
+  prepare:async kind=>{calls.push(kind);prepared.add(kind);return {phase:'ready'};},close(){}};
+ await fixture(async f=>{
+  const knowledge=f.api.panel.root.querySelector('[data-field="ai.knowledge"]');knowledge.value='保留用户正在编辑的草稿';
+  f.api.panel.root.querySelector('[data-edge-auto]').click();
+  await wait(()=>f.api.engine.config.ai.edge.localOnly);
+  const saved=f.values.get('live-assistant:config:123456');
+  assert.equal(saved.ai.enabled,true);assert.equal(saved.ai.chatEnabled,true);assert.equal(saved.ai.pipeline.mode,'local-audio');
+  assert.equal(saved.ai.knowledge,'保留用户正在编辑的草稿');assert.equal(saved.ai.edge.textModel,'auto');
+  assert.equal(f.api.engine.running,false);assert.equal(f.opened,0);assert.equal(f.requests.length,0);
+  assert.deepEqual(calls.sort(),['audio','text']);assert.equal(f.api.panel.dirty,false);
+  assert.equal(f.api.panel.root.querySelector('[data-text-service]').hidden,true,'本地模式隐藏不需要的云端密钥表单');
+ },{boot:{edge}});
+});
 
 test('AI开始场控自动接入原生音画，正常问答获得最新观察；手动停止不会被计时器重新开启',async()=>fixture(async f=>{
   assert.equal(f.opened,0);await f.api.panel.callbacks.start();await wait(()=>f.api.media.state==='running');assert.equal(f.opened,1);

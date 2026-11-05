@@ -16,6 +16,7 @@ export class AISettings {
     root.addEventListener('change',event=>{
       if(event.target.matches('[data-field^="ai.media."]'))this.syncMedia();
       if(event.target.matches('[data-field^="ai.search."]'))this.syncSearch();
+      if(event.target.matches('[data-field="ai.edge.localOnly"]'))this.syncPipeline();
     });
     root.querySelector('[data-field="ai.pipeline.mode"]').addEventListener('change',()=>this.syncPipeline());
     for(const key of ['workspaceId','region'])root.querySelector(`[data-field="ai.pipeline.${key}"]`).addEventListener('input',()=>{root.querySelector('[data-media-key="pipeline"]').value='';});
@@ -71,19 +72,21 @@ export class AISettings {
     const mode=this.root.querySelector('[data-field="ai.pipeline.mode"]').value;
     this.root.querySelector('[data-pipeline-ali]').hidden=['custom','text','local-audio'].includes(mode);
     this.root.querySelector('[data-custom-media]').hidden=mode!=='custom';
-    this.root.querySelector('[data-text-service]').hidden=mode==='omni-only';
+    const localOnly=this.root.querySelector('[data-field="ai.edge.localOnly"]').checked;
+    this.root.querySelector('[data-text-service]').hidden=mode==='omni-only' || localOnly;
     this.syncPerception();
     for(const node of this.root.querySelectorAll('[data-ai-modes]'))node.hidden=!node.dataset.aiModes.split(' ').includes(mode);
     this.root.querySelector('[data-pipeline-role]').textContent=mode==='omni-only' ? '感知 + 回复共用' : '仅感知';
     this.root.querySelector('[data-pipeline-description]').textContent=({'local-audio':'使用已准备的本地中文语音模型识别直播，回复沿用文字模型及其端侧兜底，无需语音云服务密钥。',custom:'回复服务独立配置；可按需开启自定义视觉、语音或 Omni 分段识别。',text:'只用直播数据、弹幕、知识与搜索生成回复，无需配置感知服务。','omni-llm':'Omni 持续理解直播音画，回复由独立配置的文字模型生成。','omni-only':'同一套百炼配置，Omni 负责直播感知和弹幕回复。','ali-split':'视觉与语音分别按间隔识别直播内容，回复使用文字模型。'})[mode];
-    this.root.querySelector('[data-perception-description]').textContent=({'local-audio':'先在连接与模型准备中文识别，保存设置，再启动直播音频采集。',custom:'在“连接与模型”启用并配置感知服务，再启动直播音视频识别。',text:'','omni-llm':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','omni-only':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','ali-split':'使用“连接与模型”中的视觉模型与语音模型分段识别。'})[mode];
+    this.root.querySelector('[data-perception-description]').textContent=({'local-audio':'开始采集时自动准备中文识别并读取当前直播音轨，无需语音密钥或选择共享窗口。',custom:'在“连接与模型”启用并配置感知服务，再启动直播音视频识别。',text:'','omni-llm':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','omni-only':'使用“连接与模型”中的 Omni 实时模型识别直播音画。','ali-split':'使用“连接与模型”中的视觉模型与语音模型分段识别。'})[mode];
+    if(localOnly)this.root.querySelector('[data-pipeline-description]').textContent='回复由已准备的本地模型完成，无需云端模型密钥；语音按当前组合自动准备并读取直播音轨。';
     this.syncMedia();
   }
   syncSource(){
     const source=this.root.querySelector('[data-field="ai.media.inputSource"]').value,direct=source!=='display';
     this.root.querySelector('[data-native-install]').hidden=source!=='native';
     this.root.querySelector('[data-media-start]').textContent=source==='native' ? '原生拉流并开始感知' : direct ? '直接拉流并开始识别' : '选择直播标签页并开始识别';
-    this.root.querySelector('[data-source-help]').textContent=source==='native' ? 'StreamGet 获取当前房间 CDN 地址，FFmpeg 在本地解码音画，通过 WebSocket 交给 Omni。支持有界重连和静音画面观察；不会自动改用录屏。首次使用请展开安装说明。' : direct ? '自动读取当前直播间原始 FLV / HLS 流并在本机解码，无需选择共享窗口。需流支持 H264/AAC 和跨域读取；失败会提示，不自动改用屏幕共享。' : '请选择直播标签页并勾选“同时分享标签页音频”。仅在你选择此方式后才会请求共享。';
+    this.root.querySelector('[data-source-help]').textContent=source==='native' ? '自动读取当前已登录直播页的流地址，页面不可用时使用 StreamGet；FFmpeg 在本地解码音画，通过 WebSocket 交给 Omni。支持有界重连和静音画面观察；不会自动改用录屏。首次使用请展开安装说明。' : direct ? '自动读取当前直播间原始 FLV / HLS 流并在本机解码，无需选择共享窗口。需流支持 H264/AAC 和跨域读取；失败会提示，不自动改用屏幕共享。' : '请选择直播标签页并勾选“同时分享标签页音频”。仅在你选择此方式后才会请求共享。';
   }
   syncMedia(){
     this.syncSource();

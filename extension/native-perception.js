@@ -1,5 +1,7 @@
 import {validateRealtimeEndpoint} from '../src/services/ai-pipeline.js';
 import {roomFromURL} from '../src/browser/room-context.js';
+import {accessPage} from './page-access.js';
+import {validateStreamURL} from '../src/browser/live-stream.js';
 
 export const NATIVE_HOST='com.douyin_live_assistant.perception';
 
@@ -71,6 +73,21 @@ export function installNativePerceptionBridge(chrome,{onObservation,onStart=()=>
   };
   const receive=(session,event)=>{
     if(session.closed)return;
+    if(event?.type==='stream-request'){
+      if(session.resolving || event.room!==session.room || !/^[a-f0-9]{32}$/u.test(event.id || ''))return;
+      session.resolving=true;
+      void (async()=>{
+        let candidates=[];
+        try{
+          const sender=session.channel?.client.sender;
+          if(sender){
+            const rows=await accessPage(chrome,sender,{type:'resolve-stream'});
+            if(Array.isArray(rows) && rows.length<=12)candidates=rows.map(row=>({url:validateStreamURL(row.url)}));
+          }
+        }catch{}finally{session.resolving=false;}
+        if(!session.closed)try{session.host.postMessage({type:'streams',id:event.id,room:session.room,candidates});}catch{finish(session,'NOT_INSTALLED');}
+      })();return;
+    }
     if(event?.type==='error'){
       finish(session,['RESOLVE_FAILED','DECODE_FAILED','MODEL_FAILED','LIMIT','INVALID'].includes(event.code) ? event.code : 'MODEL_FAILED');return;
     }

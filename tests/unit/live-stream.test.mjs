@@ -64,3 +64,10 @@ test('房间接口按请求绑定 web_rid，兼容响应省略 web_rid，仍拒�
   assert.equal((await resolveLiveStream({page,room:'123'}))[0].roomId,'987');
   data.data.data[0].web_rid='456';await assert.rejects(()=>resolveLiveStream({page,room:'123'}),/当前直播间/);
 });
+
+test('原生续接请求新地址时跳过页面初始数据，避免重复使用过期签名',async()=>{
+ let fetched=0;
+ const page={location,SSR_RENDER_DATA:{roomStore:{roomInfo:{room:response().data.data[0]}}},
+  fetch:async()=>{fetched++;const fresh=response();fresh.data.data[0].stream_url.flv_pull_url.FULL_HD1=flv.replace('private','renewed');return {ok:true,text:async()=>JSON.stringify(fresh)};}};
+ assert.match((await resolveLiveStream({page,room:'123',fresh:true}))[0].url,/renewed/);assert.equal(fetched,1);
+});
