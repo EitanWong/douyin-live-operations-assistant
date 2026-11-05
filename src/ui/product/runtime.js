@@ -9,6 +9,7 @@ import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
 import {gridOptions,cardRuns} from './layout.js';
 import {WorkspaceFit} from './fit.js';
+import {CardFlow} from './card-flow.js';
 import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel,canInspect} from './inspect.js';
 import {recordText} from './collection.js';
 import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
@@ -74,7 +75,9 @@ function Chart({node}) {
   return h(Inspectable,{node},h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'}));
 }
 function CardRun({nodes,bridge}) {
-  return h(Group,{className:'product-card-run','data-card-run':nodes[0]?.span==='full' ? 'full' : nodes[0]?.kind==='details' ? 'disclosures' : nodes[0]?.band || 'cards',wrap:'wrap',align:'flex-start',gap:'var(--product-section-gap)'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot'},h(View,{node:child,bridge}))));
+  const element=useRef(null);
+  useLayoutEffect(()=>{const flow=new CardFlow(element.current);return ()=>flow.destroy();},[nodes]);
+  return h('div',{ref:element,className:'product-card-run','data-card-run':nodes[0]?.span==='full' ? 'full' : nodes[0]?.band || 'cards'},nodes.map((child,i)=>h('div',{key:child.id || i,className:'product-card-slot'},h(View,{node:child,bridge}))));
 }
 function CardGrid({node,bridge,props}) {
   // A run keeps its identity when its first card moves; cards have their own IDs.

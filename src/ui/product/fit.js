@@ -1,3 +1,4 @@
+import {layoutCardFlows} from './card-flow.js';
 // Keep standard spacing when it fits; shrink only when the content needs it.
 // Column widths are stable during the probes so the required height is monotone.
 export function chooseWorkspaceFit(measure) {
@@ -32,10 +33,12 @@ export class WorkspaceFit {
     this.owner.dataset.measuring='';
     const fit=chooseWorkspaceFit(scale=>{
       this.owner.style.setProperty('--product-density',String(scale));
+      layoutCardFlows(this.content);
       const style=this.view.getComputedStyle(this.content);
       return {required:page.getBoundingClientRect().height+Number.parseFloat(style.paddingTop)+Number.parseFloat(style.paddingBottom),available:this.content.clientHeight};
     });
     if(fit){this.owner.dataset.fit=fit.density;this.owner.style.setProperty('--product-density',String(fit.scale));}
+    layoutCardFlows(this.content);
     delete this.owner.dataset.measuring;
     for(const {node,top,left} of positions){if(node.scrollTop!==top)node.scrollTop=top;if(node.scrollLeft!==left)node.scrollLeft=left;}
   }

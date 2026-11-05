@@ -64,11 +64,11 @@ test('连接诊断按账号摘要、三组诊断和高级折叠区排列，发�
     bridge=createWorkspaceBridge(p);
     const body=bridge.getSnapshot().content.children.find(node=>node.classes?.split(/\s/u).includes('workspace-grid'));
     const runs=cardRuns(body.children);
-    assert.equal(runs.length,3);
+    assert.equal(runs.length,2);
     assert.equal(runs[0][0].span,'full');
     const title=node=>node.children[0]?.children[0]?.text;
-    assert.deepEqual(runs[1].map(title),['直播连接','采集与存储','互动过滤']);
-    assert.deepEqual(runs[2].map(node=>node.title),['高级页面适配与去重','弹幕备用采集与场次识别','运行记录','配置与运行记录','使用说明']);
+    assert.deepEqual(runs[1].slice(0,3).map(title),['直播连接','采集与存储','互动过滤']);
+    assert.deepEqual(runs[1].slice(3).map(node=>node.title),['高级页面适配与去重','弹幕备用采集与场次识别','运行记录','配置与运行记录','使用说明']);
     const input=p.node('[data-field="selfId"]');
     input.value='123456789';input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));
     p.tab('welcome');p.tab('diagnostics');
