@@ -2614,3 +2614,5 @@ DOM 备用采集复核：先添加慢订阅/超大消息红测，确认原队列
 投影性能基准：Node v26.12.1 / Darwin arm64、6图各1000点、100次投影，状态刷新中位0.465ms、P95 0.650ms，0次content变更、后台页面0次图表option读取。仍只观察内容区/页面外框，rAF合并，未新增逐卡片测量；此数据为投影基准，不是浏览器FPS。
 
 证据位于output/workspace-fill-help-2026-11-05/：browser-evidence.json、profiles-filled.png、help-guide.png、diagnostics-expanded.png，以及红测、专项、全测、构建/检查和基准日志。演示功能开关与输入草稿均未保存，已重载丢弃；临时视口已恢复、标签关闭、4184服务停止。构建更新原路径dist/chrome-extension与油猴产物，版本仍为0.1.2。crapper、dryer、mutator不可用、未执行，其他测试不替代这些检查；远端CI未核验。待追加最终dev提交推送回执。
+
+最终交付回执：修复提交 **bc322f520aa2eb23081ac7f60d72b32fd5281492** 已推送origin/dev，远端分支SHA与本地HEAD一致，工作区干净。`git diff --check`通过。本回执另作纯文档提交同步dev；生产代码即上述1531项回归与浏览器验收版本。重新加载原路径扩展并刷新直播页后生效，远端CI未核验。
