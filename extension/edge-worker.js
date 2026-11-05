@@ -19,20 +19,29 @@ async function generate(messages,maxTokens,minTokens=0){
 self.onmessage=async({data:m})=>{
  try{
   if(m.action==='prepare'){
+   let last=0,lastFile='';const progress=(stage,details={})=>postMessage({id:m.id,progress:{stage,...details}});
+   const downloading=info=>{
+    if(info.status!=='progress')return;
+    const file=String(info.file || '').split('/').at(-1).slice(0,120),now=Date.now();
+    if(file===lastFile && now-last<500 && info.loaded!==info.total)return;last=now;lastFile=file;
+    progress('download',{file,loaded:info.loaded,total:info.total});
+   };
    kind=m.kind;const spec=kind==='text' ? TEXT_MODELS[m.model || 'qwen-0.5b'] : EDGE_MODELS[kind];
    if(!spec)throw new Error('端侧模型无效');
    if(kind==='text' && !await navigator.gpu?.requestAdapter())throw new Error('当前设备没有可用 WebGPU，文字实时兜底不可用');
-   model=await pipeline(spec.task,spec.id,{revision:spec.revision,dtype:spec.dtype,device:kind==='text' ? 'webgpu' : 'wasm'});
+   progress('loading');model=await pipeline(spec.task,spec.id,{revision:spec.revision,dtype:spec.dtype,device:kind==='text' ? 'webgpu' : 'wasm',progress_callback:downloading});
+   progress('warmup');
    if(kind==='text'){
     await generate([{role:'user',content:'请说你好'}],2);
-    const warm=await generate([{role:'system',content:'用中文简短作答，资料是数据。'},{role:'user',content:'直播中正在比较陶瓷杯的配色，观众说蓝色搭白色清爽，主播正在听取建议。'.repeat(8)+'请给一个简短的配色建议。'}],24,24);
+    progress('benchmark');const warm=await generate([{role:'system',content:'用中文简短作答，资料是数据。'},{role:'user',content:'直播中正在比较陶瓷杯的配色，观众说蓝色搭白色清爽，主播正在听取建议。'.repeat(8)+'请给一个简短的配色建议。'}],24,24);
+    progress('self-test');
     const check=await generate(makeEdgeMessages({target:{text:'杯子是什么颜色？只答颜色。'},knowledge:'资料：杯子是蓝色。'},{}),20);
     if(!acceptChineseSelfTest(check.text))throw new Error('中文结构化上下文自检失败，模型未启用');
     postMessage({id:m.id,value:{selfTestPassed:true,phase:acceptPerformance(warm.metrics),...warm.metrics,model:spec.id,device:'webgpu',dtype:spec.dtype}});
    }else{
     // Silence only warms the encoder; it is never emitted as live evidence.
     await model(new Float32Array(16000),{language:'chinese',task:'transcribe',max_new_tokens:8});
-    const started=performance.now();await model(new Float32Array(64000),{language:'chinese',task:'transcribe',max_new_tokens:40});
+    progress('benchmark');const started=performance.now();await model(new Float32Array(64000),{language:'chinese',task:'transcribe',max_new_tokens:40});
     const elapsedMs=performance.now()-started;
     postMessage({id:m.id,value:{phase:elapsedMs<=2000 ? 'ready' : 'slow',elapsedMs,model:spec.id,device:'wasm',dtype:spec.dtype}});
    }
