@@ -2889,3 +2889,15 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 验证证据位于 `output/release-0.1.3/`（本地忽略目录）。本轮没有新增业务逻辑，不为版本和文档编造红测；沿用既有全量行为回归。crapper、dryer、mutator 不可用，均未执行。最终提交、PR、CI、Squash、标签、Release 附件与推送结果在实际完成后追加。
 
 发布准备提交：`0597cdb`（版本及索引）与 `99da5e6`（README、截图、Changelog 及清理说明）。同步 main 时普通合并产生 126 个历史冲突；核对 PR #11 的原始头 `410b6cd` 已是 dev 祖先，且其文件树与 origin/main 的 `d2efd78` 完全相同（tree `f2ae02cfbb861690235005968eae9612fa2b4949`，diff 为空）。因此撤销该次普通合并，使用保留当前文件树的历史同步合并记录 main 祖先；合并前后文件树差异为空，未覆盖新功能或跳过未集成的稳定分支变更。该历史关联修复不改变已验证产物，后续 PR 仍需完整 CI。
+
+正式发布回执：
+
+| 执行动作 | 原因 | 验证结果 / 未完成项 |
+| --- | --- | --- |
+| 推送 dev 并创建发布 PR #19，等待 CI | 先保存全部版本、说明和截图，再通过稳定分支门禁 | origin/dev 核对为 `85f086d9fa942774406c14a5d0529d989bf7a6dd`。dev CI `42091986941` 成功，JS 1606/1606、原生 47/47；PR CI `42092059682` 的 test-build 成功。原生步骤因 Ubuntu 镜像下载持续十余分钟未推进而取消后单独重跑；日志保留下载超时/慢速证据，重跑原生 47/47 成功，最终整个 PR CI 为 success。没有修改测试、绕过门禁或使用管理员合并 |
+| 按授权对 PR #19 执行 Squash 合并，核对 main 和 dev 文件树 | 以单个稳定提交交付当前功能并保留开发分支 | PR https://github.com/EitanWong/douyin-live-operations-assistant/pull/19 已合并；main 提交 `dd0fdb47e39eb8273ded98bf09f93941a77352a2`，与已验证 dev 文件树完全一致。main CI `42094754251` 成功，JS 1606/1606、原生 47/47 |
+| 在 main 合并提交创建并推送 v0.1.3 标签，跟进 Release workflow | 让发布附件由同一稳定提交自动生成 | 标签解引用为 `dd0fdb47e39eb8273ded98bf09f93941a77352a2`；Release workflow `42094800933` 成功，版本/main 归属校验、build、JS 1606/1606、check、打包和发布均通过。标签未改写 |
+| 用 CHANGELOG 当前版本正文更新 Release，下载两类附件并核验 | 确保发布说明清楚、文件可下载且用户实际安装的是 0.1.3 | https://github.com/EitanWong/douyin-live-operations-assistant/releases/tag/v0.1.3 已公开且为 latest，非草稿/预发布。ZIP 32,053,702 字节，45 个条目 CRC 全部通过，manifest 为 0.1.3，11 个入口资产存在；独立脚本 11,931,436 字节、头部 0.1.3，无外部 require/resource。两附件 SHA-256 与 GitHub digest 一致；Release 正文与 Changelog 提取内容完全一致 |
+| 将发布后的 main 正常合并回 dev，保存行动日志与交付收据 | 避免下轮重复 Squash 历史冲突，并保留发布后结果 | 同步提交 `ec2938d370086d3fb47384f516be9e3aaa36266e` 无文件变化。最后仅追加本日志，最终文档提交、dev 推送 SHA 与远端核对结果保存在 `output/release-0.1.3/delivery-receipt.json`，不直接推送 main、不删除其他工作树 |
+
+本轮已完成 0.1.3 发布，无待完成发布项。专用检查缺口仍为 crapper、dryer、mutator 不可用；真实直播操作、WebGPU 下载与扩展重载的端到端实测未在本轮执行，不把模拟器或 CI 当作真实平台验收。下载附件和校验摘要保留于 `output/release-0.1.3/assets/` 与 `assets-verification.json`；临时截图视口、演示标签和服务均已回收。
