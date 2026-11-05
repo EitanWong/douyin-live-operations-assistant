@@ -45,6 +45,9 @@ test('原生任务跨页面缓存、刷新继续采集；无持久密钥也恢�
     page.dom.window.dispatchEvent(new page.dom.window.PageTransitionEvent('pageshow',{persisted:true}));
     await wait(()=>page.api.media.state==='running');assert.equal(native.hosts.length,1);
     assert.deepEqual(page.api.engine.aiContext().mediaContext.observations.map(row=>row.text),['离开页面仍在观察'],JSON.stringify(native.trace));
+    host.onMessage.emit({type:'state',phase:'renewing',totalTokens:0});await new Promise(setImmediate);
+    assert.match(page.api.panel.root.querySelector('[data-media-status]').textContent,/自动续接/);
+    assert.equal(page.api.engine.aiContext().mediaContext.observations[0].text,'离开页面仍在观察');
     page.close();assert.equal(host.closed,0);
     page=await launch(values,native);await wait(()=>page.api.media.state==='running');
     assert.equal(native.hosts.length,1);assert.equal(page.api.engine.running,false);

@@ -10,7 +10,7 @@ import {collectResearch,reviewResearch} from './web-research.js';
 import {calculateQuestion} from './question-math.js';
 import {createWeatherClient,weatherDate} from './weather.js';
 import {currentTime,clockAnswer,CURRENT_FACTS_INSTRUCTION} from './current-facts.js';
-import {VISUAL_ANSWER_INSTRUCTION} from '../ai/media-context.js';
+import {VISUAL_ANSWER_INSTRUCTION,AUDIO_ANSWER_INSTRUCTION,deniesAvailableMedia} from '../ai/media-context.js';
 import {createPublicDataClient,PUBLIC_DATA_INSTRUCTION,publicDataQuery} from './public-data.js';
 import { assembleAIContext,currentAIPrompt,applyPromptSources,applyContextBudget,liveFactFingerprint } from './ai-context.js';
 import {resolveReplyConfig,pipelineConfig} from './ai-pipeline.js';
@@ -35,7 +35,8 @@ export function makeAIRequest(prompt, config) {
   if(!prompt.searchResults && !isSpeechRouting(prompt))request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {}),current_time:currentTime(prompt)};
   if(prompt.intentRouting)request.messages[0].content=`${CURRENT_FACTS_INSTRUCTION}\n${PUBLIC_DATA_INSTRUCTION}\nclock和weather使用各自的工具JSON格式，不含query或reply。\n`+request.messages[0].content;
-  if(!prompt.searchResults)request.messages[0].content=`${VISUAL_ANSWER_INSTRUCTION}\n`+request.messages[0].content;
+  if(!prompt.searchResults)request.messages[0].content=`${VISUAL_ANSWER_INSTRUCTION}\n${AUDIO_ANSWER_INSTRUCTION}\n`+request.messages[0].content;
+  if(prompt.mediaCorrection)request.messages[0].content='上次回答与已提供的有效音画证据矛盾。本次直接依据观察回答当前问题，不重复否认感知能力，不补造证据没有的细节；仍只输出原定意图JSON。\n'+request.messages[0].content;
   if(data.live_context && data.recent_chat)delete data.live_context.recentChat;
   request.messages[0].content='context_meta.budget.omissions 列出按预算省略的资料；缺少明细不等于没有发生，不能将截取明细求和冒充完整汇总。\n'+request.messages[0].content;
   request.messages[1].content='';
@@ -279,6 +280,14 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
     if(plan.intent==='live-data')prompt.onLiveFacts?.(factVersion);
     if(plan.intent!=='web-search'){
       if(!plan.reply.trim() || [...plan.reply].length>prompt.maxLength)throw new Error('AI 回复为空或超过字数限制');
+      const media=assembleAIContext(currentAIPrompt(prompt),config).media_context;
+      if(deniesAvailableMedia(plan.reply,media)){
+        if(prompt.reserveFollowup && !await prompt.reserveFollowup())throw new Error('音画回答修订额度不足');
+        const corrected=parseAIIntent(await complete({...prompt,intentRouting:true,mediaCorrection:true,searchAvailable:false}),prompt.maxLength);
+        if(!current() || corrected.intent==='skip')return '[SKIP]';
+        if(!['chat','clarify','live-data'].includes(corrected.intent) || !corrected.reply.trim() || deniesAvailableMedia(corrected.reply,assembleAIContext(currentAIPrompt(prompt),config).media_context))throw new Error('模型仍未根据有效音画回答');
+        return spokenAnswer(corrected.reply);
+      }
       return spokenAnswer(plan.reply);
     }
     if(prompt.canFollowup && !prompt.canFollowup())return '这次暂时还答不了，晚点再问我吧。';

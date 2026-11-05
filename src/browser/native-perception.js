@@ -57,7 +57,7 @@ export function createNativeCapture({connect,getKey,room,now=Date.now,setupTimeo
       });
       signal?.addEventListener('abort',stop,{once:true});
       timer=setTimeout(()=>fail('NOT_INSTALLED'),setupTimeoutMs);
-      port.postMessage(config.resume ? {type:'resume',room} : {type:'start',room,key,config:{inputSource:'native',transport:config.transport,realtimeEndpoint:endpoint,realtimeModel:config.realtimeModel,sessionMinutes:config.sessionMinutes,sessionTokens:config.sessionTokens,maxPerHour:config.maxPerHour}});
+      port.postMessage(config.resume ? {type:'resume',room} : {type:'start',room,key,config:{inputSource:'native',transport:config.transport,realtimeEndpoint:endpoint,realtimeModel:config.realtimeModel,sessionMinutes:config.sessionMinutes,sessionTokens:config.sessionTokens,maxPerHour:config.maxPerHour,videoIntervalSec:config.videoIntervalSec ?? 12}});
     }catch(error){close(error);}
   });
 }

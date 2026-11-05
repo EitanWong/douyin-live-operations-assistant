@@ -11,8 +11,10 @@ function senderRoom(client,chrome){
 function nativeSettings(message,room){
   const c=message.config;
   validateRealtimeEndpoint(c?.realtimeEndpoint);
+  const videoIntervalSec=c.videoIntervalSec ?? 12;
+  if(!Number.isInteger(videoIntervalSec) || videoIntervalSec<5 || videoIntervalSec>120)throw new Error();
   if(message.room!==room || c.inputSource!=='native' || c.transport!=='webrtc' || new URL(c.realtimeEndpoint).searchParams.get('model')!==c.realtimeModel || !/^[^\s]{1,1000}$/u.test(message.key || '') || !Number.isInteger(c.sessionMinutes) || c.sessionMinutes<1 || c.sessionMinutes>60 || !Number.isInteger(c.sessionTokens) || c.sessionTokens<1000 || c.sessionTokens>1000000 || !Number.isInteger(c.maxPerHour) || c.maxPerHour<1 || c.maxPerHour>1200)throw new Error();
-  return {inputSource:'native',transport:c.transport,realtimeEndpoint:c.realtimeEndpoint,realtimeModel:c.realtimeModel,sessionMinutes:c.sessionMinutes,sessionTokens:c.sessionTokens,maxPerHour:c.maxPerHour};
+  return {inputSource:'native',transport:c.transport,realtimeEndpoint:c.realtimeEndpoint,realtimeModel:c.realtimeModel,sessionMinutes:c.sessionMinutes,sessionTokens:c.sessionTokens,maxPerHour:c.maxPerHour,videoIntervalSec};
 }
 
 // The native connection belongs to the room, not to a page or settings module.
@@ -73,7 +75,7 @@ export function installNativePerceptionBridge(chrome,{onObservation,onStart=()=>
       finish(session,['RESOLVE_FAILED','DECODE_FAILED','MODEL_FAILED','LIMIT','INVALID'].includes(event.code) ? event.code : 'MODEL_FAILED');return;
     }
     if(event?.type==='ready'){session.ready=true;send(session.channel,{type:'ready'});}
-    if(event?.type==='state' && ['resolving','connecting','decoding','observing','recovering'].includes(event.phase)){
+    if(event?.type==='state' && ['resolving','connecting','decoding','observing','recovering','renewing','waiting'].includes(event.phase)){
       session.state={type:'state',phase:event.phase,...(Number.isFinite(event.totalTokens) ? {totalTokens:event.totalTokens} : {}),...(Number.isFinite(event.lastFinalAt) ? {lastFinalAt:event.lastFinalAt} : {})};
       send(session.channel,session.state);
     }

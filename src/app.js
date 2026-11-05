@@ -16,6 +16,7 @@ import {createAIPlayground} from './services/ai-playground.js';
 import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
+import {createRenewingCapture} from './browser/media-renewal.js';
 import {createNativeCapture,checkNativeComponent,readNativeSession} from './browser/native-perception.js';
 import { RoomContext } from './browser/room-context.js';
 import {RoomMonitor} from './browser/room-monitor.js';
@@ -275,13 +276,14 @@ export function boot(options = {}) {
   let activeMediaConfig=resolveMediaConfig(config.ai),mediaAnchor=config.anchorId,mediaAttemptKey='';
   let mediaManuallyStopped=false,nativeResumePending=Boolean(!demo && options.nativeConnect);
   let mediaEvidence=new MediaEvidence();
+  const captureSegmentAt=Date.now();
   const mediaKey=endpoint=>(sessionKeys.get(mediaSecretKey(endpoint)) ?? get(mediaSecretKey(endpoint),'')) || (sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''));
   const recognizeMedia=createMediaClient({request,getKey:mediaKey});
   const clearMedia=()=>{mediaEvidence.clear();panel?.aiSettings.observations([]);};
   const directSource=options.directStreamSource || createDirectStreamSource({page,env:window});
   const sourceFor=config=>config.inputSource==='display' ? undefined : directSource;
   const exchange=createSDPExchange({request,getKey:mediaKey});
-  const realtimeCapture=createRealtimeCapture({exchange,env:window,sourceFactory:directSource});
+  const realtimeCapture=createRenewingCapture({capture:createRealtimeCapture({exchange,env:window}),sourceFactory:directSource,env:window});
   const media=new LiveMediaAnalyzer({capture:options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config),vadFactory:options.vadFactory},window)),
     realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room,onMemoryWarning:message=>{log('error',message);panel?.aiSettings.showError(message);}}),recognize:createSpeechRecognizer({cloud:recognizeMedia,edge,config:()=>engine.config.ai.edge}),
     onObservation:row=>{mediaEvidence.add(row);if(engine?.config.ai.assistant.memoryEnabled && memoryScope().perception.observe(row))persistRuntime();panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
@@ -414,7 +416,7 @@ export function boot(options = {}) {
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
-    config, log, ai: client, viewerMemory:(user,query)=>currentMemory().context(user,query),perceptionMemory:query=>memoryScope().perception.context(query),conversationMemory:query=>currentMemory().conversation(query),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
+    config, log, ai: client, viewerMemory:(user,query)=>currentMemory().context(user,query),perceptionMemory:query=>memoryScope().perception.context(query),sessionMemory:query=>memoryScope().perception.sessionContext(query,{since:engine.liveMode.boundaryAt || captureSegmentAt,boundaryKnown:Boolean(engine.liveMode.boundaryAt)}),conversationMemory:query=>currentMemory().conversation(query),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;

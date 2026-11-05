@@ -55,7 +55,7 @@ test('运行中保存感知配置只切换一次；切文字、页面关闭释�
   f.dom.window.dispatchEvent(new f.dom.window.Event('pagehide'));assert.equal(f.closed,3);assert.equal(f.api.engine.aiContext().mediaContext,null);
 }));
 
-test('原生感知不随AI回复开关停止；会话到期不绕过额度自动重启',async()=>fixture(async f=>{
+test('原生感知不随AI回复开关停止；后台明确结束后页面不擅自重开任务',async()=>fixture(async f=>{
   await f.api.panel.callbacks.start();await wait(()=>f.opened===1);
   f.config.ai.enabled=false;await f.save(f.config);await settle();assert.equal(f.closed,0);assert.equal(f.opened,1);
   f.config.ai.enabled=true;await f.save(f.config);await settle();assert.equal(f.opened,1);

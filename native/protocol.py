@@ -101,7 +101,7 @@ class Observer:
         if kind == 'input_audio_buffer.committed' and self.window and isinstance(item, str) and 0 < len(item) <= 200 and item not in self.audio_seen:
             self.audio_seen.add(item)
             if len(self.audio_seen) > 1200:
-                raise ValueError('LIMIT')
+                raise ValueError('SESSION_LIMIT')
             self.audio_windows[item] = self.window
             if len(self.audio_windows) > 128:
                 self.audio_windows.pop(next(iter(self.audio_windows)))
@@ -126,13 +126,11 @@ class Observer:
         self.responding = False
         self.seen.add(rid)
         if len(self.seen) > 1200:
-            raise ValueError('LIMIT')
+            raise ValueError('SESSION_LIMIT')
         tokens = response.get('usage', {}).get('total_tokens')
         if type(tokens) not in (int, float) or tokens < 0:
             raise ValueError('MODEL_FAILED')
         self.total_tokens += tokens
-        if self.total_tokens >= self.max_tokens:
-            raise ValueError('LIMIT')
         if response.get('status') != 'completed':
             raise ValueError('MODEL_FAILED')
         text = (''.join(part.get('text', '') for item in response.get('output', [])
@@ -144,6 +142,8 @@ class Observer:
             self.emit({'type': 'observation', 'row': {'kind': 'omni', 'id': rid, 'at': at,
                        'endedAt': ended, 'receivedAt': now, 'text': text, 'isFinal': True}})
         self.emit({'type': 'state', 'phase': 'observing', 'totalTokens': self.total_tokens, 'lastFinalAt': now})
+        if self.total_tokens >= self.max_tokens:
+            raise ValueError('SESSION_LIMIT')
 
 
     def transcription(self, item, text):

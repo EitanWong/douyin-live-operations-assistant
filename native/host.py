@@ -240,6 +240,27 @@ async def attempt(config, observer, candidate, binary):
             await terminate(process)
 
 
+async def run_session(config, observer, binary):
+    async with asyncio.timeout(config['minutes'] * 60):
+        for generation in range(5):
+            try:
+                emit({'type': 'state', 'phase': 'resolving'})
+                rows = await resolve_streams(config['room'])
+                candidate = rows[generation % len(rows)]
+                observer.pending.clear()
+                observer.text.clear()
+                observer.responding = False
+                await attempt(config, observer, candidate, binary)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                code = str(error) if str(error) in ['RESOLVE_FAILED', 'DECODE_FAILED', 'MODEL_FAILED', 'LIMIT', 'SESSION_LIMIT'] else 'MODEL_FAILED'
+                if code in ['LIMIT', 'SESSION_LIMIT', 'MODEL_FAILED'] or generation == 4:
+                    raise ValueError(code) from None
+                emit({'type': 'state', 'phase': 'recovering', 'totalTokens': observer.total_tokens})
+                await asyncio.sleep(min(2 ** generation, 8))
+
+
 async def session(message):
     try:
         config = parse_config(message)
@@ -247,30 +268,28 @@ async def session(message):
         binary = runtime.get('ffmpeg') or shutil.which('ffmpeg')
         if not binary or not Path(binary).is_file():
             raise ValueError('DECODE_FAILED')
-        observer = Observer(config['model'], emit, config['calls'], config['tokens'])
-        async with asyncio.timeout(config['minutes'] * 60):
-            for generation in range(5):
-                try:
-                    emit({'type': 'state', 'phase': 'resolving'})
-                    rows = await resolve_streams(config['room'])
-                    # Fresh URLs on each generation; alternate both quality and transport.
-                    candidate = rows[generation % len(rows)]
-                    observer.pending.clear()
-                    observer.text.clear()
-                    observer.responding = False
-                    await attempt(config, observer, candidate, binary)
-                except asyncio.CancelledError:
+        calls = []
+        while True:
+            observer = Observer(config['model'], emit, config['calls'], config['tokens'])
+            observer.calls = calls
+            try:
+                await run_session(config, observer, binary)
+            except TimeoutError:
+                pass
+            except ValueError as error:
+                if str(error) not in ['SESSION_LIMIT', 'LIMIT']:
                     raise
-                except Exception as error:
-                    code = str(error) if str(error) in ['RESOLVE_FAILED', 'DECODE_FAILED', 'MODEL_FAILED', 'LIMIT'] else 'MODEL_FAILED'
-                    if code in ['LIMIT', 'MODEL_FAILED'] or generation == 4:
-                        raise ValueError(code) from None
-                    emit({'type': 'state', 'phase': 'recovering', 'totalTokens': observer.total_tokens})
-                    await asyncio.sleep(min(2 ** generation, 8))
+                if str(error) == 'LIMIT':
+                    retry_at = min(observer.calls, default=clock()) + 3600000
+                    emit({'type':'state', 'phase':'waiting', 'retryAt':retry_at})
+                    await asyncio.sleep(max(0, retry_at - clock()) / 1000)
+            calls = observer.calls
+            emit({'type':'state', 'phase':'renewing', 'totalTokens':0})
+            # A fresh provider session has no growing conversation history.
+            # Observations already emitted remain in the room's memory writer.
+            await asyncio.sleep(0)
     except asyncio.CancelledError:
         raise
-    except TimeoutError:
-        emit({'type': 'error', 'code': 'LIMIT'})
     except Exception as error:
         code = str(error) if str(error) in ['INVALID', 'RESOLVE_FAILED', 'DECODE_FAILED', 'MODEL_FAILED', 'LIMIT'] else 'MODEL_FAILED'
         emit({'type': 'error', 'code': code})

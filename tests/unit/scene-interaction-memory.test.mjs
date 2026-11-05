@@ -84,3 +84,13 @@ test('无稳定身份的弹幕也持久保存为房间原话，同名不归人�
  const merged=mergeLiveMemory(old,restored.capture()[0].state);
  assert.equal(new AudienceMemory({anchor:'10',state:merged.audience,now:()=>now}).conversation('白瓷').records.length,0);
 });
+
+test('本场短期记忆跨感知会话保留故事，只取当前开播边界内相关片段与最近原话',()=>{
+ const memory=new PerceptionMemory({now:()=>start});
+ for(const [id,text,age] of [['old','上一场的事情',86400000],['story','今天说起爷爷的白瓷茶杯',3600000],['recent','刚才讲的是茶杯上的蓝色花纹',1000]])memory.observe({kind:'audio',id,text,at:start-age-1000,endedAt:start-age,isFinal:true});
+ const restored=new PerceptionMemory({state:memory.snapshot(),now:()=>start});
+ const session=restored.sessionContext('爷爷',{since:start-7200000});
+ assert.ok(session.records.some(r=>r.id==='story'));assert.ok(session.records.some(r=>r.id==='recent'));assert.ok(!session.records.some(r=>r.id==='old'));
+ const input=JSON.parse(makeAIRequest({now:start,target:{text:'刚才说的茶杯呢'},task:{kind:'ai'},getSessionMemory:()=>session,maxLength:50},mergeConfig().ai).messages[1].content);
+ assert.ok(input.evidence_context.sessionMemory.records.some(r=>r.id==='story'));
+});

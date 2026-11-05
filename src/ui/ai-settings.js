@@ -114,7 +114,7 @@ export class AISettings {
     this.root.querySelector('[data-media-start]').disabled=state!=='idle';this.root.querySelector('[data-media-stop]').disabled=state==='idle';
     const direct=this.root.querySelector('[data-field="ai.media.inputSource"]').value!=='display';
     this.root.querySelector('[data-media-status]').textContent=`${({idle:'识别已停止',starting:direct ? '正在获取原始流或等待服务配置确认' : '正在选择直播标签页或等待服务配置确认',running:direct ? '正在识别原始直播流' : '正在持续识别所选共享内容'})[state]} · 忙时跳过 ${skipped} 次 · 失败 ${errors} 次${totalTokens!==undefined ? ` · 已用 ${totalTokens} token` : ''}${lastFinalAt ? ` · 最近完成 ${new Date(lastFinalAt).toLocaleTimeString('zh-CN')}` : ''}`;
-    const phases={resolving:'正在解析当前房间 CDN 地址',connecting:'正在连接 Omni 并确认配置',decoding:'正在等待原始流音频与画面',observing:'音画已接入 Omni，等待或接收观察结果',recovering:'直播流中断，正在刷新地址并重连'};
+    const phases={resolving:'正在解析当前房间 CDN 地址',connecting:'正在连接 Omni 并确认配置',decoding:'正在等待原始流音频与画面',observing:'音画已接入 Omni，等待或接收观察结果',recovering:'直播流中断，正在刷新地址并重连',renewing:'正在自动续接实时识别，本场记忆已保留',waiting:'识别小时额度已用完，窗口恢复后自动续接；本场记忆已保留'};
     if(phase && phases[phase])this.root.querySelector('[data-media-status]').textContent=`${phases[phase]}${totalTokens!==undefined ? ` · 已用 ${totalTokens} token` : ''}`;
     if(state==='starting')this.showError('');
   }
