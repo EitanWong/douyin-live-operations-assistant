@@ -174,6 +174,11 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       let value;
       if(message.type==='data-configure' && extensionPage){value=await dataEngine().configure(message.enabled);if(message.enabled)void dataEngine().flush();}
       else if(message.type==='data-flush' && extensionPage){await dataEngine().flush();value=await dataEngine().status();}
+      else if(message.type==='data-relocate' && extensionPage){
+        if(typeof message.directory!=='string' || message.directory.length>4096 || typeof message.expectedDatabase!=='string' || message.expectedDatabase.length>4096)throw Error('存储位置无效，请刷新状态后重试');
+        value=await nativeDataRequest(chrome,120000)('relocate',{directory:message.directory,expectedDatabase:message.expectedDatabase});
+        void dataEngine().flush();
+      }
       else if(message.type==='data-status' && extensionPage){
         const status=await dataEngine().status();let native=null;
         try{native=await nativeDataRequest(chrome)('status');}catch{ /* Report unavailable explicitly; never enable implicitly. */ }
