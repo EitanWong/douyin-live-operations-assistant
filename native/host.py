@@ -6,9 +6,11 @@ output and provider error text are never forwarded to the extension.
 import asyncio
 import base64
 import contextlib
+from collections import deque
 import json
 from pathlib import Path
 import shutil
+import struct
 import sys
 import threading
 import time
@@ -76,7 +78,7 @@ def ffmpeg_args(binary, url):
 
 
 class MediaPump:
-    def __init__(self, ws, observer, send=emit, now=clock):
+    def __init__(self, ws, observer, send=emit, now=clock, visual_interval=None):
         self.ws, self.observer, self.emit, self.now = ws, observer, send, now
         self.image = None
         self.audio_sent = False
@@ -84,6 +86,12 @@ class MediaPump:
         self.started = self.window_at = self.now()
         self.committed_at = 0
         self.awaiting_commit = False
+        self.request_visual = False
+        self.visual_interval = visual_interval or max(12000, 3600000 / getattr(observer, 'max_calls', 120))
+        self.last_visual = self.started - self.visual_interval + 8000
+        self.audio_at = None
+        self.speech_until = 0
+        self.prefix = deque(maxlen=3)
         self.tasks = []
 
     async def send(self, value):
@@ -114,18 +122,34 @@ class MediaPump:
                 raise ValueError('DECODE_FAILED')
 
     async def images(self):
-        previous = None
         while True:
             await asyncio.sleep(0.1)
             if self.now() - self.started > 20000 and not self.ready:
                 raise ValueError('DECODE_FAILED')
-            if self.image and self.audio_sent and self.image[1] != previous:
-                previous = self.image[1]
+            if self.image and self.audio_sent and not self.ready:
                 await self.send({'type': 'input_image_buffer.append', 'image': base64.b64encode(self.image[0]).decode()})
                 if not self.ready:
                     self.ready = True
                     self.emit({'type': 'ready'})
                     self.emit({'type': 'state', 'phase': 'observing', 'totalTokens': self.observer.total_tokens})
+
+    async def append_audio(self, chunk, at):
+        if self.audio_at is None:
+            self.audio_at = at
+        await self.send({'type': 'input_audio_buffer.append', 'audio': base64.b64encode(chunk).decode()})
+        self.audio_sent = True
+
+    async def commit(self, now, visual):
+        if visual:
+            await self.send({'type': 'input_image_buffer.append', 'image': base64.b64encode(self.image[0]).decode()})
+            self.last_visual = now
+        self.observer.begin(self.audio_at, now, respond=visual)
+        self.committed_at = now
+        self.window_at = now
+        self.audio_at = None
+        self.awaiting_commit = True
+        self.request_visual = visual
+        await self.send({'type': 'input_audio_buffer.commit'})
 
     async def audio(self, stream):
         while True:
@@ -133,19 +157,28 @@ class MediaPump:
                 chunk = await asyncio.wait_for(stream.readexactly(3200), 18)
             except (asyncio.IncompleteReadError, TimeoutError):
                 raise ValueError('DECODE_FAILED') from None
-            await self.send({'type': 'input_audio_buffer.append', 'audio': base64.b64encode(chunk).decode()})
-            self.audio_sent = True
             now = self.now()
+            samples = struct.unpack('<1600h', chunk)
+            audible = sum(value * value for value in samples) / len(samples) >= (32768 * 0.003) ** 2
+            if audible:
+                self.speech_until = now + 800
+            if audible or now < self.speech_until or not self.audio_sent:
+                for prefix, at in self.prefix:
+                    await self.append_audio(prefix, at)
+                self.prefix.clear()
+                await self.append_audio(chunk, now - 100)
+            else:
+                self.prefix.append((chunk, now - 100))
             if self.ready and (not self.image or now - self.image[1] > 5000):
                 raise ValueError('DECODE_FAILED')
-            if self.observer.responding and now - self.committed_at > 25000:
+            if (self.observer.responding or self.awaiting_commit) and now - self.committed_at > 25000:
                 raise ValueError('MODEL_FAILED')
-            if self.ready and now - self.window_at >= 8000 and not self.observer.responding:
-                self.observer.begin(self.window_at, now)
-                self.committed_at = now
-                self.window_at = now
-                self.awaiting_commit = True
-                await self.send({'type': 'input_audio_buffer.commit'})
+            visual = now - self.last_visual >= self.visual_interval
+            segment = self.audio_at is not None and (now - self.audio_at >= 8000 or self.speech_until and now >= self.speech_until)
+            if self.ready and not self.observer.responding and not self.awaiting_commit and (visual or segment):
+                if self.audio_at is None:
+                    await self.append_audio(chunk, now - 100)
+                await self.commit(now, visual)
 
     async def receive(self):
         async for raw in self.ws:
@@ -153,8 +186,11 @@ class MediaPump:
             if event.get('type') == 'input_audio_buffer.committed':
                 if not self.awaiting_commit:
                     continue
+                self.observer.event(event)
+                if self.request_visual:
+                    await self.send({'type': 'response.create'})
                 self.awaiting_commit = False
-                await self.send({'type': 'response.create'})
+                continue
             self.observer.event(event)
         raise ValueError('MODEL_FAILED')
 
@@ -199,7 +235,7 @@ async def attempt(config, observer, candidate, binary):
         process = await asyncio.create_subprocess_exec(*ffmpeg_args(binary, candidate['url']),
                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
-            await MediaPump(ws, observer).run(process)
+            await MediaPump(ws, observer, visual_interval=config['visual_interval']).run(process)
         finally:
             await terminate(process)
 

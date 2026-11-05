@@ -79,7 +79,7 @@ function mediaBody(sample,config) {
 }
 
 export function createMediaClient({request,getKey,now=Date.now}) {
-  let calls=[];
+  let calls=[],lastVisual=null;
   return async(sample,config,{signal}={})=>{
     if(signal?.aborted)throw new Error('请求已取消');
     validateMediaConfig(config,true);
@@ -94,12 +94,16 @@ export function createMediaClient({request,getKey,now=Date.now}) {
     }
     const body=mediaBody(sample,config),endpoint=validateEndpoint(config[sample.kind==='video' || sample.kind==='omni' ? 'visionEndpoint' : 'audioEndpoint']),key=getKey(endpoint);
     if(!key && !['localhost','127.0.0.1','[::1]'].includes(new URL(endpoint).hostname))throw new Error('请填写音视频服务密钥');
+    const visualKey=sample.kind==='video' ? JSON.stringify([endpoint,body.model,sample.inputSource,sample.frames.map(f=>f.data)]) : null;
+    // Suppression is not new evidence. Refresh before the previous observation expires.
+    if(visualKey && lastVisual?.key===visualKey && now()>=lastVisual.at && now()-lastVisual.at<Math.min(30000,config.contextAgeSec*500))return null;
     calls=calls.filter(at=>now()-at<3600000);
     if(calls.length>=config.maxPerHour)throw new Error('音视频每小时调用额度已用完');
     calls.push(now());
     const response=await requestJSON(request,{url:endpoint,key,body,operation:'media',stream:sample.kind==='omni',signal});
     const text=response?.choices?.[0]?.message?.content;
     if(typeof text!=='string' || !text.trim())throw new Error('媒体模型未返回文本，请检查模型是否支持输入格式');
+    if(visualKey)lastVisual={key:visualKey,at:now()};
     if(['[SILENCE]','[UNKNOWN]'].includes(text.trim()))return null;
     return {kind:sample.kind,...(['video','omni'].includes(sample.kind) ? {frameCount:sample.frames.length} : {}),at:sample.at,endedAt:sample.endedAt || sample.at,receivedAt:now(),text:text.trim().slice(0,1800),source:'model-recognition',
       model:body.model,transport:'chat-completions',inputSource:sample.inputSource || 'display',isFinal:true};

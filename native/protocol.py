@@ -54,9 +54,13 @@ def parse_config(message):
         value = c.get(name)
         if type(value) is not int or not lo <= value <= hi:
             raise ValueError('INVALID')
+    video_interval = c.get('videoIntervalSec', 12)
+    if type(video_interval) is not int or not 5 <= video_interval <= 120:
+        raise ValueError('INVALID')
     return {'room': room, 'key': key, 'model': model,
             'endpoint': f'wss://{url.netloc}/api-ws/v1/realtime?{urlencode({"model": model})}',
-            'minutes': c['sessionMinutes'], 'tokens': c['sessionTokens'], 'calls': c['maxPerHour']}
+            'minutes': c['sessionMinutes'], 'tokens': c['sessionTokens'], 'calls': c['maxPerHour'],
+            'visual_interval': max(video_interval * 1000, 3600000 / c['maxPerHour'])}
 
 
 def session_settings(model):
@@ -80,13 +84,14 @@ class Observer:
         self.text = {}
         self.audio_windows, self.audio_seen = {}, set()
 
-    def begin(self, at, ended_at):
+    def begin(self, at, ended_at, respond=True):
         now = self.clock()
         self.calls = [x for x in self.calls if now - x < 3600000]
-        if len(self.calls) >= self.max_calls:
-            raise ValueError('LIMIT')
-        self.calls.append(now)
-        self.window, self.responding = (at, ended_at), True
+        if respond:
+            if len(self.calls) >= self.max_calls:
+                raise ValueError('LIMIT')
+            self.calls.append(now)
+        self.window, self.responding = (at, ended_at), respond
 
     def event(self, event):
         kind = event.get('type')
