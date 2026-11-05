@@ -374,7 +374,7 @@ export function boot(options = {}) {
       } catch (error) { log('error', `互动资料更新失败：${error.message}`); }
       const giveawayState=tools?.state('giveaway');
       const giveawayRound=giveawayState?.phase==='running' ? giveawayState.rounds.find(round=>round.status==='running') : null;
-      engine.ingest(event, {giveawayChat:matchesGiveawayChat(giveawayRound,event,Date.now())});
+      engine.ingest(event, {giveawayChat:matchesGiveawayChat(giveawayRound,event,Date.now(),{self:engine.selfIdentity,selfId:engine.config.selfId})});
       // Persist analysis before acknowledging the recovery journal. Other
       // consumers already ran; retries are idempotent by event/combo identity.
       if(!persistenceDisabled){
@@ -384,7 +384,7 @@ export function boot(options = {}) {
         catch(error){if(journalWrite)await journalWrite;log('error',`预测档案保存失败：${error.message}`);throw error;}
       }
       stopEndedTools();
-      if(['chat','gift'].includes(liveEvent.type)) {
+      if(['chat','gift','like','enter'].includes(liveEvent.type)) {
         await tools?.ready;
         try{await tools?.dispatch('event',liveEvent);}
         catch(error){if(journalWrite)await journalWrite;throw error;}

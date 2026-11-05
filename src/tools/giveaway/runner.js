@@ -1,10 +1,10 @@
 import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState,validateGiveawayConfig,GIVEAWAY_VERSION,matchesGiveawayChat,giveawayUserId} from '../../core/giveaway.js';
-import {prepareGiveawayFeedback} from '../../core/giveaway-feedback.js';
+import {prepareGiveawayFeedback,prepareGiveawayDuplicate} from '../../core/giveaway-feedback.js';
 
 // All commands, ticks and event writes use one queue under one room lease.
 export class GiveawayRunner {
-  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',anchorId=()=>'',now=Date.now,randomInt,pendingEvents,feedback,maxLength=()=>50,feedbackMode=()=> 'auto'}) {
-    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,anchorId,now,randomInt,pendingEvents,feedback,maxLength,feedbackMode});
+  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',anchorId=()=>'',identity=()=>({}),now=Date.now,randomInt,pendingEvents,feedback,maxLength=()=>50,feedbackMode=()=> 'auto'}) {
+    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,anchorId,identity,now,randomInt,pendingEvents,feedback,maxLength,feedbackMode});
     this.key=`live-assistant:giveaway:${room}`;this.data={version:GIVEAWAY_VERSION,rounds:[]};this.tail=Promise.resolve();this.owned=false;this.closed=false;this.reason='尚未开始抽奖';
     this.handedOff=new Set();
   }
@@ -35,7 +35,7 @@ export class GiveawayRunner {
       records=await this.pendingEvents(after);this.assertOpen();
       let round=this.current();const previous=round;
       for(const record of records) {
-        if(record.savedAt>=round.startedAt && record.savedAt<round.endsAt) round=enterGiveaway(round,record.event,record.savedAt);
+        if(record.savedAt>=round.startedAt && record.savedAt<round.endsAt) round=this.applyEvent(round,record.event,record.savedAt);
       }
       if(round!==previous)await this.save(round);
       const last=records.at(-1);if(last)after={savedAt:last.savedAt,key:last.key};
@@ -83,7 +83,7 @@ export class GiveawayRunner {
         const round=this.data.rounds.find(row=>row.feedback?.some(message=>`${row.id}:${message.id}`===key));
         const message=round?.feedback.find(row=>`${round.id}:${row.id}`===key);
         if(!message || message.expiresAt<=this.now() || message.attemptedBy && message.attemptedBy!==owner)return false;
-        if(['start','entry','countdown','reminder'].includes(message.kind) && round.status!=='running')return false;
+        if(['start','entry','duplicate','countdown','reminder'].includes(message.kind) && round.status!=='running')return false;
         if(round.broadcastId && this.broadcastId() && round.broadcastId!==this.broadcastId())return false;
         if(message.attemptedBy===owner)return true;
         await this.save({...round,feedback:round.feedback.map(row=>row.id===message.id ? {...row,attemptedBy:owner} : row)});
@@ -101,7 +101,7 @@ export class GiveawayRunner {
   }
   start(value) {
     return this.run(async()=>{
-      const config=validateGiveawayConfig({...value,feedbackEnabled:true}),reason=this.guard();
+      const config=validateGiveawayConfig({...value,presenceBias:value.presenceBias ?? true,feedbackEnabled:true}),reason=this.guard();
       if(reason)throw new Error(reason);
       if(!this.storage)throw new Error('抽奖存储不可用，请重新加载扩展');
       if(!await this.claim())throw new Error('其他页面正在运行本直播间抽奖，请在该页面操作');
@@ -145,16 +145,21 @@ export class GiveawayRunner {
       await this.check();
     });
   }
+  applyEvent(round,event,now) {
+    const identity=this.identity(),matching=matchesGiveawayChat(round,event,now,identity),already=matching && round.entrants.some(row=>row.userId===giveawayUserId(event.user));
+    const next=enterGiveaway(round,event,now,identity);
+    return already ? prepareGiveawayDuplicate(next,event,now,this.maxLength()) : next;
+  }
   event(event) {
     return this.run(async()=>{
       const round=this.current();if(!this.owned || !round)return;
       if(this.now()>=round.endsAt){await this.check();return;}
       if(this.guard())return;
-      if(matchesGiveawayChat(round,event,this.now()) && !giveawayUserId(event.user)) {
+      if(matchesGiveawayChat(round,event,this.now(),this.identity()) && !giveawayUserId(event.user)) {
         this.entryError=`${String(event.user?.name || '观众').slice(0,100)} 的参与弹幕未报名：未采集到稳定用户 ID，请检查直播连接后重发口令`;
         this.publish();return;
       }
-      const next=enterGiveaway(round,event,this.now());
+      const next=this.applyEvent(round,event,this.now());
       if(next!==round) {
         await this.save(prepareGiveawayFeedback(next,this.now(),this.maxLength()));
         this.entryError='';

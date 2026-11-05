@@ -194,6 +194,24 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   let collapsed=false;root.addEventListener('keydown',event=>{if(event.key==='Escape' && !event.defaultPrevented)collapsed=true;});
   ui.querySelector('[role="dialog"] input').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,30));
   assert.equal(collapsed,false,'Escape关闭知识弹窗时不触发外层面板收起');assert.equal(ui.querySelector('[role="dialog"]'),null);assert.equal(ui.activeElement?.textContent,'添加知识');
+  const history=document.createElement('section');history.dataset.recordBrowser='抽奖记录';
+  root.querySelector('[data-page=ai]').append(history);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.ok([...ui.querySelectorAll('button')].find(button=>button.textContent==='查看抽奖记录'),'尚无历史时也提供紧凑入口和空状态');
+  for(let i=0;i<25;i++){const record=document.createElement('details');record.dataset.recordItem=String(i);record.innerHTML=`<summary>第 ${i+1} 轮礼盒</summary><p>详情 ${i+1}：近期活动权重</p>`;history.append(record);}
+  root.querySelector('[data-page=ai]').append(history);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  const historyTrigger=[...ui.querySelectorAll('button')].find(n=>n.textContent==='查看抽奖记录');assert.ok(historyTrigger);
+  assert.doesNotMatch(ui.querySelector('.product-content').textContent,/详情 25/,'记录详情不堆在页面底部');
+  historyTrigger.focus();historyTrigger.click();await new Promise(resolve=>setTimeout(resolve,60));
+  let historyDialog=ui.querySelector('[role=dialog]');assert.equal(historyDialog.querySelectorAll('[data-record-open]').length,20);
+  const historySearch=historyDialog.querySelector('input[type=search]');setter.call(historySearch,'第 25');historySearch.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));await new Promise(resolve=>setTimeout(resolve,30));
+  historyDialog.querySelector('[data-record-open]').click();await new Promise(resolve=>setTimeout(resolve,30));assert.match(historyDialog.textContent,/详情 25/);assert.equal(ui.querySelectorAll('[role=dialog]').length,1,'二级详情复用同一弹窗，不叠遮罩');
+  assert.equal(historyDialog.querySelector('.product-disclosure'),null,'打开轮次直接呈现详情，不再套一层折叠');
+  const replacement=history.lastElementChild.cloneNode(true);replacement.querySelector('p').textContent='实时更新后的详情 25';history.lastElementChild.replaceWith(replacement);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,30));
+  assert.match(historyDialog.textContent,/实时更新后的详情 25/,'详情按稳定业务键订阅实时记录');
+  historyDialog.querySelector('[data-record-detail-heading]').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,30));
+  assert.equal(historyDialog.querySelector('input[type=search]').value,'第 25','返回保留搜索');assert.match(ui.activeElement.textContent,/第 25 轮/,'返回聚焦原记录入口');
+  historyDialog.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,250));
+  assert.equal(ui.querySelector('[role=dialog]'),null);assert.equal(ui.activeElement,historyTrigger);
   assert.equal(document.documentElement.getAttribute('data-mantine-color-scheme'),null);assert.equal(document.body.querySelector('[data-portal]'),null);
   runtime.destroy();runtime=null;assert.equal(container.shadowRoot.childNodes.length,0);
  }finally{runtime?.destroy();bridge?.destroy();Object.assign(globalThis,previous);if(navigatorDescriptor)Object.defineProperty(globalThis,'navigator',navigatorDescriptor);else delete globalThis.navigator;dom.window.close();await rm(dir,{recursive:true,force:true});}

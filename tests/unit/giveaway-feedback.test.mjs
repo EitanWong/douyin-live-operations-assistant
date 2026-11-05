@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState} from '../../src/core/giveaway.js';
-import {prepareGiveawayFeedback} from '../../src/core/giveaway-feedback.js';
+import {prepareGiveawayFeedback,prepareGiveawayDuplicate} from '../../src/core/giveaway-feedback.js';
 import {Engine,copy,DEFAULTS} from '../../src/core/engine.js';
 
 const config={prizes:[{name:'签名礼盒',count:1},{name:'纪念杯',count:2}],durationSec:360,chatEnabled:true,keyword:'参与抽奖',giftEnabled:true,gifts:'小心心',giftMin:1,feedbackEnabled:true};
@@ -39,6 +39,22 @@ test('抽奖反馈优先请求管理员弹幕',async()=>{
   f.engine.send=async(text,current,hooks)=>{channel=hooks.channel;await hooks.beforeClick();return {submitted:true};};
   await f.engine.enqueueGiveaway(f.message('start','抽奖开始',{kind:'start'}));await f.engine.tick();
   assert.equal(channel,'admin');
+});
+
+test('短账号消息保留可解析的@身份；空白和特殊昵称使用稳定ID，重复提醒可恢复',async()=>{
+ for(const name of ['🦊'.repeat(100),'@@@','   ','\u202e']) {
+  let round=enterGiveaway(make(),{type:'chat',id:'first',text:'参与抽奖',at:2000,user:{id:'1',name}},2000);
+  round=prepareGiveawayFeedback(round,2000,10);
+  round=prepareGiveawayDuplicate(round,{type:'chat',id:'second',text:'参与抽奖',at:3000,user:{id:'1',name}},3000,10);
+  assert.ok(round.feedback.every(row=>row.text.trim() && [...row.text].length<=10));
+  assert.ok(round.feedback.some(row=>row.kind==='duplicate' && row.mentionTargets?.[0]?.id==='1'));
+  assert.doesNotThrow(()=>parseGiveawayState({version:2,rounds:[round]},'123'));
+  const f=sender();let mentions;
+  f.engine.send=async(text,current,hooks)=>{mentions=hooks.mentions;await hooks.beforeClick();return {submitted:true};};
+  const entry=round.feedback.find(row=>row.kind==='entry');
+  await f.engine.enqueueGiveaway(f.message('entry',entry.text,{mentionTargets:entry.mentionTargets}));await f.engine.tick();
+  assert.deepEqual(mentions,[{id:'1',start:entry.text.indexOf('@'),length:entry.text.length-entry.text.indexOf('@')}]);
+ }
 });
 test('短轮次合并开场信息，为报名确认与倒计时留出发送时段',async()=>{
   const f=sender();

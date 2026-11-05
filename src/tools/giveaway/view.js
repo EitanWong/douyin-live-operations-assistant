@@ -42,14 +42,21 @@ function updateWeightControls(panel,rounds) {
   if(panel.giveawayViewerSignature!==signature){list.innerHTML=[...viewers].slice(-100).map(([id,name])=>`<option value="${esc(id)}">${esc(name)}</option>`).join('');panel.giveawayViewerSignature=signature;}
 }
 
+function entrantWeight(round,row,snapshot) {
+  const base=`基础 ×${giveawayWeight(round.config,row.userId)}`;
+  const seen=row.lastSeenAt!==undefined ? `<small>最近活动 ${time(row.lastSeenAt)}</small>` : '';
+  return `<small>${base}${snapshot ? ` · 开奖 ×${snapshot.weight} · ${snapshot.recent ? '近期有活动' : '未近期观测'}` : ''}</small>${seen}`;
+}
 function entrantsTable(round) {
   if(!round.entrants.length)return '<p class="hint">本轮尚无参与者。</p>';
-  return `<div class="giveaway-scroll" tabindex="0" role="region" aria-label="本轮参与记录"><table class="pk-table"><thead><tr><th scope="col">观众 / 用户 ID</th><th scope="col">参与方式 / 权重</th><th scope="col">结果</th></tr></thead><tbody>${round.entrants.slice(-100).map(row=>`<tr><td>${esc(row.userName)}<small>${esc(row.userId)}</small></td><td>${row.sources.map(source=>source==='chat' ? '弹幕' : '礼物').join('、')}${row.giftCount ? `<small>指定礼物 ×${row.giftCount}</small>` : ''}<small>权重 ×${giveawayWeight(round.config,row.userId)}</small></td><td>${round.awards.some(award=>award.userId===row.userId) ? `<strong>中奖 · ${esc(round.config.prizes[round.awards.find(award=>award.userId===row.userId).prizeIndex].name)}</strong>` : round.status==='drawn' ? '未中奖' : round.status==='cancelled' ? '已取消' : '待开奖'}</td></tr>`).join('')}</tbody></table></div>${round.entrants.length>100 ? '<p class="hint">显示最近 100 位；导出包含全部参与者。</p>' : ''}`;
+  const weights=new Map(round.drawSnapshot?.weights.map(row=>[row.userId,row]) || []),awards=new Map(round.awards.map(row=>[row.userId,row]));
+  return `<table class="pk-table" aria-label="本轮参与记录"><thead><tr><th scope="col">观众 / 用户 ID</th><th scope="col">参与方式 / 权重</th><th scope="col">结果</th></tr></thead><tbody>${round.entrants.map(row=>{
+    const award=awards.get(row.userId),result=award ? `中奖 · ${esc(round.config.prizes[award.prizeIndex].name)}` : round.status==='drawn' ? '未中奖' : round.status==='cancelled' ? '已取消' : '待开奖';
+    return `<tr><td>${esc(row.userName)}<br><small>${esc(row.userId)}</small></td><td>${row.sources.map(source=>source==='chat' ? '弹幕' : '礼物').join('、')}${row.giftCount ? `<small>指定礼物 ×${row.giftCount}</small>` : ''}${entrantWeight(round,row,weights.get(row.userId))}</td><td>${result}</td></tr>`;
+  }).join('')}</tbody></table>`;
 }
-
 function historyHTML(rounds) {
-  if(!rounds.length)return '<p class="hint">第一轮抽奖结束后，这里会保留奖品、规则、参与明细和中奖名单。</p>';
-  return rounds.slice(-20).reverse().map(round=>`<details class="giveaway-record" data-round-id="${esc(round.id)}"><summary>${esc(giveawayPrizes(round.config))} · ${status[round.status]} · ${round.entrants.length} 人参与<small>${time(round.startedAt)} · ${round.awards.length} 人中奖</small></summary><p class="hint">${round.config.chatEnabled ? `弹幕「${esc(round.config.keyword)}」` : ''}${round.config.chatEnabled && round.config.giftEnabled ? ' 或 ' : ''}${round.config.giftEnabled ? `指定礼物「${esc(round.config.gifts)}」累计 ${round.config.giftMin} 个` : ''} · 计划抽取 ${giveawaySlots(round.config)} 人 · ${round.config.durationSec} 秒</p><p class="hint">${esc(giveawayDrawRules(round.config))}${round.config.anchorGuaranteed ? ` · 主播 UID ${esc(round.anchorId)}` : ''}</p><p>${esc(giveawayAnnouncement(round) || round.reason || '等待开奖')}</p>${entrantsTable(round)}</details>`).join('')+(rounds.length>20 ? '<p class="hint">显示最近 20 轮；导出包含全部历史轮次。</p>' : '');
+  return [...rounds].reverse().map(round=>`<details class="giveaway-record" data-round-id="${esc(round.id)}" data-record-item="${esc(round.id)}"><summary>${esc(giveawayPrizes(round.config))} · ${status[round.status]} · ${round.entrants.length} 人参与 · ${time(round.startedAt)} · ${round.awards.length} 人中奖</summary><h4>规则与时间</h4><p>开始 ${time(round.startedAt)} · 截止 ${time(round.endsAt)}${round.closedAt ? ` · 结束 ${time(round.closedAt)}` : ''}</p><p>${round.config.chatEnabled ? `弹幕「${esc(round.config.keyword)}」，或 @当前场控账号 发送“参与抽奖”/指定文字` : ''}${round.config.chatEnabled && round.config.giftEnabled ? ' 或 ' : ''}${round.config.giftEnabled ? `指定礼物「${esc(round.config.gifts)}」累计 ${round.config.giftMin} 个` : ''} · 计划抽取 ${giveawaySlots(round.config)} 人 · ${round.config.durationSec} 秒</p><p>${esc(giveawayDrawRules(round.config))}${round.config.anchorGuaranteed ? ` · 主播 UID ${esc(round.anchorId)}` : ''}</p><h4>开奖结果</h4><p>${esc(giveawayAnnouncement(round) || round.reason || '等待开奖')}</p><h4>参与明细</h4>${entrantsTable(round)}</details>`).join('');
 }
 
 function hydrate(panel,config) {
@@ -75,7 +82,7 @@ export const giveawayView = {
   template:()=>`<section class="page" role="tabpanel" id="page-giveaway" aria-labelledby="tab-giveaway" data-page="giveaway" hidden>
     <style>
       .giveaway-prize-row{display:grid;grid-template-columns:minmax(0,1fr) 100px auto;gap:10px;align-items:end}.giveaway-prize-row .field{min-width:0}.giveaway-prize-row button{margin-bottom:18px}.giveaway-gift-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px;max-height:200px;overflow:auto}.giveaway-gift-option{display:flex;align-items:center;gap:8px;padding:10px 0;min-width:0;font-size:12px;overflow-wrap:anywhere}.giveaway-gift-option input{flex:none;accent-color:var(--accent)}.giveaway-gift-selected{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px;font-size:12px;color:var(--muted)}.giveaway-gift-chip{font-size:12px;max-width:100%;overflow-wrap:anywhere}@media (max-width:560px){.giveaway-prize-row{grid-template-columns:minmax(0,1fr) 88px}.giveaway-prize-row button{grid-column:1/-1;justify-self:start;margin:-8px 0 12px}.giveaway-gift-list{grid-template-columns:1fr}}
-      .giveaway-history-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin:20px 0 12px}.giveaway-history-head h3{font-size:13px;margin:0}.giveaway-live{margin:18px 0;padding-block:16px;border-block:1px solid var(--line)}.giveaway-live h3{margin:0 0 8px;font-size:15px}.giveaway-live p{margin:6px 0;overflow-wrap:anywhere}.giveaway-clock{font-variant-numeric:tabular-nums;font-weight:600}.giveaway-result{line-height:1.8}.giveaway-record{padding-block:12px;border-bottom:1px solid var(--line)}.giveaway-record summary{cursor:pointer;font-size:13px;overflow-wrap:anywhere}.giveaway-record small,.giveaway-scroll td small{display:block;font-size:11px;color:var(--muted);overflow-wrap:anywhere}.giveaway-scroll{overflow:auto;max-height:300px}.giveaway-scroll table{min-width:300px}.giveaway-scroll td:first-child{max-width:190px;overflow-wrap:anywhere}.giveaway-config{border:0;margin:0;padding:0;min-width:0}.giveaway-config legend{font-size:13px;font-weight:600;margin-bottom:10px}.giveaway-option{display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0 10px}.giveaway-option input{accent-color:var(--accent)}
+      .giveaway-live{margin:18px 0;padding-block:16px;border-block:1px solid var(--line)}.giveaway-live h3{margin:0 0 8px;font-size:15px}.giveaway-live p{margin:6px 0;overflow-wrap:anywhere}.giveaway-clock{font-variant-numeric:tabular-nums;font-weight:600}.giveaway-result{line-height:1.8}.giveaway-record{padding-block:12px;border-bottom:1px solid var(--line)}.giveaway-record summary{cursor:pointer;font-size:13px;overflow-wrap:anywhere}.giveaway-record small{display:block;font-size:11px;color:var(--muted);overflow-wrap:anywhere}.giveaway-config{border:0;margin:0;padding:0;min-width:0}.giveaway-config legend{font-size:13px;font-weight:600;margin-bottom:10px}.giveaway-option{display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0 10px}.giveaway-option input{accent-color:var(--accent)}
     </style>
     <h2>互动抽奖</h2><p class="intro">观众发送指定弹幕或赠送指定礼物即可参与。倒计时结束自动开奖，每人每轮一个名额。</p>
     <fieldset class="giveaway-config"><legend>奖品与开奖时间</legend>
@@ -86,7 +93,8 @@ export const giveawayView = {
     </fieldset>
     <fieldset class="giveaway-config"><legend>弹幕参与与中奖规则</legend><p class="hint">弹幕与礼物满足任意一种即可参与，每人每轮一个名额。</p>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="chatEnabled" checked>发送指定弹幕参与</label>
-      <label class="field"><span>参与弹幕</span><input type="text" data-giveaway="keyword" value="参与抽奖" maxlength="100"><small>去除首尾空格后须完全一致；重复发送不增加名额。</small></label>
+      <label class="field"><span>参与弹幕</span><input type="text" data-giveaway="keyword" value="参与抽奖" maxlength="100"><small>直接发指定文字，或 @当前场控账号 发送“参与抽奖”/指定文字；重复报名会提醒，不增加名额。</small></label>
+      <label class="giveaway-option"><input type="checkbox" data-giveaway="presenceBias" checked>提高近期在场活动观众的中奖权重</label><p class="hint">截止前2分钟有弹幕、礼物、点赞或进场记录的参与者，基础权重乘3；其余乘1。未近期观测不代表已经离开，安静观看的观众仍可中奖。重复口令不增加名额或叠加倍数。</p>
       <details data-giveaway-weight-settings><summary>指定观众抽取权重 · 其他观众默认为 1</summary>
         <p class="hint">按用户 ID 设置，权重越高越容易被抽中。范围 0.01～1000，最多两位小数。例如只有两人、权重分别为 1 和 3 时，首个名额概率为 25% 和 75%；多名额会在每次抽取后重新计算。</p>
         <datalist id="giveaway-known-viewers" data-giveaway-known-viewers></datalist><div data-giveaway-weights></div>
@@ -110,15 +118,13 @@ export const giveawayView = {
     </fieldset>
     <section class="giveaway-live workspace-wide" aria-label="当前抽奖"><h3 data-giveaway-round-title>尚未开始</h3><p class="giveaway-clock" data-giveaway-countdown role="timer" aria-live="off">设置奖品和参与方式，然后开始第一轮抽奖。</p><p class="giveaway-result" data-giveaway-result role="status" aria-live="polite"></p><div class="actions"><button type="button" data-action="giveaway-copy" disabled>复制开奖公告</button></div>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="announcePrizeNames" checked>开场播报奖品名称</label>
-      <details><summary>弹幕播报与提醒规则</summary><p class="hint">开场可隐藏奖品，中奖后始终 @ 中奖者并播报奖品，不公开抽取规则。每分钟主动提示参与方式，最后 10 秒停止招募；播报开轮、报名成功和开奖结果。剩余时间前段每分钟提醒，最后两分钟在 120、90、60、30、10、5 秒时提醒，越接近开奖反馈越及时。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；按实际剩余秒数播报，过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p></details>
+      <details><summary>弹幕播报与提醒规则</summary><p class="hint">开场可隐藏奖品，中奖后始终 @ 中奖者并播报奖品，不公开抽取规则。每分钟主动提示参与方式，最后 10 秒停止招募；播报开轮、@报名成功、@重复参与提醒和开奖结果；同一观众重复报名提醒每30秒至多一次。剩余时间前段每分钟提醒，最后两分钟在 120、90、60、30、10、5 秒时提醒，越接近开奖反馈越及时。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；按实际剩余秒数播报，过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p></details>
     <div class="actions"><button type="button" class="primary" data-action="giveaway-start">开始抽奖</button><button type="button" class="danger" data-action="giveaway-cancel" disabled>取消本轮</button></div>
     <p class="hint" data-giveaway-status role="status" aria-live="polite">正在读取抽奖记录</p>
     <p class="hint" data-giveaway-feedback role="status" aria-live="polite">开轮后显示弹幕反馈状态</p>
     <p class="hint" data-giveaway-entry-feedback role="status" aria-live="polite"></p>
     </section>
-    <div class="giveaway-history-head"><h3>抽奖记录</h3><div class="actions"><button type="button" data-action="giveaway-csv" disabled>导出 CSV</button><button type="button" data-action="giveaway-json" disabled>导出 JSON</button></div></div>
-    <div data-giveaway-history></div>
-    <p class="hint">结果保存在本工具，并自动公布到公屏。记录保存在本机；CSV 可用于表格统计，JSON 保留完整规则、明细与弹幕反馈记录。发送状态和公屏回显可在运行日志查看。请保持直播页打开；刷新后会恢复本轮，关闭期间的互动无法采集。参与人数不足时按奖品列表顺序分配；无人参加时保留空结果。</p>
+    <section aria-label="抽奖记录与导出"><div data-giveaway-history data-record-browser="抽奖记录"></div><div class="actions"><button type="button" data-action="giveaway-csv" disabled>导出 CSV</button><button type="button" data-action="giveaway-json" disabled>导出 JSON</button></div><p class="hint">记录保存在本机。进入记录面板后可搜索轮次，再查看每轮规则、参与者、开奖权重和中奖结果；导出包含完整历史。</p></section>
   </section>`,
   update(panel,state) {
     const rounds=state.rounds || [],round=rounds.at(-1),active=round?.status==='running';
@@ -139,12 +145,8 @@ export const giveawayView = {
     const clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
     panel.text('[data-giveaway-countdown]',round ? active ? `剩余 ${clock} · ${round.entrants.length} 人参与 · 抽取 ${giveawaySlots(round.config)} 人` : `${round.entrants.length} 人参与 · ${round.awards.length} 人中奖 · ${round.closedAt ? time(round.closedAt) : ''}` : '设置奖品和参与方式，然后开始第一轮抽奖。');
     panel.text('[data-giveaway-result]',giveawayAnnouncement(round));
-    const target=panel.node('[data-giveaway-history]'),signature=JSON.stringify(rounds.slice(-20).map(round=>({...round,giftProgress:undefined,entrants:round.entrants.slice(-100),participantCount:round.entrants.length})));
-    if(panel.giveawayHistorySignature!==signature){
-      const openIds=[...target.querySelectorAll('details[open]')].map(node=>node.dataset.roundId);
-      target.innerHTML=historyHTML(rounds);for(const node of target.querySelectorAll('details'))node.open=openIds.includes(node.dataset.roundId);
-      panel.giveawayHistorySignature=signature;
-    }
+    const target=panel.node('[data-giveaway-history]'),signature=JSON.stringify(rounds.map(({giftProgress,feedback,...round})=>round));
+    if(panel.giveawayHistorySignature!==signature){target.innerHTML=historyHTML(rounds);panel.giveawayHistorySignature=signature;}
   },
   actions:{
     'add-prize':panel=>{

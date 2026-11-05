@@ -9,7 +9,7 @@ import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
 import {gridOptions,cardRuns} from './layout.js';
 import {WorkspaceFit} from './fit.js';
-import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel,canInspect} from './inspect.js';
+import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel,canInspect,RecordBrowser} from './inspect.js';
 import {recordText} from './collection.js';
 import {PageUtilities} from './utilities.js';
 import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
@@ -101,6 +101,7 @@ const View=React.memo(function View({node,bridge}) {
   if(node.kind==='field')return h(Control,{node,bridge});
   if(node.kind==='button')return h(Button,{size:'sm',variant:node.primary || node.selected ? 'filled' : 'light',color:node.danger ? 'red' : undefined,disabled:node.disabled,loading:node.busy,'aria-label':node.label,'aria-pressed':node.selected || undefined,onClick:()=>bridge.activate(node.id),leftSection:icon(node.icon)},node.text);
   if(node.kind==='details')return h(Disclosure,{node,bridge});
+  if(node.kind==='record-browser')return h(RecordBrowser,{node});
   if(node.kind==='table')return h(DataTable,{node,bridge});
   if(node.collection?.mode==='records')return h(RecordCollection,{node,bridge});
   if(node.kind==='chart')return h(Chart,{node});
@@ -149,7 +150,7 @@ function Workspace({bridge,shadow,onReady}) {
   useEffect(()=>{if(!state.focus)return;const selector=`[data-control-id="${state.focus.id}"]`,field=shadow.querySelector(`.product-inspection-view ${selector}`) || shadow.querySelector(selector);const input=field?.matches('input,textarea,select') ? field : field?.querySelector('input,textarea,select');input?.focus();input?.scrollIntoView?.({block:'center'});},[state.focus,shadow]);
   const dark=state.theme==='dark' || state.theme==='system' && systemDark;
   const groups=[...new Set(state.nav.map(n=>n.group))];
-  const headings=[];function walk(node){if(node?.tag==='h3')headings.push({value:node.id,label:node.children.filter(n=>n.kind==='text').map(n=>n.text).join('').trim()});for(const child of node?.children || [])walk(child);}walk(state.content);
+  const headings=[];function walk(node){if(node?.kind==='record-browser')return;if(node?.tag==='h3')headings.push({value:node.id,label:node.children.filter(n=>n.kind==='text').map(n=>n.text).join('').trim()});for(const child of node?.children || [])walk(child);}walk(state.content);
   const nav=h('nav',{id:'product-navigation',className:'product-nav','aria-label':'功能导航'},groups.map(group=>h('div',{key:group,className:'product-nav-group'},h(motion.div,{className:'product-nav-label',initial:false,'aria-hidden':state.sidebar.collapsed && !compact,animate:groupReveal},group),state.nav.filter(n=>n.group===group).map(item=>h(Button,{key:item.key,className:'product-nav-button',variant:state.key===item.key ? 'light' : 'subtle',fullWidth:true,'aria-label':item.label,title:item.label,'aria-current':state.key===item.key ? 'page' : undefined,onClick:()=>bridge.navigate(item.key),leftSection:icon(item.icon)},item.label)))));
   return h(MantineProvider,{forceColorScheme:dark ? 'dark' : 'light',getRootElement:()=>shadow.host,cssVariablesSelector:':host',deduplicateCssVariables:false,withGlobalClasses:false,cssVariablesResolver:componentVariables,theme:componentTheme(state.palette,dark)},
     h(PageUtilities,{utilities:state.utilities,shadow,pageKey:`${state.key}:${selectedView || ''}`,title:state.title,disabled:Boolean(state.dialog),render:nodes=>renderChildren(nodes,bridge)},({utilityOpen,utilityActions})=>h(InspectionProvider,{content:state.content,shadow,pageKey:`${state.key}:${selectedView || ''}`,disabled:Boolean(state.dialog) || utilityOpen,render:node=>node.kind==='details' ? h(Stack,{gap:'var(--product-gap)'},renderChildren(node.children,bridge)) : h(View,{node,bridge})},({inspecting})=>h(React.Fragment,null,

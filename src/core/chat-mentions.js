@@ -46,3 +46,29 @@ export function encodeChatMentions(text, mentions = []) {
   });
   return parts.length ? JSON.stringify(parts) : '';
 }
+
+const mentionBoundary = /[\s\u200b:：,，。!！?？]/u;
+
+// 有结构化被 @ 账号时以 UID 为准；纯文本必须完整匹配昵称，不能误回同名前缀。
+export function addressedToSelf(event, self, configuredId = '') {
+  const text = String(event.text || '').trim();
+  const ids = new Set([configuredId || self?.id, self?.secUid].filter(Boolean).map(String));
+  const mentions = Array.isArray(event.mentions) ? event.mentions.map(String) : [];
+  const structured = mentions.length > 0;
+  if (structured && !mentions.some(id => ids.has(id))) return null;
+  const name = (!configuredId || !self?.id || String(self.id) === String(configuredId)) && self?.name;
+  if (name) {
+    const token = `@${name}`;
+    let offset = text.indexOf(token);
+    while (offset >= 0) {
+      const end = offset + token.length;
+      if ((!offset || mentionBoundary.test(text[offset - 1])) && (end === text.length || mentionBoundary.test(text[end]))) {
+        return `${text.slice(0, offset)} ${text.slice(end)}`.trim().replace(/^[:：,，\s]+/u, '');
+      }
+      offset = text.indexOf(token, end);
+    }
+  }
+  if (!structured) return null;
+  // 手动 UID 也可使用结构化 @；页面未提供昵称时，移除开头的显示昵称。
+  return text.replace(/^@[^\s\u200b]+(?:[\s\u200b]+|$)/u, '').trim();
+}

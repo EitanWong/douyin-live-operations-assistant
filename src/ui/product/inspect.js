@@ -2,16 +2,23 @@ import {createElement as h,createContext,useContext,useEffect,useRef,useState} f
 import {Modal} from '@mantine/core';
 import {Button,useMotionPreference} from './motion.js';
 import {recordText} from './collection.js';
+import {RecordBrowserContents} from './record-browser.js';
 
 const Inspection=createContext(null);
 const EntryScope=createContext(false);
 // Enlargement serves detailed content, rather than the container around it.
 export function canInspect(node) {
   if(!node)return false;
-  if(node.inspectable || ['chart','svg','table','bars'].includes(node.kind) || node.collection?.mode==='records')return true;
+  if(node.inspectable || ['chart','svg','table','bars','record-browser'].includes(node.kind) || node.collection?.mode==='records')return true;
   return (node.children || []).some(canInspect);
 }
 export function InspectionContents({children}) {return h(EntryScope.Provider,{value:true},children);}
+export function RecordBrowser({node}) {
+  const inspection=useContext(Inspection);
+  return h('section',{className:'product-record-browser-entry','aria-label':node.label},
+    h('div',null,h('h3',null,node.label),h('p',null,`共 ${node.children.length} 轮 · 进入后查看规则、参与明细和开奖结果`)),
+    h(Button,{variant:'light','aria-haspopup':'dialog',onClick:()=>inspection?.open(node.id)},`查看${node.label}`));
+}
 export function viewLabel(node) {
   const first=node.children?.find(child=>child.tag==='h3' || child.tag==='h4' || child.tag==='strong' || child.layout==='row' && child.children?.some(part=>part.tag==='h3'));
   const heading=first?.layout==='row' ? first.children.find(part=>part.tag==='h3') : first;
@@ -45,5 +52,5 @@ export function InspectionProvider({content,shadow,pageKey,disabled,render,child
     h(Modal,{opened:opened && !disabled,onClose:close,title:node ? viewLabel(node) : '',size:'min(1120px, calc(100vw - 24px))',centered:true,withinPortal:false,lockScroll:false,returnFocus:false,closeOnEscape:false,onExitTransitionEnd:restore,
       transitionProps:{transition:'pop',duration:reduced ? 0 : 180},classNames:{root:'product-inspection-dialog',content:'product-inspection-content',body:'product-inspection-body'},closeButtonProps:{'aria-label':'关闭放大视图'},
       onKeyDown:event=>{if(event.key==='Escape' && !event.isComposing){event.preventDefault();event.stopPropagation();close();}}},
-      node ? h(Inspection.Provider,{value:null},h('div',{className:'product-inspection-view product-page'},render(node))) : null));
+      node ? h(Inspection.Provider,{value:null},h('div',{className:'product-inspection-view product-page'},node.kind==='record-browser' ? h(RecordBrowserContents,{node,render}) : render(node))) : null));
 }

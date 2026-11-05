@@ -165,7 +165,7 @@ Cordis API 仅封装在 `cordis-adapter.js`；业务工具和 UI 继续依赖项
 
 `giveaway` 通过包内注册加入导航。纯规则位于 `src/core/giveaway.js`；运行器在房间租约下串行保存，持久状态为 `{version:2, rounds}`。直播间、轮次、参与者、礼物连击进度与中奖 ID 各有明确字段，规则创建后固定。
 
-`dispatch` 可靠分发弹幕／礼物事件并等待工具保存，区别于可合并的 `notify` 状态提示。保存失败时核心仍接收事件，抽奖保留待处理日志并进入失败状态；重建工具先恢复截止前的日志，再开奖。后台通过 `giveaway-read/write` 按来源房间限制记录，并在 IndexedDB 事务提交后返回，错误不会清空旧数据。工具关闭先撤销未来任务、等待当前写入，再释放租约。
+`dispatch` 可靠分发弹幕／礼物／点赞／进场事件并等待工具保存，区别于可合并的 `notify` 状态提示。保存失败时核心仍接收事件，抽奖保留待处理日志并进入失败状态；重建工具先恢复截止前的日志，再开奖。后台通过 `giveaway-read/write` 按来源房间限制记录，并在 IndexedDB 事务提交后返回，错误不会清空旧数据。工具关闭先撤销未来任务、等待当前写入，再释放租约。
 
 使用 `tests/unit/giveaway*.test.mjs`、`tests/integration/giveaway.test.mjs` 和构建后的扩展后台测试验证规则、跨页接管、恢复与存储边界。
 
@@ -177,3 +177,11 @@ Cordis API 仅封装在 `cordis-adapter.js`；业务工具和 UI 继续依赖项
 抽奖另声明 `giveaway.announce`，须持有房间工具租约，且受宿主页面／直播场次门控。`config.feedbackEnabled` 固定本轮是否发弹幕；旧记录缺少该字段时归一为 false。纯函数 `prepareGiveawayFeedback` 生成 `round.feedback[]`：`id/kind/text/createdAt/expiresAt/queued`，报名确认另存 `userIds`，倒计时另存 `seconds`。开始、报名与结果先与轮次一起保存，再交给发送队列；截止前确认合并，关键节点不补发过期提醒。
 
 Engine 的 `enqueueGiveaway` 将带稳定 key 的任务和收据一起 checkpoint，抽奖通道可独立于场控 running 工作，沿用发送串行、点击前检查点与回显核对。抽奖消息独立间隔 2 秒，其他模块原有调度保持原样；出队时更新倒计时文本。`claimFeedback` 在点击前以房间单写者持久记录 `attemptedBy`（当前 Engine 实例），接管页不能重复点击已认领消息。未认领的 queued 消息由新运行器重新交付，收据与队列去重；未知发送结果保持不自动重发。JSON 保留反馈记录，queued 仅表示交付队列，不表示平台回显。
+
+报名口令由共享 `matchesGiveawayChat` 判断：直接发送指定文字，或 @当前场控账号发送“参与抽奖”/指定文字均可。结构化 @身份优先，指向他人的消息不触发报名。报名消息优先于普通机器人、关键词和AI回复。宿主通过 `chatIdentity()` 提供当前发送账号身份。
+
+新轮次默认 `presenceBias:true`，可在开轮前关闭。协议没有可靠的完整在线/离场名单，不从贡献榜缺席推断离场；仅使用截止前120秒内真实采集到的弹幕、礼物、点赞或进场事件更新已入池用户的 `lastSeenAt`。近期有活动者的基础权重乘3，其余乘1，仍然可中奖；倍数不累加，与指定权重相乘。按 `endsAt` 固化 `drawSnapshot{at,windowMs,recentMultiplier,weights[{userId,lastSeenAt,recent,weight}]}`，恢复晚开奖仍用原截止时刻，CSV和详情可核对实际权重。旧轮次缺少开关时归一为false，既有结果不重抽。
+
+报名、重复参与和中奖消息携带 `mentionTargets[{id,name}]`，数字UID可生成平台真正的@；只有secUid时保留可读的@昵称，不伪造数字身份。`entryEventKey` 保存首条报名消息收据，重复提醒另存 `eventKey`；原消息重放不生成重复提醒。再次发送口令时提示“已经参与成功，请勿重复参与”，每个观众每30秒至多提醒一次，且不增加入池人数。反馈与报名/开奖结果一起先持久保存，再交发送队列；特殊昵称和最短账号消息长度仍使用同一发送边界。
+
+抽奖记录位于页面底部，使用共享 `data-record-browser="抽奖记录"` 槽位；子项通过 `details[data-record-item="稳定轮次ID"]` 提供摘要和正文。主页面只显示数量和查看入口；弹窗先搜索/分页（20条），点击轮次直接显示规则、参与者、中奖结果及保存的开奖权重。二级详情是同一个Mantine Modal中的导航，不叠加遮罩；返回保留搜索并聚焦原轮次，Escape逐级返回/关闭。详情按稳定业务键刷新，分页仅影响显示，导出保留全部记录。

@@ -1,4 +1,4 @@
-import {giveawaySlots,giveawayPrizes} from './giveaway.js';
+import {giveawaySlots,giveawayPrizes,giveawayUserId,giveawayEventKey} from './giveaway.js';
 import {giveawayCountdownStage} from './giveaway-countdown.js';
 
 const text=value=>String(value).replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,' ').replace(/\s+/g,' ').trim();
@@ -20,14 +20,34 @@ function packLines(messages,limit) {
   return result;
 }
 function groups(rows,label,limit,mention=false) {
-  const result=[];let names=[],userIds=[];
-  const flush=()=>{if(names.length)result.push({text:label+names.join('、'),userIds});names=[];userIds=[];};
+  const result=[];let names=[],userIds=[],mentionTargets=[];
+  const flush=()=>{if(names.length)result.push({text:label+names.join('、'),userIds,...(mention ? {mentionTargets} : {})});names=[];userIds=[];mentionTargets=[];};
   for(const row of rows) {
-    const name=(mention ? '@' : '')+clip(row.userName || row.userId,Math.min(12,limit-size(label)-(mention ? 1 : 0)));
+    const display=clip(text(String(row.userName || row.userId).replaceAll('@','')) || row.userId,Math.min(12,limit-size(label)-(mention ? 1 : 0)));
+    const name=(mention ? '@' : '')+display;
     if(size(label+[...names,name].join('、'))>limit)flush();
     names.push(name);userIds.push(row.userId);
+    if(mention && /^[1-9]\d{0,19}$/.test(row.userId))mentionTargets.push({id:row.userId,name:display});
   }
   flush();return result;
+}
+
+// A new qualifying message may remind an existing entrant; replay and bursts do
+// not create another outbox item. The receipt is saved with the round.
+export function prepareGiveawayDuplicate(round,event,now,limit=50) {
+  const userId=giveawayUserId(event.user);
+  const entrant=round.entrants.find(row=>row.userId===userId);
+  if(!entrant || !round.config.feedbackEnabled || round.status!=='running')return round;
+  const eventKey=giveawayEventKey(event,now);
+  if(entrant.entryEventKey===eventKey)return round;
+  const feedback=round.feedback || [];
+  const eventAt=event.receivedAt ?? (event.at>0 ? event.at : now);
+  if(feedback.some(row=>row.kind==='duplicate' && (row.eventKey===eventKey || row.userIds.includes(userId) && eventAt-row.createdAt<30000)))return round;
+  // The normal 50-character mode keeps the full reminder; shorter account
+  // limits split it without dropping the @ identity or exceeding the limit.
+  const suffix=' 已经参与成功，请勿重复参与';
+  const rows=size(suffix)+3<=limit ? groups([entrant],'',limit-size(suffix),true).map(row=>({...row,text:row.text+suffix})) : [...groups([entrant],'已参与：',limit,true),...lines('提示：','已经参与成功，请勿重复参与',limit).map(text=>({text}))];
+  return {...round,feedback:[...feedback,...rows.map((row,index)=>({id:`duplicate:${feedback.length+index}`,kind:'duplicate',createdAt:now,expiresAt:Math.min(round.endsAt,now+30000),queued:false,eventKey,userIds:[userId],...row}))]};
 }
 function resultLines(round,limit) {
   if(!round.entrants.length)return [{text:'抽奖结束，无人参与'}];

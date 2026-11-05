@@ -50,7 +50,7 @@ export function partitionPageUtilities(content) {
   if(Object.hasOwn(utilities,node.utility)){utilities[node.utility].push(node);return null;}
   if(!node.children)return node;
   const children=node.children.map(visit).filter(Boolean);
-  return children.length ? {...node,children} : null;
+  return children.length || node.kind==='record-browser' ? {...node,children} : null;
  }
  return {content:content ? visit(content) : null,utilities};
 }

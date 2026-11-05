@@ -13,7 +13,7 @@ export function createPageTools({page,room,engine,adapter,demo,current,unavailab
     : id==='rewards' && !engine.config.selfId ? '请先登录抖音并识别当前账号' : '';
   return new ToolRuntime({registry:bundledTools,room,guard,createLock:key=>new RoomLock({room:key}),
     getConfig:id=>engine.config[id],services:{page,log,demo,isToolVisible,predictions,predictionAI,selfId:()=>engine.config.selfId,anchorId:()=>engine.config.anchorId,rewardStorage,giveawayStorage,giveawayPendingEvents,
-      messageLength:()=>engine.config.sending.maxLength,feedbackMode:()=>demo ? 'demo' : engine.config.mode,
+      messageLength:()=>engine.config.sending.maxLength,feedbackMode:()=>demo ? 'demo' : engine.config.mode,chatIdentity:()=>({self:engine.selfIdentity,selfId:engine.config.selfId}),
       rewardEvents:()=>engine.roomData.activities,roomId:getRoomId || (()=>engine.liveMode?.roomId || '')},
     operations:toolOperations({selfId:()=>engine.config.selfId,saveConfig,getRewardsConfig:()=>engine.config.rewards,announceGiveaway:value=>engine.enqueueGiveaway(value),
       transport:demo ? {...demoGiftTransport(),prepareLike:async()=>({available:true,token:'demo'}),commitLike:async(token,count)=>({submitted:true,count}),stopLike:async()=>({stopped:true})} : adapter.requestSender,

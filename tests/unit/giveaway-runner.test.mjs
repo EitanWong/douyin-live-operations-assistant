@@ -12,6 +12,28 @@ function fixture() {
 }
 const event=id=>({type:'chat',id:`c-${id}`,source:'socket',roomId:'room',at:1500,text:'参与抽奖',user:{id,name:`观众${id}`}});
 
+test('重复报名@提示已参与，重放不重复且限频；刷新后仍保留去重记录',async()=>{
+ const f=fixture(),messages=[],runner=f.create({feedback:async row=>messages.push(row),identity:()=>({self:{id:'9',name:'场控'},selfId:'9'})});
+ await runner.ready();await runner.start({...config,durationSec:120});f.time(2000);
+ const first={...event('1'),id:'first',text:'@场控 参与抽奖',mentions:['9']};
+ await runner.event(first);await runner.event(first);
+ assert.equal(messages.filter(row=>row.kind==='duplicate').length,0,'原报名消息重放不应提示重复参与');
+ await runner.event({...event('1'),id:'repeat',at:2000});
+ await runner.event({...event('1'),id:'repeat',at:2000});
+ await runner.event({...event('1'),id:'repeat-fast',at:2000});
+ assert.equal(runner.state().rounds[0].entrants.length,1);
+ const duplicate=messages.filter(row=>row.kind==='duplicate');assert.equal(duplicate.length,1);
+ assert.match(duplicate[0].text,/@观众1.*已经参与成功.*请勿重复参与/);
+ assert.deepEqual(duplicate[0].mentionTargets,[{id:'1',name:'观众1'}]);
+ await runner.dispose();const restored=f.create({feedback:async row=>messages.push(row)});await restored.ready();
+ await restored.event({...first,text:'参与抽奖'});
+ f.time(40000);await restored.event({...event('1'),id:'repeat',at:2000});
+ assert.equal(restored.state().rounds[0].feedback.filter(row=>row.kind==='duplicate').length,1,'旧事件不能触发新提醒');
+ await restored.event({...event('1'),id:'repeat-later',at:40000});
+ assert.equal(restored.state().rounds[0].feedback.filter(row=>row.kind==='duplicate').length,2);
+ await restored.dispose();
+});
+
 test('采集到平台时间为零和安全 UID 的口令时立即保存报名和 @ 确认',async()=>{
   const f=fixture(),messages=[],runner=f.create({feedback:async message=>messages.push(message)});
   try {

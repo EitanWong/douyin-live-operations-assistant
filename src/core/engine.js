@@ -561,7 +561,7 @@ export class Engine {
       if(this.queue.length>=this.backlogLimit)throw new Error('发送队列积压，抽奖弹幕保留待重试');
       this.giveawayReceipts.set(message.key,message.expiresAt);
       this.queue.push({id:++this.serial,kind:'giveaway',text:checked.text,created:now,expires:message.expiresAt,
-        priority:({countdown:130,result:120,start:115,cancelled:115,reminder:96,entry:95})[message.kind],
+        priority:({countdown:130,result:120,start:115,cancelled:115,reminder:96,entry:95,duplicate:94})[message.kind],mentionTargets:message.mentionTargets,
         giveaway:{key:message.key,roundId:message.roundId,kind:message.kind,endsAt:message.endsAt}});
       this.log('queue',`抽奖：${checked.text}`);this.changed();
     }
