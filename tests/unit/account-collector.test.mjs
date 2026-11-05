@@ -14,3 +14,9 @@ test('native account collector observes the selected page and closes only its ow
  const redirect=fixture({redirect:true});await assert.rejects(collectAccount(redirect.chrome,'https://www.douyin.com/user/target'),/跳转/);assert.deepEqual(redirect.removed,[1]);
  const c=new AbortController();c.abort();const cancelled=fixture();await assert.rejects(collectAccount(cancelled.chrome,'https://www.douyin.com/user/target',{signal:c.signal}),/取消/);assert.deepEqual(cancelled.removed,[1]);
 });
+test('a script result arriving after cancellation is discarded and its temporary page is closed',async()=>{
+ const f=fixture(),cancel=new AbortController();
+ f.chrome.scripting.executeScript=async()=>{cancel.abort();return [{result:[{kind:'work',title:'late'}]}];};
+ await assert.rejects(collectAccount(f.chrome,'https://www.douyin.com/user/target',{signal:cancel.signal}),/取消/);
+ assert.deepEqual(f.removed,[1]);
+});

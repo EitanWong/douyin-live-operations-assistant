@@ -1,6 +1,7 @@
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
 import {collectAccount} from './account-collector.js';
+import {createAccountResearch} from './account-research.js';
 import {installNativePerceptionBridge} from './native-perception.js';
 import {createBackgroundAI} from './ai-background.js';
 import {APPEARANCE_PREFERENCES} from '../src/ui/appearance.js';
@@ -46,6 +47,10 @@ const writeRecord = async (key,value) => {
   await durableStorage.set(key,value);
   await notifyChanges({[key]:{newValue:value}});
 };
+const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),
+  collect:(url,options)=>collectAccount(chrome,url,options),archive:async({room,anchor,source,records,at})=>{
+    await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor,kind:'account',receivedAt:at,payload:{source,records}});void dataEngine().flush();
+  }});
 const deleteRecord = async keys => {
   const list = Array.isArray(keys) ? keys : [keys], durable = list.filter(durableKey), local = list.filter(key=>!durableKey(key));
   if (durable.length) await durableStorage.remove(durable);
@@ -221,10 +226,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const key=sender.tab.id;if(accountCollections.has(key))throw new Error('账号采集正在进行');
         const controller=new AbortController();accountCollections.set(key,controller);
         try{
-          value=await collectAccount(chrome,message.url,{signal:controller.signal});
-          const room=roomFromUrl(sender.tab.url),config=await readRecord(`live-assistant:config:${room}`),at=Date.now();
-          await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor:String(config?.anchorId || ''),kind:'account',receivedAt:at,payload:{source:message.url,records:value}});
-          void dataEngine().flush();
+          value=await accountResearch.collect(roomFromUrl(sender.tab.url),message.url,{signal:controller.signal});
         }finally{accountCollections.delete(key);}
       }else if(message.type==='account-cancel' && isRoom(sender)){accountCollections.get(sender.tab.id)?.abort();value=true;}
       else if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);

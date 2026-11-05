@@ -18,3 +18,22 @@ test('failed refresh removes previous evidence and a cancelled result never ente
  await service.cancel();anchor='two';finish(rows);await assert.rejects(work,/取消|失效/);assert.equal(accounts.list('two').length,0);
  service.close();
 });
+test('automatic research shares the selected-source budget, prioritizes the anchor and restores cooldowns after restart',async()=>{
+ let now=Date.now();const accounts=new AccountContext({now:()=>now}),calls=[];
+ const config={enabled:true,autoRefresh:true,autoResearch:true,intervalMinutes:60,maxPerHour:2,urls:[]};
+ const targets=()=>[{url,role:'anchor'},{url:'https://www.douyin.com/user/chatty',role:'viewer'}];
+ const options={accounts,now:()=>now,scope:()=> 'host',config:()=>config,targets,changed:async()=>{},collector:{collect:async source=>{calls.push(source);return normalizeAccountPayload({user:{sec_uid:accountSource(source).id,nickname:'公开资料'}},accountSource(source),now);},cancel:async()=>{}}};
+ let service=createAccountRefresh(options);
+ assert.equal(await service.tick(),true);assert.equal(accounts.list('host')[0].role,'anchor');
+ now+=60001;assert.equal(await service.tick(),true);assert.deepEqual(calls,[url,targets()[1].url]);
+ const saved=service.snapshot();service.close();service=createAccountRefresh({...options,snapshot:saved});
+ now+=60001;assert.equal(await service.tick(),false,'restart does not reset the hour budget or source cooldown');
+ now+=3600001;assert.equal(await service.tick(),true);assert.equal(calls.at(-1),url);
+ service.close();
+});
+test('removing an automatically selected viewer during collection discards the late result',async()=>{
+ let targets=[{url,role:'viewer'}],finish;const accounts=new AccountContext(),config={enabled:true,autoRefresh:true,autoResearch:true,urls:[]};
+ const service=createAccountRefresh({accounts,scope:()=> 'host',config:()=>config,targets:()=>targets,changed:async()=>{},collector:{collect:()=>new Promise(resolve=>finish=resolve),cancel:async()=>{}}});
+ const work=service.tick();await new Promise(setImmediate);targets=[];await service.tick();finish(normalizeAccountPayload({user:{sec_uid:'target',nickname:'旧目标'}},accountSource(url)));
+ assert.equal(await work,false);assert.deepEqual(accounts.list('host'),[]);service.close();
+});

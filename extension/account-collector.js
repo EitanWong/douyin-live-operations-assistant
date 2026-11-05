@@ -10,8 +10,9 @@ export async function collectAccount(chrome,url,{signal,timeout=12000}={}){
    try{
     const current=await chrome.tabs.get(tab.id);if(current.url && accountSource(current.url).url!==source.url)throw new Error('页面跳转，无法核对目标账号');
     const [result]=await chrome.scripting.executeScript({target:{tabId:tab.id},world:'MAIN',func:()=>window.__liveAssistantPublicAccountV1?.snapshot() || []});
+    if(signal?.aborted)throw new Error('账号采集已取消');
     if(Array.isArray(result?.result) && result.result.length){best=result.result;if(best.some(r=>r.kind==='work') || source.kind==='work')return best;}
-   }catch(error){if(/页面跳转/u.test(error.message))throw error;}
+   }catch(error){if(signal?.aborted || /页面跳转/u.test(error.message))throw error;}
    await new Promise(resolve=>setTimeout(resolve,500));
   }
   if(best.length)return best;

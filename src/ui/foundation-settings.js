@@ -20,11 +20,11 @@ export class FoundationSettings {
   bind('[data-account-collect]',async()=>{
    const url=root.querySelector('[data-account-url]').value.trim(),scope=anchor(),generation=++this.generation;
    this.accountStatus('正在读取抖音公开页面，最多等待12秒…');
-   try{const rows=await this.accountRefresh.refresh(url);if(scope!==anchor() || generation!==this.generation)return;this.accountStatus(`已采集 ${rows.length} 条公开资料，24小时后不再用于回答；可刷新或删除。`);}
+   try{const rows=await this.accountRefresh.refresh(url);if(scope!==anchor() || generation!==this.generation)return;this.accountStatus(`已采集 ${rows.length} 条公开资料；简介和计数24小时有效，作品描述保留为有日期的历史背景，可刷新或删除。`);}
    finally{this.showAccounts();}
   });
   bind('[data-account-cancel]',async()=>{this.generation++;await this.accountRefresh.cancel();this.accountStatus('已取消采集');});
-  bind('[data-account-clear]',async()=>{this.generation++;await this.accountRefresh.cancel();accounts.forget(anchor());await changed();this.showAccounts();this.accountStatus('本主播公开资料已清空；已保存的自动更新来源会在下次周期重新采集，停用请清空列表并保存');});
+  bind('[data-account-clear]',async()=>{this.generation++;await this.accountRefresh.cancel();accounts.forget(anchor());await changed();this.showAccounts();this.accountStatus('本主播当前与历史公开资料已清空；停止后续采集请关闭自动更新、重点研究并保存');});
   bind('[data-account-refresh]',()=>this.showAccounts());this.showAccounts();
   bind('[data-account-search]',async()=>{if(!collector?.search)throw new Error('抖音原生搜索需要 Chrome 扩展版');await collector.search(root.querySelector('[data-account-query]').value.trim());});
   bind('[data-account-targets]',()=>this.showTargets());
@@ -52,6 +52,8 @@ export class FoundationSettings {
   const target=this.root.querySelector('[data-account-records]');target.replaceChildren();const rows=this.accounts.list(this.anchor());
   for(const r of rows){const item=target.ownerDocument.createElement('p'),a=target.ownerDocument.createElement('a');a.textContent=r.title;a.href=r.url || r.source;a.target='_blank';a.rel='noopener noreferrer';item.append(a,` · ${r.kind==='profile' ? '主页' : '作品描述'} · ${new Date(r.observedAt).toLocaleString('zh-CN')}：${r.text.slice(0,240)}`);target.append(item);}
   if(!rows.length)target.textContent='尚未采集公开资料。';
+  const historical=this.accounts.history(this.anchor()).filter(r=>r.expiresAt<=Date.now()).length;
+  if(historical){const note=target.ownerDocument.createElement('p');note.textContent=`另有 ${historical} 条有日期的历史作品描述，按问题和对应账号检索；不代表当前状态或已分析完整视频。`;target.append(note);}
  }
  trace(row){
   this.traces.push(row);this.traces=this.traces.slice(-100);const ok=this.traces.filter(r=>r.status==='ok'),times=ok.map(r=>r.elapsedMs).sort((a,b)=>a-b);
