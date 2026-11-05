@@ -16,6 +16,7 @@
     "demo": "node scripts/serve.mjs",
     "native:install": "node scripts/install-native.mjs",
     "native:doctor": "node scripts/install-native.mjs --doctor",
+    "native:status": "node scripts/install-native.mjs --status",
     "data:install": "node scripts/install-data-native.mjs",
     "data:status": "python3 native/data_host.py status",
     "test:native": "python3 -m unittest discover -s native",

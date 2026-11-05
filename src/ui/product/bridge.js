@@ -93,7 +93,7 @@ export function createWorkspaceBridge(panel) {
     const invalid=relevant.find(r=>r.attributeName==='aria-invalid' && r.target.getAttribute('aria-invalid')==='true');
     if(invalid)focus={id:id(invalid.target),serial:++focusSerial};refresh();
   });
-  observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','open','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','class','data-nav-collapsed','data-nav-side']});
+  observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','open','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','aria-valuenow','aria-valuemax','class','data-nav-collapsed','data-nav-side']});
   const themeObserver=new view.MutationObserver(refresh);themeObserver.observe(panel.host,{attributes:true,attributeFilter:['data-theme','data-palette','data-material']});
   root.addEventListener('input',refresh);root.addEventListener('change',refresh);
   refresh();

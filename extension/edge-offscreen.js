@@ -1,9 +1,15 @@
 import {detectDevice} from '../src/browser/device-capabilities.js';
-import {createModelPreparation,MODEL_PREPARATION_KEY} from './model-preparation.js';
+import {createModelPreparation} from './model-preparation.js';
+
+// Offscreen documents support chrome.runtime only; the service worker owns storage.
+async function persistence(action,state){
+ const result=await chrome.runtime.sendMessage({target:'edge-background',action,state});
+ if(!result || result.error)throw new Error(result?.error || '模型准备状态暂不可用');return result.value;
+}
 
 const manager=createModelPreparation({
- read:async()=>(await chrome.storage.local.get(MODEL_PREPARATION_KEY))[MODEL_PREPARATION_KEY],
- write:state=>chrome.storage.local.set({[MODEL_PREPARATION_KEY]:state}),
+ read:()=>persistence('preparation-read'),
+ write:state=>persistence('preparation-write',state),
  createWorker:()=>new Worker(chrome.runtime.getURL('edge-worker.js'),{type:'module'}),detect:detectDevice,
  onChange:state=>{void chrome.runtime.sendMessage({target:'edge-background',state}).catch(()=>{});}
 });

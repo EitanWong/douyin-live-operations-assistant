@@ -46,13 +46,28 @@ test('一键启用自动选择并准备本地文字和语音，保存免密钥�
  await fixture(async f=>{
   const knowledge=f.api.panel.root.querySelector('[data-field="ai.knowledge"]');knowledge.value='保留用户正在编辑的草稿';
   f.api.panel.root.querySelector('[data-edge-auto]').click();
-  await wait(()=>f.api.engine.config.ai.edge.localOnly);
+  await wait(()=>f.api.panel.root.querySelector('[data-edge-status]').textContent.includes('本地 AI 已启用'));
   const saved=f.values.get('live-assistant:config:123456');
   assert.equal(saved.ai.enabled,true);assert.equal(saved.ai.chatEnabled,true);assert.equal(saved.ai.pipeline.mode,'local-audio');
   assert.equal(saved.ai.knowledge,'保留用户正在编辑的草稿');assert.equal(saved.ai.edge.textModel,'auto');
   assert.equal(f.api.engine.running,false);assert.equal(f.opened,0);assert.equal(f.requests.length,0);
   assert.deepEqual(calls.sort(),['audio','text']);assert.equal(f.api.panel.dirty,false);
   assert.equal(f.api.panel.root.querySelector('[data-text-service]').hidden,true,'本地模式隐藏不需要的云端密钥表单');
+ },{boot:{edge}});
+});
+
+test('一键启用在准备完成前保存意图，刷新后可继续；进度更新不覆盖正在编辑的草稿',async()=>{
+ let finish;const pending=new Promise(resolve=>finish=resolve),listeners=new Set();
+ const edge={detect:async()=>({webgpu:true}),ready:async()=>false,status:async()=>({}),prepare:()=>pending,subscribe:fn=>{listeners.add(fn);return ()=>listeners.delete(fn);},close(){}};
+ await fixture(async f=>{
+  f.api.panel.root.querySelector('[data-edge-auto]').click();
+  await wait(()=>f.values.get('live-assistant:config:123456')?.ai.edge.localOnly);
+  assert.equal(f.api.engine.running,false);
+  const draft=f.api.panel.root.querySelector('[data-field="ai.knowledge"]');draft.value='下载中继续编辑';
+  for(const listener of listeners)listener({text:{phase:'loading',progress:{stage:'download',loaded:5,total:10}}});
+  assert.equal(draft.value,'下载中继续编辑');assert.match(f.api.panel.root.querySelector('[data-setup-kind="text"]').textContent,/下载/);
+  finish({phase:'ready'});await wait(()=>f.api.panel.root.querySelector('[data-edge-status]').textContent.includes('已启用'));
+  assert.equal(draft.value,'下载中继续编辑','后台完成不重填表单');
  },{boot:{edge}});
 });
 

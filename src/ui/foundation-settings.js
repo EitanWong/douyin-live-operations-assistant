@@ -2,10 +2,11 @@ import {TEXT_MODELS} from '../ai/device-policy.js';
 import {contextInventory} from '../ai/context-policy.js';
 import {accountSource} from '../ai/account-context.js';
 import {createAccountRefresh,ACCOUNT_COLLECTION_DEFAULTS} from '../services/account-refresh.js';
+import {showSetupProgress} from './setup-progress.js';
 
 export class FoundationSettings {
- constructor(root,{edge,activateLocal,collector,accounts,anchor,changed,onError,accountRefresh,dirty=()=>{},getContext=()=>null,targets=()=>[]}){
-  Object.assign(this,{root,edge,collector,accounts,anchor,changed,onError,dirty,getContext,targets});this.traces=[];this.generation=0;this.closed=false;
+ constructor(root,{edge,activateLocal,deployment,collector,accounts,anchor,changed,onError,accountRefresh,dirty=()=>{},getContext=()=>null,targets=()=>[]}){
+  Object.assign(this,{root,edge,deployment,collector,accounts,anchor,changed,onError,dirty,getContext,targets});this.traces=[];this.generation=0;this.closed=false;
   this.ownsRefresh=!accountRefresh;this.accountRefresh=accountRefresh || createAccountRefresh({collector,accounts,scope:anchor,config:()=>ACCOUNT_COLLECTION_DEFAULTS,changed});
   const bind=(selector,fn)=>root.querySelector(selector).addEventListener('click',async event=>{const button=event.currentTarget;button.disabled=true;try{await fn();}catch(error){onError(error);}finally{button.disabled=false;}});
   for(const kind of ['text','audio'])bind(`[data-edge-prepare="${kind}"]`,async()=>{
@@ -14,8 +15,9 @@ export class FoundationSettings {
    this.status(result.phase==='ready' ? `${kind==='text' ? '中文回复' : '中文语音'}已就绪 · ${result.model || result.backend || selection}${result.tokensPerSecond ? ` · ${result.tokensPerSecond.toFixed(1)} token/s · 首 token ${Math.round(result.firstTokenMs)}ms` : ''}` : '设备推理速度不足，实时兜底未启用');
   });
   bind('[data-edge-detect]',()=>this.detect());
+  for(const button of root.querySelectorAll('[data-native-install-start]'))button.addEventListener('click',async()=>{button.disabled=true;try{await this.pollDeployment('start');}catch(error){onError(error);}finally{button.disabled=false;}});
   bind('[data-edge-auto]',async()=>{
-   this.status('正在自动选择、下载并测速本地文字和语音模型，完成后自动保存…');
+   this.status('正在保存本地设置并交给后台准备；可继续操作，刷新后仍可查看进度…');
    try{if(!activateLocal)throw new Error('一键启用需要 Chrome 扩展版');this.status(await activateLocal());}
    catch(error){this.status(`本地 AI 未启用：${error.message}`);throw error;}
   });
@@ -36,7 +38,21 @@ export class FoundationSettings {
   bind('[data-account-watch]',()=>{const url=accountSource(root.querySelector('[data-account-url]').value.trim()).url,field=root.querySelector('[data-field="ai.accountCollection.urls"]'),urls=[...new Set(field.value.split('\n').map(s=>s.trim()).filter(Boolean).concat(url))];if(urls.length>10)throw new Error('自动更新最多10个明确来源');field.value=urls.join('\n');dirty();this.accountStatus('已加入自动更新草稿，保存后生效');});
   bind('[data-context-refresh]',()=>this.showContext());this.showContext();
   void this.detect().catch(error=>{if(!this.closed)this.deviceStatus(error.message);});
+  this.unsubscribe=edge?.subscribe?.(state=>this.progress(state));
+  void edge?.status?.().then(state=>this.progress(state)).catch(()=>{});
+  if(deployment)void this.pollDeployment().catch(()=>{});
  }
+ progress(state){if(!this.closed)for(const kind of ['text','audio'])showSetupProgress(this.root,kind,state?.[kind]);}
+ async pollDeployment(action='status'){
+  if(this.closed)return;clearTimeout(this.deploymentTimer);const generation=this.deploymentGeneration=(this.deploymentGeneration || 0)+1;
+  try{
+   if(!this.deployment)throw new Error('本机自动安装需要 Chrome 扩展版');
+   const state=await this.deployment(action);if(this.closed || generation!==this.deploymentGeneration)return;this.nativeState=state;
+   showSetupProgress(this.root,'native',state);
+   if(['queued','running'].includes(state.phase))this.deploymentTimer=setTimeout(()=>{void this.pollDeployment().catch(()=>{});},1000);
+  }catch(error){if(!this.closed && generation===this.deploymentGeneration)showSetupProgress(this.root,'native',{phase:'error',error:error.message});throw error;}
+ }
+ async prepareNative(){if(!this.deployment)return;if(!this.nativeState)await this.pollDeployment();if(this.nativeState?.phase!=='unavailable')await this.pollDeployment('start');}
  field(key){return this.root.querySelector(`[data-field="ai.edge.${key}"]`);}
  async detect(){
   if(!this.edge?.detect){this.deviceStatus('设备自动检测需要 Chrome 扩展版；当前仍可配置云端与规则回复');return;}
@@ -63,5 +79,5 @@ export class FoundationSettings {
   this.traces.push(row);this.traces=this.traces.slice(-100);const ok=this.traces.filter(r=>r.status==='ok'),times=ok.map(r=>r.elapsedMs).sort((a,b)=>a-b);
   const target=this.root.querySelector('[data-ai-latency]');target.textContent=`最近 ${ok.length} 次完成 · 最近一次 ${row.provider==='edge' ? '端侧' : '云端'} ${row.elapsedMs}ms · ${row.status}${times.length ? ` · P95 ${times[Math.ceil(times.length*.95)-1]}ms` : ''}`;
  }
- close(){this.closed=true;this.generation++;if(this.ownsRefresh)this.accountRefresh.close();}
+ close(){this.closed=true;this.generation++;this.unsubscribe?.();clearTimeout(this.deploymentTimer);if(this.ownsRefresh)this.accountRefresh.close();}
 }

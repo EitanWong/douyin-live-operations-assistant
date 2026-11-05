@@ -10,8 +10,12 @@ export function installEdgeBridge(chrome){
  };
  const restore=async()=>{try{const state=(await chrome.storage.local.get(MODEL_PREPARATION_KEY))[MODEL_PREPARATION_KEY];if(Object.values(state || {}).some(row=>['queued','loading','ready'].includes(row.phase)))await ensure();}catch{}};
  void restore();chrome.runtime.onStartup?.addListener(restore);chrome.runtime.onInstalled?.addListener(restore);
- chrome.runtime.onMessage?.addListener((message,sender)=>{
+ chrome.runtime.onMessage?.addListener((message,sender,reply)=>{
   if(message?.target!=='edge-background' || sender.id!==chrome.runtime.id || sender.url!==chrome.runtime.getURL('edge-offscreen.html'))return;
+  if(['preparation-read','preparation-write'].includes(message.action)){
+   const operation=message.action==='preparation-read' ? chrome.storage.local.get(MODEL_PREPARATION_KEY).then(value=>value[MODEL_PREPARATION_KEY]) : chrome.storage.local.set({[MODEL_PREPARATION_KEY]:message.state});
+   void operation.then(value=>reply({value}),()=>reply({error:'模型准备状态无法保存，请检查扩展存储'}));return true;
+  }
   for(const client of clients)try{client.postMessage({type:'edge-state',value:message.state});}catch{}
  });
  chrome.runtime.onConnect?.addListener(port=>{

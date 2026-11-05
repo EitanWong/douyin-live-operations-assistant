@@ -50,6 +50,6 @@ export function createEdgeRouter({browser,native,config}){
  const status=async()=>{const state=await browser?.status() || {};textStatus=state.text || {};return {...state,audio:{...(audioBackend()==='native-sensevoice' ? await native?.status() : state.audio) || {phase:'unprepared'},backend:audioBackend()}};};
  return {detect,prepare,ensure,ready,audioBackend,tuning:()=>automaticLatency(textStatus),
   reply:(p,c)=>browser.reply(p,c),classify:(text,signal)=>{if(!browser?.classify)throw new Error('此浏览器未连接中文端侧模型');return browser.classify(text,signal);},transcribe:(sample,signal)=>audio().transcribe(sample,signal),
-  status,
+  status,subscribe:listener=>browser?.subscribe?.(listener) || (()=>{}),
   release:async()=>{generation++;preparing.clear();textStatus={};native?.close();await browser?.release();},close:()=>{generation++;preparing.clear();textStatus={};native?.close();browser?.close();}};
 }

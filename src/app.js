@@ -272,11 +272,13 @@ export function boot(options = {}) {
   let localAttemptKey='';
   function syncLocalModels(){
     if(demo || closed || suspended || !options.edge || !engine.config.ai.enabled || !engine.config.ai.edge.enabled)return;
-    const key=JSON.stringify(engine.config.ai.edge);if(localAttemptKey===key)return;localAttemptKey=key;
+    const key=JSON.stringify([engine.config.ai.edge,engine.config.ai.pipeline.mode]);if(localAttemptKey===key)return;localAttemptKey=key;
     foundationSettings?.status('正在自动准备本地中文回复，首次下载可能需要几分钟；其他功能可继续使用…');
-    void edge.ensure('text').then(result=>{
+    void edge.status().then(state=>closed || localAttemptKey!==key || state.text?.phase==='released' ? {phase:'released'} : edge.ensure('text')).then(result=>{
+      if(result.phase==='released')return;
       if(!closed && localAttemptKey===key)foundationSettings?.status(result.phase==='ready' ? '本地中文回复已自动就绪；直播语音会在使用时自动准备。' : '设备速度不足，继续使用已配置的云端或规则回复。');
     },error=>{if(!closed && localAttemptKey===key)foundationSettings?.status(`本地回复暂不可用：${error.message}；可稍后点击准备重试。`);});
+    if(engine.config.ai.edge.localOnly && engine.config.ai.pipeline.mode==='local-audio')void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).catch(()=>{});
   }
   const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
     snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
@@ -884,16 +886,17 @@ export function boot(options = {}) {
       });
       return localAgentReady;
     };
-    foundationSettings=new FoundationSettings(panel.root,{edge,activateLocal:async()=>{
-      const result=await edge.ensure('text','auto');
-      if(result?.phase!=='ready')throw new Error('此设备本地回复测速未达标，尚未更改配置');
-      let audio;try{audio=await edge.ensure('audio','auto');}catch{}
-      if(closed || suspended || !roomContext.current())throw new Error('页面已关闭或切换，本地配置未更改');
+    foundationSettings=new FoundationSettings(panel.root,{edge,deployment:options.nativeDeployment,activateLocal:async()=>{
+      if(!options.edge)throw new Error('浏览器端侧推理需要 Chrome 扩展');
       const c=panel.read();c.ai.enabled=true;c.ai.chatEnabled=true;
       Object.assign(c.ai.edge,{enabled:true,audioEnabled:true,autoTune:true,localOnly:true,textModel:'auto',audioBackend:'auto'});
-      c.ai.pipeline.mode=audio?.phase==='ready' ? 'local-audio' : 'text';c.ai.media.inputSource='direct';
+      c.ai.pipeline.mode='local-audio';c.ai.media.inputSource='direct';
       await panel.callbacks.save(c,panel.root.querySelector('[data-api-key]').value.trim(),panel.root.querySelector('[data-remember-key]').checked,panel.searchCredentials(),panel.aiSettings.credentials());panel.populate(c);
-      return audio?.phase==='ready' ? '本地 AI 已启用并保存，开始场控后自动读取直播音轨；无需模型密钥。' : '本地文字 AI 已启用并保存；语音暂不可用，可稍后重试。';
+      void foundationSettings?.prepareNative().catch(()=>{});
+      const [text,audio]=await Promise.allSettled([edge.ensure('text','auto'),edge.ensure('audio','auto')]);
+      if(closed || suspended || !roomContext.current())return '本地设置已保存，后台准备会继续。';
+      if(text.status!=='fulfilled' || text.value?.phase!=='ready')throw new Error('本地设置已保存，文字模型尚未就绪，请查看进度并重试');
+      return audio.status==='fulfilled' && audio.value?.phase==='ready' ? '本地 AI 已启用并保存，开始场控后自动读取直播音轨；无需模型密钥。' : '本地文字 AI 已启用并保存；语音暂不可用，可在后台进度查看原因并重试。';
     },collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
       changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
     syncLocalModels();

@@ -47,6 +47,7 @@ git diff --check
 | 可见界面与表单 | `src/ui/panel.js`、`src/ui/product/bridge.js`、`src/ui/product/runtime.js` | 原控制器是唯一草稿来源；`product-workspace`、`product-runtime`、`workspace-system` 测试 |
 | 布局、放大、动效 | `src/ui/product/layout.js`、`src/ui/product/fit.js`、`src/ui/product/inspect.js` | 尺寸、密度、焦点与减少动效；`workspace-fit`、`product-layout`、`adaptive-layout` 测试 |
 | AI 回复与上下文 | `src/services/ai.js`、`src/services/ai-context.js`、`src/ai/context-policy.js` | 共享现场事实、预算、过期回复拒绝；`ai-context-budget`、`ai-stale-facts` 测试 |
+| 本地模型准备与安装进度 | `extension/model-preparation.js`、`extension/edge-offscreen.js`、`scripts/lib/native-deployment.mjs`、`src/ui/setup-progress.js` | 离屏仅用runtime、后台存储、重载恢复与显式释放；`model-preparation`、`edge-background-prepare`、`native-deployment`、`setup-progress` 测试 |
 | 产品内 Agent 任务 | `src/ai/harness.js`、`extension/ai-background.js`、`src/ai/task-store.js` | 后台持久任务、取消、额度与发送分离；`agent-execution`、`agent-lifecycle` 测试 |
 | 语音、视觉与原生宿主 | `src/browser/live-media.js`、`src/browser/native-perception.js`、`extension/native-perception.js`、`native/` | 实例独立状态与取消；`media-lifecycle`、`native-perception-*`、`native/test_*.py` |
 | 公共数据与检索 | `src/services/public-data.js`、`src/services/weather.js`、`src/services/retrieval.js` | 来源、时效、单位、取消与缓存边界；`public-data`、`weather`、`mature-retrieval` 测试 |
@@ -84,5 +85,7 @@ npm run benchmark:workspace
 | Checkpoint | 完成后才能确认日志或继续发送的实际存储屏障 |
 | Scope | 一个工具实例持有的取消信号、监听、计时器与在途任务 |
 | Projection / 视图快照 | 从唯一控制器草稿生成的只读呈现数据，不是第二份配置 |
+| Model preparation / 模型准备 | 持久化的模型选择意图及下载、加载、自检状态；就绪的Worker内存不跨扩展重载，恢复时重新预热 |
+| Native deployment / 本机部署 | 固定安装快照启动的独立进程任务，以原子磁盘状态报告进度；与直播感知运行会话独立 |
 | Room / Session | 页面房间范围 / 一次开播场次，两个标识不能混用 |
 | Gap / Unknown | 未采集到的事实 / 已提交发送但结果不确定，分别处理 |

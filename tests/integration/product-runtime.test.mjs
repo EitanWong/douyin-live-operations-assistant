@@ -54,12 +54,16 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   const toggle=document.createElement('button');toggle.dataset.sidebarToggle='';toggle.setAttribute('aria-label','折叠侧边栏');toggle.innerHTML='<svg viewBox="0 0 24 24"><path d="M9 3v18"/></svg>';root.querySelector('.workspace').prepend(toggle);
   const utilities=document.createElement('div');utilities.innerHTML='<details data-workspace-utility="help"><summary>模型使用说明</summary><p>使用完整模型名称后保存。</p><ol><li>选择服务</li><li>填写模型并保存</li><li>测试连接</li></ol><ul><li>核对服务权限</li></ul></details><details data-workspace-utility="manage"><summary>测试工具</summary><p role="status">运行中</p><button>停用测试工具</button></details>';root.querySelector('[data-page=ai]').append(utilities);
   let toolDisables=0;utilities.querySelector('button').onclick=()=>{toolDisables++;utilities.querySelector('[role=status]').textContent='工具已停用';};
+  const progress=document.createElement('div');progress.className='stat-progress';progress.setAttribute('aria-label','后台当前文件下载');progress.setAttribute('aria-valuemax','100');progress.setAttribute('aria-valuenow','10');simple.append(progress);
   const panel={root,host:root.host,activeTab:'ai',navigation:{side:'left',collapsed:false},tab(){}};
   toggle.onclick=()=>{panel.navigation.collapsed=!panel.navigation.collapsed;root.querySelector('.workspace').dataset.navCollapsed=String(panel.navigation.collapsed);toggle.setAttribute('aria-label',panel.navigation.collapsed ? '展开侧边栏' : '折叠侧边栏');};bridge=createWorkspaceBridge(panel);
   await build({entryPoints:['src/ui/product/runtime.js'],bundle:true,format:'esm',platform:'browser',loader:{'.css':'text'},define:{'process.env.NODE_ENV':'"production"'},outfile:join(dir,'runtime.mjs')});
   const {mountProductWorkspace}=await import(pathToFileURL(join(dir,'runtime.mjs')).href);
   const container=document.createElement('div');root.append(container);runtime=mountProductWorkspace({container,bridge});
   await new Promise(resolve=>setTimeout(resolve,70));const ui=container.shadowRoot;
+  await waitFor(()=>ui.querySelector('[role=progressbar][aria-label="后台当前文件下载"]')?.getAttribute('aria-valuenow')==='10','初始下载进度');
+  progress.setAttribute('aria-valuenow','30');
+  await waitFor(()=>ui.querySelector('[role=progressbar][aria-label="后台当前文件下载"]')?.getAttribute('aria-valuenow')==='30','仅进度属性变化也刷新共享展示层');
   const helpButton=ui.querySelector('.product-utility-actions button[aria-label="使用说明"]'),manageButton=ui.querySelector('.product-utility-actions button[aria-label="工具管理"]');
   assert.ok(helpButton.querySelector('svg'));assert.ok(manageButton.querySelector('svg'));assert.equal(ui.querySelector('.product-content [data-workspace-utility]'),null);assert.doesNotMatch(ui.querySelector('.product-content').textContent,/模型使用说明|停用测试工具/);
   helpButton.focus();helpButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'打开使用说明');

@@ -23,3 +23,23 @@ test('客户端加入后台任务并订阅实际下载进度；关闭页面不�
  phase='loading';const detached=client.prepare('text');await flush();client.close();await assert.rejects(detached,/关闭|断开/);
  assert.equal(sent.filter(m=>m.action==='cancel').length,0);unsubscribe();
 });
+test('离屏文档仅使用runtime，通过后台读写持久任务；其他来源不能改写任务',async()=>{
+ let saved={},handler;const oldChrome=globalThis.chrome,oldWorker=globalThis.Worker;
+ const listeners=[],workers=[];
+ const background={storage:{local:{get:async key=>({[key]:saved}),set:async value=>{saved=value['local-model-preparation-v1'];}}},runtime:{id:'ext',getURL:path=>`chrome-extension://ext/${path}`,onConnect:events(),onMessage:{addListener:fn=>listeners.push(fn)}}};
+ installEdgeBridge(background);
+ const request=(message,sender={id:'ext',url:'chrome-extension://ext/edge-offscreen.html'})=>new Promise(resolve=>{
+  const result=listeners[0](message,sender,resolve);if(result!==true)resolve(undefined);
+ });
+ globalThis.chrome={runtime:{id:'ext',getURL:background.runtime.getURL,sendMessage:request,onMessage:{addListener:fn=>{handler=fn;}}}};
+ globalThis.Worker=class{constructor(){workers.push(this);}postMessage(message){this.message=message;}terminate(){}};
+ try{
+  await import(`../../extension/edge-offscreen.js?runtime-only=${crypto.randomUUID()}`);
+  const send=message=>new Promise(resolve=>handler({...message,target:'edge-offscreen'},{id:'ext',url:'chrome-extension://ext/background.js'},resolve));
+  const result=await send({action:'prepare',kind:'audio'});
+  assert.equal(result.value.phase,'loading');assert.equal(saved.audio.id,result.value.id);assert.equal(workers.length,1);
+  const loaded=await request({target:'edge-background',action:'preparation-read'});assert.equal(loaded.value.audio.id,saved.audio.id);
+  await request({target:'edge-background',action:'preparation-write',state:{}},{id:'ext',url:'https://live.douyin.com/123'});
+  assert.equal(saved.audio.phase,'loading');await send({action:'release'});assert.equal(saved.audio.phase,'released');
+ }finally{globalThis.chrome=oldChrome;globalThis.Worker=oldWorker;}
+});

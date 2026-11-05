@@ -1,5 +1,6 @@
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
+import {requestNativeDeployment} from './native-deployment.js';
 import {collectAccount} from './account-collector.js';
 import {createAccountResearch} from './account-research.js';
 import {installNativePerceptionBridge} from './native-perception.js';
@@ -134,7 +135,7 @@ const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
-  if(message?.target==='edge-offscreen')return;
+  if(['edge-offscreen','edge-background'].includes(message?.target))return;
   if (message?.type === 'fanclub-frame') {
     void (async()=>{
       try {
@@ -249,6 +250,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           const state=parseGiveawayState(message.value,room);await durableStorage.set(key,state);value=true;
         }
       }
+      else if(message.type==='native-deployment' && isRoom(sender))value=await requestNativeDeployment(chrome,message.action);
       else if (['agent-submit','agent-list','agent-cancel'].includes(message.type) && isRoom(sender)) value=await getAIBackground().handle(message,roomFromUrl(sender.tab.url));
       else if(message.type==='ai-request-cancel' && isRoom(sender) && typeof message.id==='string' && /^[a-z\d-]{16,80}$/iu.test(message.id)){const key=`${sender.tab.id}:${message.id}`;cancelledAIRequests.add(key);while(cancelledAIRequests.size>128)cancelledAIRequests.delete(cancelledAIRequests.values().next().value);activeAIRequests.get(key)?.abort();value=true;}
       else if (message.type === 'collection-state' && isRoom(sender)) value = await collectionKeeper.update(sender,message.active);
