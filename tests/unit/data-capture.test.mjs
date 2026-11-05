@@ -23,3 +23,11 @@ test('idle coverage pulses advance their identity while failed pulses retain it'
  assert.notEqual(writes[0].records[0].id,writes[1].records[0].id);
  assert.deepEqual(writes[1],writes[2]);
 });
+
+test('a retried MAIN batch freezes its first coverage and payload instead of reusing an ID for changed status',async()=>{
+ let fail=true;const writes=[];
+ const archive=createDataCapture(async m=>{writes.push(structuredClone(m));if(fail)throw Error('lost response');},{now:()=>10000});
+ const batch={batchId:1,events:[{type:'chat',text:'原话'}],status:{bridgeGaps:1}};
+ await assert.rejects(archive(batch));batch.events[0].text='调用方后来修改';batch.status.bridgeGaps=2;fail=false;
+ await archive(batch);assert.deepEqual(writes[0],writes[1]);
+});

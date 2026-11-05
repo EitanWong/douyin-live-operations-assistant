@@ -119,6 +119,7 @@ class LocalDataStore(unittest.TestCase):
         self.store.close()
         self.store = DataStore(self.path)
         self.assertEqual(self.store.predict('1', '2', 9000000, rows)['rows'][0]['point'], 120)
+        self.assertEqual(self.store.predict('1', '2', 9000000, rows)['rows'][0]['unit'], 'people')
 
     def test_pk_training_keeps_battle_identity_time_and_only_confirmed_final_labels(self):
         pk = {'status': 'ready', 'battleKey': 'battle-1', 'remainingMs': 90000, 'probability': .7}

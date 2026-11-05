@@ -148,6 +148,7 @@ if (room) {
       if(bridgeStopped || !batch || typeof batch!=='object')return;
       if(batch.batchId==null || batch.batchId!==bridgeAck){
         await archiveBatch(batch);
+        if(bridgeStopped || contextInvalidated)return;
         for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
         for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
         // This acknowledges admission to the bounded content queues, not disk durability.

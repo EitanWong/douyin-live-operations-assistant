@@ -53,3 +53,19 @@ test('dedicated opponent page only drains and archives; failed persistence withh
   assert.match(dom.window.document.title,/只读采集/);
  }finally{collector?.stop();dom.window.close();}
 });
+
+test('closing a read-only collector during a pending read cannot revive its lease or update the old document',async()=>{
+ const dom=new JSDOM('<title>原页面</title>'),calls=[];let release,collector;
+ const pending=new Promise(resolve=>{release=resolve;});let timers=0;
+ dom.window.setTimeout=()=>{timers++;return 1;};dom.window.clearTimeout=()=>{};
+ try{
+  collector=await runReadOnlyCollector({window:dom.window,document:dom.window.document,room:'9',message:async m=>{
+   calls.push(m);if(m.type==='data-context')return {readOnly:true};
+   if(m.command?.type==='drain')return pending;return true;
+  }});
+  collector.start();await new Promise(setImmediate);collector.stop();
+  release({batchId:1,events:[{type:'chat',text:'迟到'}],status:{connected:true}});await new Promise(setImmediate);
+  assert.equal(calls.some(m=>m.command?.type==='collection-pulse' || m.type==='data-records' || m.active===true),false);
+  assert.equal(dom.window.document.title,'原页面');assert.equal(timers,0);
+ }finally{release?.({});collector?.stop();dom.window.close();}
+});

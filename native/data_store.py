@@ -261,6 +261,7 @@ class DataStore:
             if model.get('status') != 'validated' or model['trainingUntil'] >= as_of:
                 continue
             result.append({'target': row['target'], 'horizonMinutes': row['horizonMinutes'],
+                           'status': 'ready', 'unit': 'diamonds' if row['target'] == 'diamonds' else 'people',
                            'trainedAt': model_row['trained_at'], **predict_calibration(model, row)})
         return {'asOf': as_of, 'scope': f'{room}:{anchor}', 'rows': result,
                 'basis': '本地独立推理候选，与原始预测分别保存；仅对具有留出集验证的目标返回数值'}

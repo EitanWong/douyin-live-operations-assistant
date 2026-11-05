@@ -278,20 +278,21 @@ test('MAIN 未确认批次可重读且仍占容量，重复确认不删除下一
   }finally{page.close();}
 });
 
-for(const mode of ['lost-response','pagehide'])test(`内容桥在 ${mode} 后恢复 MAIN 已读取批次且不重复交付`,async()=>{
+for(const mode of ['lost-response','pagehide','archive-pagehide'])test(`内容桥在 ${mode} 后恢复 MAIN 已读取批次且不重复交付`,async()=>{
   const dom=new JSDOM('',{url:'https://live.douyin.com/1',runScripts:'outside-only'}),page=dom.window;
-  let captured,adapter,release,reads=0;const timers=[],handled=[],saved=[];
+  let captured,adapter,release,reads=0,archiveBlocked=false;const timers=[],handled=[],saved=[];
   Object.assign(page,{EventInbox,roomFromURL,RoomContext,createEdgeClient,createNativeASRClient,createDataCapture,runReadOnlyCollector,RequestBridgeClient,IdentityReader:class {},DEFAULTS:{},copy:value=>value,
     DouyinAdapter:class {constructor(options){Object.assign(this,options);captured=options;}hook(){}emitStatus(){}},
     setTimeout:callback=>{timers.push(callback);return timers.length;},clearTimeout(){},
     chrome:{runtime:{onMessage:{addListener(){}},sendMessage:async request=>{
       if(request.type==='init')return {ok:true,value:{}};
+      if(request.type==='data-records' && mode==='archive-pagehide' && !archiveBlocked){archiveBlocked=true;await new Promise(resolve=>{release=resolve;});return {ok:true,value:true};}
       if(request.type==='protocol-append'){saved.push(request.record);return {ok:true,value:true};}
       if(request.type==='page-command' && request.command.type==='drain'){
         const value=page.__douyinAssistantPageV2.call(request.command);reads++;
         if(reads===1){
           if(mode==='lost-response')throw Error('response lost after MAIN executed');
-          await new Promise(resolve=>{release=resolve;});
+          if(mode==='pagehide')await new Promise(resolve=>{release=resolve;});
         }
         return {ok:true,value};
       }
@@ -301,7 +302,7 @@ for(const mode of ['lost-response','pagehide'])test(`内容桥在 ${mode} 后恢
   try {
     await evalPage(page);captured.onEvent({type:'chat',id:'retained'});captured.onCapture({rawBase64:'AQ=='});
     await page.eval(`(async()=>{${await rawEntry('content')}})()`);await new Promise(setImmediate);
-    if(mode==='pagehide'){
+    if(mode==='pagehide' || mode==='archive-pagehide'){
       page.dispatchEvent(new page.Event('pagehide'));release();await new Promise(setImmediate);
       assert.deepEqual(handled,[]);
       page.dispatchEvent(new page.PageTransitionEvent('pageshow',{persisted:true}));
