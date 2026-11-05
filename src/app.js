@@ -1,5 +1,6 @@
 import {createSpeechRecognizer} from './services/speech-routing.js';
 import {createAccountRefresh} from './services/account-refresh.js';
+import {rankAccountTargets} from './services/account-targets.js';
 import {createLocalReply} from './services/local-search.js';
 import {createEdgeRouter} from './browser/edge-router.js';
 import {createPredictionClient} from './analytics/service.js';
@@ -98,7 +99,7 @@ export function boot(options = {}) {
     clearTimeout(runtimeSaveTimer); runtimeSaveTimer = null;
     const save = () => {
       currentMemory();
-      const snapshot = { ...engine.snapshot(),accountSources:accounts.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),domGaps:network.dom?.gaps ?? runtimeSnapshot?.collection?.domGaps ?? 0,acknowledgedRuntimeAlert} };
+      const snapshot = { ...engine.snapshot(),accountSources:accounts.snapshot(),accountResearch:accountRefresh.snapshot(), incomePending:JSON.parse(JSON.stringify([...incomePending])),collection:{...(network.ingestion ? {...network.ingestion,bridgeGaps:network.bridgeGaps || 0,frameGaps:network.frameGaps || 0,captureGaps:network.capture?.gaps || 0} : runtimeSnapshot?.collection || {}),domGaps:network.dom?.gaps ?? runtimeSnapshot?.collection?.domGaps ?? 0,acknowledgedRuntimeAlert} };
       const write = runtimeWriter.save({snapshot,memories:liveMemory.capture()});
       const reported = write.catch(error => reportPersistenceError(error, '运行状态保存失败'));
       return immediate ? write : reported;
@@ -269,6 +270,7 @@ export function boot(options = {}) {
   };
   const edge=createEdgeRouter({browser:options.edge,native:options.nativeASR,config:()=>engine?.config.ai.edge || config.ai.edge});
   const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
+    snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
     changed:async()=>{accountRevision++;engine?.cancelAI();await persistRuntime(true);},onStatus:text=>{log('ai',text);foundationSettings?.showAccounts();}});
   const request = options.request || (details => GM_xmlhttpRequest(details));
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
@@ -416,7 +418,11 @@ export function boot(options = {}) {
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
-    config, log, ai: client, viewerMemory:(user,query)=>currentMemory().context(user,query),perceptionMemory:query=>memoryScope().perception.context(query),sessionMemory:query=>memoryScope().perception.sessionContext(query,{since:engine.liveMode.boundaryAt || captureSegmentAt,boundaryKnown:Boolean(engine.liveMode.boundaryAt)}),conversationMemory:query=>currentMemory().conversation(query),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
+    config, log, ai: client, viewerMemory:(user,query)=>currentMemory().context(user,query),perceptionMemory:query=>memoryScope().perception.context(query),sessionMemory:query=>memoryScope().perception.sessionContext(query,{since:engine.liveMode.boundaryAt || captureSegmentAt,boundaryKnown:Boolean(engine.liveMode.boundaryAt)}),conversationMemory:query=>currentMemory().conversation(query),accountContext:(query,user)=>{
+      const subject=user?.secUid || engine.audience.users.get(user?.id ? `uid:${user.id}` : '')?.secUid;
+      const subjects=[identity.anchor?.secUid,subject].filter(Boolean);
+      return accounts.context(engine.config.anchorId,query,{subjects:subjects.length ? subjects : undefined,includeHistory:true});
+    },evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;

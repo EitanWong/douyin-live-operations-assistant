@@ -1184,6 +1184,7 @@ export class Engine {
     const prompt = {
       signal:active.controller.signal,cloudAllowed,
       persona: a.persona, knowledge: a.knowledge, ...this.aiContext(),
+      getAccountContext:query=>a.contextSources.accounts ? this.accountContext(query,event?.user) : [],
       target: event?.type==='speech' ? {type:'speech',text:event.text,source:'live-audio',speaker:'unverified'} : event ? { memory:a.assistant.memoryEnabled ? this.viewerMemory(event.user,event.text || '') : null, type: event.type, name: event.user?.name || '', text: event.text || '', address:audienceAddress(event.user,now), title:audienceTitle(event.user,now), ...(['gift','welcome'].includes(task.kind) ? audienceReplyContext(event.user, this.config.anchorId) : {}) } : null,
       task: { kind: task.kind, instruction: task.instruction, data: task.data || null }, maxLength: task.maxLength ?? this.config.sending.maxLength
     };

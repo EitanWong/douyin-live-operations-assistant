@@ -11,6 +11,20 @@ import {Panel} from '../../src/ui/panel.js';
 import {awaitingVisual} from '../../src/ai/live-moment.js';
 const flush=()=>new Promise(setImmediate);
 
+test('automatic audience research reaches the actual AI request only for the current viewer and remains dated after restart',async()=>{
+ const accounts=new AccountContext(),requests=[];
+ for(const subject of ['viewer-a','viewer-b']){
+  const source=accountSource(`https://www.douyin.com/user/${subject}`);
+  accounts.replace('123',source.url,normalizeAccountPayload({user:{sec_uid:subject,nickname:subject,signature:`陶艺资料仅属于${subject}`}},source),{role:'viewer'});
+ }
+ const engine=new Engine({config:mergeConfig({anchorId:'123',ai:{enabled:true,chatEnabled:true}}),accountContext:(q,user)=>accounts.context('123',q,{subjects:[user?.secUid].filter(Boolean),includeHistory:true}),ai:async p=>{requests.push(makeAIRequest(p,engine.config.ai));return '欢迎一起聊陶艺。';}});
+ try{
+  engine.start();engine.requestChatAI({type:'chat',user:{id:'1',secUid:'viewer-a',name:'观众'},text:'陶艺怎么做？'},true);await flush();
+  const rows=JSON.parse(requests[0].messages[1].content).evidence_context.accounts;
+  assert.equal(rows.length,1);assert.equal(rows[0].subject,'viewer-a');assert.doesNotMatch(JSON.stringify(rows),/viewer-b/);
+ }finally{engine.stop();}
+});
+
 test('public profile evidence enters the real AI request, and forgetting invalidates queued answers',async()=>{
  const now=Date.now(),url='https://www.douyin.com/user/target';let revision=0;
  const accounts=new AccountContext(),rows=normalizeAccountPayload({user:{sec_uid:'target',nickname:'陶艺主播',signature:'每周六分享陶艺'}},accountSource(url),now);

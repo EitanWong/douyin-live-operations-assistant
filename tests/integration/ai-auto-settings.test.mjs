@@ -20,10 +20,15 @@ test('device recommendation, local controls, selected account refresh and source
   panel.root.querySelector('[data-field="ai.edge.textModel"]').value='qwen-0.5b';panel.root.querySelector('[data-edge-auto]').click();await flush();
   panel.root.querySelector('[data-account-targets]').click();await flush();const selected=panel.root.querySelector('[data-account-target]');selected.value='https://www.douyin.com/user/known';selected.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
   panel.root.querySelector('[data-account-watch]').click();await flush();
+  panel.root.querySelector('[data-field="ai.accountCollection.autoResearch"]').checked=true;
+  panel.root.querySelector('[data-field="ai.accountCollection.researchLimit"]').value='5';
+  panel.root.querySelector('[data-field="ai.accountCollection.minDiamonds"]').value='200';
+  panel.root.querySelector('[data-field="ai.accountCollection.minChats"]').value='4';
   panel.root.querySelector('[data-field="ai.contextSources.income"]').checked=false;
   panel.root.querySelector('[data-field="ai.edge.localOnly"]').checked=true;
   const c=panel.read();assert.equal(c.ai.edge.textModel,'auto');assert.equal(c.ai.edge.autoTune,true);assert.equal(c.ai.edge.enabled,true);assert.equal(c.ai.edge.localOnly,true);assert.deepEqual(c.ai.accountCollection.urls,['https://www.douyin.com/user/known']);
   engine.update(c);panel.populate(c);assert.equal(panel.read().ai.edge.localOnly,true);assert.equal(engine.aiContext().liveContext.income,null);
+  assert.equal(engine.config.ai.accountCollection.autoResearch,true);assert.equal(panel.read().ai.accountCollection.researchLimit,5);assert.equal(engine.config.ai.accountCollection.minDiamonds,200);assert.equal(engine.config.ai.accountCollection.minChats,4);
   panel.root.querySelector('[data-context-refresh]').click();await flush();assert.match(panel.root.querySelector('[data-context-overview]').textContent,/本场收入与历史账本/);assert.equal(errors.length,0);assert.equal(panel.dirty,false);
  }finally{settings?.close();panel?.destroy();clearTimeout(panel?.toastTimer);dom.window.close();Object.assign(globalThis,previous);}
 });

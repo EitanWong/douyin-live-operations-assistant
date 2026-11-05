@@ -34,3 +34,22 @@ test('a sparse work author cannot erase the richer profile in the same native pa
  const source=accountSource(url),rows=normalizeAccountPayload({user:{sec_uid:source.id,nickname:'茶友',signature:'每周六分享陶艺',follower_count:42},aweme_list:[{aweme_id:'56',desc:'作品',author:{sec_uid:source.id,nickname:'茶友'}}]},source);
  const profile=rows.find(r=>r.kind==='profile');assert.match(profile.text,/每周六/);assert.equal(profile.counts.followers,42);
 });
+test('historical works survive a restart with dated evidence and only enter context for the matching subject',()=>{
+ let at=Date.now();const store=new AccountContext({now:()=>at}),source=accountSource(url);
+ const payload={user:{sec_uid:source.id,nickname:'主播',signature:'旧简介'},aweme_list:[{aweme_id:'70',desc:'青瓷杯拉坯教程',author:{sec_uid:source.id}}]};
+ store.replace('host',url,normalizeAccountPayload(payload,source,at),{role:'anchor'});
+ const other='https://www.douyin.com/user/other';store.replace('host',other,normalizeAccountPayload({aweme_detail:{aweme_id:'71',desc:'另一个人的青瓷杯',author:{sec_uid:'other'}}},accountSource(other),at),{role:'viewer'});
+ at+=25*3600000;const restored=new AccountContext({now:()=>at,snapshot:store.snapshot()});
+ assert.deepEqual(restored.context('host','青瓷'),[],'legacy current-evidence lookup never revives stale data');
+ const rows=restored.context('host','青瓷',{subjects:[source.id],includeHistory:true});
+ assert.equal(rows.length,1);assert.equal(rows[0].subject,source.id);assert.equal(rows[0].historical,true);assert.equal(rows[0].role,'anchor');assert.match(rows[0].coverage,/历史/);assert.doesNotMatch(rows[0].content,/旧简介/);
+ restored.invalidate('host',url);assert.deepEqual(restored.context('host','青瓷',{subjects:[source.id],includeHistory:true}),[],'failed refresh makes all evidence unavailable');
+ restored.forget('host',url);assert.equal(restored.history('host').length,1,'forget removes that source from retained history, preserving unrelated people');
+});
+test('automatic viewer records do not become general anchor background without matching subject identity',()=>{
+ const store=new AccountContext(),source=accountSource(url);
+ store.replace('host',url,normalizeAccountPayload({user:{sec_uid:source.id,nickname:'观众',signature:'周末做陶艺'}},source),{role:'viewer'});
+ assert.deepEqual(store.context('host','陶艺'),[]);
+ assert.equal(store.context('host','陶艺',{subjects:[source.id]})[0].subject,source.id);
+ assert.deepEqual(store.context('host','陶艺',{subjects:['another']}),[]);
+});
