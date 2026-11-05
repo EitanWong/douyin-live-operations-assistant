@@ -2546,3 +2546,5 @@ DOM 备用采集复核：先添加慢订阅/超大消息红测，确认原队列
 证据保留 `output/unified-card-layout-2026-11-05/`（measurements.json、resize-focus.json、final-diagnostic.json、键盘滚动、截图、红测/专项/全测/基准日志）。临时草稿未保存，已重载丢弃；视口恢复、测试标签关闭，4184演示服务已停止。其他用途工作树不清理；版本保持0.1.2，main/标签/Release均不变。
 
 最终验证：完整回归 **1527/1527**（190.356秒，0失败/取消/跳过）；`npm run build`、`npm run check`、`npm run agent:check`、`git diff --check` 全部通过。索引423个模块、2550个顶层符号/类成员，删除模块与测试同步移除索引。原路径 `dist/chrome-extension` 与油猴产物已更新。交付前fetch核对本地及origin/dev同为a7c5843无分叉。接下来提交并推送dev，再补充远端SHA回执；远端CI尚未核验。crapper、dryer、mutator不可用、未执行。
+
+最终推送回执：修复提交 **d7c8145fb2f574fd90a1aac8711204f951f35455** 已推送 `origin/dev`，`git ls-remote --heads origin dev` 与本地HEAD逐字一致，工作区干净。本回执再作纯文档提交同步dev；生产代码即上述已完整验证版本。重新加载原路径扩展并刷新直播页后使用新布局，远端CI未核验。
