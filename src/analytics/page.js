@@ -13,6 +13,17 @@ export function predictionContext(report,anchor,now){
  if(!report || !anchor || report.scope?.split(':').at(-1)!==anchor || report.asOf>now || now-report.asOf>30000)return null;
  const n=v=>Number.isFinite(v)?v:null;
  const row=r=>r?{status:r.status,point:n(r.point),low:n(r.low),high:n(r.high),unit:r.unit,horizonMinutes:n(r.horizonMinutes),sampleSize:n(r.sampleSize),calibration:r.calibration}:null;
- return {asOf:report.asOf,modelVersion:String(report.modelVersion).slice(0,80),revenue:row(report.revenue),month:{...row(report.month),kind:'scenario'},online:(report.online || []).slice(0,3).map(row),pk:report.pk?.status==='ready'?{status:'ready',probability:n(report.pk.probability),calibration:report.pk.calibration}:null,
+ const warehouse=report.warehouse?.room===report.scope.split(':')[0] && report.warehouse.asOf<=now && now-report.warehouse.asOf<30000?warehouseContext(report.warehouse):null;
+ const model=report.localModel;
+ const localModel=model?.scope===report.scope && model.asOf===report.asOf?{asOf:model.asOf,rows:(model.rows || []).slice(0,4).filter(r=>r.trainedAt<report.asOf && r.calibration==='temporal-holdout' && ['diamonds','online'].includes(r.target)).map(r=>({target:r.target,...row(r),trainedAt:r.trainedAt})),basis:'独立本机模型候选；留出验证表现不保证未来准确率；和原始预测分开'}:null;
+ return {asOf:report.asOf,modelVersion:String(report.modelVersion).slice(0,80),revenue:row(report.revenue),month:{...row(report.month),kind:'scenario'},online:(report.online || []).slice(0,3).map(row),pk:report.pk?.status==='ready'?{status:'ready',probability:n(report.pk.probability),calibration:report.pk.calibration}:null,warehouse,localModel,
   basis:'本机统计模型预测，和实测分开；尚未证明个人准确率，不代表官方收入、结算或必然胜负'};
+}
+
+function warehouseContext(value,includeOpponents=true){
+ const count=v=>Number.isSafeInteger(v) && v>=0?v:null;
+ return {room:String(value.room).slice(0,30),windowMinutes:15,observedUsers:count(value.observedUsers),
+  eventCounts:Object.fromEntries(['chat','gift','enter','pk-score','social','fansclub','room-audience'].map(key=>[key,count(value.eventCounts?.[key])])),
+  coverage:value.coverage?{connected:value.coverage.connected===true,gaps:count(value.coverage.gaps)}:null,
+  opponents:includeOpponents?(value.opponents || []).slice(0,3).map(r=>warehouseContext(r,false)):[],basis:'已观察的最近15分钟样本；不是完整在线名单'};
 }

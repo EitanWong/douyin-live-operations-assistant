@@ -69,6 +69,6 @@ export function createPredictionClient({transport,context,clock=Date.now}={}){
  return {ingest,call,scope:()=>{const c=scope();return `${c.room}:${c.anchor}`;},pause:()=>{paused=true;latest=null;},resume:()=>{paused=false;lastPulse=0;},enabled:()=>{scope();return enabled && !paused;},
   pulse:async info=>{const c=scope();if(paused || clock()-lastPulse<5000 || !c.anchor)return;lastPulse=clock();try{await call('pulse',info,c);failed='';}catch(e){failed=e.message;}},
   report:async()=>{const c=scope();try{const r=await call('report',undefined,c);if(`${scope().room}:${scope().anchor}`===`${c.room}:${c.anchor}`){latest=r;enabled=r.settings?.enabled!==false;failed='';}return r;}catch(e){failed=e.message;return {phase:'unavailable',reason:failed};}},
-  context:()=>{scope();return latest && clock()-latest.asOf<30000 ? {scope:latest.scope,asOf:latest.asOf,modelVersion:latest.modelVersion,revenue:latest.revenue,month:latest.month,online:latest.online,pk:latest.pk,coverage:latest.coverage,basis:latest.basis}:null;},
+  context:()=>{scope();return latest && clock()-latest.asOf<30000 ? {scope:latest.scope,asOf:latest.asOf,modelVersion:latest.modelVersion,revenue:latest.revenue,month:latest.month,online:latest.online,pk:latest.pk,coverage:latest.coverage,warehouse:latest.warehouse,localModel:latest.localModel,basis:latest.basis}:null;},
   error:()=>failed,close:()=>local?.close()};
 }

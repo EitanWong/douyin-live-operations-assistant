@@ -4,6 +4,28 @@ let tab;
 const status=document.querySelector('#status'),open=document.querySelector('#open'),endpoint=document.querySelector('#endpoint');
 installTheme({ target:document.documentElement, select:document.querySelector('[data-theme-choice]'), paletteSelect:document.querySelector('[data-theme-palette]'), materialSelect:document.querySelector('[data-theme-material]'), onError:message=>{ status.textContent=message; status.classList.add('error'); } });
 open.disabled=true;
+const dataStatus=document.querySelector('#data-status');
+const dataCall=async(type,extra={})=>{
+ const r=await chrome.runtime.sendMessage({type,...extra});if(!r?.ok)throw Error(r?.error || '本地数据后台不可用');return r.value;
+};
+const showDataStatus=async()=>{
+ const s=await dataCall('data-status');
+ dataStatus.textContent=`${s.enabled?'归档已启用':'归档未启用'} · 待落盘 ${s.pending} 条 · ${s.native?`已落盘 ${s.native.records} 条，${s.native.database}`:'本地组件未连接，请按文档安装'}${s.error?` · ${s.error}`:''}`;
+ document.querySelector('#data-enable').disabled=s.enabled;
+ document.querySelector('#data-disable').disabled=!s.enabled;
+};
+for(const [id,type,extra] of [
+ ['data-enable','data-configure',()=>({enabled:true})],['data-disable','data-configure',()=>({enabled:false})],
+ ['data-retry','data-flush',()=>({})],
+ ['data-opponent-open','data-opponent-open',()=>({tabId:tab?.id,room:document.querySelector('#data-room').value.trim()})],
+ ['data-opponent-stop','data-opponent-stop',()=>({tabId:tab?.id})]
+])document.querySelector(`#${id}`).addEventListener('click',async event=>{
+ const button=event.currentTarget;button.disabled=true;
+ try{await dataCall(type,extra());await showDataStatus();}
+ catch(error){dataStatus.textContent=error.message;button.disabled=false;}
+ finally{if(!['data-enable','data-disable'].includes(button.id))button.disabled=false;}
+});
+void showDataStatus().catch(error=>{dataStatus.textContent=error.message;});
 void(async()=>{
   try { [tab]=await chrome.tabs.query({active:true,currentWindow:true}); }
   catch { status.textContent='无法读取当前标签页，请重新打开扩展。'; return; }

@@ -21,6 +21,9 @@ import {parseGiveawayState} from '../src/core/giveaway.js';
 import {createPredictionBackground} from './prediction-background.js';
 import {mergeLiveMemory} from '../src/ai/live-memory.js';
 import {persistNativeMemory} from './live-memory.js';
+import {LocalDataEngine,nativeDataRequest} from './local-data.js';
+import {createOpponentCollector} from './opponent-collector.js';
+import {parsePulse} from '../src/analytics/schema.js';
 
 const collectionKeeper = installCollectionKeeper(chrome);
 installNativePerceptionBridge(chrome,{onStart:async room=>{await storageReady;return readRecord(`live-assistant:config:${room}`);},onObservation:async(room,row,scope)=>{await storageReady;await persistNativeMemory({room,row,scope,read:readRecord,write:writeRecord,transaction:work=>giftStore.transaction(work)});}});
@@ -34,6 +37,9 @@ void storageReady.catch(()=>{});
 const durableKey = isDurableKey;
 const readRecord = async key => durableKey(key) ? durableStorage.get(key) : (await chrome.storage.local.get(key))[key];
 let predictionHost;
+let localData;
+const dataEngine=()=>localData ||=new LocalDataEngine({request:nativeDataRequest(chrome)});
+const opponentCollector=createOpponentCollector(chrome);
 const readAll = async () => durableStorage.getAll(['live-assistant:config:','live-assistant:profile:']);
 const writeRecord = async (key,value) => {
   if (!durableKey(key)) return writeStorage(key,value);
@@ -166,16 +172,55 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
     try {
       await storageReady;
       let value;
-      if(message.type==='prediction' && isRoom(sender)){
+      if(message.type==='data-configure' && extensionPage){value=await dataEngine().configure(message.enabled);if(message.enabled)void dataEngine().flush();}
+      else if(message.type==='data-flush' && extensionPage){await dataEngine().flush();value=await dataEngine().status();}
+      else if(message.type==='data-status' && extensionPage){
+        const status=await dataEngine().status();let native=null;
+        try{native=await nativeDataRequest(chrome)('status');}catch{ /* Report unavailable explicitly; never enable implicitly. */ }
+        value={...status,native};
+      }else if(message.type==='data-context' && isRoom(sender))value=await opponentCollector.context(sender);
+      else if(message.type==='data-records' && isRoom(sender)){
+        if(!await dataEngine().enabled()){value=false;reply({ok:true,value});return;}
+        if(!Array.isArray(message.records) || message.records.length>32 || jsonLength(message.records)>650000)throw Error('本地归档批次无效');
+        const room=roomFromUrl(sender.tab.url),config=await readRecord(`live-assistant:config:${room}`);
+        const collector=await opponentCollector.context(sender);
+        for(const row of message.records){
+          if(!row || typeof row.id!=='string' || row.id.length>100 || !['event','protocol','coverage'].includes(row.kind) || row.receivedAt>Date.now() || row.kind==='event' && !(validEvent(row.payload,500000) || row.payload?.type==='anchor-exhibition-retention' && jsonLength(row.payload)<12000))throw Error('本地归档事件无效');
+          await dataEngine().enqueue({...row,id:`${room}:${sender.documentId || sender.tab.id}:${row.id}`,room,anchor:String(config?.anchorId || ''),payload:row.kind==='coverage' && collector?{...row.payload,ownerRoom:collector.ownerRoom}:row.payload});
+        }
+        void dataEngine().flush();value=true;
+      }else if(['data-opponent-open','data-opponent-stop','data-opponent-list'].includes(message.type) && extensionPage){
+        const tab=await chrome.tabs.get(message.tabId),owner={frameId:0,tab,url:tab.url};
+        if(message.type==='data-opponent-open'){
+          if(!await dataEngine().enabled())throw Error('请先启用本地归档');
+          value=await opponentCollector.open(owner,message.room);
+        }else value=await opponentCollector[message.type==='data-opponent-stop'?'stop':'list'](owner);
+      }else if(message.type==='prediction' && isRoom(sender)){
         predictionHost ||=createPredictionBackground({readRecord});
         value=await predictionHost.handle(message,roomFromUrl(sender.tab.url));
+        if(message.action==='pulse' && await dataEngine().enabled()){
+          const room=roomFromUrl(sender.tab.url),at=Date.now(),pulse=parsePulse(message.value,at);
+          await dataEngine().enqueue({id:`pk-state:${crypto.randomUUID()}`,room,anchor:message.anchor,kind:'pk-state',receivedAt:at,payload:pulse});
+          void dataEngine().flush();
+        }
+        if(message.action==='report' && !value.simulated && await dataEngine().enabled()){
+          const room=roomFromUrl(sender.tab.url);
+          await dataEngine().enqueue({id:`report:${room}:${message.anchor}:${value.asOf}`,room,anchor:message.anchor,kind:'forecast',receivedAt:value.asOf,payload:value});
+          void dataEngine().flush();
+          value=await dataEngine().enrich(room,message.anchor,value);
+        }
       }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
         await chrome.tabs.create({url:`https://www.douyin.com/search/${encodeURIComponent(message.query.trim())}?type=general`,active:true});value=true;
       }else if(message.type==='account-collect' && isRoom(sender)){
         const key=sender.tab.id;if(accountCollections.has(key))throw new Error('账号采集正在进行');
         const controller=new AbortController();accountCollections.set(key,controller);
-        try{value=await collectAccount(chrome,message.url,{signal:controller.signal});}finally{accountCollections.delete(key);}
+        try{
+          value=await collectAccount(chrome,message.url,{signal:controller.signal});
+          const room=roomFromUrl(sender.tab.url),config=await readRecord(`live-assistant:config:${room}`),at=Date.now();
+          await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor:String(config?.anchorId || ''),kind:'account',receivedAt:at,payload:{source:message.url,records:value}});
+          void dataEngine().flush();
+        }finally{accountCollections.delete(key);}
       }else if(message.type==='account-cancel' && isRoom(sender)){accountCollections.get(sender.tab.id)?.abort();value=true;}
       else if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
       else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:',`live-assistant:live-memory:${roomFromUrl(sender.tab.url)}:`,'live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
