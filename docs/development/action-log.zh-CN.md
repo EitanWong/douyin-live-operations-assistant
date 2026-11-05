@@ -2856,3 +2856,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 交付边界：Windows原生自动注册尚不支持，首次本机接入仍需一条命令；本地视觉未实现，直播流抓取与真实平台准确率不在本轮验收范围。未操作真实直播页、刷新已加载扩展、发送弹幕或调用付费模型。crapper、dryer、mutator均不可用，未执行，普通回归不替代这些专用检查。最终完整回归、提交和dev推送回执在完成后追加。
 
 最终验证：`npm test` **1606/1606**，0失败/取消/跳过，229.353秒；交付日志明确包含离屏runtime存储、通用路由隔离与自动发现ID变化三个新增回归。原生 **47/47**，0跳过；正式build、check、agent:check和git diff --check均通过，生成索引与源码一致。证据为同目录full-js-delivery.log、native-tests-final.log、build-delivery.log、check-delivery.log。版本保持0.1.2；fetch确认origin/dev没有新增远端提交，按dev集成流程提交推送，不创建PR、标签或Release，不将远端CI算作本地通过项。
+
+交付回执：浏览器后台任务提交 **28a6d45** 与本机后台部署/进度提交 **69569dd66ea8950a048bccc67d33a7bafa939c5c** 已推送origin/dev（3ffc4c3..69569dd），git ls-remote核对SHA一致，功能提交后工作区干净。构建目录dist/chrome-extension已更新；用户现有已加载扩展未重载、原生注册未更换，使用新扩展需重载构建产物，首次启用安装代理需运行native:install。本条为纯文档回执，最终文档提交和推送SHA保存在证据目录delivery-receipt.json；已删除测试安装目录，历史收据中的路径仅作为验收记录。
