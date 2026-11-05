@@ -2583,3 +2583,5 @@ DOM 备用采集复核：先添加慢订阅/超大消息红测，确认原队列
 投影性能基准：Node v26.12.1 / Darwin arm64、6图各1000点、100次投影，状态刷新中位0.508ms、P95 0.834ms，0次content变更，后台页面0次图表option读取。新增辅助内容分离为纯边界转换，沿用结构共享；无逐卡片测量或新增观察器。此数据为本机投影基准，不作为浏览器帧率结论。
 
 证据包括browser-evidence.json、toolbar-manage.png、expanded-diagnostics.png、红测/专项/两轮全测与基准日志。临时功能开关草稿已重载丢弃；恢复测试前已将管理模块重新启用。浏览器视口已恢复、临时标签已关闭，4184演示服务已停止。没有连接实播或发送真实消息；crapper/dryer/mutator不可用、未执行。构建仍在原路径dist/chrome-extension；接下来提交并推送dev，远端CI未核验。
+
+最终交付回执：功能提交 **f7a147b04d7c488e9f640cc821ebc83143eb3ec9** 已推送 `origin/dev`，`git ls-remote --heads origin dev` 与本地HEAD一致，工作区干净，提交后agent:check仍通过。本回执另作纯文档提交同步dev；生产代码即上述1528项回归与浏览器验收版本。重新加载原路径扩展并刷新直播页后生效，远端CI未核验。
