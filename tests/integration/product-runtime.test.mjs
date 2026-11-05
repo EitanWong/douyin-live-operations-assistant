@@ -8,6 +8,14 @@ import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {createWorkspaceBridge} from '../../src/ui/product/bridge.js';
 
+async function waitFor(predicate,message){
+ const deadline=Date.now()+5000;
+ while(!predicate()){
+  assert.ok(Date.now()<deadline,message);
+  await new Promise(resolve=>setTimeout(resolve,10));
+ }
+}
+
 test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现 TanStack 表格，销毁后清理',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'product-ui-')), dom=new JSDOM('<div id="host"></div>',{url:'https://live.douyin.com/123',pretendToBeVisual:true});
  const previous=Object.fromEntries(['window','document','HTMLElement','Element','getComputedStyle','MutationObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
@@ -38,18 +46,19 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   await new Promise(resolve=>setTimeout(resolve,70));const ui=container.shadowRoot;
   const helpButton=ui.querySelector('.product-utility-actions button[aria-label="使用说明"]'),manageButton=ui.querySelector('.product-utility-actions button[aria-label="工具管理"]');
   assert.ok(helpButton.querySelector('svg'));assert.ok(manageButton.querySelector('svg'));assert.equal(ui.querySelector('.product-content [data-workspace-utility]'),null);assert.doesNotMatch(ui.querySelector('.product-content').textContent,/模型使用说明|停用测试工具/);
-  helpButton.focus();helpButton.click();await new Promise(resolve=>setTimeout(resolve,60));
+  helpButton.focus();helpButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'打开使用说明');
   let utilityDialog=ui.querySelector('[role=dialog]');assert.match(utilityDialog.textContent,/使用完整模型名称后保存/);assert.ok(ui.querySelector('.product-shell').hasAttribute('inert'));
   assert.equal(utilityDialog.querySelectorAll('ol>li').length,3,'真实弹窗保留编号列表，布局容器不得覆盖语义标签');assert.equal(utilityDialog.querySelectorAll('ul>li').length,1);
-  utilityDialog.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,250));assert.equal(ui.querySelector('[role=dialog]'),null);assert.equal(ui.activeElement,helpButton);
-  manageButton.focus();manageButton.click();await new Promise(resolve=>setTimeout(resolve,60));utilityDialog=ui.querySelector('[role=dialog]');
+  utilityDialog.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===helpButton,'Escape关闭说明并返回焦点');
+  manageButton.focus();manageButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'打开工具管理');utilityDialog=ui.querySelector('[role=dialog]');
   [...utilityDialog.querySelectorAll('button')].find(n=>n.textContent==='停用测试工具').click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(toolDisables,1);assert.match(utilityDialog.textContent,/工具已停用/);
-  utilityDialog.querySelector('button[aria-label="关闭工具管理"]').click();await new Promise(resolve=>setTimeout(resolve,250));assert.equal(ui.activeElement,manageButton);assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);
-  helpButton.click();await new Promise(resolve=>setTimeout(resolve,30));root.querySelectorAll('[data-workspace-views] button')[1].click();bridge.refresh();await new Promise(resolve=>setTimeout(resolve,250));
-  assert.equal(ui.querySelector('[role=dialog]'),null,'子页切换后关闭旧说明');assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);
+  utilityDialog.querySelector('button[aria-label="关闭工具管理"]').click();await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===manageButton,'关闭管理并返回焦点');assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);
+  helpButton.focus();helpButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'切换子页前说明已打开');root.querySelectorAll('[data-workspace-views] button')[1].click();bridge.refresh();
+  await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===helpButton,'子页切换后关闭旧说明并返回焦点');assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);
   root.querySelectorAll('[data-workspace-views] button')[0].click();bridge.refresh();
-  manageButton.click();await new Promise(resolve=>setTimeout(resolve,30));utilities.querySelector('[data-workspace-utility=manage]').hidden=true;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,250));
-  assert.equal(ui.querySelector('[role=dialog]'),null,'模块移除后关闭旧管理视图');assert.ok(!ui.querySelector('button[aria-label="工具管理"]'),'缺少管理内容就不显示图标');
+  await waitFor(()=>ui.querySelector('[role=tab][aria-selected=true]')?.textContent==='模型设置','原子页已恢复');
+  manageButton.focus();manageButton.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'移除模块前管理已打开');utilities.querySelector('[data-workspace-utility=manage]').hidden=true;bridge.refresh();
+  await waitFor(()=>!ui.querySelector('[role=dialog]'),'模块移除后关闭旧管理视图');assert.ok(!ui.querySelector('button[aria-label="工具管理"]'),'缺少管理内容就不显示图标');
   utilities.querySelector('[data-workspace-utility=manage]').hidden=false;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
   assert.ok(ui.querySelector('button[aria-label="工具管理"]'),'内容重新可用后恢复入口');
   utilities.hidden=true;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));assert.ok(!ui.querySelector('.product-utility-actions'),'没有辅助功能时不保留空工具组或分隔线');
@@ -65,7 +74,7 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   assert.equal(ui.querySelector('[role=dialog]'),null,'直接操作不弹出视图');
   const extra=document.createElement('h3');extra.textContent='补充说明';simple.append(extra);bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
   assert.equal(Boolean(ui.querySelector('select[aria-label="跳转到本页分区"]')),false,'少量分区直接浏览，不额外占用一行分区工具栏');
-  const expand=ui.querySelector('button[aria-label="放大查看：回复模型"]');assert.ok(expand,'卡片提供明确的放大入口');expand.focus();expand.click();await new Promise(resolve=>setTimeout(resolve,60));
+  const expand=ui.querySelector('button[aria-label="放大查看：回复模型"]');assert.ok(expand,'卡片提供明确的放大入口');expand.focus();expand.click();await waitFor(()=>ui.querySelector('[role=dialog]'),'打开放大视图');
   const enlarged=ui.querySelector('[role=dialog]');assert.ok(enlarged);assert.match(enlarged.textContent,/回复模型/);assert.ok(ui.querySelector('.product-shell').hasAttribute('inert'));
   assert.equal(enlarged.querySelectorAll('.product-expand').length,0,'独立视图不重复嵌套放大入口');
   const enlargedInput=enlarged.querySelector('input[aria-label="模型名"]'),inputSetter=Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set;
@@ -73,8 +82,8 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   assert.equal(root.querySelector('input').value,'enlarged-draft');assert.equal(changes,1,'放大视图沿用唯一的原字段与事件');
   assert.equal(ui.querySelector('.product-content input[aria-label="模型名"]').value,'enlarged-draft','主界面同步同一份草稿');
   let outerEscape=false;const onEscape=event=>{if(event.key==='Escape' && !event.defaultPrevented)outerEscape=true;};root.addEventListener('keydown',onEscape);
-  enlargedInput.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,250));
-  assert.equal(ui.querySelector('[role=dialog]'),null);assert.equal(outerEscape,false);assert.equal(ui.activeElement,expand);assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);root.removeEventListener('keydown',onEscape);changes=0;
+  enlargedInput.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await waitFor(()=>!ui.querySelector('[role=dialog]') && ui.activeElement===expand,'关闭放大视图并返回焦点');
+  assert.equal(outerEscape,false);assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);root.removeEventListener('keydown',onEscape);changes=0;
   const slider=ui.querySelector('.mantine-Slider-root [role=slider]');assert.ok(slider,'组件界面使用真正的Mantine滑块，不将range包成文本框');assert.equal(slider.getAttribute('aria-valuetext'),'克制陪伴');slider.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'End',bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));assert.equal(root.querySelector('input[type=range]').value,'4');
   const tabs=[...ui.querySelectorAll('[role=tab]')];assert.deepEqual(tabs.map(n=>n.textContent),['模型设置','额度设置']);tabs[0].dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));await new Promise(resolve=>setTimeout(resolve,25));assert.equal(sections,1);assert.equal(ui.querySelector('[role=tab][aria-selected=true]').textContent,'额度设置');
   const input=ui.querySelector('input[aria-label="模型名"]');assert.ok(input);const description=input.closest('.mantine-InputWrapper-root').querySelector('.mantine-InputWrapper-description');assert.ok(input.compareDocumentPosition(description) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING,'说明位于输入框之后，不使同排输入框错位');const setter=Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype,'value').set;setter.call(input,'new-model');input.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));
