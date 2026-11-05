@@ -108,6 +108,7 @@ export const PRODUCT_CSS=`
 :is(.anchor-section,.pred-card)[data-card-size=tile]>.product-card-body>.product-card-content{flex:0 0 auto;justify-content:flex-start}
 .product-inspection-view :is(.anchor-section,.pred-card)[data-card-size=tile]{block-size:auto}
 .product-inspection-view :is(.anchor-section,.pred-card)[data-card-size=tile]>.product-card-body{overflow:visible}
+.product-page pre.diagnostic-output{max-block-size:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;overscroll-behavior:contain}
 .delivery-records{max-block-size:280px;overflow:auto;overscroll-behavior:contain}
 .product-card-body:focus-visible{outline:2px solid var(--sg-focus);outline-offset:-3px}
 

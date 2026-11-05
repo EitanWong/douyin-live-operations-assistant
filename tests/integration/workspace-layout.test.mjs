@@ -77,6 +77,26 @@ test('连接诊断按账号摘要、三组诊断和高级折叠区排列，发�
   }finally{bridge?.destroy();f.close();}
 });
 
+test('直播连接默认收起长检查结果与发送测试，检查后结果可见且不展开测试记录',async()=>{
+ const f=fixture(),p=f.panel;let bridge;
+ try{
+  p.tab('diagnostics');
+  const output=p.node('[data-diagnostics]'),results=output.closest('details'),records=p.node('[data-deliveries]').closest('details');
+  assert.ok(results,'长诊断输出按需查看');assert.ok(records,'测试说明与记录按需查看');
+  assert.equal(results.open,false);assert.equal(records.open,false);
+  assert.ok(records.contains(p.node('[data-action=debug-send]')));
+  p.callbacks.diagnose=()=>({hook:true,sockets:2,connected:true,frames:25,events:30,errors:0,anchorId:'123',input:true,send:true});
+  p.node('[data-action=diagnose]').click();
+  await new Promise(resolve=>setTimeout(resolve,0));
+  assert.equal(results.open,true);assert.match(output.textContent,/捕获连接：2；连接在线/);
+  assert.equal(records.open,false);
+  bridge=createWorkspaceBridge(p);
+  const find=node=>node.id && node.kind==='details' && node.title==='连接检查结果' ? node : node.children?.map(find).find(Boolean);
+  assert.equal(find(bridge.getSnapshot().content).open,true,'可见界面同步原详情开关');
+  results.open=false;p.tab('welcome');p.tab('diagnostics');assert.equal(results.open,false);
+ }finally{bridge?.destroy();f.close();}
+});
+
 test('抽奖的弹幕与礼物参与独立分组，礼物长目录不撑高奖品与规则',()=>{
  const f=fixture();try{
   const page=f.panel.node('[data-page=giveaway]');
