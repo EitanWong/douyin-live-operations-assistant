@@ -414,7 +414,7 @@ export function boot(options = {}) {
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
-    config, log, ai: client, viewerMemory:(user,query)=>currentMemory().context(user,query),perceptionMemory:query=>memoryScope().perception.context(query),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
+    config, log, ai: client, viewerMemory:(user,query)=>currentMemory().context(user,query),perceptionMemory:query=>memoryScope().perception.context(query),conversationMemory:query=>currentMemory().conversation(query),accountContext:query=>accounts.context(engine.config.anchorId,query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;

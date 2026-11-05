@@ -62,6 +62,9 @@ export class AccountContext {
   const labels={followers:'粉丝',following:'关注',works:'作品数',likes:'点赞',comments:'评论数',shares:'分享数'};
   const unique=new Map();for(const r of this.list(anchor).sort((a,b)=>a.observedAt-b.observedAt))unique.set(`${r.kind}:${r.id}`,r);
   const entries=[...unique.values()].map(r=>({id:`${r.kind}:${r.id}`,title:r.title,content:r.text+'\n页面计数（采集时）：'+Object.entries(r.counts).map(([k,v])=>`${labels[k] || k} ${v ?? '未知'}`).join('；'),source:r.url || r.source,updatedAt:r.observedAt,expiresOn:'',enabled:true}));
-  return this.retriever(entries,query).chunks.slice(0,4).map(r=>({title:r.title,content:r.content,source:r.source,observedAt:r.updatedAt,coverage:'公开页面采样；作品标题不等于看过视频，不据此推断个人偏好或关系'}));
+  const records=[...unique.values()],recent=records.filter(r=>r.kind==='work' && Number.isFinite(r.publishedAt) && r.publishedAt<=this.now()).sort((a,b)=>b.publishedAt-a.publishedAt).slice(0,2);
+  const related=this.retriever(entries,query).chunks.slice(0,2),selected=new Map(related.map(r=>[r.entryId,r]));
+  for(const row of recent){const entry=entries.find(e=>e.id===`work:${row.id}`);if(!selected.has(entry.id))selected.set(entry.id,entry);}
+  return [...selected.values()].slice(0,4).map(r=>{const row=unique.get(r.entryId || r.id);return {kind:row.kind,title:r.title,content:r.content,source:r.source,observedAt:r.updatedAt,publishedAt:row.publishedAt ?? null,coverage:'公开页面采样；publishedAt为页面发布时间，observedAt为采集时间。作品标题不等于看过视频，不据此推断个人偏好或关系'};});
  }
 }

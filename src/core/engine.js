@@ -1,6 +1,7 @@
 import {REPLY_FREQUENCIES,TurnTaking,conversational,jobTurn,turnViewerKey} from '../ai/turn-taking.js';
 import {hostSpeechInstruction,EVERY_TURN_INSTRUCTION,DIRECT_TURN_INSTRUCTION} from '../ai/conversation-policy.js';
 import {freshObservations,liveMoment,awaitingVisual,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
+import {speechTurn,conversationAtmosphere} from '../ai/interaction-context.js';
 import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
 import {offlineReply} from '../ai/offline-reply.js';
@@ -263,8 +264,8 @@ function cloneRuntime(value) {
 const keyFor = u => u.id || u.secUid || `name:${u.name}`;
 
 export class Engine {
-  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, perceptionMemory=()=>null, accountContext=()=>[], evidenceVersion=()=>0, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
-    this.viewerMemory=viewerMemory;this.perceptionMemory=perceptionMemory;this.accountContext=accountContext;this.evidenceVersion=evidenceVersion;
+  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, perceptionMemory=()=>null, conversationMemory=()=>null, accountContext=()=>[], evidenceVersion=()=>0, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
+    this.viewerMemory=viewerMemory;this.perceptionMemory=perceptionMemory;this.conversationMemory=conversationMemory;this.accountContext=accountContext;this.evidenceVersion=evidenceVersion;this.chatInteractionRevision=0;
     this.config = validateConfig(mergeConfig(config)); this.now = now; this.send = send; this.ai = ai; this.log = log; this.changed = changed; this.checkpoint = checkpoint; this.onStop = onStop;
     this.queue = []; this.giftJobs = new Map(); this.history = []; this.seen = new Map(); this.cooldowns = new Map(); this.gifts = new Map(); this.duplicates = new Map();
     this.claimGiveaway=claimGiveaway;this.giveawayInstance=crypto.randomUUID();this.giveawayCurrent=giveawayCurrent;this.giveawayReceipts=new Map();this.lastGiveawaySend=-Infinity;
@@ -797,7 +798,7 @@ export class Engine {
         this.queueMilestone(milestone);
         return;
       }
-      this.lastChat = now; this.lastInteraction = now; this.interactionRevision++;
+      this.lastChat = now; this.lastInteraction = now; this.interactionRevision++; this.chatInteractionRevision++;
       this.history.push({ name: u.name.slice(0, 40), text: String(event.text).slice(0, 300), at: now });
       const contextAge = this.config.ai.contextAgeSec * 1000;
       while (this.history.length && (now - this.history[0].at > contextAge || this.history.length > this.config.ai.contextSize)) this.history.shift();
@@ -848,17 +849,20 @@ export class Engine {
   }
   validProactive(reply) {
     const now=this.now(),ai=this.config.ai,speech=reply.mode==='speech';
-    const enabled=(reply.mode==='idle' ? ai.idleEnabled && ai.chatEnabled : ai.proactiveEnabled) && this.turnTaking.canSpeak(this.turnInput(speech ? 'speech' : 'proactive',now));
+    const enabled=(reply.mode==='idle' ? ai.idleEnabled && ai.chatEnabled : ai.proactiveEnabled) && this.turnTaking.canSpeak(this.turnInput(reply.pacingMode || (speech ? 'speech' : 'proactive'),now));
     const media=this.mediaContext(this.config),currentSpeech=liveMoment(media,now).speech;
     return this.running && ai.enabled && enabled && reply.epoch===this.epoch && reply.contextKey===this.chatContextKey()
-      && now-reply.created>=0 && now-reply.created<=30000 && reply.lastChat===this.lastChat && reply.lastInteraction===this.lastInteraction && reply.interactionRevision===this.interactionRevision
+      && now-reply.created>=0 && now-reply.created<=30000
+      && (reply.pacingMode==='host-question' ? reply.interruptRevision===this.interactionRevision-this.chatInteractionRevision && reply.caution===conversationAtmosphere(this.contextChat,now).caution : reply.lastChat===this.lastChat && reply.lastInteraction===this.lastInteraction && reply.interactionRevision===this.interactionRevision)
       && (!speech || currentSpeech && sceneKey(currentSpeech)===reply.speechKey)
       && freshObservations(media,now).some(row=>observationKey(row)===reply.evidenceKey);
   }
   proactiveCandidate(now) {
     const ai=this.config.ai,moment=liveMoment(this.mediaContext(this.config),now),speech=moment.speech;
     if(ai.proactiveEnabled && awaitingVisual(moment,now,resolveMediaConfig(ai).videoEnabled))return null;
-    if(ai.proactiveEnabled && speech && this.turnTaking.canAssess({...this.turnInput('speech',now),key:ai.replyFrequency==='every' ? observationKey(speech) : sceneKey(speech)}))return {mode:'speech',row:speech};
+    const pacingMode=speechTurn(moment);
+    if(ai.proactiveEnabled && speech && this.turnTaking.canAssess({...this.turnInput(pacingMode,now),key:ai.replyFrequency==='every' ? observationKey(speech) : sceneKey(speech)}))return {mode:'speech',row:speech,pacingMode};
+    if(ai.proactiveEnabled && speech)return null;
     const mode=proactiveMode(ai,now-Math.max(this.lastChat,this.lastInteraction));
     if(!mode || !this.turnTaking.canSpeak(this.turnInput('proactive',now)) || now-this.lastProactiveAt<ai.proactiveIntervalSec*1000)return null;
     const row=moment.visual || (mode==='idle' ? speech : null);
@@ -870,11 +874,11 @@ export class Engine {
     if(!ai.enabled || this.aiBusy || this.researchAI.size || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
       || now-this.lastAI<ai.intervalSec*1000)return false;
     const candidate=this.proactiveCandidate(now);if(!candidate)return false;
-    const {mode,row}=candidate,speech=mode==='speech',pacingMode=speech ? 'speech' : 'proactive';
-    const reply={mode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,evidenceKey:observationKey(row),...(speech ? {speechKey:sceneKey(row)} : {})};
+    const {mode,row}=candidate,speech=mode==='speech',pacingMode=candidate.pacingMode || 'proactive',atmosphere=conversationAtmosphere(this.contextChat,now);
+    const reply={mode,pacingMode,epoch:this.epoch,contextKey:this.chatContextKey(),created:now,lastChat:this.lastChat,lastInteraction:this.lastInteraction,interactionRevision:this.interactionRevision,interruptRevision:this.interactionRevision-this.chatInteractionRevision,caution:atmosphere.caution,evidenceKey:observationKey(row),...(speech ? {speechKey:sceneKey(row)} : {})};
     if(speech)this.turnTaking.assessed(reply.contextKey,now,'speech',ai.replyFrequency==='every' ? observationKey(row) : reply.speechKey);
     else {this.lastProactiveAt=now;this.lastProactiveScene=sceneKey(row);}
-    void this.requestAI(speech ? {type:'speech',text:row.text} : null,{kind:'ai',data:{proactive:true,interactionMode:mode,engagement:this.turnTaking.context(this.turnInput(pacingMode,now))},extra:{aiProactive:reply},
+    void this.requestAI(speech ? {type:'speech',text:row.text} : null,{kind:'ai',data:{proactive:true,interactionMode:mode,engagement:{...this.turnTaking.context(this.turnInput(pacingMode,now)),atmosphere}},extra:{aiProactive:reply},
       instruction:speech ? hostSpeechInstruction(ai.replyFrequency) : '这是用户已开启的直播内容自然互动。根据最新音画上下文，可像观众一样对主播正在做的事、刚说的内容自然接一句或问一个贴切的小问题。默认旁听，不因看见一个动作或每段识别就起话题。主播在讲解、唱歌、回应别人、关键PK或严肃表达时不打断。只有主播向公屏抛出问题或确有值得回应的新变化，才选一个具体话题，不重复近期回复，不复述整段识别。不用全场号召，不催关注消费，不声称自己是真人或有线下经历。音画不明确、观众正在聊天、争执中、没有值得回应的新内容时输出 [SKIP]。'});
     return true;
   }
@@ -1127,7 +1131,7 @@ export class Engine {
       const liveContext=liveReplyContext(this,this.now(),config);
       return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8),mediaContext:this.mediaContext(config)};
     };
-    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getPerceptionMemory:query=>config.ai.assistant.memoryEnabled ? this.perceptionMemory(query) : null,getAccountContext:query=>config.ai.contextSources.accounts ? this.accountContext(query) : []};
+    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getPerceptionMemory:query=>config.ai.assistant.memoryEnabled ? this.perceptionMemory(query) : null,getConversationMemory:query=>config.ai.assistant.memoryEnabled && config.ai.contextSources.audience ? this.conversationMemory(query) : null,getAccountContext:query=>config.ai.contextSources.accounts ? this.accountContext(query) : []};
   }
   cancelAI({includeResearch=true}={}){const active=this.activeAI;this.activeAI=null;this.aiBusy=false;active?.controller.abort();if(includeResearch){for(const job of this.researchAI)job.controller.abort();this.researchAI.clear();}}
   researchNotices() {

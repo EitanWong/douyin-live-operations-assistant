@@ -38,7 +38,7 @@ export function mergeLiveMemory(previous,incoming){
  for(const row of [...old.audience.forgotten,...next.audience.forgotten])forgotten.set(row.key,Math.max(forgotten.get(row.key) || 0,row.at));
  const viewers=new Map();for(const row of [...old.audience.viewers,...next.audience.viewers]){const rows=viewers.get(row.key) || [];rows.push(row);viewers.set(row.key,rows);}
  const perceptionCutoff=Math.max(old.perception.forgetBefore,next.perception.forgetBefore);
- return {version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0))).filter(Boolean)},
+ return {version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0))).filter(Boolean),unattributed:unique([...old.audience.unattributed,...next.audience.unattributed].filter(row=>row.at>forgetBefore).sort((a,b)=>a.at-b.at),row=>row.id)},
   perception:{forgetBefore:perceptionCutoff,observations:unique([...old.perception.observations,...next.perception.observations].filter(row=>row.at>perceptionCutoff).sort((a,b)=>a.at-b.at),identity)}};
 }
 
