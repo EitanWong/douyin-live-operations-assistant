@@ -10,8 +10,9 @@
 
 1. 在 `dev` 完成一组可交付改动，运行 `npm ci`、`npm run build`、`npm test` 和 `npm run check`。
 2. 创建 `dev` 到 `main` 的 PR，说明用户可见变化、验证结果和已知限制；等待 CI 通过并完成评审后合并。
-3. 只在 `main` 上准备发布时更新 `package.json`、`package-lock.json`、`extension/manifest.json`、油猴脚本头部和文档版本，然后合并版本提交。
-4. 在 `main` 的发布提交上创建匹配版本的 `vX.Y.Z` 标签。Release workflow 会再次校验版本、测试，并自动生成 Chrome 扩展与油猴脚本附件。
+3. 正式发布获授权后，在 `dev` 的发布准备提交中统一更新 `package.json`、`package-lock.json`、`extension/manifest.json`、油猴脚本头部、README 与更新日志；通过上述 PR 和 CI 后以 Squash 方式合入 `main`。发布内容和版本号随同一 PR 审查，不直接推送 `main`。
+4. 在 `main` 的合并提交上创建匹配版本的 `vX.Y.Z` 标签。Release workflow 会再次校验版本、测试，并自动生成 Chrome 扩展与油猴脚本附件。将对应版本的 `CHANGELOG.md` 正文用于 Release 说明，核对附件可下载、包内版本一致。
+5. 将 `main` 合并回 `dev`，保留 Squash 前的开发历史并建立共同祖先，避免下次 PR 重复包含已发布改动。将 CI、PR、标签、Release 与最终推送结果追加到行动日志。
 
 日常开发、草稿 PR 和中间提交保持当前版本号，不创建版本标签或 GitHub Release。发布标签是不可变历史；已发布版本不通过改写标签来回收。
 
@@ -23,4 +24,4 @@
 - `0.(Y+1).0`：一个完整的功能阶段，包含新模块或明显的用户可见能力扩展。
 - `1.0.0`：核心配置、模块边界和公开使用流程稳定后发布首个稳定主版本。
 
-以 `0.1.2` 为当前已发布版本。后续未达到稳定发布条件时，代码继续在 `dev` 迭代且版本保持 `0.1.2`；具体何时发布、发布为何版本，以 `dev` 到 `main` 的 PR 决策为准。
+当前发布目标为 `0.1.3`；正式发布后，日常开发继续在 `dev` 迭代并保持该版本，直到下一次发布准备。具体何时发布、发布为何版本，以获授权的 `dev` 到 `main` 发布 PR 为准。

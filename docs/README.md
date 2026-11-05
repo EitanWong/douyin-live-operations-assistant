@@ -2,6 +2,9 @@
 
 ## 使用
 
+- [下载安装与首次使用](../README.md)：面向普通用户的逐步操作、升级与常见问题。
+- [版本更新日志](../CHANGELOG.md)：0.1.3 更新内容、附件和兼容边界。
+
 - [使用与配置](guides/usage.zh-CN.md)：安装、互动规则、AI、机器人和收入统计。
 - [本机实测](guides/live-testing.zh-CN.md)：开发扩展加载及真实房间验收步骤。
 - [AI 链路与中文端侧](ai-foundation.zh-CN.md)：低延迟、WebGPU 兜底、SenseVoice 安装、公开账号资料与实测边界。
