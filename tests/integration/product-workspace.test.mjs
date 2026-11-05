@@ -11,6 +11,23 @@ function setup(){
 }
 const find=(node,kind)=>node?.kind===kind ? node : node?.children?.map(n=>find(n,kind)).find(Boolean);
 
+test('页面与嵌入模块的管理/说明从正文分离，弹窗操作仍映射原控制器',()=>{
+ const f=setup();try{
+  const page=f.root.querySelector('[data-page=ai]');
+  page.innerHTML='<section class="workspace-card"><h3>主配置</h3><input value="原草稿"></section><details data-workspace-utility="help"><summary>页面说明</summary><p>本页使用方法</p></details><section data-tool-panel="nested"><h3>嵌入模块</h3><details data-workspace-utility="manage"><summary>模块管理</summary><p role="status">运行中</p><button>停用模块</button></details><details data-workspace-utility="help"><summary>模块说明</summary><p>模块使用方法</p></details></section><section hidden><details data-workspace-utility="manage"><summary>隐藏模块</summary><button>不该出现</button></details></section>';
+  let disabled=0;page.querySelector('button').onclick=()=>{disabled++;page.querySelector('[role=status]').textContent='已停用';};
+  f.bridge.refresh();const before=f.bridge.getSnapshot();
+  assert.deepEqual(before.utilities.help.map(n=>n.title),['页面说明','模块说明']);
+  assert.deepEqual(before.utilities.manage.map(n=>n.title),['模块管理']);
+  assert.doesNotMatch(JSON.stringify(before.content),/本页使用方法|模块使用方法|停用模块|隐藏模块/);
+  assert.equal(f.bridge.activate(find(before.utilities.manage[0],'button').id),true);assert.equal(disabled,1);
+  const after=f.bridge.getSnapshot();assert.match(JSON.stringify(after.utilities.manage),/已停用/);
+  assert.equal(after.content,before.content,'工具状态变化不重建正文布局');
+  f.bridge.navigate('anchor');assert.deepEqual(f.bridge.getSnapshot().utilities,{help:[],manage:[]});
+  assert.equal(f.bridge.activate(find(before.utilities.manage[0],'button').id),false,'切页后旧弹窗操作失效');
+ }finally{f.close();}
+});
+
 test('状态更新复用未变化的视图与图表，格式函数变化仍正确发布',()=>{
  const f=setup();try{
   const page=f.root.querySelector('[data-page=ai]');page.innerHTML='<div data-pred-chart="online"></div>';

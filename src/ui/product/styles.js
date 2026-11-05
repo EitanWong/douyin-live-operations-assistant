@@ -9,6 +9,10 @@ const fluidDimensions=Object.entries(PRODUCT_DIMENSIONS).map(([name,value])=>{co
 export const PRODUCT_CSS=`
 :host{${dimensions};--product-line:var(--mantine-color-default-border);all:initial;display:flex;flex:1;min-height:0;min-width:0;contain:layout style;container:product / inline-size;color:var(--mantine-color-text);font:14px/1.55 var(--mantine-font-family)}
 :host>div{display:flex;flex:1;min-width:0;min-height:0;width:100%}*{box-sizing:border-box}button,input,textarea,select{font:inherit}a{color:var(--mantine-color-anchor);overflow-wrap:anywhere}img{max-width:100%}
+.product-utility-host{display:flex;flex:1;min-width:0;min-height:0;width:100%}
+.product-utility-actions{display:flex;gap:4px;padding-inline-start:8px;border-inline-start:1px solid var(--product-line);flex:none}
+.product-toolbar-actions .product-utility-button{width:36px;height:36px;min-height:36px;padding:6px;flex:none}.product-utility-button svg{display:block;width:20px;height:20px}
+.product-utility-section{display:flex;flex-direction:column;gap:var(--product-gap);min-width:0}.product-utility-section+.product-utility-section{border-top:1px solid var(--product-line);padding-top:var(--product-card-padding)}
 .product-shell{display:grid;grid-template-columns:var(--product-sidebar-width,184px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);width:100%;min-height:0;--product-feedback-ease:cubic-bezier(.2,.8,.2,1);background:var(--mantine-color-body);color:var(--mantine-color-text);--product-line:var(--mantine-color-default-border)}
 .product-shell .mantine-Button-root{display:inline-flex;align-items:center;justify-content:center}
 .product-shell .mantine-Button-inner{width:100%;min-width:0}

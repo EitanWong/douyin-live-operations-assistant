@@ -55,7 +55,7 @@ export function anchorPageTemplate(room,analytics='',pk='') {
               <div class="income-toolbar"><h3>直播场次明细</h3></div><div data-income-daily><p class="empty">正在读取本地账本…</p></div>
               <p class="hint" data-income-coverage></p><p class="hint" data-income-calibration-status>在线榜单：等待自动采样</p>
 </div></div>
-              <details><summary>统计口径与数据范围</summary><p class="hint">在线榜估值按经验锚点线性折算：1000 分约 ¥100，单独显示，不与礼物收入相加；只接受 UID 可唯一识别的用户。该换算尚未用长期直播样本校准，不代表平台结算或实际到账。榜单只采集页面当前可见的用户。</p><p class="hint">每次开播至下播计为一场，刷新页面不会拆场。平台未返回开播时间时显示首次观测时间，未收到下播信号时保留直播中；推定边界会单独标注。旧版日汇总单独保留，不计入直播场次数。礼物统计只包含工具在线时采集到的事件；每笔按采集时保存的元/钻比例计算。未知单价不计入金额。数据保存在当前浏览器，卸载扩展或清除其数据会移除账本。</p></details>
+              <details data-workspace-utility="help"><summary>统计口径与数据范围</summary><p class="hint">在线榜估值按经验锚点线性折算：1000 分约 ¥100，单独显示，不与礼物收入相加；只接受 UID 可唯一识别的用户。该换算尚未用长期直播样本校准，不代表平台结算或实际到账。榜单只采集页面当前可见的用户。</p><p class="hint">每次开播至下播计为一场，刷新页面不会拆场。平台未返回开播时间时显示首次观测时间，未收到下播信号时保留直播中；推定边界会单独标注。旧版日汇总单独保留，不计入直播场次数。礼物统计只包含工具在线时采集到的事件；每笔按采集时保存的元/钻比例计算。未知单价不计入金额。数据保存在当前浏览器，卸载扩展或清除其数据会移除账本。</p></details>
             </section>
             </div>
           </section>

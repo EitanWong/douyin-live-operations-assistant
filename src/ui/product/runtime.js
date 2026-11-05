@@ -2,7 +2,7 @@ import React,{createElement as h,useEffect,useLayoutEffect,useId,useMemo,useRef,
 import {createRoot} from 'react-dom/client';
 import {MantineProvider,Switch,Input,Slider,TextInput,Textarea,NativeSelect,Select,Paper,Table,Alert,Progress,SimpleGrid,Stack,Group,Flex,Tabs,Modal} from '@mantine/core';
 import {m as motion,LazyMotion,domAnimation} from 'motion/react';
-import {Button,MotionIcon,Chevron,Reveal,PageEntrance,MotionPreferences,useMotionTarget,springs,fade} from './motion.js';
+import {Button,MotionIcon,Chevron,Reveal,PageEntrance,MotionPreferences,useMotionTarget,useMotionPreference,springs,fade} from './motion.js';
 import {useTable,tableFeatures} from '@tanstack/react-table';
 import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
@@ -11,6 +11,7 @@ import {gridOptions,cardRuns} from './layout.js';
 import {WorkspaceFit} from './fit.js';
 import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel,canInspect} from './inspect.js';
 import {recordText} from './collection.js';
+import {PageUtilities} from './utilities.js';
 import {useDataBrowser,DataBrowserTools,DataBrowserFooter} from './data-browser.js';
 import {componentTheme,componentVariables,paletteScale} from '../theme-palette.js';
 
@@ -61,11 +62,16 @@ function RecordCollection({node,bridge}) {
 }
 function Disclosure({node,bridge}) {
   // The bridge is the only expansion owner, including section jumps and errors.
-  const open=node.open,body=useRef(null),regionId=useId();
+  const open=node.open,body=useRef(null),regionId=useId(),reduced=useMotionPreference();
   const invalid=JSON.stringify(node.children).includes('"invalid":true');
+  const scrollOpened=()=>{
+    if(invalid)return; // Validation keeps its focused error in view.
+    const parent=body.current?.parentElement,scroller=parent?.closest('.product-card-body') || parent?.closest('.product-disclosure-body');
+    if(scroller && scroller.scrollHeight>scroller.clientHeight)scroller.scrollTo({top:scroller.scrollHeight,behavior:reduced ? 'instant' : 'smooth'});
+  };
   useEffect(()=>{if(invalid && !open)bridge.toggle(node.id,true);},[invalid,open,bridge,node.id]);
   useEffect(()=>{if(open && invalid){const input=body.current?.querySelector('[aria-invalid="true"]');input?.focus();input?.scrollIntoView?.({block:'center'});}},[open,invalid]);
-  return h(Paper,{withBorder:true,className:['product-disclosure',node.classes].filter(Boolean).join(' '),'data-surface':node.surface,'data-view-id':node.id},h('div',{className:'product-disclosure-heading'},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':regionId,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(InspectButton,{node})),h(Reveal,{open,id:regionId},h(InspectionContents,null,h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body,tabIndex:0,role:'region','aria-label':node.title},renderChildren(node.children,bridge)))));
+  return h(Paper,{withBorder:true,className:['product-disclosure',node.classes].filter(Boolean).join(' '),'data-surface':node.surface,'data-view-id':node.id},h('div',{className:'product-disclosure-heading'},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':regionId,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(InspectButton,{node})),h(Reveal,{open,id:regionId,onOpened:scrollOpened},h(InspectionContents,null,h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body,tabIndex:0,role:'region','aria-label':node.title},renderChildren(node.children,bridge)))));
 }
 function Chart({node}) {
   const element=useRef(null),chart=useRef(null);
@@ -146,15 +152,15 @@ function Workspace({bridge,shadow,onReady}) {
   const headings=[];function walk(node){if(node?.tag==='h3')headings.push({value:node.id,label:node.children.filter(n=>n.kind==='text').map(n=>n.text).join('').trim()});for(const child of node?.children || [])walk(child);}walk(state.content);
   const nav=h('nav',{id:'product-navigation',className:'product-nav','aria-label':'功能导航'},groups.map(group=>h('div',{key:group,className:'product-nav-group'},h(motion.div,{className:'product-nav-label',initial:false,'aria-hidden':state.sidebar.collapsed && !compact,animate:groupReveal},group),state.nav.filter(n=>n.group===group).map(item=>h(Button,{key:item.key,className:'product-nav-button',variant:state.key===item.key ? 'light' : 'subtle',fullWidth:true,'aria-label':item.label,title:item.label,'aria-current':state.key===item.key ? 'page' : undefined,onClick:()=>bridge.navigate(item.key),leftSection:icon(item.icon)},item.label)))));
   return h(MantineProvider,{forceColorScheme:dark ? 'dark' : 'light',getRootElement:()=>shadow.host,cssVariablesSelector:':host',deduplicateCssVariables:false,withGlobalClasses:false,cssVariablesResolver:componentVariables,theme:componentTheme(state.palette,dark)},
-    h(InspectionProvider,{content:state.content,shadow,pageKey:`${state.key}:${selectedView || ''}`,disabled:Boolean(state.dialog),render:node=>node.kind==='details' ? h(Stack,{gap:'var(--product-gap)'},renderChildren(node.children,bridge)) : h(View,{node,bridge})},({inspecting})=>h(React.Fragment,null,
+    h(PageUtilities,{utilities:state.utilities,shadow,pageKey:`${state.key}:${selectedView || ''}`,title:state.title,disabled:Boolean(state.dialog),render:nodes=>renderChildren(nodes,bridge)},({utilityOpen,utilityActions})=>h(InspectionProvider,{content:state.content,shadow,pageKey:`${state.key}:${selectedView || ''}`,disabled:Boolean(state.dialog) || utilityOpen,render:node=>node.kind==='details' ? h(Stack,{gap:'var(--product-gap)'},renderChildren(node.children,bridge)) : h(View,{node,bridge})},({inspecting})=>h(React.Fragment,null,
     state.dialog ? h(KnowledgeDialog,{node:state.dialog,bridge,shadow}) : null,
-    h(motion.div,{initial:false,animate:sidebarWidth,className:'product-shell',inert:inspecting,'aria-hidden':inspecting || undefined,'data-menu-open':menu,'data-sidebar-side':state.sidebar.side,'data-sidebar-collapsed':state.sidebar.collapsed,'data-material':state.material,'data-mantine-color-scheme':dark ? 'dark' : 'light'},
+    h(motion.div,{initial:false,animate:sidebarWidth,className:'product-shell',inert:inspecting || utilityOpen,'aria-hidden':inspecting || utilityOpen || undefined,'data-menu-open':menu,'data-sidebar-side':state.sidebar.side,'data-sidebar-collapsed':state.sidebar.collapsed,'data-material':state.material,'data-mantine-color-scheme':dark ? 'dark' : 'light'},
       h(motion.aside,{className:'product-sidebar','aria-label':'功能侧边栏',initial:false,inert:compact && !menu,'aria-hidden':compact && !menu,animate:sidebarReveal},h('div',{className:'product-sidebar-inner'},state.sidebar.toggle ? h('div',{className:'product-nav-toggle'},h(Button,{className:'product-nav-button',variant:'subtle',fullWidth:true,'aria-label':state.sidebar.toggle.label,title:state.sidebar.toggle.label,'aria-expanded':!state.sidebar.collapsed,'aria-controls':'product-navigation',onClick:()=>bridge.activate(state.sidebar.toggle.id),leftSection:icon(state.sidebar.toggle.icon)},state.sidebar.toggle.label)) : null,nav)),
       h('div',{className:'product-main'},
-        h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},h(Chevron,{open:menu}),menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge))),
+        h('header',{className:'product-toolbar'},h('div',{className:'product-heading'},h(Button,{className:'product-menu-button',size:'xs',variant:'light',onClick:()=>setMenu(!menu),'aria-expanded':menu},h(Chevron,{open:menu}),menu ? '收起菜单' : '功能菜单'),h('h2',null,state.title)),h('div',{className:'product-toolbar-actions'},renderChildren(state.toolbar.filter(node=>node.kind==='button'),bridge),utilityActions)),
         h('div',{className:'product-subviews'},state.subviews.length ? h(Tabs,{id:'product-sections',value:selectedView,variant:'pills',className:'product-subview-tabs',onChange:value=>{if(value)bridge.activate(value);}},h(Tabs.List,{'aria-label':`${state.title}分类`},state.subviews.map(node=>h(Tabs.Tab,{key:node.id,value:node.id,disabled:node.disabled},node.text)))) : null,headings.length>3 ? h(NativeSelect,{'aria-label':'跳转到本页分区',size:'xs',value:'',data:[{value:'',label:'跳转到分区…'},...headings.filter(n=>n.label)],onChange:e=>{const id=e.currentTarget.value;if(bridge.reveal(id))setJump({id});}}) : null),
         h('main',{className:'product-content',ref:main,key:state.key,id:selectedView ? `product-sections-panel-${selectedView}` : undefined,'aria-label':state.title,'aria-labelledby':selectedView ? `product-sections-tab-${selectedView}` : undefined},h(PageEntrance,{key:`${state.key}:${selectedView || ''}`},h(View,{node:state.content,bridge}))),
-        h('footer',{className:'product-status','aria-label':'运行状态与消息'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite',role:'region','aria-label':'消息与提醒，可滚动',tabIndex:0},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null))))));
+        h('footer',{className:'product-status','aria-label':'运行状态与消息'},h('div',{className:'product-state'},h('span',null,state.status || '已暂停'),h('span',null,renderChildren(state.toolbar.filter(node=>node.kind!=='button'),bridge))),state.messages.length ? h('div',{className:'product-messages','aria-live':'polite',role:'region','aria-label':'消息与提醒，可滚动',tabIndex:0},state.messages.map((message,i)=>h(PageEntrance,{key:message.id || i,distance:3},h(Alert,{variant:'light',color:message.error ? 'red' : 'brand'},h(View,{node:message,bridge}))))) : null)))))));
 }
 class WorkspaceBoundary extends React.Component {
   state={failed:false};

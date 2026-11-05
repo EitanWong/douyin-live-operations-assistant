@@ -663,7 +663,7 @@ export class Panel {
     const node = this.root.querySelector('.toast'); node.textContent = message; node.classList.toggle('error', error); node.hidden = false;
     clearTimeout(this.toastTimer); this.toastTimer = setTimeout(() => { node.hidden = true; }, 8000);
   }
-  toolTemplate(tool){return tool.view.template().replace(/<section/,`<section data-tool-panel="${tool.id}"`).replace(/<\/section>\s*$/,`<details class="advanced"><summary>${tool.embeddedIn?'分析模块管理':'工具管理'}</summary><p data-tool-health="${tool.id}" role="status">正在准备模块</p><div class="actions"><button type="button" data-tool-control="restart" data-tool-id="${tool.id}">重新启用工具</button><button type="button" data-tool-control="disable" data-tool-id="${tool.id}">停用工具</button></div></details></section>`);}
+  toolTemplate(tool){return tool.view.template().replace(/<section/,`<section data-tool-panel="${tool.id}" data-tool-label="${esc(tool.label)}"`).replace(/<\/section>\s*$/,`<details class="advanced" data-workspace-utility="manage" aria-label="${esc(tool.label)} · 工具管理"><summary>${tool.embeddedIn?'分析模块管理':'工具管理'}</summary><p data-tool-health="${tool.id}" role="status">正在准备模块</p><div class="actions"><button type="button" data-tool-control="restart" data-tool-id="${tool.id}">重新启用工具</button><button type="button" data-tool-control="disable" data-tool-id="${tool.id}">停用工具</button></div></details></section>`);}
   updateToolState(id, state) {
     this.toolStates.set(id, {...state});
     this.tools.get(id)?.view.update(this, state);this.productUI?.refresh();

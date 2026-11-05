@@ -44,15 +44,15 @@ export function cardRuns(children) {
  return runs;
 }
 
-export function packPageCards(children) {
- const packed=[];
- for(const child of children){
-  const previous=packed.at(-1);
-  if(child.kind==='details' && child.classes?.split(/\s/u).includes('workspace-help') && previous?.layout==='cards'){
-   packed[packed.length-1]={...previous,children:[...previous.children,{...child,span:'full',size:'section'}]};
-  }else packed.push(child);
+export function partitionPageUtilities(content) {
+ const utilities={help:[],manage:[]};
+ function visit(node){
+  if(Object.hasOwn(utilities,node.utility)){utilities[node.utility].push(node);return null;}
+  if(!node.children)return node;
+  const children=node.children.map(visit).filter(Boolean);
+  return children.length ? {...node,children} : null;
  }
- return packed;
+ return {content:content ? visit(content) : null,utilities};
 }
 
 export function gridOptions(node) {

@@ -1,4 +1,4 @@
-import {createElement as h,createContext,useContext,useMemo,useCallback,useSyncExternalStore,useLayoutEffect} from 'react';
+import {createElement as h,createContext,useContext,useMemo,useCallback,useSyncExternalStore,useLayoutEffect,useRef} from 'react';
 import {Button as MantineButton} from '@mantine/core';
 import {m as motion,MotionConfig,useAnimationControls} from 'motion/react';
 
@@ -22,12 +22,16 @@ export function MotionPreferences({view,children}) {
 }
 // Explicitly finish running animations when the OS preference changes. A
 // changed transition prop alone does not retarget an unchanged Motion value.
-export function useMotionTarget(target,transition) {
+export function useMotionTarget(target,transition,onComplete) {
   const reduced=useMotionPreference(),controls=useAnimationControls();
+  const complete=useRef(onComplete);complete.current=onComplete;
   const valueKey=JSON.stringify(target),transitionKey=JSON.stringify(transition);
   useLayoutEffect(()=>{
-    if(reduced){controls.stop();controls.set(JSON.parse(valueKey));}
-    else controls.start({...JSON.parse(valueKey),transition:JSON.parse(transitionKey)});
+    let active=true;
+    const finish=()=>{if(active)complete.current?.();};
+    if(reduced){controls.stop();controls.set(JSON.parse(valueKey));finish();}
+    else controls.start({...JSON.parse(valueKey),transition:JSON.parse(transitionKey)}).then(finish);
+    return ()=>{active=false;};
   },[controls,reduced,valueKey,transitionKey]);
   return controls;
 }
@@ -52,8 +56,12 @@ export function Chevron({open}) {
     animate:animation},
   h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:1.8,strokeLinecap:'round',strokeLinejoin:'round'},h('path',{d:'m6 9 6 6 6-6'})));
 }
-export function Reveal({open,children,id}) {
-  const animation=useMotionTarget({height:open ? 'auto' : 0,opacity:open ? 1 : 0},{...springs.disclosure,opacity:fade});
+export function Reveal({open,children,id,onOpened}) {
+  const previous=useRef(open),pending=useRef(false);
+  useLayoutEffect(()=>{pending.current=open && (pending.current || !previous.current);previous.current=open;},[open]);
+  const animation=useMotionTarget({height:open ? 'auto' : 0,opacity:open ? 1 : 0},{...springs.disclosure,opacity:fade},()=>{
+    if(pending.current){pending.current=false;onOpened?.();}
+  });
   // Retain the same fields/drafts during interruptions, but remove closed
   // controls from focus and the accessibility tree immediately.
   return h(motion.div,{id,className:'product-reveal',inert:!open,'aria-hidden':!open,

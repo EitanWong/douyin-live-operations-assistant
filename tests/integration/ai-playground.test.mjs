@@ -28,7 +28,10 @@ test('问答测试空状态只保留输入，生成后在相邻结果卡展示�
   assert.ok(question.querySelector('[data-playground-guidance]')?.closest('details'),'详细说明按需查看，不挤压问答主操作');
   assert.match(question.querySelector('[data-playground-guidance]').closest('details').textContent,/不发公屏/u,'测试用途和费用说明放在同一入口');
   assert.ok(question.querySelector('[data-playground-summary]')?.closest('details'),'评测和保留记录说明归入测试操作侧');
-  assert.equal(f.panel.node('[data-page=ai]>[data-workspace-help]').hidden,true);
+  const bridge=createWorkspaceBridge(f.panel);try{
+   const view=bridge.getSnapshot();assert.deepEqual(view.utilities.help.map(node=>node.title),['配置与调用说明','评测汇总与记录说明','使用说明'],'通用和子页说明都通过固定入口提供');
+   assert.doesNotMatch(JSON.stringify(view.content),/配置与调用说明|评测汇总与记录说明/,'详细说明不占问答正文布局');
+  }finally{bridge.destroy();}
   assert.equal(output.hidden,true);assert.ok(!question.classList.contains('workspace-wide'));assert.ok(!output.classList.contains('workspace-wide'));
   assert.ok(output.compareDocumentPosition(quality) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
   f.panel.node('[data-playground-question]').value='测试';await f.ui.run();assert.equal(output.hidden,false);assert.match(output.textContent,/答案。/u);

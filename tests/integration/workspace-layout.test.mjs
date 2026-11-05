@@ -64,11 +64,12 @@ test('连接诊断按账号摘要、三组诊断和高级折叠区排列，发�
     bridge=createWorkspaceBridge(p);
     const body=bridge.getSnapshot().content.children.find(node=>node.classes?.split(/\s/u).includes('workspace-grid'));
     const runs=cardRuns(body.children);
-    assert.equal(runs.length,7);
+    assert.equal(runs.length,6);
     assert.equal(runs[0][0].span,'full');
     const title=node=>node.children[0]?.children[0]?.text;
     assert.deepEqual(runs[1].slice(0,3).map(title),['直播连接','采集与存储','互动过滤']);
-    assert.deepEqual(runs.slice(2).map(run=>run[0].title),['高级页面适配与去重','弹幕备用采集与场次识别','运行记录','配置与运行记录','使用说明']);
+    assert.deepEqual(runs.slice(2).map(run=>run[0].title),['高级页面适配与去重','弹幕备用采集与场次识别','运行记录','配置与运行记录']);
+    assert.ok(bridge.getSnapshot().utilities.help.some(node=>node.title==='使用说明'));
     assert.ok(runs.slice(2).every(run=>run.length===1),'收起的高级区不生成空白卡片');
     const input=p.node('[data-field="selfId"]');
     input.value='123456789';input.dispatchEvent(new f.dom.window.Event('input',{bubbles:true}));
@@ -87,6 +88,8 @@ test('所有功能页在全部详情打开后仍遵循同一尺寸角色且保�
    p.tab(key);
    for(const detail of page.querySelectorAll('details'))detail.open=true;
    bridge.refresh();
+   assert.ok(bridge.getSnapshot().utilities.help.length,key+' 在固定说明入口提供内容');
+   assert.doesNotMatch(JSON.stringify(bridge.getSnapshot().content),/"utility":"(?:help|manage)"/,key+' 正文不混入管理或说明');
    visit(bridge.getSnapshot().content,node=>{
     if(node.layout!=='cards')return;
     for(const child of node.children){
@@ -184,5 +187,6 @@ test('切换主播子页面后分区目录只显示当前视图',async()=>{
     p.tab('anchor');p.node('[data-anchor-view="income"]').click();await Promise.resolve();
     const text=[...p.node('[data-page-sections]').options].map(o=>o.textContent).join(' ');
     assert.match(text,/直播场次明细/);assert.ok(!text.includes('观众与互动'));
+    const bridge=createWorkspaceBridge(p);try{const view=bridge.getSnapshot();assert.ok(view.utilities.help.some(node=>node.title==='统计口径与数据范围'));assert.doesNotMatch(JSON.stringify(view.content),/统计口径与数据范围/);}finally{bridge.destroy();}
   }finally{f.close();}
 });

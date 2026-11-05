@@ -59,7 +59,8 @@ function organizeAnchor(page){
 }
 function pageHelp(page){
   const intro=page.querySelector(':scope>.intro');if(!intro)return;
-  const help=element(page,'details','workspace-help','data-workspace-help'),summary=element(page,'summary');summary.textContent='使用说明';help.append(summary,intro);page.append(help);
+  const help=element(page,'details','workspace-help','data-workspace-help'),summary=element(page,'summary');
+  help.dataset.workspaceUtility='help';summary.textContent=page.dataset.toolLabel ? `${page.dataset.toolLabel} · 使用说明` : '使用说明';help.append(summary,intro);page.append(help);
 }
 function organizeShortSections(page){
   if(page.dataset.page==='likes'){
@@ -86,6 +87,7 @@ function organizeAI(page){
   page.querySelector('[data-media-start]').closest('.ai-card').classList.add('workspace-wide');
 }
 export function organizePage(page){
+  for(const module of page.querySelectorAll('[data-tool-panel]'))pageHelp(module);
   if(page.dataset.page==='anchor'){organizeAnchor(page);pageHelp(page);return;}
   flattenSettings(page);
   organizeShortSections(page);

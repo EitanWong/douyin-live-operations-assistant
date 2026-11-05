@@ -1,6 +1,6 @@
 // Transitional boundary: the controller owns drafts and actions; React owns
 // presentation. Only the active page is projected, never a second config store.
-import {describeLayout,describeCollection,isTransparentLayout,layoutChildren,packPageCards} from './layout.js';
+import {describeLayout,describeCollection,isTransparentLayout,layoutChildren,partitionPageUtilities} from './layout.js';
 import {APPEARANCE_PREFERENCES} from '../appearance.js';
 import {shareView} from './snapshot.js';
 
@@ -52,7 +52,7 @@ export function createWorkspaceBridge(panel) {
     if(chartName){const owner=node.hasAttribute('data-pk-chart') ? panel.charts : panel.anchorDashboard?.charts,chart=owner?.instances.get(chartName);if(chart)return {kind:'chart',id:id(node),option:chart.getOption(),label:node.getAttribute('aria-label')};}
     if(node.tagName==='BUTTON')return {kind:'button',id:id(node),text:cleanText(node) || node.getAttribute('aria-label'),label:node.getAttribute('aria-label'),disabled:node.disabled,busy:node.getAttribute('aria-busy')==='true',selected:node.getAttribute('aria-pressed')==='true' || node.getAttribute('aria-selected')==='true',primary:node.matches('.primary'),danger:node.matches('.danger'),icon:node.querySelector('svg')?.outerHTML};
     if(node.tagName==='TABLE')return table(node);
-    if(node.tagName==='DETAILS')return {kind:'details',id:id(node),classes:node.className,...describeLayout(node),open:node.open,title:cleanText(node.querySelector(':scope>summary')),children:children(node)};
+    if(node.tagName==='DETAILS')return {kind:'details',id:id(node),classes:node.className,...describeLayout(node),utility:['help','manage'].includes(node.dataset.workspaceUtility) ? node.dataset.workspaceUtility : node.matches('.workspace-help') ? 'help' : undefined,open:node.open,title:node.getAttribute('aria-label') || cleanText(node.querySelector(':scope>summary')),children:children(node)};
     if(node.localName==='svg')return {kind:'svg',id:id(node),html:node.outerHTML,label:node.getAttribute('aria-label')};
     if(node.tagName==='A')return /^https?:/u.test(node.href) ? {kind:'link',id:id(node),text:cleanText(node),href:node.href} : {kind:'text',text:cleanText(node)};
     if(node.tagName==='IMG')return {kind:'image',id:id(node),src:node.src,alt:node.alt};
@@ -71,9 +71,10 @@ export function createWorkspaceBridge(panel) {
     const toolbar=[...(root.querySelector('[data-workspace-toolbar] .foot')?.children || [])].filter(shown).flatMap(n=>n.matches('button,small') ? [project(n)] : children(n)).filter(Boolean);
     const subviews=[...root.querySelectorAll('[data-workspace-views] button')].filter(n=>available(n)).map(project);
     const dialog=page?.querySelector('[data-knowledge-dialog]:not([hidden])');
+    const pageView=partitionPageUtilities(page ? {kind:'group',id:id(page),layout:'stack',tag:'div',classes:'product-page',children:children(page)} : null);
     return {key,title:nav.find(n=>n.key===key)?.label || cleanText(page?.querySelector('h2')),nav,toolbar,subviews,sidebar:{side:panel.navigation?.side || 'left',collapsed:Boolean(panel.navigation?.collapsed),toggle:project(root.querySelector('[data-sidebar-toggle]'))},
       dialog:dialog ? {id:id(dialog),title:cleanText(dialog.querySelector('[data-memory-dialog-title]')),cancelId:id(dialog.querySelector('[data-memory-cancel]')),children:children(dialog.querySelector('[data-knowledge-dialog-body]'))} : null,
-      content:page ? {kind:'group',id:id(page),layout:'stack',tag:'div',classes:'product-page',children:packPageCards(children(page))} : null,
+      ...pageView,
       messages:[...(root.querySelector('.workspace-message-list')?.children || [])].filter(shown).map(node=>({...project(node),error:node.classList.contains('error')})).filter(Boolean),status:[...(root.querySelector('.shell-status')?.children || [])].map(cleanText).join(' · '),theme:panel.host.dataset.theme || APPEARANCE_PREFERENCES.theme.fallback,palette:panel.host.dataset.palette || APPEARANCE_PREFERENCES.palette.fallback,material:panel.host.dataset.material || APPEARANCE_PREFERENCES.material.fallback,focus};
   }
   function refresh() {
