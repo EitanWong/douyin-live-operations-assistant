@@ -4,7 +4,7 @@
 
 ## 一次安装
 
-当前自动安装支持 macOS 和 Linux x64/arm64 的 Chrome、Chromium 和 Edge，仅需 Node.js 20+。Python、FFmpeg、中文模型和推理依赖由安装器自动准备。仅使用浏览器本地 AI 时可直接在“连接与模型”点击“一键启用本地 AI”，跳过本组件安装。Chrome 扩展使用构建后的 `dist/chrome-extension` 目录；修改代码后先运行 `npm ci` 和 `npm run build`，再在 `chrome://extensions` 重载扩展。
+当前自动安装支持 macOS 和 Linux x64/arm64 的 Chrome、Chromium 和 Edge，仅需 Node.js 20+。Python、FFmpeg、中文模型和推理依赖由安装器自动准备。仅使用浏览器本地 AI 时可直接在“本地与性能”点击“一键启用本地 AI”，跳过本组件安装。Chrome 扩展使用构建后的 `dist/chrome-extension` 目录；修改代码后先运行 `npm ci` 和 `npm run build`，再在 `chrome://extensions` 重载扩展。
 
 在项目根目录运行以下命令。安装器会自动发现唯一已启用的助手扩展；如有多个安装，可复制“AI 设置 → 直播感知 → 本地组件安装”中已填入当前扩展 ID 的命令：
 

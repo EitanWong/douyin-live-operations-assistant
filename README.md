@@ -76,6 +76,6 @@ npm run dev
 
 AI 新增规则来源、背景记忆和近实时音视频识别，配置与限制见 [AI 使用说明](docs/guides/ai-context.zh-CN.md)。
 
-本地 AI：在“AI → 连接与模型”点击“一键启用本地 AI”，自动保存设置并在后台选型、下载和测速，无需模型密钥。界面显示下载字节与准备阶段，刷新页面不取消，重载扩展后自动恢复；准备就绪并启动场控后自动读取直播音轨。可选原生加速组件首次运行 `npm run native:install` 接入安装代理，随后可关闭终端，Python、FFmpeg 与中文模型继续后台安装；进度可在界面或 `npm run native:status` 查看。详见[本地 AI 快速开始](docs/ai-foundation.zh-CN.md#快速开始)。
+本地 AI：在“AI → 本地与性能”点击“一键启用本地 AI”，自动保存设置并在后台选型、下载和测速，无需模型密钥。界面显示下载字节与准备阶段，刷新页面不取消，重载扩展后自动恢复；准备就绪并启动场控后自动读取直播音轨。可选原生加速组件首次运行 `npm run native:install` 接入安装代理，随后可关闭终端，Python、FFmpeg 与中文模型继续后台安装；进度可在界面或 `npm run native:status` 查看。详见[本地 AI 快速开始](docs/ai-foundation.zh-CN.md#快速开始)。
 
 原生直播感知：支持当前登录直播页 / StreamGet → FFmpeg → 百炼 Omni WebSocket，直接分析当前房间的原始音视频，接入现有直播上下文与回复模型。需一次安装本地组件（macOS/Linux Chrome）；详见[安装与使用](docs/guides/native-perception.zh-CN.md)。

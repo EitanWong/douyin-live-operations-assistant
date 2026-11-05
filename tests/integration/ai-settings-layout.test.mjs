@@ -42,6 +42,11 @@ test('本地模型与观众研究从连接页和知识页独立归组，字段�
  const s=setup();try{
   const {panel,section}=s;
   for(const path of ['ai.edge.enabled','ai.edge.textModel','ai.latency.cloudMs'])assert.equal(panel.node(`[data-field="${path}"]`).closest('[data-ai-section]'),section('local'));
+  assert.equal(panel.root.querySelectorAll('[data-edge-auto]').length,1);
+  assert.equal(panel.node('[data-edge-auto]').closest('[data-ai-section]'),section('local'));
+  assert.equal(panel.node('[data-setup-kind="text"]').closest('[data-ai-section]'),section('local'));
+  assert.equal(visible(panel.node('[data-edge-auto]')),false);
+  panel.node('[data-ai-section-tab="local"]').click();assert.equal(visible(panel.node('[data-edge-auto]')),true);
   for(const path of ['ai.assistant.memoryEnabled','ai.accountCollection.enabled'])assert.equal(panel.node(`[data-field="${path}"]`).closest('[data-ai-section]'),section('audience'));
   assert.ok(panel.node('[data-agent-question]').closest('[data-ai-section="audience"]'));
   const field=panel.node('[data-field="ai.latency.cloudMs"]');field.value='';assert.throws(()=>panel.read(),/不能为空/);assert.equal(section('local').hidden,false);assert.equal(panel.root.activeElement,field);
