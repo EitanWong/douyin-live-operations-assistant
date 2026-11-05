@@ -28,7 +28,7 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   let saves=0,changes=0;root.querySelector('button[data-action]').onclick=()=>saves++;root.querySelector('input').addEventListener('input',()=>changes++);
   let sections=0;for(const button of root.querySelectorAll('[data-workspace-views] button'))button.onclick=()=>{sections++;for(const sibling of button.parentElement.children)sibling.setAttribute('aria-selected',String(sibling===button));};
   const toggle=document.createElement('button');toggle.dataset.sidebarToggle='';toggle.setAttribute('aria-label','折叠侧边栏');toggle.innerHTML='<svg viewBox="0 0 24 24"><path d="M9 3v18"/></svg>';root.querySelector('.workspace').prepend(toggle);
-  const utilities=document.createElement('div');utilities.innerHTML='<details data-workspace-utility="help"><summary>模型使用说明</summary><p>使用完整模型名称后保存。</p></details><details data-workspace-utility="manage"><summary>测试工具</summary><p role="status">运行中</p><button>停用测试工具</button></details>';root.querySelector('[data-page=ai]').append(utilities);
+  const utilities=document.createElement('div');utilities.innerHTML='<details data-workspace-utility="help"><summary>模型使用说明</summary><p>使用完整模型名称后保存。</p><ol><li>选择服务</li><li>填写模型并保存</li><li>测试连接</li></ol><ul><li>核对服务权限</li></ul></details><details data-workspace-utility="manage"><summary>测试工具</summary><p role="status">运行中</p><button>停用测试工具</button></details>';root.querySelector('[data-page=ai]').append(utilities);
   let toolDisables=0;utilities.querySelector('button').onclick=()=>{toolDisables++;utilities.querySelector('[role=status]').textContent='工具已停用';};
   const panel={root,host:root.host,activeTab:'ai',navigation:{side:'left',collapsed:false},tab(){}};
   toggle.onclick=()=>{panel.navigation.collapsed=!panel.navigation.collapsed;root.querySelector('.workspace').dataset.navCollapsed=String(panel.navigation.collapsed);toggle.setAttribute('aria-label',panel.navigation.collapsed ? '展开侧边栏' : '折叠侧边栏');};bridge=createWorkspaceBridge(panel);
@@ -40,6 +40,7 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   assert.ok(helpButton.querySelector('svg'));assert.ok(manageButton.querySelector('svg'));assert.equal(ui.querySelector('.product-content [data-workspace-utility]'),null);assert.doesNotMatch(ui.querySelector('.product-content').textContent,/模型使用说明|停用测试工具/);
   helpButton.focus();helpButton.click();await new Promise(resolve=>setTimeout(resolve,60));
   let utilityDialog=ui.querySelector('[role=dialog]');assert.match(utilityDialog.textContent,/使用完整模型名称后保存/);assert.ok(ui.querySelector('.product-shell').hasAttribute('inert'));
+  assert.equal(utilityDialog.querySelectorAll('ol>li').length,3,'真实弹窗保留编号列表，布局容器不得覆盖语义标签');assert.equal(utilityDialog.querySelectorAll('ul>li').length,1);
   utilityDialog.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,composed:true,cancelable:true}));await new Promise(resolve=>setTimeout(resolve,250));assert.equal(ui.querySelector('[role=dialog]'),null);assert.equal(ui.activeElement,helpButton);
   manageButton.focus();manageButton.click();await new Promise(resolve=>setTimeout(resolve,60));utilityDialog=ui.querySelector('[role=dialog]');
   [...utilityDialog.querySelectorAll('button')].find(n=>n.textContent==='停用测试工具').click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(toolDisables,1);assert.match(utilityDialog.textContent,/工具已停用/);
@@ -48,8 +49,11 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   assert.equal(ui.querySelector('[role=dialog]'),null,'子页切换后关闭旧说明');assert.equal(ui.querySelector('.product-shell').hasAttribute('inert'),false);
   root.querySelectorAll('[data-workspace-views] button')[0].click();bridge.refresh();
   manageButton.click();await new Promise(resolve=>setTimeout(resolve,30));utilities.querySelector('[data-workspace-utility=manage]').hidden=true;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,250));
-  assert.equal(ui.querySelector('[role=dialog]'),null,'模块移除后关闭旧管理视图');assert.equal(manageButton.disabled,true,'缺少管理内容仍保留固定禁用入口');
+  assert.equal(ui.querySelector('[role=dialog]'),null,'模块移除后关闭旧管理视图');assert.ok(!ui.querySelector('button[aria-label="工具管理"]'),'缺少管理内容就不显示图标');
   utilities.querySelector('[data-workspace-utility=manage]').hidden=false;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
+  assert.ok(ui.querySelector('button[aria-label="工具管理"]'),'内容重新可用后恢复入口');
+  utilities.hidden=true;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));assert.ok(!ui.querySelector('.product-utility-actions'),'没有辅助功能时不保留空工具组或分隔线');
+  utilities.hidden=false;bridge.refresh();await new Promise(resolve=>setTimeout(resolve,25));
   sections=0;
   const sidebarToggle=ui.querySelector('.product-nav-toggle button');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'true');assert.equal(ui.getElementById(sidebarToggle.getAttribute('aria-controls'))?.getAttribute('aria-label'),'功能导航');
   sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(ui.querySelector('.product-shell').dataset.sidebarCollapsed,'true');assert.equal(sidebarToggle.getAttribute('aria-expanded'),'false');assert.equal(sidebarToggle.getAttribute('title'),'展开侧边栏');assert.ok(sidebarToggle.querySelector('svg'));sidebarToggle.click();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(panel.navigation.collapsed,false);

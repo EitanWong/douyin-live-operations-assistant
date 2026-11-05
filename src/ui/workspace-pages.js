@@ -1,5 +1,6 @@
 // Presentation boundaries reuse live nodes, so drafts and business listeners keep
 // one owner even when controls move between the shared shell and a page.
+import {appendWorkspaceGuide} from './workspace-help.js';
 export function element(parent,tag,className,attribute){
   const node=parent.ownerDocument.createElement(tag);if(className)node.className=className;if(attribute)node.setAttribute(attribute,'');return node;
 }
@@ -57,10 +58,18 @@ function organizeAnchor(page){
   const basis=page.querySelector('[data-anchor-basis]');if(basis){const detail=element(page,'details','workspace-help'),summary=element(page,'summary');summary.textContent='数据口径';detail.append(summary,basis);overview.append(detail);}
   const income=page.querySelector('.income-workspace');if(income){income.classList.add('workspace-grid');income.dataset.workspaceGrid='';for(const child of income.children){child.classList.add('workspace-card');child.dataset.workspaceCard='';}}
 }
-function pageHelp(page){
-  const intro=page.querySelector(':scope>.intro');if(!intro)return;
+function pageHelp(page,key=page.dataset.page || page.dataset.toolPanel,title=page.dataset.toolLabel ? `${page.dataset.toolLabel} · 使用说明` : '使用说明'){
+  const intro=page.querySelector(':scope>.intro');
   const help=element(page,'details','workspace-help','data-workspace-help'),summary=element(page,'summary');
-  help.dataset.workspaceUtility='help';summary.textContent=page.dataset.toolLabel ? `${page.dataset.toolLabel} · 使用说明` : '使用说明';help.append(summary,intro);page.append(help);
+  if(!appendWorkspaceGuide(help,key) && !intro)return;
+  help.dataset.workspaceUtility='help';summary.textContent=title;help.prepend(summary);if(intro)summary.after(intro);page.append(help);
+}
+function subviewHelp(page){
+  for(const scope of page.querySelectorAll('[data-ai-section],[data-anchor-content]')){
+    const ai=scope.dataset.aiSection,key=ai || scope.dataset.anchorContent;
+    const label=page.querySelector(ai ? `[data-ai-section-tab="${key}"]` : `[data-anchor-view="${key}"]`)?.textContent || key;
+    pageHelp(scope,`${ai ? 'ai' : 'anchor'}.${key}`,`${label} · 使用说明`);
+  }
 }
 function organizeShortSections(page){
   if(page.dataset.page==='likes'){
@@ -88,7 +97,7 @@ function organizeAI(page){
 }
 export function organizePage(page){
   for(const module of page.querySelectorAll('[data-tool-panel]'))pageHelp(module);
-  if(page.dataset.page==='anchor'){organizeAnchor(page);pageHelp(page);return;}
+  if(page.dataset.page==='anchor'){organizeAnchor(page);subviewHelp(page);pageHelp(page);return;}
   flattenSettings(page);
   organizeShortSections(page);
   if(page.dataset.page==='ai')organizeAI(page);
@@ -101,5 +110,5 @@ export function organizePage(page){
     for(const wrapper of scope.children)if(!wrapper.matches('.ai-card') && wrapper.querySelector(':scope>.ai-card'))wrapper.dataset.workspaceContents='';
     for(const card of scope.querySelectorAll(':scope>.ai-card,:scope>[data-workspace-contents]>.ai-card')){card.dataset.workspaceCard='';card.classList.add('workspace-card');}
   }
-  pageHelp(page);
+  subviewHelp(page);pageHelp(page);
 }

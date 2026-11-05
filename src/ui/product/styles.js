@@ -13,6 +13,7 @@ export const PRODUCT_CSS=`
 .product-utility-actions{display:flex;gap:4px;padding-inline-start:8px;border-inline-start:1px solid var(--product-line);flex:none}
 .product-toolbar-actions .product-utility-button{width:36px;height:36px;min-height:36px;padding:6px;flex:none}.product-utility-button svg{display:block;width:20px;height:20px}
 .product-utility-section{display:flex;flex-direction:column;gap:var(--product-gap);min-width:0}.product-utility-section+.product-utility-section{border-top:1px solid var(--product-line);padding-top:var(--product-card-padding)}
+.workspace-help-guide{display:flex;flex-direction:column;gap:8px}.workspace-help-guide>h4:not(:first-child){margin-block-start:8px}.product-utility-view :is(ol,ul){margin:0;padding-inline-start:22px}.product-utility-view li+li{margin-top:6px}
 .product-shell{display:grid;grid-template-columns:var(--product-sidebar-width,184px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);width:100%;min-height:0;--product-feedback-ease:cubic-bezier(.2,.8,.2,1);background:var(--mantine-color-body);color:var(--mantine-color-text);--product-line:var(--mantine-color-default-border)}
 .product-shell .mantine-Button-root{display:inline-flex;align-items:center;justify-content:center}
 .product-shell .mantine-Button-inner{width:100%;min-width:0}
@@ -94,7 +95,7 @@ export const PRODUCT_CSS=`
 .product-main .product-toolbar{padding:calc(8px + 3px * var(--product-density)) calc(12px + 4px * var(--product-density))}
 .product-main .product-subviews{padding:calc(6px + 2px * var(--product-density)) calc(12px + 4px * var(--product-density))}
 .product-main .product-status{padding:8px 12px}
-.product-page{--product-card-limit:clamp(var(--product-card-min-height),100cqh,var(--product-card-height))}
+.product-page{--product-card-limit:clamp(var(--product-card-min-height),100cqh,calc(var(--product-card-height) + var(--product-fill,0) * 100cqh))}
 .product-card-run{width:100%;min-width:0}.product-card-slot{display:flex;flex:1 1 min(100%,var(--product-card-min-width));min-width:0;max-width:100%}.product-card-slot>*{flex:1;min-width:0;max-width:100%;margin:0}.product-card-slot>.mantine-Paper-root{display:flex;flex-direction:column;align-self:stretch;min-height:0}
 .product-page .product-card-run:not([data-card-run=full])>.product-card-slot{block-size:var(--product-card-limit)}
 .feature-settings{gap:var(--product-section-gap)}.feature-section{padding-block:var(--product-card-padding);border-bottom:1px solid var(--product-line)}.feature-section:first-child{padding-top:0}.feature-section:last-child{border-bottom:0;padding-bottom:0}.feature-section>.group-note{margin-bottom:var(--product-metric-padding)}

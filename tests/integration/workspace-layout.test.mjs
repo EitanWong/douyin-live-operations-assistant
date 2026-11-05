@@ -103,6 +103,29 @@ test('所有功能页在全部详情打开后仍遵循同一尺寸角色且保�
  }finally{bridge.destroy();f.close();}
 });
 
+test('每个页面、AI分类和数据子页都有清楚的用途、操作步骤和提醒，说明只进弹窗',()=>{
+ const f=fixture(),p=f.panel,bridge=createWorkspaceBridge(p);
+ try{
+  for(const page of p.root.querySelectorAll('[data-page][role=tabpanel]')){
+   const key=page.dataset.page;
+   p.tab(key);bridge.refresh();
+   const guide=page.querySelector('[data-workspace-guide]');assert.ok(guide,key+' 缺少完整说明');
+   assert.deepEqual([...guide.querySelectorAll('h4')].map(n=>n.textContent),['能帮你做什么','怎么使用','使用提醒']);
+   assert.ok(guide.querySelectorAll('ol li').length>=3,key+' 缺少具体操作步骤');
+   assert.doesNotMatch(JSON.stringify(bridge.getSnapshot().content),/能帮你做什么|怎么使用|使用提醒/,key+' 说明不占正文');
+   const lists=[];const visit=node=>{if(node.tag==='ol')lists.push(node);for(const child of node.children || [])visit(child);};
+   bridge.getSnapshot().utilities.help.forEach(visit);
+   assert.ok(lists.some(list=>list.children.length>=3 && list.children.every(item=>item.tag==='li')),key+' 弹窗保留编号步骤和列表语义');
+  }
+  for(const [page,scope] of [['ai','[data-ai-section]'],['anchor','[data-anchor-content]']]){
+   for(const section of p.node(`[data-page=${page}]`).querySelectorAll(scope))assert.ok(section.querySelector('[data-workspace-guide]'),`${page} 子页缺少专用说明`);
+  }
+  assert.match(p.node('[data-page=profiles] [data-workspace-guide]').textContent,/打开并配置/);
+  assert.match(p.node('[data-page=runtime] [data-workspace-guide]').textContent,/仅预览/);
+  assert.match(p.node('[data-ai-section=models] [data-workspace-guide]').textContent,/API Key/);
+ }finally{bridge.destroy();f.close();}
+});
+
 test('直播连接默认收起长检查结果与发送测试，检查后结果可见且不展开测试记录',async()=>{
  const f=fixture(),p=f.panel;let bridge;
  try{

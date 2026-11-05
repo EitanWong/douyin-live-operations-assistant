@@ -5,7 +5,7 @@ import {APPEARANCE_PREFERENCES} from '../appearance.js';
 import {shareView} from './snapshot.js';
 
 const ignored = 'STYLE,SCRIPT,OPTION,SUMMARY,TEMPLATE'.split(',');
-const containers = 'DIV,SECTION,ARTICLE,MAIN,HEADER,FOOTER,FORM,FIELDSET,LABEL,NAV,UL,OL,LI,DL,DT,DD'.split(',');
+const containers = 'DIV,SECTION,ARTICLE,MAIN,HEADER,FOOTER,FORM,FIELDSET,LABEL,NAV,DL,DT,DD'.split(',');
 const cleanText = node => node?.textContent.replace(/\s+/gu, ' ').trim() || '';
 const shown = node => !node.hidden && node.getAttribute('aria-hidden') !== 'true';
 const available = node => { for (let p=node;p;p=p.parentElement) if(p.hidden)return false;return true; };
@@ -60,7 +60,7 @@ export function createWorkspaceBridge(panel) {
     const content=children(node);if(!content.length)return null;
     const classes=[node.className?.baseVal ?? node.className,node.dataset.aiSection ? `product-ai-${node.dataset.aiSection}` : '',node.hasAttribute('data-workspace-contents') ? 'workspace-contents' : ''].filter(Boolean).join(' ');
     const layout=describeLayout(node);
-    return {kind:'group',id:id(node),...layout,inspectable:node.matches('.ai-final-answer,.ai-result-section') || undefined,collection:describeCollection(node),tag:node.tagName==='LEGEND' ? 'h3' : containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
+    return {kind:'group',id:id(node),...layout,inspectable:node.matches('.ai-final-answer,.ai-result-section') || undefined,collection:describeCollection(node),tag:node.tagName==='LEGEND' ? 'h3' : containers.includes(node.tagName) ? 'div' : ['H3','H4','P','SPAN','B','STRONG','SMALL','EM','CODE','PRE','DT','DD','OL','UL','LI'].includes(node.tagName) ? node.tagName.toLowerCase() : 'div',classes,children:layoutChildren(layout.layout,content),label:node.getAttribute('aria-label'),role:node.getAttribute('role') || undefined};
   }
   function collect() {
     // Only the projected view owns strong references; IDs survive in the WeakMap

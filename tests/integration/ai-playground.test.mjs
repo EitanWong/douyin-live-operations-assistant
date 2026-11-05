@@ -29,7 +29,7 @@ test('问答测试空状态只保留输入，生成后在相邻结果卡展示�
   assert.match(question.querySelector('[data-playground-guidance]').closest('details').textContent,/不发公屏/u,'测试用途和费用说明放在同一入口');
   assert.ok(question.querySelector('[data-playground-summary]')?.closest('details'),'评测和保留记录说明归入测试操作侧');
   const bridge=createWorkspaceBridge(f.panel);try{
-   const view=bridge.getSnapshot();assert.deepEqual(view.utilities.help.map(node=>node.title),['配置与调用说明','评测汇总与记录说明','使用说明'],'通用和子页说明都通过固定入口提供');
+   const view=bridge.getSnapshot();assert.deepEqual(view.utilities.help.map(node=>node.title),['配置与调用说明','评测汇总与记录说明','问答测试 · 使用说明','使用说明'],'通用和子页说明都通过固定入口提供');
    assert.doesNotMatch(JSON.stringify(view.content),/配置与调用说明|评测汇总与记录说明/,'详细说明不占问答正文布局');
   }finally{bridge.destroy();}
   assert.equal(output.hidden,true);assert.ok(!question.classList.contains('workspace-wide'));assert.ok(!output.classList.contains('workspace-wide'));
