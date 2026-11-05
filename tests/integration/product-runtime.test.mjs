@@ -16,12 +16,28 @@ async function waitFor(predicate,message){
  }
 }
 
+function animationFrameGate(view){
+ const request=view.requestAnimationFrame.bind(view),cancel=view.cancelAnimationFrame.bind(view),frames=new Map();
+ let paused=false,serial=0;
+ const schedule=id=>{const frame=frames.get(id);frame.handle=request(time=>{
+  frame.handle=null;if(paused)return;frames.delete(id);frame.callback(time);
+ });};
+ return {
+  request(callback){const id=++serial;frames.set(id,{callback,handle:null});schedule(id);return id;},
+  cancel(id){const frame=frames.get(id);if(frame?.handle!=null)cancel(frame.handle);frames.delete(id);},
+  pause(){paused=true;},
+  resume(){paused=false;for(const [id,frame] of frames)if(frame.handle==null)schedule(id);},
+ };
+}
+
 test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现 TanStack 表格，销毁后清理',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'product-ui-')), dom=new JSDOM('<div id="host"></div>',{url:'https://live.douyin.com/123',pretendToBeVisual:true});
  const previous=Object.fromEntries(['window','document','HTMLElement','Element','getComputedStyle','MutationObserver','requestAnimationFrame','cancelAnimationFrame'].map(key=>[key,globalThis[key]]));
  const navigatorDescriptor=Object.getOwnPropertyDescriptor(globalThis,'navigator');
  let runtime,bridge;
  try{
+  const animationFrames=animationFrameGate(dom.window);
+  dom.window.requestAnimationFrame=animationFrames.request;dom.window.cancelAnimationFrame=animationFrames.cancel;
   Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,Element:dom.window.Element,getComputedStyle:dom.window.getComputedStyle,MutationObserver:dom.window.MutationObserver,requestAnimationFrame:dom.window.requestAnimationFrame.bind(dom.window),cancelAnimationFrame:dom.window.cancelAnimationFrame.bind(dom.window)});
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:dom.window.navigator});
   dom.window.HTMLElement.prototype.scrollTo=()=>Promise.resolve(); // Modern CSSOM scrolling can return a completion promise; effects must not return it.
@@ -119,20 +135,25 @@ test('实际 React / Mantine 界面编辑原草稿、执行一次操作、呈现
   reducedQuery.matches=false;reducedQuery.dispatchEvent(new dom.window.Event('change'));
   const draft=reveal.querySelector('input');setter.call(draft,'retained-draft');draft.dispatchEvent(new dom.window.Event('input',{bubbles:true,composed:true}));
   await new Promise(resolve=>setTimeout(resolve,25));
-  // Reverse before the spring settles: keep the same editable node and draft.
-  disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));
+  // Hold visual time while React commits each reversal, even on a busy runner.
+  animationFrames.pause();
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','收起状态已提交');
   assert.equal(reveal.getAttribute('aria-hidden'),'true');assert.ok(reveal.hasAttribute('inert'));
   assert.equal(scrolls.length,completedScrolls+1,'收起不触发到底部滚动');
-  disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));
-  disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));
-  disclosure.click();await new Promise(resolve=>setTimeout(resolve,25));
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='false','第一次反转展开已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','第二次反转收起已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='false','最终展开已提交');
   assert.equal(disclosure.getAttribute('aria-expanded'),'true');assert.equal(reveal.hasAttribute('inert'),false);
   assert.equal(reveal.querySelector('input'),draft);assert.equal(draft.value,'retained-draft');
   assert.equal(root.querySelector('details input').value,'retained-draft');
-  await new Promise(resolve=>setTimeout(resolve,750));
+  animationFrames.resume();await waitFor(()=>scrolls.length>completedScrolls+1,'正常展开动画完成并滚动');
   assert.equal(scrolls.at(-1)?.behavior,'smooth','正常展开动画完成后平滑滚动');
   const settledScrolls=scrolls.length;
-  disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));disclosure.click();await new Promise(resolve=>setTimeout(resolve,20));disclosure.click();await new Promise(resolve=>setTimeout(resolve,750));
+  animationFrames.pause();
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','再次收起已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='false','反转展开已提交');
+  disclosure.click();await waitFor(()=>reveal.getAttribute('aria-hidden')==='true','最终收起已提交');
+  animationFrames.resume();await waitFor(()=>Number(reveal.style.opacity)===0,'最终收起动画已结束');
   assert.equal(scrolls.length,settledScrolls,'快速反转且最终关闭时没有迟到的展开滚动');
   // Large projected datasets must stay bounded and keep original action ownership.
   const dataset=document.createElement('section');dataset.innerHTML='<h3>互动记录</h3><table aria-label="互动记录"><thead><tr><th>观众</th><th>状态</th><th>钻石</th><th>操作</th></tr></thead><tbody></tbody></table>';

@@ -18,11 +18,14 @@ if(process.argv.includes('--uninstall')){
  const id=args['--extension-id'];if(!/^[a-p]{32}$/.test(id || ''))throw Error('请传入 --extension-id=chrome://extensions 中的扩展ID');
  const python=execFileSync(args['--python'] || 'python3',['-c','import sys,sqlite3; assert sys.version_info >= (3,11); print(sys.executable)'],{encoding:'utf8'}).trim();
  await mkdir(folder,{recursive:true,mode:0o700});
- for(const name of ['data_host.py','data_store.py','data_models.py','protocol.py'])await copyFile(join(root,'native',name),join(folder,name));
+ for(const name of ['data_host.py','data_store.py','data_models.py','data_location.py','protocol.py'])await copyFile(join(root,'native',name),join(folder,name));
  const quote=value=>`'${value.replaceAll("'","'\\''")}'`;
  const launcher=join(folder,'launch');
  await writeFile(launcher,`#!/bin/sh\nexec ${quote(python)} ${quote(join(folder,'data_host.py'))}\n`,{mode:0o700});
  await mkdir(manifests,{recursive:true});
  await writeFile(manifest,JSON.stringify({name:'com.douyin_live_assistant.data',description:'Local live data warehouse',path:launcher,type:'stdio',allowed_origins:[`chrome-extension://${id}/`]},null,2),{mode:0o600});
- console.log(`本地数据组件已注册。数据库：${join(homedir(),'.local/share/douyin-live-assistant/data/live.sqlite3')}\n在扩展图标菜单启用本地归档；不需要云服务。`);
+ const host=join(folder,'data_host.py');
+ if(args['--directory'])execFileSync(python,[host,'location','--directory',args['--directory']],{stdio:'inherit'});
+ const state=JSON.parse(execFileSync(python,[host,'status'],{encoding:'utf8'}));
+ console.log(`本地数据组件已注册。数据库：${state.database}\n在扩展图标菜单启用本地归档；不需要云服务。`);
 }

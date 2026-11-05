@@ -23,6 +23,9 @@
       <button id="data-enable">启用本地整场归档</button>
       <button id="data-disable">暂停新增归档</button>
       <button id="data-retry">检查连接并继续落盘</button>
+      <label>数据保存文件夹<input id="data-directory" type="text" autocomplete="off" spellcheck="false" placeholder="/完整路径/直播数据"></label>
+      <button id="data-relocate">保存位置并迁移已有数据</button>
+      <p class="hint">填写本机或已挂载磁盘的完整文件夹路径。成功后自动保存为 live.sqlite3，旧库保留为恢复副本；不会覆盖目标文件夹中的已有数据库。切换失败时保留待写数据。</p>
       <label>对手直播间号或链接<input id="data-room" type="text" autocomplete="off" placeholder="https://live.douyin.com/…"></label>
       <button id="data-opponent-open">打开对手只读采集页</button>
       <button id="data-opponent-stop">停止本房发起的对手采集</button>

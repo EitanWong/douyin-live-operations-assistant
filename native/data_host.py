@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-from data_store import DataStore
+from data_location import DataLocation, LocationError
 from protocol import read_message, write_message
 
 
@@ -23,7 +23,7 @@ def handle(store, message):
     raise ValueError('本地数据操作无效')
 
 
-def native_loop(store):
+def native_loop(location):
     while True:
         try:
             message = read_message(sys.stdin.buffer)
@@ -32,7 +32,14 @@ def native_loop(store):
         except (ValueError, UnicodeError):
             return
         try:
-            response = {'id': message.get('id'), 'value': handle(store, message)}
+            if message.get('action') == 'relocate':
+                value = location.relocate(message.get('directory'), message.get('expectedDatabase'))
+            else:
+                with location.open() as store:
+                    value = handle(store, message)
+            response = {'id': message.get('id'), 'value': value}
+        except LocationError as error:
+            response = {'id': message.get('id'), 'error': str(error)}
         except (ValueError, TypeError, KeyError):
             response = {'id': message.get('id'), 'error': '本地归档数据无效，未确认批次已保留'}
         except Exception:
@@ -43,7 +50,9 @@ def native_loop(store):
 def main():
     parser = argparse.ArgumentParser(description='本地直播数据仓库')
     parser.add_argument('--database')
-    parser.add_argument('command', nargs='?', choices=['status', 'summary', 'export', 'dataset', 'pk-dataset', 'backup', 'train', 'audience'])
+    parser.add_argument('--settings')
+    parser.add_argument('command', nargs='?', choices=['status', 'summary', 'export', 'dataset', 'pk-dataset', 'backup', 'train', 'audience', 'location'])
+    parser.add_argument('--directory')
     parser.add_argument('--room')
     parser.add_argument('--anchor')
     parser.add_argument('--user', action='append', default=[])
@@ -51,8 +60,16 @@ def main():
     parser.add_argument('--horizon', type=int, default=5)
     parser.add_argument('--output')
     args = parser.parse_args()
-    store = DataStore(args.database)
-    try:
+    location = DataLocation(settings=args.settings, database=args.database)
+    if args.command == 'location':
+        with location.open() as store:
+            current = str(store.path)
+        print(json.dumps(location.relocate(args.directory, current), ensure_ascii=False))
+        return
+    if not args.command:
+        native_loop(location)
+        return
+    with location.open() as store:
         if args.command in ('export', 'dataset', 'pk-dataset'):
             stream = open(args.output, 'x', encoding='utf-8') if args.output else sys.stdout
             try:
@@ -75,10 +92,6 @@ def main():
             print(json.dumps(store.audience(args.room, args.user), ensure_ascii=False))
         elif args.command:
             print(json.dumps(store.summary(args.room) if args.command == 'summary' else store.status(), ensure_ascii=False))
-        else:
-            native_loop(store)
-    finally:
-        store.close()
 
 
 if __name__ == '__main__':
