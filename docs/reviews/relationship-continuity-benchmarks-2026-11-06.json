@@ -1,0 +1,137 @@
+{
+  "date": "2026-11-06",
+  "relationshipQuery": {
+    "scopes": 10,
+    "viewers": 1000,
+    "statements": 10000,
+    "coldMs": 149.361,
+    "warmMs": [
+      56.09725000000003,
+      22.94595800000002,
+      28.407541000000037,
+      78.65666700000003,
+      30.195875
+    ],
+    "updateMs": 117.662958,
+    "relations": 12,
+    "resultChars": 5122,
+    "updateFound": true,
+    "coverage": "synthetic durable sources, includes structuredClone, validation and query; not browser FPS or all-day guarantee"
+  },
+  "publicWorkSample": {
+    "fixture": "synthetic 640x360 blue video with bundled Chinese speech; actual Chrome capturePublicWorkSample",
+    "jpegDataURLCharacters": 2879,
+    "audioBase64Characters": 170728,
+    "audioFormat": "mono PCM16 WAV, 16kHz, about 4 seconds",
+    "captureApproxMs": 6668,
+    "scope": "capture only; not Douyin playback, native ASR or vision model end-to-end"
+  },
+  "ui": {
+    "fixture": "production boot and shared presentation layer with isolated synthetic two-room archives",
+    "query": "青哥和小雨和阿明什么关系",
+    "result": {
+      "entities": 3,
+      "unverifiedRelations": 2,
+      "provenance": [
+        "room 1 / anchor 10",
+        "room 2 / anchor 20"
+      ]
+    },
+    "desktop": {
+      "viewport": [
+        1280,
+        900
+      ],
+      "finalPanel": [
+        918,
+        700
+      ],
+      "audienceCards": {
+        "firstTwoBodyWidth": 337,
+        "lastBodyWidth": 692,
+        "cardHeight": 320,
+        "bodyHeights": [
+          277,
+          273,
+          273
+        ],
+        "horizontalOverflow": false
+      }
+    },
+    "narrow": {
+      "viewport": [
+        430,
+        850
+      ],
+      "panel": [
+        410,
+        700
+      ],
+      "graph": {
+        "bodyWidth": 352,
+        "scrollWidth": 352,
+        "boundedBody": true
+      },
+      "audienceCards": {
+        "bodyWidth": 368,
+        "scrollWidth": 368,
+        "cardHeight": 320
+      },
+      "publicSourceEndScroll": {
+        "scrollTop": 1220,
+        "clientHeight": 273,
+        "scrollHeight": 1493
+      }
+    },
+    "interactions": [
+      "two long manual records expanded together",
+      "three audience-category disclosures expanded together",
+      "repeated collapse and reopen retains query/results",
+      "drag resize and accelerated keyboard resize",
+      "keyboard End reaches body end",
+      "research draft retained across viewport changes",
+      "graph query and results retained across navigation"
+    ],
+    "consoleWarningsSinceCorrectedFixtureReload": [],
+    "temporaryViewportReset": true,
+    "ownTabsClosed": true
+  },
+  "validation": {
+    "native": {
+      "pass": 50,
+      "skipped": 0,
+      "durationSeconds": 12.996,
+      "environment": "existing installed native venv; system Python skipped one WebSocket pipeline test"
+    },
+    "build": true,
+    "syntaxCheck": true,
+    "agentIndex": true,
+    "specialTools": {
+      "crapper": "unavailable",
+      "dryer": "unavailable",
+      "mutator": "unavailable"
+    },
+    "javascript": {
+      "command": "node --test --test-concurrency=4 tests",
+      "pass": 1645,
+      "fail": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 196056.399875,
+      "unboundedAttempt": {
+        "pass": 1642,
+        "fail": 2,
+        "cancelled": 1,
+        "reason": "persistent-display wait, monitoring timeout and UI test process failure; no threshold or source changes before bounded rerun"
+      }
+    }
+  },
+  "limitations": [
+    "no real Douyin profile/video/login/CAPTCHA end-to-end test",
+    "comments and danmaku cover only actual page-loaded samples",
+    "media sampling rejects unmatched playback sources and inaccessible canvas/audio",
+    "no long live-room soak or all-speaker/dialect ASR accuracy guarantee",
+    "relationships use explicit claims and observed interactions; unverified statements are not confirmed facts",
+    "installed extension not reloaded"
+  ]
+}
