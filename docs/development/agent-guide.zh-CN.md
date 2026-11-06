@@ -49,6 +49,8 @@ git diff --check
 | AI 回复与上下文 | `src/services/ai.js`、`src/services/ai-context.js`、`src/ai/context-policy.js` | 共享现场事实、预算、过期回复拒绝；`ai-context-budget`、`ai-stale-facts` 测试 |
 | 本地模型准备与安装进度 | `extension/model-preparation.js`、`extension/edge-offscreen.js`、`scripts/lib/native-deployment.mjs`、`src/ui/setup-progress.js` | 离屏仅用runtime、后台存储、重载恢复与显式释放；`model-preparation`、`edge-background-prepare`、`native-deployment`、`setup-progress` 测试 |
 | 产品内 Agent 任务 | `src/ai/harness.js`、`extension/ai-background.js`、`src/ai/task-store.js` | 后台持久任务、取消、额度与发送分离；`agent-execution`、`agent-lifecycle` 测试 |
+| 多步研究与断点恢复 | `src/ai/research-graph.js`、`src/ai/checkpoint-store.js` | LangGraph原生节点和pending writes、源时效与恢复绑定；`research-loop`、`research-checkpoint`、`continuous-research-flow` 测试 |
+| 持续研究与前台原文复用 | `src/ai/continuous-research.js`、`src/services/automatic-knowledge.js` | alarm去重/预算、稳定任务ID、唯一知识库；`continuous-research`、`research-knowledge` 测试 |
 | 语音、视觉与原生宿主 | `src/browser/live-media.js`、`src/browser/native-perception.js`、`extension/native-perception.js`、`native/` | 实例独立状态与取消；`media-lifecycle`、`native-perception-*`、`native/test_*.py` |
 | 公共数据与检索 | `src/services/public-data.js`、`src/services/weather.js`、`src/services/retrieval.js` | 来源、时效、单位、取消与缓存边界；`public-data`、`weather`、`mature-retrieval` 测试 |
 | 构建与交付 | `scripts/build.mjs`、`extension/manifest.json`、`.github/workflows/ci.yml` | 按 [发布流程](release-process.zh-CN.md) 集成 dev；`standalone-build`、`extension` 测试 |
@@ -79,6 +81,8 @@ npm run benchmark:workspace
 | --- | --- |
 | 开发 Agent 索引 | 本文的离线源码导航数据；不进入扩展产物或用户配置 |
 | 产品内 Agent | 为直播业务执行受限任务的 AI；与开发索引没有运行时依赖 |
+| 研究检查点 | LangGraph已落盘的图状态和pending writes；完成工具可恢复，未落盘在途请求仍可能重试 |
+| 持续研究 | 从近期持久对话中按去重、冷却和额度发现研究任务；无新数据不调用模型，浏览器关闭时暂停 |
 | Inbox | 内存事件交接队列；接收成功不等于已持久化 |
 | Bridge batch / 桥接批次 | MAIN 保留的未确认观测；重复读取不推进，ack 后释放，不代表已经落盘 |
 | Journal | 已落盘、尚待检查点确认的可重放事件 |

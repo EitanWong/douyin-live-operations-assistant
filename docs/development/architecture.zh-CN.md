@@ -132,7 +132,7 @@ Chrome 后台的 DurableStorage 使用 Dexie 事务，保持原生数据库版�
 
 ### 受限 Agent、观众记忆与缓存（2026-11-02）
 
-`ai/harness.js` 用 XState actor 执行独立任务；`extension/ai-background.js` 是 Chrome 后台宿主，`ai/task-store.js` 用独立 Dexie 数据库保存任务及调用额度。前台只提交、查询、取消；研究不持有公屏发送器，使用提交时快照、执行时已保存模型设置和独立密钥。旧在途任务重启后标为中断，不自动重复付费步骤；排队任务可由 alarm 唤醒。油猴和演示版使用依赖页面存活的本地宿主。
+`ai/harness.js` 用 XState actor 管理独立任务生命周期；`ai/research-graph.js` 使用 LangGraph.js 浏览器运行时执行规划→工具→观察循环，`ai/checkpoint-store.js` 将原生检查点与pending writes保存到Dexie。`extension/ai-background.js` 是唯一Chrome后台宿主；`ai/continuous-research.js` 按新近持久对话、去重与预算发现任务，原文知识经MiniSearch回到前台。研究不持有公屏发送器；新任务中断最多恢复2次，已完成且落盘的工具不重复，在途请求可能重试计费。旧版任务保留中断状态。油猴和演示版只支持依赖页面存活的手动任务。完整边界见[浏览器 Agent Harness](browser-agent-harness.zh-CN.md)。
 
 `ai/audience-memory.js` 管理主播范围内、30天/100位观众的有界事实；同名不合并，礼物累计去重，删除水位阻止旧事件恢复。目标记忆以不含UID/secUID的形式注入回复，用户可查看、纠正和删除。`ai/skills.js` 仅解析声明式提示包，不执行代码。公开网页提取使用linkedom worker + Readability，只读取明确链接的已授权文字，不分析主页视频或进行跨平台身份匹配。
 
