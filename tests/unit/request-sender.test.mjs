@@ -230,6 +230,19 @@ test('达到票据容量后，五分钟过期使能力恢复且旧票据不能�
   }finally{f.page.close();}
 });
 
+test('连续成功发送超过128条仍优先可用，旧回执淘汰后不能再次发送',async()=>{
+  const f=fixture();let first;
+  try {
+    for(let i=0;i<160;i++) {
+      const ticket=f.sender.prepare('chat');first ||= ticket.token;
+      assert.equal(ticket.available,true,`第${i+1}条应继续直接请求`);
+      assert.equal((await f.sender.commit(ticket.token,`消息${i}`)).submitted,true);
+    }
+    assert.equal(f.requests.length,160);assert.equal(f.sender.available('chat'),true);
+    await f.sender.commit(first,'不应重发');assert.equal(f.requests.length,160);
+  } finally {f.page.close();}
+});
+
 test('点赞准备响应迟到时取消或超时都不返回可用会话，并注销已创建票据',async()=>{
   for(const mode of ['abort','timeout']) {
     const f=fixture(),controller=new AbortController();let complete,cancel;

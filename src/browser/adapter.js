@@ -244,6 +244,7 @@ export class DouyinAdapter {
     this.pending = 0; this.pendingBytes = 0; this.decodedCacheBytes = 0; this.chain = Promise.resolve(); this.decodeChain = Promise.resolve(); this.roomContext = new RoomContext(page);
     this.activeSockets = new Set(); this.domSeen = new WeakMap(); this.domActive = false; this.lastSocketChat = 0;
     this.seenProtocolEvents = new Map();
+    this.ownedDraft = null;
     this.requestSender = new PageRequestSender(page);
     this.anchorData = new AnchorDataCollector({page,sender:this.requestSender,onEvent:event=>this.onEvent(event),onStatus:(kind,result)=>{
       this.status.exhibition = {...this.status.exhibition,[kind]:result}; this.emitStatus();
@@ -515,6 +516,91 @@ export class DouyinAdapter {
   requestAvailable(channel = 'chat') {
     return typeof this.requestSender?.available === 'function' && this.requestSender.available(channel) === true;
   }
+  findChatModeToggle(input) {
+    let current = input?.parentElement;
+    for (let depth = 0; current && depth < 5; depth++, current = current.parentElement) {
+      if (current.id === 'douyin-live-assistant' || current.closest?.('#douyin-live-assistant')) continue;
+      const toggle = [...current.querySelectorAll('input[type="checkbox"], [role="switch"]')]
+        .find(element => {
+          if (!isVisible(element) || element.closest?.('#douyin-live-assistant')) return false;
+          // 真实页面的 switch 是付费/特权弹幕总开关，并不代表管理员类型。
+          const native = element.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]');
+          const label = [element.getAttribute('aria-label'), element.getAttribute('title'), element.closest('label')?.textContent].filter(Boolean).join(' ');
+          return native || /管理员弹幕/.test(label);
+        });
+      if (toggle) return toggle;
+    }
+    return null;
+  }
+  chatMode(toggle) {
+    if (!toggle) return false;
+    return toggle.checked === true || toggle.getAttribute('aria-checked') === 'true';
+  }
+  isAdminChatMode(input, toggle = this.findChatModeToggle(input)) {
+    if (!this.chatMode(toggle)) return false;
+    const hint = input.getAttribute('data-placeholder') || input.getAttribute('placeholder') || '';
+    if (toggle?.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]')) {
+      if (hint) return hint === '发送管理员弹幕';
+      // 富文本输入后 placeholder 会消失，按当前选中类型继续核对。
+      return Boolean(input.closest('.webcast-chatroom')?.querySelector('.cw6Usapi img[src*="/privilege_screen_chat_admin_"]'));
+    }
+    return Boolean(toggle); // 此路径只接受明确标注“管理员弹幕”的控件。
+  }
+  clickChatControl(element) {
+    if (typeof element.click === 'function') element.click();
+    else element.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
+  }
+  async setChatMode(input, channel) {
+    const desired = channel === 'admin';
+    let toggle = this.findChatModeToggle(input);
+    const previous = this.isAdminChatMode(input, toggle);
+    const native = toggle?.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]');
+    let fallback = desired && !toggle ? '管理员弹幕开关未找到' : '';
+    const disabled = el => el?.disabled || el?.getAttribute('aria-disabled') === 'true' || el?.closest('[disabled], [aria-disabled="true"]');
+    const refresh = () => { input = this.findInput(); toggle = this.findChatModeToggle(input); };
+    const settle = async () => { await new Promise(resolve => setTimeout(resolve, 80)); refresh(); };
+    if (desired && toggle && !previous) {
+      if (disabled(toggle)) fallback = '管理员弹幕开关不可用';
+      else {
+        if (native) {
+          // 点击“弹”开关后页面请求类型列表；菜单由 showPanel 控制，并非 hover。
+          // 此时即使默认选中付费类型，也只展开列表，绝不写入或点击发送。
+          if (!this.chatMode(toggle)) { this.clickChatControl(toggle); await settle(); }
+          let options = [];
+          const deadline = Date.now() + 2400;
+          do {
+            await settle();
+            const room = input.closest('.webcast-chatroom');
+            options = [...(room?.querySelectorAll('img[src*="/privilege_screen_chat_admin_"]') || [])]
+              .map(img => img.closest('.RfKNBPEF')).filter(el => el && isVisible(el));
+          } while (!options.length && Date.now() < deadline);
+          if (options.length !== 1 || disabled(options[0])) fallback = '管理员弹幕选项不可用';
+          else { this.clickChatControl(options[0]); await settle(); }
+        }
+        if (!fallback && toggle && !this.chatMode(toggle)) { this.clickChatControl(toggle); await settle(); }
+        if (!fallback && !this.isAdminChatMode(input, toggle)) fallback = '管理员弹幕类型未确认';
+      }
+    }
+    if ((!desired || fallback) && this.chatMode(toggle)) {
+      if (disabled(toggle)) throw new Error('无法关闭特权弹幕模式，本条未发送');
+      this.clickChatControl(toggle); await settle();
+      if (this.chatMode(toggle)) throw new Error('特权弹幕开关未关闭，本条未发送');
+    }
+    const used = desired && !fallback && this.isAdminChatMode(input, toggle) ? 'admin' : 'chat';
+    return { toggle, previous, changed: previous !== (used === 'admin'), used, fallback };
+  }
+  restoreChatMode(mode) {
+    if (!mode?.changed || !mode.toggle?.isConnected) return;
+    if (mode.previous && mode.toggle.matches('#chatInput [data-e2e="live-chatting"] .semi-switch [role="switch"]')) {
+      // 恢复前也确认类型；发送期间用户若改选付费类型，不能重新开启总开关。
+      const selected = mode.toggle.closest('.webcast-chatroom')?.querySelector('.cw6Usapi img[src*="/privilege_screen_chat_admin_"]');
+      if (!selected) return;
+    }
+    // 只恢复本次发送切换出的状态；用户若在发送期间手动改过开关，不再争抢控制权。
+    if (this.chatMode(mode.toggle) === (mode.previous ? false : true)) {
+      this.clickChatControl(mode.toggle);
+    }
+  }
   async moderate(action, user, isCurrent) {
     if (!isCurrent() || !this.roomContext.current()) return {submitted:false,reason:'场控已暂停或直播间已变更'};
     const prepared=await this.requestSender.prepareModeration(action,{id:user.id,secUid:user.secUid});
@@ -522,35 +608,234 @@ export class DouyinAdapter {
     if (!isCurrent() || !this.roomContext.current()) return {submitted:false,reason:'管理操作已取消'};
     return this.requestSender.commitModeration(prepared.token);
   }
-  async send(text, isCurrent, { beforeClick = async()=>{}, channel = 'chat', mentions = [] } = {}) {
-    if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
-    if (!this.healthy()) return { submitted: false, retryable: true, reason: '直播数据重连中，本条未发送' };
-    const temporary = reason => Object.assign(new Error(reason), { retryable: true });
-    const mentionFallback=mentions.length && channel==='admin' ? '真实@使用普通弹幕通道' : '';
-    if (mentions.length) channel='chat';
-    let prepared = await this.requestSender.prepare(channel), requestFallback = mentionFallback;
-    // 未提交前确认无管理员能力时，可安全使用普通弹幕；提交后的未知结果不重发。
-    if (!prepared?.available && channel === 'admin') {
+  async prepareChatRequest(channel, isCurrent) {
+    const prepared = await this.requestSender.prepare(channel);
+    if (!isCurrent()) return null;
+    if (prepared?.available) return {token:prepared.token,channel};
+    if (channel === 'admin') {
       const ordinary = await this.requestSender.prepare('chat');
-      if (ordinary?.available) { prepared = ordinary; channel = 'chat'; requestFallback = '当前账号管理员弹幕不可用'; }
+      if (ordinary?.available) return {token:ordinary.token,channel:'chat',modeFallback:'当前账号管理员弹幕不可用'};
     }
-    if (prepared?.available) {
-      const guard = () => {
-        if (!isCurrent() || !this.healthy()) return false;
-        // 请求发送不会读写编辑器，但仍让人工草稿优先。
-        const editors = [...this.page.document.querySelectorAll('#chatInput [contenteditable="true"], #chatInput textarea')];
-        if (editors.some(el => ('value' in el ? el.value : el.textContent).replace(/[\u200b\ufeff]/g,'').trim())) throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
-        return true;
-      };
-      if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
+    return null;
+  }
+  async sendChatRequest(text, isCurrent, request, {beforeClick,mentions,mentionFallback}) {
+    const guard = () => {
+      if (!isCurrent()) return false;
+      const editors = [...this.page.document.querySelectorAll('#chatInput [contenteditable="true"], #chatInput textarea')];
+      if (editors.some(el => ('value' in el ? el.value : el.textContent).replace(/[\u200b\ufeff]/g,'').trim())) {
+        throw Object.assign(new Error('公屏输入框已有手动草稿，等待手动内容发送后继续'), {retryable:true});
+      }
+      return true;
+    };
+    if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
+    await beforeClick();
+    if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
+    // Once committed, all results stay on this transport, including rejection or uncertainty.
+    const result = await this.requestSender.commit(request.token,text,mentions);
+    const fallback = request.modeFallback || mentionFallback;
+    return {...result,channelUsed:request.channel,...(fallback ? {modeFallback:fallback} : {})};
+  }
+  async send(text, isCurrent, {beforeClick = async()=>{},channel = 'chat',mentions = []} = {}) {
+    const current = () => isCurrent() && this.healthy() && this.roomContext.current();
+    const canceled = () => ({submitted:false,retryable:true,reason:'场控已暂停、断线或直播间已变更'});
+    if (!current()) return canceled();
+    const mentionFallback = mentions.length && channel === 'admin' ? '真实@使用普通弹幕通道' : '';
+    if (mentions.length) channel = 'chat';
+    let checkpointed = false;
+    const checkpoint = async () => {
+      if (checkpointed) return;
       await beforeClick();
-      if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
-      // 从这里开始请求可能已经送达，未知结果不能转 UI 再发一次。
-      const result = await this.requestSender.commit(prepared.token,text,mentions);
-      return {...result,channelUsed:channel,...(requestFallback ? {modeFallback:requestFallback} : {})};
+      checkpointed = true;
+    };
+    const preferRequest = async clearDraft => {
+      if (!current()) return canceled();
+      const request = await this.prepareChatRequest(channel,current);
+      if (!current()) return canceled();
+      if (!request) return null;
+      if (clearDraft && !clearDraft()) throw Object.assign(new Error('网页草稿尚未清理，等待恢复直接发送'),{retryable:true});
+      return this.sendChatRequest(text,current,request,{beforeClick:checkpoint,mentions,mentionFallback});
+    };
+    // Recheck fresh MAIN capabilities for every message; never latch into UI mode.
+    for (const delay of [0,300,600]) {
+      if (delay) await new Promise(resolve => this.page.setTimeout(resolve,delay));
+      const result = await preferRequest();
+      if (result) return result;
     }
     if (mentions.length) return {submitted:false,reason:'真实@请求暂不可用，本条未发送'};
-    throw temporary('弹幕直接发送暂不可用，等待页面请求恢复');
+    return this.sendViaInput(text,current,{beforeClick:checkpoint,channel,preferRequest});
+  }
+  async sendViaInput(text, isCurrent, {beforeClick,channel,preferRequest}) {
+    const temporary = reason => Object.assign(new Error(reason), {retryable:true});
+    let input;
+    try { input = this.findInput(); this.findSend(input); }
+    catch (error) {
+      // 尚未写入或点击，页面重绘导致的控件缺失可以安全重试；歧义配置仍需检查。
+      if (!input && /未找到/.test(error.message)) throw temporary(error.message);
+      if (input && !input.isConnected) throw temporary('直播输入框正在重新加载');
+      throw error;
+    }
+    const readText = () => ('value' in input ? input.value : input.textContent).replace(/[\u200b\ufeff]/g, '').trim();
+    const repeatedDraft = (value, candidate) => {
+      const normalize = text => String(text || '').replace(/[\u200b\ufeff]/g, '').replace(/\s+/g, '').trim();
+      const current = normalize(value), expected = normalize(candidate);
+      if (!current || !expected || current.length <= expected.length || current.length > expected.length * 6) return false;
+      const count = current.length / expected.length;
+      if (Number.isInteger(count) && current === expected.repeat(count)) return true;
+      const remainder = current.slice(expected.length);
+      return current.startsWith(expected) && remainder.length >= Math.min(8, Math.ceil(expected.length * 0.2)) && expected.startsWith(remainder);
+    };
+    const existing = readText();
+    if (existing && this.ownedDraft?.text !== existing) {
+      if (repeatedDraft(existing, text)) this.ownedDraft = {text:existing,at:Date.now()};
+      else throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
+    }
+    if (input.disabled || input.readOnly || input.getAttribute('aria-disabled') === 'true') throw temporary('输入框暂不可用，等待网页恢复');
+    if (!isCurrent()) return { submitted: false, reason: '场控已暂停' };
+    const doc = input.ownerDocument;
+    const clearOwnText = (expected = text) => {
+      // 清理也必须作用于当前编辑器，不能误把已经脱离页面的旧节点清空当作成功。
+      try { input = this.findInput(); } catch { return false; }
+      if (!input.isConnected || readText() !== expected) return false;
+      if ('value' in input) {
+        const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, '');
+      } else {
+        if (doc.activeElement !== input && doc.activeElement !== doc.body) return false;
+        input.focus({ preventScroll: true });
+        const selection = this.page.getSelection(), range = doc.createRange();
+        range.selectNodeContents(input); selection.removeAllRanges(); selection.addRange(range);
+        doc.execCommand?.('delete', false);
+      }
+      input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
+      const cleared = !readText();
+      // 编辑器可能拒绝 delete；保留归属，重试时复用原文，避免永远等待“人工草稿”。
+      if (cleared) this.ownedDraft = null;
+      return cleared;
+    };
+    let previousFocus = doc.activeElement;
+    while (previousFocus?.shadowRoot?.activeElement) previousFocus = previousFocus.shadowRoot.activeElement;
+    let clicked = false;
+    const failures = () => [...document.querySelectorAll('[role="alert"], [data-e2e="chat-error"], .webcast-chatroom___error')].filter(isVisible).map(el=>el.textContent.trim()).filter(value=>/^(发送失败|消息发送失败|发言过于频繁|操作过于频繁|你已被禁言|您已被禁言|暂时无法发言|当前无法发言)/.test(value));
+    const previousFailures = new Set(failures());
+    let mode;
+    try {
+      input.focus({ preventScroll: true });
+      const focusedInput = input;
+      mode = await this.setChatMode(input, channel);
+      const withMode = result => mode.used === 'admin' || mode.fallback ? { ...result, channelUsed: mode.used, ...(mode.fallback ? { modeFallback: mode.fallback } : {}) } : result;
+      // 切换弹幕模式也可能重建输入框；写入前重新确认，保留用户中途输入的草稿。
+      input = this.findInput();
+      const direct = await preferRequest();
+      if (direct) return direct;
+      let draft = readText();
+      // 每次回复都从空白输入框开始。只清理由本脚本确认写入的草稿，
+      // 人工输入仍保留并暂停自动发送，避免覆盖观众/主播正在编辑的内容。
+      if (draft && draft === this.ownedDraft?.text) {
+        if (!clearOwnText(draft)) {
+          // 同一回复可能由旧版脚本重复写入；清理仍须成功后才能发送。
+          throw temporary('上条回复仍留在输入框，清理失败后稍后重试');
+        }
+        input = this.findInput(); draft = readText();
+      }
+      if (draft) throw temporary('公屏输入框已有手动草稿，等待手动内容发送后继续');
+      if (input.disabled || input.readOnly || input.getAttribute('aria-disabled') === 'true') throw temporary('输入框暂不可用，等待网页恢复');
+      if (doc.activeElement === focusedInput || (!focusedInput.isConnected && doc.activeElement === doc.body)) input.focus({ preventScroll: true });
+      if ('value' in input) {
+        const proto = input.tagName === 'TEXTAREA' ? this.page.HTMLTextAreaElement.prototype : this.page.HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, text);
+        input.dispatchEvent(new this.page.Event('input', { bubbles: true }));
+        input.dispatchEvent(new this.page.Event('change', { bubbles: true }));
+      } else {
+        if (doc.activeElement !== input && doc.activeElement !== doc.body) throw temporary('输入焦点已变更，稍后重试');
+        // 当前抖音使用有内部文档状态的富文本编辑器，不能只改 textContent。
+        // 走编辑器的纯文本粘贴路径，保留原有输入校验、字数限制和 onChange。
+        let handled = false;
+        if (this.page.DataTransfer && this.page.ClipboardEvent) {
+          const clipboard = new this.page.DataTransfer(); clipboard.setData('text/plain', text);
+          const paste = new this.page.ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true });
+          input.dispatchEvent(paste); handled = paste.defaultPrevented;
+        }
+        if (!handled && !this.page.document.execCommand?.('insertText', false, text)) throw new Error('富文本编辑器未接受输入，请用人工方式发送并检查页面适配');
+      }
+      if (readText() === text) this.ownedDraft = { text, at: Date.now() };
+      // 等待 React 更新按钮状态；取消时只清理本脚本的文本。
+      await new Promise(resolve => setTimeout(resolve, 120));
+      // 输入后的状态更新不保证在 120ms 内完成。等待当前控件真正就绪，
+      // 避免每次都在按钮启用前清空重填，并在重绘时重新定位。
+      const inspectSend = () => {
+        let button, unavailable;
+        try { input = this.findInput(); }
+        catch (error) { unavailable = error; }
+        if (!unavailable) {
+          const value = readText();
+          // 粘贴处理器也可能异步提交文档；空编辑器继续等待，其他内容不冒险发送。
+          if (value && value !== text) throw temporary('输入内容已变更或与候选不一致（可能被截断），稍后重试');
+          if (value === text) this.ownedDraft = { text, at: Date.now() };
+          try { button = this.findSend(input); }
+          catch (error) { if (!error.retryable) throw error; unavailable = error; }
+          const disabled = element => element.disabled || element.readOnly || element.hasAttribute('disabled') || element.classList.contains('disable') || element.getAttribute('aria-disabled') === 'true';
+          if (value === text && button && isVisible(input) && !disabled(input) && isVisible(button) && !disabled(button) && !button.closest('[disabled], [aria-disabled="true"], .disable')) return {button};
+        }
+        return {unavailable};
+      };
+      const waitForSend = async () => {
+        const deadline = Date.now() + 1800;
+        while (true) {
+          if (!isCurrent() || !this.healthy()) return null;
+          const {button,unavailable} = inspectSend();
+          if (button) return button;
+          if (Date.now() >= deadline) throw unavailable || temporary('发送按钮暂不可用，等待网页恢复');
+          await new Promise(resolve => setTimeout(resolve, 60));
+        }
+      };
+      let button = await waitForSend();
+      if (!button) return {submitted:false,reason:'点击前已暂停或断线'};
+      // 抖音的发送控件是 SVGElement，没有 HTMLElement.click()。
+      // 对真实控件派发一次冒泡点击，让页面自己的 React 处理发送。
+      const recovered = await preferRequest(() => clearOwnText());
+      if (recovered) return recovered;
+      await beforeClick();
+      // 异步钩子期间控件与草稿仍可能变化，点击前再次校验并获取当前节点。
+      button = await waitForSend();
+      if (!button) {
+        return {submitted:false,reason:'点击前已暂停或断线'};
+      }
+      const saved = await preferRequest(() => clearOwnText());
+      if (saved) return saved;
+      // 请求桥异步复查期间也可能重绘或发生人工输入；最后一次校验同步完成。
+      const final = inspectSend();
+      if (!final.button) throw final.unavailable || temporary('发送控件已变更，等待网页恢复');
+      button = final.button;
+      const toggle = this.findChatModeToggle(input);
+      const hint = input.getAttribute('data-placeholder') || input.getAttribute('placeholder') || '';
+      if (mode.used === 'admin' ? !this.isAdminChatMode(input, toggle) : this.chatMode(toggle) || /发送.*(?:至尊|高级|付费|钻)/.test(hint)) {
+        throw temporary('弹幕类型在发送前发生变化，本条未发送');
+      }
+      clicked = true;
+      button.dispatchEvent(new this.page.MouseEvent('click', { bubbles: true, cancelable: true, composed: true, view: this.page }));
+      const deadline = Date.now() + 1800;
+      while (Date.now() < deadline) {
+        const rejected = failures().find(value=>!previousFailures.has(value));
+        if (rejected) return {submitted:false,clicked:true,failed:true,reason:rejected.slice(0,200)};
+        let currentInput = false;
+        try { input = this.findInput(); currentInput = input.isConnected; } catch {}
+        if (currentInput && !readText()) { this.ownedDraft = null; return withMode({ submitted: true, clicked:true }); }
+        if ((currentInput && readText() !== text) || !isCurrent()) return withMode({ submitted: false, clicked:true, reason: '发送后输入框已变更或场控已暂停' });
+        await new Promise(resolve => setTimeout(resolve, 60));
+      }
+      return withMode({submitted:false,clicked:true,reason:'点击后暂未观察到提交结果，为避免重复发送，不自动重发'});
+    } catch (error) {
+      if (clicked) error.clicked = true;
+      throw error;
+    } finally {
+      if (this.ownedDraft?.text === text) clearOwnText();
+      this.restoreChatMode(mode);
+      // 自动化结束后还原面板/网页输入焦点，用户中途主动切换焦点时不争抢。
+      if (doc.activeElement === input && previousFocus !== input) {
+        if (previousFocus?.isConnected && previousFocus !== doc.body) previousFocus.focus({ preventScroll: true });
+        if (doc.activeElement === input) input.blur();
+      }
+    }
   }
   observeDOM() {
     this.stopDOM?.();

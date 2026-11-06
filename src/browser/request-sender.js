@@ -89,6 +89,12 @@ export class PageRequestSender {
   }
   pruneTickets(now = Date.now()) {
     for (const [id,ticket] of this.tickets) if (now-ticket.at > 300000) this.tickets.delete(id);
+    // Completed receipts must not exhaust preparation capacity during a busy chat.
+    // An evicted token is invalid, so duplicate bridge deliveries still cannot resend.
+    for (const [id,ticket] of this.tickets) {
+      if (this.tickets.size < 128) break;
+      if (ticket.settled) this.tickets.delete(id);
+    }
   }
   available(channel = 'chat') {
     if (!['chat','admin'].includes(channel)) return false;
@@ -123,6 +129,7 @@ export class PageRequestSender {
     catch (error) { return Promise.resolve({submitted:false,reason:error.message}); }
     // Publish the receipt before page code can synchronously re-enter commit.
     ticket.result = Promise.resolve().then(()=>this.perform(ticket,text,richText));
+    ticket.result.then(()=>{ticket.settled=true;},()=>{ticket.settled=true;});
     return ticket.result;
   }
   async perform(ticket,text,richText) {
