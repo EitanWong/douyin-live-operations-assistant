@@ -83,5 +83,10 @@
     "Public evidence does not prove psychological traits, private life or wealth.",
     "Native generic FTS keeps its existing response shape; provenance extensions remain in browser/raw archives."
   ],
-  "commitPush": "pending"
+  "commitPush": {
+    "implementation": "pushed origin/dev",
+    "verifiedRemoteImplementationSHA": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
+    "documentationReceipt": "separate following commit; final SHA in completion report"
+  },
+  "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb"
 }

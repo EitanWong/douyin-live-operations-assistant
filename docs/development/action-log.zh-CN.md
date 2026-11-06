@@ -3213,3 +3213,4 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 有界性能记录：Node v26.12.1 / darwin，90 条合成原记录共 106824 字符投影为 4702 字符、4 条完整选中原话；首次 33.577ms，100 次缓存后中位 0.362ms / P95 0.448ms。只是本地 CPU 合成基准，无模型/网络、浏览器 FPS 或长期实播结论。记录在 output/deep-research-2026-11-07/benchmark.json。
 - 事务验证：实现、测试及生成索引共 22 个文件建立 MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、可执行 ROLLBACK.sh 四角色；回滚范围不包括本轮文档。原始 research-graph SHA-256 为 7742b06cb3d5dcce3d7487af80fa8e00d274bc8ec259550006ecdc0b7294638b。相同合成输入：BASELINE 保留“7 天”旧摘要于引用 1、正文位于引用 2；MODIFIED 直接把引用 1 升级成“73 天”正文；ROLLBACK 在独立副本恢复 BASELINE 输出。补丁重建与回滚逐文件哈希校验通过，新增实现文件已从回滚副本移除，当前项目与修改产物仍一致。命令、字面 stdout/stderr、退出码和四角色哈希在证据账本保留。
 - 交付范围：增强现有已授权研究，未接入全量下载器、未宣称完整心理画像或商业准确率验收。原生协议和模型部署未改；远端 dev 已 fetch 并核对与本地基线相同，提交及推送回执随后补记。
+- 推送回执：功能提交 fdf56a983ce95b6d50f2b047cc099c007f2a31bb 已推送 origin/dev（48dde6b→fdf56a9），git ls-remote 确认远端 SHA 一致。main、版本与标签未改。行动日志和结构化验收/继续执行状态作为后续独立文档提交同步；最终文档 SHA 见完成报告。持续目标保持 active，下一项是本机完整公开视频任务与取消/遗忘边界，尚未完成的能力不得计为本轮交付。
