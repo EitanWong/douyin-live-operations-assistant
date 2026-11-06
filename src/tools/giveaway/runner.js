@@ -1,10 +1,11 @@
 import {createGiveaway,enterGiveaway,drawGiveaway,parseGiveawayState,validateGiveawayConfig,GIVEAWAY_VERSION,matchesGiveawayChat,giveawayUserId} from '../../core/giveaway.js';
 import {prepareGiveawayFeedback,prepareGiveawayDuplicate} from '../../core/giveaway-feedback.js';
+import {isRedPacketGiveaway,selectRedPacket} from '../../core/red-packet.js';
 
 // All commands, ticks and event writes use one queue under one room lease.
 export class GiveawayRunner {
-  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',anchorId=()=>'',identity=()=>({}),now=Date.now,randomInt,pendingEvents,feedback,maxLength=()=>50,feedbackMode=()=> 'auto'}) {
-    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,anchorId,identity,now,randomInt,pendingEvents,feedback,maxLength,feedbackMode});
+  constructor({room,storage,lock,guard=()=>'',changed=()=>{},broadcastId=()=>'',anchorId=()=>'',identity=()=>({}),now=Date.now,randomInt,pendingEvents,feedback,packetCatalog,packetSend,maxLength=()=>50,feedbackMode=()=> 'auto'}) {
+    Object.assign(this,{room,storage,lock,guard,changed,broadcastId,anchorId,identity,now,randomInt,pendingEvents,feedback,packetCatalog,packetSend,maxLength,feedbackMode});
     this.key=`live-assistant:giveaway:${room}`;this.data={version:GIVEAWAY_VERSION,rounds:[]};this.tail=Promise.resolve();this.owned=false;this.closed=false;this.reason='尚未开始抽奖';
     this.handedOff=new Set();
   }
@@ -107,6 +108,7 @@ export class GiveawayRunner {
       if(!await this.claim())throw new Error('其他页面正在运行本直播间抽奖，请在该页面操作');
       try {
         if(this.current())throw new Error('本轮抽奖尚未结束');
+        if(isRedPacketGiveaway(config))await this.checkPacket(config);
         const round=createGiveaway(config,{id:crypto.randomUUID(),room:this.room,broadcastId:this.broadcastId(),anchorId:this.anchorId(),now:this.now()});
         await this.save(prepareGiveawayFeedback(round,this.now(),this.maxLength(),{start:true}));
         this.entryError='';
@@ -116,16 +118,48 @@ export class GiveawayRunner {
   }
   async finish(round) {
     await this.save(prepareGiveawayFeedback(round,this.now(),this.maxLength()));
+    await this.flushPackets();
     await this.flushFeedback();this.release();this.publish(round.reason);
+  }
+  async checkPacket(config) {
+    const snapshot=await this.packetCatalog?.();this.assertOpen();
+    if(!snapshot?.available)throw new Error(snapshot?.reason || '红包套餐读取失败，请刷新后重试');
+    if(snapshot.pending)throw new Error('有待核对的付费记录，请先在自动送礼中核对');
+    const packet=config.prizes[0].redPacket;
+    if(!['accountId','roomId','anchorId'].every(key=>packet[key]===snapshot[key]))throw new Error('账号或直播间已变化，请重新选择红包');
+    selectRedPacket(snapshot,packet);
+    if(!Number.isSafeInteger(snapshot.balanceUnits) || snapshot.balanceUnits<packet.diamondCount*10)throw new Error('钻石余额不足，请选择其他额度的红包');
+  }
+  hasPendingPacket() {
+    return this.data.rounds.some(round=>round.redPacketDeliveries?.some(row=>['pending','dispatching'].includes(row.status)));
+  }
+  async flushPackets() {
+    for(const round of this.data.rounds.filter(round=>round.redPacketDeliveries?.some(row=>['pending','dispatching'].includes(row.status)))) {
+      const delivery=round.redPacketDeliveries[0];
+      if(delivery.status==='dispatching') {
+        await this.save({...round,redPacketDeliveries:[{status:'unknown',reason:'上次已开始发放，结果待核对，不自动重发'}]});continue;
+      }
+      const reason=this.guard() || (round.broadcastId!==this.broadcastId() ? '直播场次已变化，未发放' : this.now()-round.endsAt>60000 ? '已错过发放时间，未补发' : '');
+      if(reason) {await this.save({...round,redPacketDeliveries:[{status:'failed',reason}]});continue;}
+      // Persist the attempt before crossing the paid request boundary. A crash
+      // or failed receipt write leaves dispatching, which is never retried.
+      await this.save({...round,redPacketDeliveries:[{status:'dispatching',reason:'正在核对余额并发放'}]});
+      let result;
+      try {this.assertOpen();result=await this.packetSend({packet:round.config.prizes[0].redPacket});}
+      catch {result={unknown:true,reason:'发放结果未知，请核对消费记录，不自动重发'};}
+      const receipt={status:result?.submitted ? 'sent' : result?.unknown ? 'unknown' : 'failed',reason:String(result?.reason || (result?.submitted ? '红包已发放' : '红包未发放')),...(result?.boxId ? {boxId:result.boxId} : {})};
+      // flushFeedback may have replaced the round, so keep the latest outbox.
+      await this.save({...this.data.rounds.find(row=>row.id===round.id),redPacketDeliveries:[receipt]});
+    }
   }
   async check() {
     let round=this.current();
-    if(!round && !this.data.rounds.some(row=>this.pendingFeedback(row).length)){this.publish();return;}
+    if(!round && !this.hasPendingPacket() && !this.data.rounds.some(row=>this.pendingFeedback(row).length)){this.publish();return;}
     if(!this.owned) {
       if(this.guard() || !await this.claim()){this.publish('本轮由其他页面运行，等待同步');return;}
       round=this.current();
     }
-    if(!round){await this.flushFeedback();this.release();this.publish();return;}
+    if(!round){await this.flushPackets();await this.flushFeedback();this.release();this.publish();return;}
     const broadcast=this.broadcastId();
     if(round.broadcastId && broadcast && round.broadcastId!==broadcast) {
       await this.finish({...round,status:'cancelled',closedAt:this.now(),reason:'直播场次已切换，本轮已取消'});return;
@@ -135,7 +169,7 @@ export class GiveawayRunner {
     else {
       const next=prepareGiveawayFeedback(round,this.now(),this.maxLength());
       if(next!==round)await this.save(next);
-      await this.flushFeedback();this.publish(this.guard() || '正在接收本轮参与弹幕和礼物');
+      await this.flushFeedback();this.publish(this.guard() || (isRedPacketGiveaway(round.config) ? '等待设定时间发放红包' : '正在接收本轮参与弹幕和礼物'));
     }
   }
   tick() {

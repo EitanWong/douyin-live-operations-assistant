@@ -3,12 +3,15 @@ import { ModerationRequests } from './moderation-requests.js';
 import { LikeRequests } from './like-requests.js';
 import { LotteryRequests } from './lottery-requests.js';
 import { GiftRequests } from './gift-requests.js';
+import {RedPacketRequests} from './red-packet-requests.js';
 import { encodeChatMentions } from '../core/chat-mentions.js';
 // Reuse the live page's loaded HTTP client so its session and request interceptors
 // remain in charge. Cookies, signatures and remote code never cross the bridge;
 // paid gifts use fixed, budget-bound preparation and commit operations.
 export class PageRequestSender {
-  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); this.gifts = new GiftRequests(this); }
+  constructor(page) { this.page = page; this.tickets = new Map(); this.moderation = new ModerationRequests(this); this.likes = new LikeRequests(this); this.lotteries = new LotteryRequests(this); this.gifts = new GiftRequests(this); this.redPackets=new RedPacketRequests(this); }
+  redPacketCatalog(options) {return this.redPackets.catalog(options);}
+  sendRedPacket(value,options) {return this.redPackets.send(value,options);}
   giftBalance(options) { return this.gifts.balance(options); }
   giftSnapshot(options) { return this.gifts.snapshot(options); }
   giftCatalog(options) { return this.gifts.catalog(options); }
@@ -93,7 +96,7 @@ export class PageRequestSender {
       this.pruneTickets();
       const context = this.context();
       return Boolean(context && typeof context.userId === 'string' && /^\d+$/.test(context.userId)
-        && this.client() && (channel === 'admin' ? context.admin : this.chatDisplay()) && this.tickets.size < 128);
+        && this.client() && (channel !== 'admin' || context.admin) && this.tickets.size < 128);
     } catch { return false; }
   }
   prepare(channel) {
@@ -102,9 +105,7 @@ export class PageRequestSender {
       const context = this.context(), client = context && this.client();
       if (!client || typeof context.userId !== 'string' || !/^\d+$/.test(context.userId)) return {available:false};
       if (channel === 'admin' && !context.admin) return {available:false};
-      // Fall back before submitting when we cannot complete the native chat UI
-      // flow. Otherwise the server echo is deliberately hidden on this page.
-      if (channel === 'chat' && !this.chatDisplay()) return {available:false};
+      // Local display is best effort and does not determine request availability.
       const now = Date.now();
       this.pruneTickets(now);
       if (this.tickets.size >= 128) return {available:false};
@@ -163,7 +164,7 @@ export class PageRequestSender {
 export class RequestBridgeClient {
   constructor(page,send=payload=>page.chrome.runtime.sendMessage(payload)) { this.page=page;this.send=send;this.context=new RoomContext(page);this.room=this.context.room; }
   async call(operation,payload,timeout,{signal}={}) {
-    const read=['gift-snapshot','gift-balance','gift-catalog','acknowledge-gift'].includes(operation);
+    const read=['gift-snapshot','gift-balance','gift-catalog','red-packet-catalog','acknowledge-gift'].includes(operation);
     const unavailable=()=>operation.startsWith('prepare') || read ? {available:false,reason:'页面请求未完成，请刷新数据后重试'}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
     if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const id=this.page.crypto.randomUUID();
@@ -191,6 +192,8 @@ export class RequestBridgeClient {
   giftBalance(options) {return this.call('gift-balance',{},20000,options);}
   giftSnapshot(options) {return this.call('gift-snapshot',{},20000,options);}
   giftCatalog(options) {return this.call('gift-catalog',{},20000,options);}
+  redPacketCatalog(options) {return this.call('red-packet-catalog',{},20000,options);}
+  sendRedPacket(config,options) {return this.call('send-red-packet',{config},30000,options);}
   prepareGift(config,options) {return this.call('prepare-gift',{config},20000,options);}
   commitGift(token,count,sequence,options) {return this.call('commit-gift',{token,count,sequence},30000,options);}
   stopGift(token) {return this.call('stop-gift',{token},800);}

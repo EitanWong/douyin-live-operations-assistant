@@ -1,5 +1,6 @@
 import {validGiveawayCountdown} from './giveaway-countdown.js';
 import {addressedToSelf} from './chat-mentions.js';
+import {isRedPacketGiveaway,validateRedPacket,redPacketName} from './red-packet.js';
 
 export const GIVEAWAY_VERSION = 2;
 export const GIVEAWAY_DEFAULTS = Object.freeze({prizes:Object.freeze([Object.freeze({name:'直播周边',count:1})]),weights:Object.freeze([]),presenceBias:true,anchorGuaranteed:false,feedbackEnabled:true,announcePrizeNames:true,durationSec:300,chatEnabled:true,keyword:'参与抽奖',giftEnabled:false,gifts:'小心心',giftMin:1});
@@ -9,7 +10,7 @@ export const GIVEAWAY_ACTIVITY_MULTIPLIER=3;
 const boundedText = (value, limit) => typeof value === 'string' && value.trim().length > 0 && value.trim().length <= limit;
 const integer = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max;
 export const giftRules = config => config.gifts.split(/[,，、;；\n]/).map(value=>value.trim()).filter(Boolean);
-export const giveawaySlots = config => config.prizes.reduce((sum,prize)=>sum+prize.count,0);
+export const giveawaySlots = config => isRedPacketGiveaway(config) ? 0 : config.prizes.reduce((sum,prize)=>sum+prize.count,0);
 export const giveawayPrizes = config => config.prizes.map(prize=>`${prize.name} ×${prize.count}`).join('、');
 export const giveawayWeight = (config,userId) => config.weights.find(row=>row.userId===userId)?.weight ?? 1;
 export const giveawayDrawRules = config => `${config.weights.length ? `按观众权重抽取（${config.weights.map(row=>`${row.userId} ×${row.weight}`).join('、')}；其他观众 ×1）` : '基础权重 ×1'}${config.presenceBias ? '；截止前2分钟有真实互动再乘3，其余乘1（未近期观测不等于已离开）' : ''}${config.anchorGuaranteed ? '；主播参与必中，占用首项奖品一个名额' : ''}`;
@@ -28,7 +29,13 @@ function validatePrizes(value) {
   // Legacy command callers may still submit one prize; all internal rules use the array.
   const prizes=value?.prizes ?? (value?.prize!==undefined ? [{name:value.prize,count:value.winners}] : null);
   if(!Array.isArray(prizes) || !prizes.length || prizes.length>20)throw new Error('请设置 1～20 项奖品');
+  if(prizes.some(prize=>prize?.type==='red-packet')) {
+    if(prizes.length!==1 || prizes[0].count!==1)throw new Error('直播间红包每轮发送一个套餐，请单独设置');
+    const redPacket=validateRedPacket(prizes[0].redPacket);
+    return [{type:'red-packet',name:redPacketName(redPacket),count:1,redPacket}];
+  }
   for(const prize of prizes) {
+    if(prize?.type!==undefined && prize.type!=='custom')throw new Error('奖品类型无效');
     if(!prize || !boundedText(prize.name,100))throw new Error('请填写每项奖品名称，最多 100 字');
     if(!integer(prize.count,1,1000))throw new Error('每项奖品中奖人数须为 1～1000 的整数');
   }
@@ -37,6 +44,13 @@ function validatePrizes(value) {
 }
 
 export function validateGiveawayConfig(value) {
+  if(value?.prizes?.[0]?.type==='red-packet') {
+    const prizes=validatePrizes(value);
+    if(!integer(value.durationSec,1,86400))throw new Error('倒计时须为 1～86400 秒的整数');
+    if(value.scheduledAt!==undefined && (!Number.isSafeInteger(value.scheduledAt) || value.scheduledAt<=0))throw new Error('指定发放时间无效');
+    return {prizes,weights:[],presenceBias:false,anchorGuaranteed:false,feedbackEnabled:value.feedbackEnabled ?? false,announcePrizeNames:true,durationSec:value.durationSec,
+      chatEnabled:false,keyword:'',giftEnabled:false,gifts:'',giftMin:1,...(value.scheduledAt!==undefined ? {scheduledAt:value.scheduledAt} : {})};
+  }
   const prizes=validatePrizes(value),weights=validateWeights(value.weights);
   if(value.anchorGuaranteed!==undefined && typeof value.anchorGuaranteed!=='boolean')throw new Error('主播必中设置无效');
   if(value.feedbackEnabled!==undefined && typeof value.feedbackEnabled!=='boolean')throw new Error('抽奖弹幕反馈设置无效');
@@ -54,12 +68,14 @@ export function validateGiveawayConfig(value) {
 // A round fixes its rules at creation; entrants always represent people, not tickets.
 export function createGiveaway(config,{id,room,broadcastId='',anchorId='',now}) {
   config=validateGiveawayConfig({...config,presenceBias:config.presenceBias ?? true,feedbackEnabled:true});
+  if(config.scheduledAt!==undefined && (config.scheduledAt<=now || config.scheduledAt>now+86400000))throw new Error('请选择未来24小时内的发放时间');
   if(config.anchorGuaranteed && !/^[1-9]\d{0,24}$/.test(anchorId))throw new Error('请先识别当前主播 UID，再开启主播参与必中');
-  return {id,room,broadcastId,anchorId,status:'running',startedAt:now,endsAt:now+config.durationSec*1000,closedAt:null,
+  return {id,room,broadcastId,anchorId,status:'running',startedAt:now,endsAt:config.scheduledAt ?? now+config.durationSec*1000,closedAt:null,
     config,entrants:[],giftProgress:[],awards:[],feedback:[],reason:''};
 }
 
 function eligibleEvent(round,event,now) {
+  if(isRedPacketGiveaway(round.config))return false;
   if (round.status !== 'running' || now >= round.endsAt || !['chat','gift','like','enter'].includes(event?.type)) return false;
   if (round.broadcastId && event.roomId && event.roomId !== round.broadcastId) return false;
   // Round boundaries and frame capture use the same local clock. Platform time
@@ -147,6 +163,7 @@ function drawWinners(round,randomInt,snapshot) {
 
 export function drawGiveaway(round,now,randomInt=secureRandomInt) {
   if (round.status!=='running' || now<round.endsAt) return round;
+  if(isRedPacketGiveaway(round.config))return {...round,status:'drawn',closedAt:now,reason:'红包发放时间已到',redPacketDeliveries:[{status:'pending',reason:'等待发放'}]};
   const drawSnapshot=giveawayDrawSnapshot(round),winners=drawWinners(round,randomInt,drawSnapshot);
   const awards=[];
   for(const [prizeIndex,prize] of round.config.prizes.entries()) {
@@ -215,6 +232,9 @@ export function parseGiveawayState(value,room) {
       || new Set(round.entrants.map(row=>row.userId)).size!==round.entrants.length
       || round.giftProgress.some(row=>!row || typeof row.key!=='string' || typeof row.userId!=='string' || !integer(row.count,1,1000000000))) throw new Error('抽奖参与记录无效');
     validateAwards(round);
+    if(round.redPacketDeliveries!==undefined && (!isRedPacketGiveaway(round.config) || round.status!=='drawn' || !Array.isArray(round.redPacketDeliveries) || round.redPacketDeliveries.length!==1
+      || round.redPacketDeliveries.some(row=>!row || !['pending','dispatching','sent','failed','unknown'].includes(row.status) || typeof row.reason!=='string'
+        || row.boxId!==undefined && (typeof row.boxId!=='string' || !/^[1-9]\d{0,24}$/.test(row.boxId)))))throw new Error('红包发放记录无效');
     validateFeedback(round);
     if(round.drawSnapshot!==undefined && !validDrawSnapshot(round))throw new Error('抽奖权重快照无效');
   }
@@ -224,6 +244,10 @@ export function parseGiveawayState(value,room) {
 
 export function giveawayAnnouncement(round) {
   if (!round || round.status!=='drawn') return '';
+  if(isRedPacketGiveaway(round.config)) {
+    const delivery=round.redPacketDeliveries?.[0],result={sent:'已发放，全直播间可领取',failed:'发放失败',unknown:'结果待核对，请勿重复发放',pending:'等待发放',dispatching:'正在发放'}[delivery?.status] || '未发放';
+    return `【直播间红包】${round.config.prizes[0].name}：${result}。`;
+  }
   const results=round.config.prizes.map((prize,index)=>{
     const names=round.awards.filter(award=>award.prizeIndex===index).map(award=>round.entrants.find(row=>row.userId===award.userId)?.userName || award.userId);
     return `${prize.name}：${names.length ? `恭喜 ${names.join('、')}` : '未产生中奖者'}`;
@@ -233,10 +257,14 @@ export function giveawayAnnouncement(round) {
 
 const csvCell = value => '"'+String(value ?? '').replace(/^(?:\s*[=+\-@]|[\t\r\n]|\d{15,}$)/,"'$&").replaceAll('"','""')+'"';
 export function giveawayCSV(state) {
-  const rows=[['轮次ID','直播间','直播场次','奖品及名额','计划中奖人数','倒计时秒数','参与弹幕','参与礼物','礼物门槛','开始时间','截止时间','开奖时间','状态','参与人数','用户ID','昵称','参与方式','入池时间','指定礼物数量','结果','所获奖品','抽取规则','主播UID','基础抽取权重','最近活动时间','近期活动加权','开奖权重']];
+  const rows=[['轮次ID','直播间','直播场次','奖品及名额','计划中奖人数','倒计时秒数','参与弹幕','参与礼物','礼物门槛','开始时间','截止时间','开奖时间','状态','参与人数','用户ID','昵称','参与方式','入池时间','指定礼物数量','结果','所获奖品','抽取规则','主播UID','基础抽取权重','最近活动时间','近期活动加权','开奖权重','红包发放状态','红包ID','红包发放说明']];
   for(const round of state.rounds) {
     const c=round.config,weights=new Map(round.drawSnapshot?.weights.map(row=>[row.userId,row]) || []);
     const base=[round.id,round.room,round.broadcastId,giveawayPrizes(c),giveawaySlots(c),c.durationSec,c.chatEnabled ? c.keyword : '',c.giftEnabled ? c.gifts : '',c.giftEnabled ? c.giftMin : '',new Date(round.startedAt).toISOString(),new Date(round.endsAt).toISOString(),round.closedAt ? new Date(round.closedAt).toISOString() : '',{running:'进行中',drawn:'已开奖',cancelled:'已取消'}[round.status],round.entrants.length];
+    if(isRedPacketGiveaway(c)) {
+      const receipt=round.redPacketDeliveries?.[0];
+      rows.push([...base,'','','','','',giveawayAnnouncement(round) || round.reason,'','全直播间可领取',round.anchorId,'','','','',receipt?.status || '',receipt?.boxId || '',receipt?.reason || round.reason]);continue;
+    }
     if (!round.entrants.length) rows.push([...base,'','','','','','无人参与','',giveawayDrawRules(c),round.anchorId,'','','','']);
     for(const row of round.entrants) {
       const award=round.awards.find(award=>award.userId===row.userId);
@@ -244,5 +272,5 @@ export function giveawayCSV(state) {
       rows.push([...base,row.userId,row.userName,row.sources.map(source=>source==='chat' ? '弹幕' : '礼物').join('、'),new Date(row.enteredAt).toISOString(),row.giftCount,award ? '中奖' : round.status==='drawn' ? '未中奖' : round.status==='cancelled' ? '已取消' : '待开奖',award ? c.prizes[award.prizeIndex].name : '',giveawayDrawRules(c),round.anchorId,giveawayWeight(c,row.userId),row.lastSeenAt!==undefined ? new Date(row.lastSeenAt).toISOString() : '',snapshot ? snapshot.recent ? '近期有活动' : '未近期观测' : '',snapshot?.weight ?? giveawayWeight(c,row.userId)]);
     }
   }
-  return '\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n');
+  return '\ufeff'+rows.map(row=>Array.from({length:rows[0].length},(_,index)=>csvCell(row[index])).join(',')).join('\r\n');
 }

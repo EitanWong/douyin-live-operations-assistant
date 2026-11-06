@@ -1,5 +1,6 @@
 import {giveawaySlots,giveawayPrizes,giveawayUserId,giveawayEventKey} from './giveaway.js';
 import {giveawayCountdownStage} from './giveaway-countdown.js';
+import {isRedPacketGiveaway} from './red-packet.js';
 
 const text=value=>String(value).replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g,' ').replace(/\s+/g,' ').trim();
 const clip=(value,length)=>[...text(value)].slice(0,length).join('');
@@ -77,6 +78,9 @@ function participationLines(config,limit) {
 // A queued message has a durable sender receipt; it does not claim a platform echo.
 export function prepareGiveawayFeedback(round,now,limit=50,{start=false}={}) {
   const feedback=round.feedback || [];
+  // Room-wide packets have their own platform claiming/draw flow. Do not
+  // announce local signup or pretend that selected viewers received money.
+  if(isRedPacketGiveaway(round.config))return round.feedback ? round : {...round,feedback};
   if(!round.config.feedbackEnabled)return round.feedback ? round : {...round,feedback};
   const next=[...feedback],has=kind=>next.some(row=>row.kind===kind);
   const append=(kind,rows,expiresAt,extra={})=>{

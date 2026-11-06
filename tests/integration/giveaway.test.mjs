@@ -14,6 +14,45 @@ function page(){
   globalThis.CSS={escape:value=>value};globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);
   Object.defineProperty(globalThis,'navigator',{configurable:true,value:{locks:webLocks()}});return dom;
 }
+test('红包模式自动读取余额、保留自定义草稿，按指定时间独立发放且无需中奖者',async t=>{
+ let clock=Date.now();t.mock.method(Date,'now',()=>clock);
+ const dom=page(),values=new Map();let api;
+ boot({page:dom.window,demo:true,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),onReady:value=>{api=value;}});
+ try{
+  await api.tools.ready;const p=api.panel;p.tab('giveaway');p.node('[data-prize=name]').value='保留的礼盒草稿';
+  const type=p.node('[data-packet-type]');assert.ok(type);type.value='red-packet';type.dispatchEvent(new dom.window.Event('change'));
+  await until(()=>p.node('[data-packet-meta]').options.length>1);
+  assert.match(p.node('[data-packet-balance]').textContent,/余额/);
+  type.value='custom';type.dispatchEvent(new dom.window.Event('change'));assert.equal(p.node('[data-prize=name]').value,'保留的礼盒草稿');
+  type.value='red-packet';type.dispatchEvent(new dom.window.Event('change'));await until(()=>!p.node('[data-action=giveaway-refresh-packets]').disabled);
+  const select=p.node('[data-packet-meta]');select.value='1009';select.dispatchEvent(new dom.window.Event('change'));
+  const timing=p.node('[data-packet-timing]');timing.value='scheduled';timing.dispatchEvent(new dom.window.Event('change'));
+  const date=new Date(clock+60000),pad=v=>String(v).padStart(2,'0');
+  p.node('[data-packet-at]').value=`${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  p.node('[data-action=giveaway-start]').click();await until(()=>api.tools.state('giveaway').phase==='running');
+  const round=api.tools.state('giveaway').rounds.at(-1);assert.equal(round.endsAt,Math.floor((clock+60000)/1000)*1000);assert.equal(round.config.prizes[0].type,'red-packet');
+  assert.equal(type.disabled,true);clock+=61000;await api.tools.dispatch('tick');
+  await until(()=>api.tools.state('giveaway').rounds.at(-1).redPacketDeliveries?.[0].status==='sent');
+  assert.equal(api.tools.state('giveaway').rounds.at(-1).awards.length,0);assert.match(p.node('[data-giveaway-result]').textContent,/已发放.*全直播间/);
+  await api.tools.restart('giveaway');assert.equal(api.tools.state('giveaway').rounds.at(-1).redPacketDeliveries[0].status,'sent');
+ }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
+});
+test('红包额度按余额禁用，读取失败撤销可发资格，不能靠手动选择绕过余额',async()=>{
+ const dom=page(),values=new Map();let api;
+ boot({page:dom.window,demo:true,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),onReady:value=>{api=value;}});
+ try{
+  await api.tools.ready;const p=api.panel;p.tab('giveaway');
+  let balanceUnits=100,error=false;
+  api.tools.operations['red-packet.catalog'].run=async()=>error ? {available:false,reason:'余额读取失败'} : {available:true,balanceUnits,accountId:'9',roomId:'123',anchorId:'8',packages:[{metaId:'1009',diamondCount:20,packNum:15,delays:[0,300],available:true}]};
+  const type=p.node('[data-packet-type]');type.value='red-packet';type.dispatchEvent(new dom.window.Event('change'));
+  await until(()=>p.node('[data-packet-meta]').options.length===2);
+  const select=p.node('[data-packet-meta]');assert.equal(select.options[1].disabled,true);
+  select.value='1009';select.dispatchEvent(new dom.window.Event('change'));assert.equal(p.node('[data-action=giveaway-start]').disabled,true);
+  balanceUnits=200;p.node('[data-action=giveaway-refresh-packets]').click();await until(()=>!select.options[1].disabled);assert.equal(p.node('[data-action=giveaway-start]').disabled,false);
+  error=true;p.node('[data-action=giveaway-refresh-packets]').click();await until(()=>p.node('[data-packet-balance]').textContent.includes('读取失败'));
+  assert.equal(p.node('[data-action=giveaway-start]').disabled,true);
+ }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));await api.tools.close();api.panel.destroy();dom.window.close();}
+});
 test('页面备用采集保留弹幕行的 UID 或安全 UID，不把同名观众合并',async()=>{
   const dom=page(),values=new Map(),captured=[];let api,adapter;
   boot({page:dom.window,get:(key,fallback)=>values.get(key) ?? fallback,set:(key,value)=>values.set(key,structuredClone(value)),

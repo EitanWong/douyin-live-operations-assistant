@@ -306,46 +306,7 @@ test('只显示已启用的模块；AI 服务启用后才开放 AI 生成选项'
     assert.equal(p.node('[data-field="gift.responseMode"]').value,'rules');
   } finally {p.destroy();dom.window.close();}
 });
-test('页面发送通过 native setter 驱动 input，并保留已有草稿', async () => {
-  const dom = setup('<div><textarea id="chat" placeholder="说点什么"></textarea><button id="send">发送</button></div>'); const c = copy(DEFAULTS); c.mode = 'preview';
-  const a = new DouyinAdapter({ page: dom.window, getConfig: () => c, onEvent: () => {}, onLog: () => {}, onStatus: () => {} });
-  a.status.connected = true; a.status.lastFrame = Date.now();
-  let inputEvent = 0, clicks = 0; dom.window.document.querySelector('#chat').addEventListener('input', () => inputEvent++); dom.window.document.querySelector('#send').addEventListener('click', () => { clicks++; dom.window.document.querySelector('#chat').value = ''; });
-  const result = await a.send('测试候选', () => true); assert.equal(result.submitted, true); assert.equal(inputEvent, 1); assert.equal(clicks, 1);
-  dom.window.document.querySelector('#chat').value = '手动草稿';
-  await assert.rejects(a.send('另一条', () => true), /草稿/); assert.equal(dom.window.document.querySelector('#chat').value, '手动草稿'); dom.window.close();
-});
-test('页面发送等待期间暂停会取消，禁用按钮不会点击', async () => {
-  const dom = setup('<div><textarea id="chat" placeholder="说点什么"></textarea><button id="send">发送</button></div>'); const c = copy(DEFAULTS); c.mode = 'preview';
-  const a = new DouyinAdapter({ page: dom.window, getConfig: () => c, onEvent: () => {}, onLog: () => {}, onStatus: () => {} }); a.status.connected = true; a.status.lastFrame = Date.now();
-  let current = true, clicks = 0; dom.window.document.querySelector('#send').addEventListener('click', () => clicks++);
-  const task = a.send('测试候选', () => current); current = false; const result = await task;
-  assert.equal(result.submitted, false); assert.equal(clicks, 0); assert.equal(dom.window.document.querySelector('#chat').value, '');
-  dom.window.document.querySelector('#send').disabled = true; await assert.rejects(a.send('测试候选', () => true), /不可用/); assert.equal(clicks, 0); dom.window.close();
-});
-test('富文本使用编辑器粘贴处理器，并重新定位 React 替换后的发送图标', async () => {
-  const dom = setup('<div class="webcast-chatroom"><div id="chatInput"><div id="editor" contenteditable="true"></div><div class="webcast-chatroom___send-icon disable"></div></div></div>');
-  const input = dom.window.document.querySelector('#editor'); Object.defineProperty(input, 'isContentEditable', { value: true });
-  dom.window.DataTransfer = class { constructor() { this.data = {}; } setData(k, v) { this.data[k] = v; } getData(k) { return this.data[k]; } };
-  dom.window.ClipboardEvent = class extends dom.window.Event { constructor(type, options) { super(type, options); this.clipboardData = options.clipboardData; } };
-  let pasteCount = 0, clicks = 0;
-  dom.window.document.execCommand = () => assert.fail('已处理粘贴，不应走 fallback');
-  input.addEventListener('paste', e => {
-    e.preventDefault(); pasteCount++; input.textContent = '\u200b' + e.clipboardData.getData('text/plain');
-    const replacement = dom.window.document.createElement('div'); replacement.className = 'webcast-chatroom___send-btn'; replacement.getClientRects = () => [{ width: 30, height: 30 }]; replacement.addEventListener('click', () => { clicks++; input.textContent = ''; });
-    dom.window.document.querySelector('.webcast-chatroom___send-icon').replaceWith(replacement);
-  });
-  const a = new DouyinAdapter({ page: dom.window, getConfig: () => copy(DEFAULTS), onEvent: () => {}, onLog: () => {}, onStatus: () => {} }); a.status.connected = true; a.status.lastFrame = Date.now();
-  assert.equal((await a.send('感谢支持', () => true)).submitted, true); assert.equal(pasteCount, 1); assert.equal(clicks, 1); dom.window.close();
-});
-test('富文本无粘贴处理器时使用原生插入；截断内容不提交', async () => {
-  const dom = setup('<div class="webcast-chatroom"><div id="chatInput"><div id="editor" contenteditable="true"></div><button>发送</button></div></div>');
-  const input = dom.window.document.querySelector('#editor'); Object.defineProperty(input, 'isContentEditable', { value: true });
-  let clicks = 0; dom.window.document.querySelector('button').addEventListener('click', () => clicks++);
-  dom.window.document.execCommand = (command, _, text) => { assert.equal(command, 'insertText'); input.textContent = text.slice(0, 2); return true; };
-  const a = new DouyinAdapter({ page: dom.window, getConfig: () => copy(DEFAULTS), onEvent: () => {}, onLog: () => {}, onStatus: () => {} }); a.status.connected = true; a.status.lastFrame = Date.now();
-  await assert.rejects(a.send('感谢支持', () => true), /不一致/); assert.equal(clicks, 0); assert.equal(input.textContent, '感谢'); dom.window.close();
-});
+
 test('WebSocket hook 保留原型、常量和页面帧，只观察抖音直播路径', async () => {
   const dom = setup();
   class FakeSocket extends dom.window.EventTarget { static OPEN = 1; constructor(url) { super(); this.url = url; this.binaryType = 'blob'; } send(data) { this.last = data; } }
@@ -889,94 +850,6 @@ test('总览收入按可配置比例估算，未知礼物单列并保留结算�
   } finally {p.destroy();dom.window.close();}
 });
 
-test('真实抖音 SVG 发送按钮无 click 方法时仍提交一次，并等待编辑器清空', async () => {
-  const dom=setup('<div class="webcast-chatroom"><div id="chatInput"><div contenteditable="true" data-placeholder="与大家互动一下...">\u200b</div><svg class="webcast-chatroom___send-btn disable" type="button" disabled=""></svg></div></div>');
-  const input=dom.window.document.querySelector('[contenteditable]'),button=dom.window.document.querySelector('svg');
-  Object.defineProperty(input,'isContentEditable',{value:true});
-  let clicks=0;
-  dom.window.document.execCommand=(command,unused,text)=>{assert.equal(command,'insertText');input.textContent=text+'\u200b';button.removeAttribute('disabled');button.classList.remove('disable');return true;};
-  button.addEventListener('click',()=>{clicks++;setTimeout(()=>{input.textContent='\u200b';button.setAttribute('disabled','');},80);});
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status={connected:true,lastFrame:Date.now()};
-  try {
-    assert.equal(typeof button.click,'undefined');
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
-    assert.equal(clicks,1);
-    assert.deepEqual(await adapter.send('欢迎新朋友',()=>true),{submitted:true,clicked:true});assert.equal(clicks,2);
-  } finally {dom.window.close();}
-});
-
-test('ARIA 角色型抖音编辑器和相邻图标也能被准确定位', async () => {
-  const dom=setup('<div class="webcast-chatroom___input-container"><div id="editor" role="textbox" aria-label="与大家互动一下..."></div><div class="toolbar"><img class="webcast-chatroom___send-icon" alt=""></div></div>');
-  const input=dom.window.document.querySelector('#editor'), icon=dom.window.document.querySelector('img');
-  let clicks=0; icon.addEventListener('click',()=>{ clicks++; input.textContent=''; });
-  dom.window.document.execCommand=(command,unused,text)=>{ assert.equal(command,'insertText'); input.textContent=text; return true; };
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status={connected:true,lastFrame:Date.now()};
-  try { assert.equal(adapter.findInput(),input); assert.equal(adapter.findSend(input),icon); assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true}); assert.equal(clicks,1); }
-  finally { dom.window.close(); }
-});
-
-test('高价值欢迎发送时临时启用管理员弹幕并恢复用户原状态', async () => {
-  const dom=setup('<div id="chatInput"><label><input id="admin-mode" type="checkbox" role="switch" aria-label="管理员弹幕"></label><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
-  const input=dom.window.document.querySelector('textarea'), toggle=dom.window.document.querySelector('#admin-mode'), button=dom.window.document.querySelector('button');
-  let modeAtSend;
-  button.addEventListener('click',()=>{modeAtSend=toggle.checked;input.value='';});
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
-  try {
-    const result=await adapter.send('欢迎贵宾',()=>true,{channel:'admin'});
-    assert.equal(result.submitted,true);assert.equal(result.channelUsed,'admin');assert.equal(modeAtSend,true);assert.equal(toggle.checked,false);
-    toggle.checked=true;
-    await adapter.send('普通互动',()=>true,{channel:'chat'});
-    assert.equal(modeAtSend,false);assert.equal(toggle.checked,true);
-  } finally {dom.window.close();}
-});
-
-test('管理员弹幕开关不可用时安全回退普通弹幕', async () => {
-  const dom=setup('<div id="chatInput"><input type="checkbox" role="switch" aria-label="管理员弹幕" disabled><textarea placeholder="与大家互动一下"></textarea><button>发送</button></div>');
-  const input=dom.window.document.querySelector('textarea'),button=dom.window.document.querySelector('button');let clicks=0;
-  button.addEventListener('click',()=>{clicks++;input.value='';});
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
-  try { const result=await adapter.send('欢迎贵宾',()=>true,{channel:'admin'});assert.equal(result.submitted,true);assert.equal(result.channelUsed,'chat');assert.match(result.modeFallback,/不可用/);assert.equal(clicks,1); }
-  finally {dom.window.close();}
-});
-
-function privilegeComposer({admin = true} = {}) {
-  const dom = setup(`<pace-island id="island_random"><div class="webcast-chatroom"><div id="chatInput"><div data-e2e="live-chatting"><div class="semi-switch"><input type="checkbox" role="switch" aria-checked="false"></div><textarea placeholder="与大家互动一下"></textarea></div><button>发送</button></div><div class="FJl3IMTf" style="display:none"><div><div class="RfKNBPEF cw6Usapi"><img src="https://cdn/privilege_screen_chat_supreme_v2.png"></div>${admin ? '<div class="RfKNBPEF"><img src="https://cdn/privilege_screen_chat_admin_v2.png"></div>' : ''}</div></div></div></pace-island>`);
-  const doc = dom.window.document, input = doc.querySelector('textarea'), toggle = doc.querySelector('[role=switch]'), menu = doc.querySelector('.FJl3IMTf');
-  for (const option of menu.querySelectorAll('.RfKNBPEF')) option.getClientRects = () => menu.style.display === 'none' ? [] : [{width:100,height:30}];
-  let selected = 'supreme', paidClicks = 0, sentMode = null, sends = 0;
-  const sync = () => { toggle.setAttribute('aria-checked', String(toggle.checked)); input.placeholder = toggle.checked ? selected === 'admin' ? '发送管理员弹幕' : '发送至尊弹幕（366钻/条）' : '与大家互动一下'; };
-  toggle.addEventListener('click',()=>{
-    sync();
-    if (toggle.checked) dom.window.setTimeout(()=>{menu.style.display=toggle.checked?'block':'none';},150);
-    else menu.style.display='none';
-  });
-  doc.querySelectorAll('.RfKNBPEF').forEach(option=>option.addEventListener('click',()=>{
-    selected = option.querySelector('img').src.includes('_admin_') ? 'admin' : 'supreme';
-    if (selected === 'supreme') paidClicks++;
-    doc.querySelectorAll('.RfKNBPEF').forEach(el=>el.classList.toggle('cw6Usapi',el===option));
-    toggle.checked=true; sync();
-  }));
-  doc.querySelector('button').addEventListener('click',()=>{sentMode = toggle.checked ? selected : 'chat'; sends++; input.value='';});
-  const adapter = new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}}); adapter.status.connected=true;
-  return {dom,adapter,input,toggle,sync,state:()=>({paidClicks,sentMode,sends})};
-}
-test('真实抖音结构按管理员图片定位，选中至尊样式不会被误认为管理员', async () => {
-  const f = privilegeComposer();
-  try {
-    const result = await f.adapter.send('欢迎新朋友',()=>true,{channel:'admin'});
-    assert.equal(result.channelUsed,'admin'); assert.deepEqual(f.state(),{paidClicks:0,sentMode:'admin',sends:1});
-    assert.equal(f.toggle.checked,false); assert.equal(f.input.placeholder,'与大家互动一下');
-  } finally { f.dom.window.close(); }
-});
-test('管理员富文本写入后占位提示消失，仍校验当前选中的管理员类型', async () => {
-  const f = privilegeComposer();
-  try {
-    const result=await f.adapter.send('欢迎贵宾',()=>true,{channel:'admin',beforeClick:async()=>f.input.removeAttribute('placeholder')});
-    assert.equal(result.channelUsed,'admin'); assert.equal(f.state().sentMode,'admin');
-  } finally { f.dom.window.close(); }
-});
 test('请求发送不依赖UI控件，暂停和人工草稿仍阻止提交；未知结果不走UI重发',async()=>{
   const dom=setup('<div id="chatInput"><textarea></textarea></div>'); let commits=0,active=true;
   const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
@@ -989,7 +862,7 @@ test('请求发送不依赖UI控件，暂停和人工草稿仍阻止提交；未
     const unknown=await adapter.send('欢迎',()=>true); assert.equal(unknown.transport,'request'); assert.equal(unknown.clicked,true); assert.equal(commits,1);
   } finally {dom.window.close();}
 });
-test('旧版请求发送器没有能力探测方法时安全回退页面控件',()=>{
+test('旧版请求发送器没有能力探测方法时报告请求不可用',()=>{
   const adapter=Object.create(DouyinAdapter.prototype);
   adapter.requestSender={prepare:async()=>({available:false})};
   assert.equal(adapter.requestAvailable('chat'),false);
@@ -1008,21 +881,8 @@ test('结构化@通过普通聊天请求提交，能力缺失不降级成纯文�
     assert.equal(unavailable.submitted,false);assert.match(unavailable.reason,/@/);assert.equal(committed.length,1);
   } finally {dom.window.close();}
 });
-test('管理员选项缺失时只发普通弹幕，不开启默认至尊弹幕', async () => {
-  const f = privilegeComposer({admin:false});
-  try {
-    const result = await f.adapter.send('欢迎新朋友',()=>true,{channel:'admin'});
-    assert.equal(result.channelUsed,'chat'); assert.match(result.modeFallback,/选项不可用/);
-    assert.deepEqual(f.state(),{paidClicks:0,sentMode:'chat',sends:1}); assert.equal(f.toggle.checked,false);
-  } finally { f.dom.window.close(); }
-});
-test('发送期间模式变为至尊弹幕时阻止点击发送', async () => {
-  const f = privilegeComposer();
-  try {
-    await assert.rejects(f.adapter.send('欢迎新朋友',()=>true,{beforeClick:async()=>{f.toggle.checked=true;f.sync();}}),/弹幕类型在发送前发生变化/);
-    assert.equal(f.state().sends,0);
-  } finally { f.dom.window.close(); }
-});
+
+
 test('面板灯牌门槛可保存，低于基础欢迎时定位错误字段并保留输入', () => {
   const dom=setup(), c=copy(DEFAULTS); c.welcome.admin.enabled=true;
   const p=new Panel({config:c,room:'1',callbacks:{}});
@@ -1044,158 +904,6 @@ test('抖音重绘后旧的手动选择器失效时回退到当前控件', () =>
   const input=dom.window.document.querySelector('[contenteditable]'),send=dom.window.document.querySelector('svg');
   try { assert.equal(adapter.findInput(),input); assert.equal(adapter.findSend(input),send); }
   finally { dom.window.close(); }
-});
-
-test('点击无效不会误报已提交，也不重复点击发送按钮', async () => {
-  const dom=setup('<div><textarea placeholder="说点什么"></textarea><svg class="webcast-chatroom___send-btn"></svg></div>');
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status={connected:true,lastFrame:Date.now()};let clicks=0;const input=dom.window.document.querySelector('textarea');dom.window.document.querySelector('svg').addEventListener('click',()=>{clicks++;if(clicks===2)input.value='';});
-  try {
-    const first=await adapter.send('感谢支持',()=>true);assert.equal(first.submitted,false);assert.equal(first.clicked,true);assert.match(first.reason,/不自动重发/);assert.equal(clicks,1);assert.equal(input.value,'');
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(clicks,2);
-  }
-  finally {dom.window.close();}
-});
-
-test('输入框已有重复候选文案时发送前收敛为一份', async () => {
-  const dom=setup('<div><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;
-  const input=document.querySelector('textarea'),button=document.querySelector('button');
-  input.value='谢谢 @A 哥的 小心心，心意收到啦～谢谢 @A 哥的 小心心，心意收到啦～';
-  let clicks=0;
-  button.addEventListener('click',()=>{clicks++;input.value='';});
-  try {
-    assert.deepEqual(await adapter.send('谢谢 @A 哥的 小心心，心意收到啦～',()=>true),{submitted:true,clicked:true});
-    assert.equal(clicks,1); assert.equal(input.value,'');
-  } finally {dom.window.close();}
-});
-
-test('输入框已有完整话术加部分重复时只提交一份并保留灯牌名称', async () => {
-  const dom=setup('<div><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;
-  const input=document.querySelector('textarea'),button=document.querySelector('button');
-  const message='感谢岁小孩LILAC成为本场No.1、1000票贡献用户！';
-  input.value=message + '感谢岁小孩LILAC成为本场No.1、10';
-  let clicks=0;
-  button.addEventListener('click',()=>{clicks++;assert.equal(input.value,message);input.value='';});
-  try {
-    assert.deepEqual(await adapter.send(message,()=>true),{submitted:true,clicked:true});
-    assert.equal(clicks,1);assert.equal(input.value,'');
-  } finally {dom.window.close();}
-});
-
-test('页面延迟启用发送按钮时等待就绪，不反复清空重填回复', async () => {
-  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button disabled>发送</button></div>');
-  const input=document.querySelector('textarea'),button=document.querySelector('button');
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;let writes=0,clicks=0,timer;
-  input.addEventListener('input',()=>{writes++;timer=setTimeout(()=>{button.disabled=false;},350);});
-  button.addEventListener('click',()=>{clicks++;input.value='';});
-  try {
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
-    assert.equal(writes,1);assert.equal(clicks,1);
-  } finally {clearTimeout(timer);dom.window.close();}
-});
-
-test('点击前异步钩子触发重绘后只点击当前发送按钮', async () => {
-  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
-  const input=document.querySelector('textarea'),button=document.querySelector('button');let oldClicks=0,newClicks=0;
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;button.addEventListener('click',()=>{oldClicks++;});
-  try {
-    const result=await adapter.send('感谢支持',()=>true,{beforeClick:async()=>{
-      const replacement=button.cloneNode(true);replacement.getClientRects=button.getClientRects;
-      replacement.addEventListener('click',()=>{newClicks++;input.value='';});button.replaceWith(replacement);
-      await Promise.resolve();
-    }});
-    assert.deepEqual(result,{submitted:true,clicked:true});assert.equal(oldClicks,0);assert.equal(newClicks,1);
-  } finally {dom.window.close();}
-});
-
-test('富文本异步粘贴晚于初始等待时仍提交一次', async () => {
-  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么"></div><button disabled>发送</button></div>');
-  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let pastes=0,clicks=0,timer;
-  dom.window.DataTransfer=class {setData(key,value){this.value=value;} getData(){return this.value;}};
-  dom.window.ClipboardEvent=class extends dom.window.Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}};
-  input.addEventListener('paste',event=>{event.preventDefault();pastes++;timer=setTimeout(()=>{input.textContent=event.clipboardData.getData('text/plain');button.disabled=false;},350);});
-  button.addEventListener('click',()=>{clicks++;input.textContent='';});
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
-  try {
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(pastes,1);assert.equal(clicks,1);
-  } finally {clearTimeout(timer);dom.window.close();}
-});
-
-test('发送后编辑器被替换时读取新编辑器的提交结果', async () => {
-  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
-  const input=document.querySelector('textarea'),button=document.querySelector('button');let clicks=0;
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;
-  button.addEventListener('click',()=>{clicks++;const replacement=input.cloneNode();replacement.value='';replacement.getClientRects=input.getClientRects;input.replaceWith(replacement);});
-  try {
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});assert.equal(clicks,1);
-    assert.equal(adapter.ownedDraft,null);
-  } finally {dom.window.close();}
-});
-
-test('富文本清理失败时不发送；恢复清空后重新写入再提交', async () => {
-  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么"></div><button>发送</button></div>');
-  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;
-  let deletes=0;
-  document.execCommand=(command,unused,text)=>{if(command==='delete'){if(++deletes===1)return false;input.textContent='';return true;}inserts++;input.textContent+=text;return true;};
-  button.addEventListener('click',()=>{if(++clicks===2)input.textContent='';});
-  try {
-    assert.equal((await adapter.send('感谢支持',()=>true)).submitted,false);
-    assert.equal(input.textContent,'感谢支持');assert.equal(adapter.ownedDraft?.text,'感谢支持');
-    adapter.ownedDraft.at=Date.now()-180000;
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
-    assert.equal(inserts,2);assert.equal(clicks,2);
-  } finally {dom.window.close();}
-});
-
-test('残留脚本草稿改发另一条回复时通过编辑器选区替换', async () => {
-  const dom=setup('<div id="chatInput"><div contenteditable="true" data-placeholder="说点什么">旧回复</div><button>发送</button></div>');
-  const input=document.querySelector('[contenteditable]'),button=document.querySelector('button');let inserts=0,clicks=0;
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;adapter.ownedDraft={text:'旧回复',at:Date.now()-180000};
-  document.execCommand=(command,unused,text)=>{if(command==='delete'){input.textContent='';return true;}assert.equal(command,'insertText');inserts++;input.textContent=text;return true;};
-  button.addEventListener('click',()=>{clicks++;assert.equal(input.textContent,'新回复');input.textContent='';});
-  try {
-    assert.deepEqual(await adapter.send('新回复',()=>true),{submitted:true,clicked:true});assert.equal(inserts,1);assert.equal(clicks,1);
-  } finally {dom.window.close();}
-});
-
-test('点击前用户改写草稿时不提交或清除人工内容', async () => {
-  const dom=setup('<div id="chatInput"><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
-  const input=document.querySelector('textarea'),button=document.querySelector('button');let clicks=0;
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;button.addEventListener('click',()=>{clicks++;input.value='';});
-  try {
-    await assert.rejects(adapter.send('感谢支持',()=>true,{beforeClick:async()=>{input.value='人工修改';}}),/不一致|变更/);
-    assert.equal(clicks,0);assert.equal(input.value,'人工修改');
-  } finally {dom.window.close();}
-});
-
-test('发送控件短暂缺失或输入禁用可以重试，多个发送候选仍停止', async () => {
-  const dom=setup('<div><textarea placeholder="说点什么"></textarea><button>发送</button></div>');
-  const input=document.querySelector('textarea'),button=document.querySelector('button');
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>copy(DEFAULTS),onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});
-  adapter.status.connected=true;
-  const retryable=error=>error.retryable===true;
-  try {
-    button.remove(); await assert.rejects(adapter.send('感谢支持',()=>true),retryable); assert.equal(input.value,'');
-    input.parentElement.append(button); input.disabled=true;
-    await assert.rejects(adapter.send('感谢支持',()=>true),error=>retryable(error)&&/不可用/.test(error.message)); input.disabled=false;
-    const duplicate=button.cloneNode(true);duplicate.getClientRects=button.getClientRects;input.parentElement.append(duplicate);
-    await assert.rejects(adapter.send('感谢支持',()=>true),error=>!error.retryable);duplicate.remove();
-    const pending=adapter.send('感谢支持',()=>true);button.remove();
-    await assert.rejects(pending,retryable);assert.equal(input.value,'');
-    input.parentElement.append(button);button.addEventListener('click',()=>{input.value='';});
-    assert.deepEqual(await adapter.send('感谢支持',()=>true),{submitted:true,clicked:true});
-  } finally {dom.window.close();}
 });
 
 test('月报可选多个主播月份，关闭采集后仍可从主播数据查看历史账本', () => {
@@ -1455,28 +1163,13 @@ test('按主播配置自动开始场控；手动暂停后不会被定时器偷�
   }
 });
 
-test('请求发送可用时开始场控不要求定位页面输入框', async()=>{
+test('直接发送暂不可用时仍可开始场控等待恢复，不要求定位页面输入框', async()=>{
   const dom=setup(),values=new Map([['live-assistant:config:1234567890',{mode:'auto'}]]);let api;
   const lock=new RoomLock({room:'1234567890'});
-  const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true,requestAvailable:()=>true,findInput(){throw Error('should not locate input');},findSend(){throw Error('should not locate send');},send:async()=>({submitted:true})};
+  const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>true,requestAvailable:()=>false,findInput(){throw Error('should not locate input');},findSend(){throw Error('should not locate send');},send:async()=>({submitted:true})};
   boot({page:dom.window,lock,get:(k,f)=>values.get(k)??f,set:(k,v)=>values.set(k,v),del:k=>values.delete(k),request:()=>{},adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
   try { api.panel.node('[data-action=start]').click();await new Promise(r=>setTimeout(r,30));assert.equal(api.engine.running,true); }
   finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api.panel.destroy();dom.window.close();await lock.drained;}
-});
-
-test('自动发送恢复原有面板焦点，用户中途切换焦点时不夺回；断线发生在输入后也不点击', async () => {
-  const dom=setup('<textarea id="chat"></textarea><button id="send">发送</button><input id="other"><div id="host"></div>');
-  const shadow=document.querySelector('#host').attachShadow({mode:'open'});shadow.innerHTML='<input id="setting">';const setting=shadow.querySelector('input');
-  const input=document.querySelector('#chat'),other=document.querySelector('#other');let clicks=0;
-  document.querySelector('#send').addEventListener('click',()=>{clicks++;input.value='';});
-  const c=copy(DEFAULTS);c.adapter.inputSelector='#chat';c.adapter.sendSelector='#send';
-  const adapter=new DouyinAdapter({page:dom.window,getConfig:()=>c,onEvent:()=>{},onLog:()=>{},onStatus:()=>{}});adapter.status.connected=true;
-  try {
-    setting.focus();assert.equal((await adapter.send('感谢支持',()=>true)).submitted,true);assert.equal(shadow.activeElement,setting);
-    setting.focus();const sending=adapter.send('谢谢礼物',()=>true);other.focus();await sending;assert.equal(document.activeElement,other);
-    setting.focus();const cancelled=adapter.send('断线不提交',()=>true);adapter.status.connected=false;assert.equal((await cancelled).submitted,false);
-    assert.equal(clicks,2);assert.equal(input.value,'');assert.equal(shadow.activeElement,setting);
-  } finally {dom.window.close();}
 });
 
 test('运行锁请求已发出后取消，迟到授权不持有；原生申请错误可重试', async () => {

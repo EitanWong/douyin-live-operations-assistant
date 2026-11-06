@@ -1,4 +1,5 @@
 import {giftOperations} from './gift-operations.js';
+import {validateRedPacket} from '../core/red-packet.js';
 // This is a capability boundary for maintained plugins, not a sandbox for hostile code.
 export class ToolGateway {
   constructor({definition, scope, room, guard, operations, createLock, timeout = 15000}) {
@@ -70,6 +71,8 @@ export function toolOperations({transport, click, saveConfig, selfId = () => '',
   const lotterySignal = (value,ctx) => value.signal ? AbortSignal.any([ctx.signal,value.signal]) : ctx.signal;
   return {
     ...giftOperations(transport,selfId),
+    'red-packet.catalog':{lock:false,run:(_,ctx)=>transport.redPacketCatalog({signal:ctx.signal})},
+    'red-packet.send':{validate:value=>validateRedPacket(value?.packet),run:(value,ctx)=>transport.sendRedPacket(value,{signal:ctx.signal})},
     'giveaway.announce': {validate:value=>{
       if(typeof value?.key!=='string' || typeof value.roundId!=='string' || !['start','entry','duplicate','countdown','reminder','result','cancelled'].includes(value.kind)
         || typeof value.text!=='string' || !value.text.trim() || [...value.text].length>50 || !Number.isFinite(value.expiresAt)
