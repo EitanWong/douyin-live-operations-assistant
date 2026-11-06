@@ -8,6 +8,9 @@ import re
 import time
 import statistics
 import wave
+import threading
+
+from model_lease import ModelLease
 
 
 def pcm16(value):
@@ -67,12 +70,15 @@ def benchmark_frames(frames):
 class LocalASR:
     def __init__(self, folder):
         self.folder = Path(folder) if folder else None
+        self.lease = ModelLease(self.folder) if self.folder else None
+        self.operation_lock = threading.RLock()
         self.recognizer = None
         available = bool(self.folder and all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav'])
                          and importlib.util.find_spec('sherpa_onnx') and importlib.util.find_spec('numpy'))
         self.status = {'phase': 'unprepared', 'available': available, 'model': 'SenseVoiceSmall-int8', 'device': 'cpu'}
 
     def decode(self, frames):
+        self.check_priority()
         import numpy as np
         frames = trim_silence(frames)
         if not frames:
@@ -85,7 +91,38 @@ class LocalASR:
         self.recognizer.decode_stream(stream)
         return clean_transcript(stream.result.text)
 
-    def prepare(self):
+    def check_priority(self):
+        if self.lease and self.lease.preempted():
+            raise ValueError('LOCAL_ASR_PREEMPTED')
+
+    def close(self, phase='unprepared'):
+        with self.operation_lock:
+            self.recognizer = None
+            if self.lease:
+                self.lease.close()
+            self.status['phase'] = phase
+
+    def prepare(self, priority='live'):
+        with self.operation_lock:
+            try:
+                deadline = time.monotonic()+10
+                if self.lease:
+                    while True:
+                        try:
+                            self.lease.acquire(priority)
+                            break
+                        except ValueError as error:
+                            if str(error) != 'ASR_BUSY' or priority != 'live' or time.monotonic() >= deadline:
+                                raise
+                            time.sleep(.05)
+                result = self._prepare()
+                self.check_priority()
+                return result
+            except Exception:
+                self.close()
+                raise
+
+    def _prepare(self):
         import sherpa_onnx
         if not self.folder or not all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav']):
             raise ValueError('LOCAL_ASR_INSTALL')
@@ -119,6 +156,16 @@ class LocalASR:
         return self.status
 
     def infer(self, data):
+        with self.operation_lock:
+            try:
+                self.check_priority()
+                return self._infer(data)
+            except ValueError as error:
+                if str(error) in ('LOCAL_ASR_PREEMPTED', 'LOCAL_ASR_SLOW'):
+                    self.close('slow' if str(error)=='LOCAL_ASR_SLOW' else 'unprepared')
+                raise
+
+    def _infer(self, data):
         if self.status['phase'] != 'ready':
             raise ValueError('LOCAL_ASR_NOT_READY')
         frames = pcm16(data)

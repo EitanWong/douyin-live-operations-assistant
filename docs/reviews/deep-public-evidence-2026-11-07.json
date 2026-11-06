@@ -4,15 +4,19 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "1774 JavaScript tests, 85 Harness tests, 53 native tests passed; build/check/index/diff passed; source upgrade, restartable incremental visible-work sampling and attribution persistence implemented.",
-  "nextExecutableAction": "为本机公开视频持久任务、取消和遗忘阻断编写行为测试，确定既有原生 ASR 单实例资源租约，再接下载适配器。",
+  "lastConfirmedResult": "JavaScript serial full suite 1774/1774, native 78/78 with ResourceWarning elevated, build/check/index passed; 43 aggregate files reconstruct and rollback correctly. Native public-video queue/audio worker implemented; actual platform download HTTP 403, not browser connected or deployed.",
+  "nextExecutableAction": "为浏览器到原生视频任务的桥接与权威遗忘版本同步编写行为测试，沿用既有账号采集/原文库控制器，并先检查所有已运行原生宿主版本与模型所有权。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
-    "extension/account-media.js",
-    "extension/account-collector.js",
-    "native/host.py",
-    "native/local_asr.py",
+    "native/public_media_jobs.py",
+    "native/public_media_worker.py",
+    "native/model_lease.py",
     "native/data_host.py",
+    "extension/account-media.js",
+    "extension/account-research.js",
+    "extension/background.js",
+    "extension/local-data.js",
+    "src/ai/knowledge-corpus.js",
     "src/ai/harness.js"
   ],
   "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
@@ -25,7 +29,7 @@
       "command": [
         "node",
         "--test",
-        "--test-concurrency=2",
+        "--test-concurrency=1",
         "tests"
       ]
     },
@@ -33,8 +37,9 @@
       "passed": 85
     },
     "native": {
-      "passed": 53,
-      "runtime": "installed Python 3.12 virtual environment"
+      "passed": 78,
+      "runtime": "installed Python 3.12 virtual environment",
+      "resourceWarnings": "elevated to errors; final frozen run passed"
     },
     "npmCi": "passed; audit 0 vulnerabilities",
     "build": "passed",
@@ -43,7 +48,16 @@
       "modules": 514,
       "symbols": 2937
     },
-    "diffCheck": "passed"
+    "diffCheck": "passed",
+    "javascriptThisStage": {
+      "firstPassed": 1773,
+      "firstFailed": 1,
+      "isolatedGiveawayPassed": 12,
+      "recheck": "serial 1774/1774 passed; prior parallel failures retained",
+      "secondPassed": 1772,
+      "secondFailed": 2,
+      "isolatedRoomMonitorPassed": 5
+    }
   },
   "benchmark": {
     "runtime": "v26.12.1",
@@ -59,7 +73,7 @@
     "basis": "Synthetic local CPU benchmark; no model, network, browser FPS or livestream acceptance claim."
   },
   "transaction": {
-    "filesVerified": 22,
+    "filesVerified": 43,
     "patchReconstructsModified": true,
     "restoredAllOriginalHashes": true,
     "newFilesRemoved": true,
@@ -78,15 +92,50 @@
     "mutator"
   ],
   "limitations": [
-    "Not a full-profile paginator or full-video analysis worker.",
-    "No real-model factuality, real-account end-to-end or long-duration live acceptance in this iteration.",
-    "Public evidence does not prove psychological traits, private life or wealth.",
-    "Native generic FTS keeps its existing response shape; provenance extensions remain in browser/raw archives."
+    "Native worker is not yet connected to browser job submission, authoritative subject deletion epochs or knowledge ingestion.",
+    "No visual timeline or real public-video end-to-end acceptance; platform returned HTTP 403.",
+    "No real-model transcription/factuality accuracy or long-duration livestream acceptance.",
+    "Already running legacy native hosts do not participate in the new model lease; no upgrade/reload performed.",
+    "Public evidence does not establish sensitive psychological traits, private life or wealth."
   ],
   "commitPush": {
     "implementation": "pushed origin/dev",
     "verifiedRemoteImplementationSHA": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
-    "documentationReceipt": "separate following commit; final SHA in completion report"
+    "documentationReceipt": "separate following commit; final SHA in completion report",
+    "nativeStage": "validation complete; implementation commit/push receipt follows"
   },
-  "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb"
+  "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
+  "nativeStage": {
+    "status": "implemented, not deployed or browser-connected",
+    "analysisVersion": "sensevoice-v1",
+    "downloader": "yt-dlp==2026.10.26",
+    "publicWorkAcceptance": {
+      "workId": "6961737553342991651",
+      "status": "failed",
+      "httpStatus": 403,
+      "reason": "Fresh cookies (not necessarily logged in) are needed"
+    },
+    "asrAccuracy": "not evaluated; installed legacy live host running, no second real model loaded",
+    "unitAsr": "controlled test double; real FFmpeg decoder",
+    "workerLimits": {
+      "pending": 32,
+      "durationMs": 10800000,
+      "leaseMs": 60000,
+      "evidencePage": 8
+    },
+    "nativeAPIOperations": [
+      "submit",
+      "list",
+      "get",
+      "cancel",
+      "forget",
+      "evidence"
+    ]
+  },
+  "previousCI": {
+    "runId": "42301278967",
+    "status": "completed",
+    "conclusion": "success",
+    "appliesTo": "previous stage only"
+  }
 }

@@ -14,6 +14,7 @@ import time
 from collections import deque
 
 import knowledge_index
+import public_media_jobs
 
 from data_models import train_calibration, predict_calibration
 
@@ -99,6 +100,7 @@ class DataStore:
             PRAGMA user_version=1;
         ''')
         knowledge_index.initialize(self.db)
+        public_media_jobs.initialize(self.db)
         os.chmod(self.path, 0o600)
 
     def append(self, records):

@@ -1,0 +1,238 @@
+"""SQLite jobs and evidence over the existing archive connection.
+
+Every worker write is fenced by an expiring lease and a subject deletion epoch.
+Media files are disposable; only source identity, checkpoints and evidence persist.
+"""
+from contextlib import contextmanager
+import hashlib
+import json
+import re
+import sqlite3
+import time
+import uuid
+
+
+LEASE_MS = 60000
+MAX_DURATION_MS = 3 * 3600000
+SUBJECT = r'(?:uid:[0-9]{1,30}|sec:[A-Za-z0-9_-]{8,160})'
+
+
+def initialize(db):
+    db.executescript('''
+      CREATE TABLE IF NOT EXISTS public_media_epochs(room TEXT,anchor TEXT,subject TEXT,epoch INTEGER NOT NULL,PRIMARY KEY(room,anchor,subject));
+      CREATE TABLE IF NOT EXISTS public_media_jobs(
+       id TEXT PRIMARY KEY,room TEXT,anchor TEXT,subject TEXT,epoch INTEGER,work_id TEXT,author TEXT,url TEXT,
+       analysis_version TEXT,status TEXT,created_at INTEGER,updated_at INTEGER,cursor_ms INTEGER DEFAULT 0,
+       lease TEXT,lease_until INTEGER,worker TEXT,not_before INTEGER DEFAULT 0,recoveries INTEGER DEFAULT 0,
+       failures INTEGER DEFAULT 0,error TEXT,coverage TEXT);
+      CREATE INDEX IF NOT EXISTS public_media_pending ON public_media_jobs(status,not_before,created_at);
+      CREATE TABLE IF NOT EXISTS public_media_segments(
+       job_id TEXT,kind TEXT,start_ms INTEGER,end_ms INTEGER,text TEXT,speaker TEXT,
+       PRIMARY KEY(job_id,kind,start_ms,end_ms),FOREIGN KEY(job_id) REFERENCES public_media_jobs(id));
+      CREATE TABLE IF NOT EXISTS public_media_blobs(job_id TEXT PRIMARY KEY,sha256 TEXT NOT NULL);
+    ''')
+
+
+def scope(room, anchor, subject=None):
+    if not all(isinstance(v, str) and re.fullmatch(r'[0-9]{1,30}', v) for v in (room, anchor)) or subject is not None and (not isinstance(subject, str) or not re.fullmatch(SUBJECT, subject)):
+        raise ValueError('MEDIA_SCOPE')
+
+
+def request_data(request):
+    if not isinstance(request, dict) or set(request) != {'room', 'anchor', 'subject', 'epoch', 'workId', 'author', 'url'}:
+        raise ValueError('MEDIA_INPUT')
+    if not isinstance(request['subject'], str):
+        raise ValueError('MEDIA_SCOPE')
+    scope(request['room'], request['anchor'], request['subject'])
+    if (type(request['epoch']) is not int or not 0 <= request['epoch'] < 2**53
+            or not isinstance(request['workId'], str) or not re.fullmatch(r'[0-9]{1,30}', request['workId'])
+            or not isinstance(request['author'], str) or not re.fullmatch(r'[A-Za-z0-9_.=-]{1,160}', request['author'])
+            or request['url'] != 'https://www.douyin.com/video/' + request['workId']):
+        raise ValueError('MEDIA_INPUT')
+    return dict(request)
+
+
+def segment_data(value):
+    if (not isinstance(value, dict) or set(value) != {'kind', 'startMs', 'endMs', 'text', 'speaker'}
+            or value['kind'] not in ('transcript', 'visual', 'ocr', 'caption') or value['speaker'] != 'unknown'
+            or not isinstance(value['text'], str) or len(value['text']) > 1200 or '\x00' in value['text']
+            or any(type(value[k]) is not int for k in ('startMs', 'endMs'))
+            or not 0 <= value['startMs'] < value['endMs'] <= MAX_DURATION_MS):
+        raise ValueError('MEDIA_SEGMENT')
+    return dict(value)
+
+
+class PublicMediaJobs:
+    def __init__(self, db, now=None):
+        self.db, self.now = db, now or (lambda: int(time.time()*1000))
+        self.db.row_factory = sqlite3.Row
+        initialize(db)
+
+    @contextmanager
+    def transaction(self):
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            yield
+
+    def current_epoch(self, room, anchor, subject):
+        row = self.db.execute('SELECT epoch FROM public_media_epochs WHERE room=? AND anchor=? AND subject=?', (room, anchor, subject)).fetchone()
+        return row['epoch'] if row else None
+
+    def submit(self, request):
+        data = request_data(request)
+        identity = [data[k] for k in ('room', 'anchor', 'subject', 'epoch', 'workId', 'author')]+['sensevoice-v1']
+        job_id = hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest()
+        with self.transaction():
+            current = self.current_epoch(data['room'], data['anchor'], data['subject'])
+            if current is not None and data['epoch'] != current:
+                raise ValueError('MEDIA_EPOCH')
+            self.db.execute('INSERT OR IGNORE INTO public_media_epochs VALUES(?,?,?,?)', (data['room'], data['anchor'], data['subject'], data['epoch']))
+            if not self.db.execute('SELECT 1 FROM public_media_jobs WHERE id=?', (job_id,)).fetchone():
+                if self.db.execute("SELECT COUNT(*) FROM public_media_jobs WHERE status IN ('queued','running','paused')").fetchone()[0] >= 32:
+                    raise ValueError('MEDIA_QUEUE_FULL')
+                at = self.now()
+                self.db.execute('INSERT INTO public_media_jobs(id,room,anchor,subject,epoch,work_id,author,url,analysis_version,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
+                                (job_id, data['room'], data['anchor'], data['subject'], data['epoch'], data['workId'], data['author'], data['url'], 'sensevoice-v1', 'queued', at, at))
+        return self.get(job_id)
+
+    def get(self, job_id):
+        row = self.db.execute('SELECT * FROM public_media_jobs WHERE id=?', (job_id,)).fetchone()
+        if row is None:
+            raise ValueError('MEDIA_JOB')
+        blob = self.db.execute('SELECT sha256 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone()
+        return {'id': row['id'], 'room': row['room'], 'anchor': row['anchor'], 'subject': row['subject'], 'epoch': row['epoch'],
+                'workId': row['work_id'], 'author': row['author'], 'url': row['url'], 'analysisVersion': row['analysis_version'],
+                'status': row['status'], 'cursorMs': row['cursor_ms'], 'lease': row['lease'], 'leaseUntil': row['lease_until'],
+                'mediaHash': blob['sha256'] if blob else None,
+                'error': row['error'], 'coverage': json.loads(row['coverage']) if row['coverage'] else {'audio': 'pending', 'video': 'not-analyzed'}}
+
+    def list(self, room, anchor):
+        scope(room, anchor)
+        return [self.get(row['id']) for row in self.db.execute('SELECT id FROM public_media_jobs WHERE room=? AND anchor=? ORDER BY created_at DESC,id LIMIT 32', (room, anchor))]
+
+    def claim(self, worker):
+        if not isinstance(worker, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', worker):
+            raise ValueError('MEDIA_WORKER')
+        with self.transaction():
+            at = self.now()
+            self.db.execute("UPDATE public_media_jobs SET status=CASE WHEN recoveries>=3 THEN 'failed' ELSE 'queued' END,recoveries=recoveries+1,lease=NULL,worker=NULL,error='MEDIA_INTERRUPTED',updated_at=? WHERE status='running' AND lease_until<=?", (at, at))
+            if self.db.execute("SELECT 1 FROM public_media_jobs WHERE status='running' LIMIT 1").fetchone():
+                return None
+            row = self.db.execute("SELECT id FROM public_media_jobs WHERE status IN ('queued','paused') AND not_before<=? ORDER BY created_at,id LIMIT 1", (at,)).fetchone()
+            if row is None:
+                return None
+            self.db.execute("UPDATE public_media_jobs SET status='running',lease=?,lease_until=?,worker=?,updated_at=?,error=NULL WHERE id=?", (uuid.uuid4().hex, at+LEASE_MS, worker, at, row['id']))
+            return self.get(row['id'])
+
+    def fenced(self, job_id, lease):
+        row = self.db.execute('SELECT * FROM public_media_jobs WHERE id=?', (job_id,)).fetchone()
+        if row is None or row['status'] != 'running' or not isinstance(lease, str) or row['lease'] != lease or row['lease_until'] <= self.now():
+            raise ValueError('MEDIA_LEASE')
+        if self.current_epoch(row['room'], row['anchor'], row['subject']) != row['epoch']:
+            raise ValueError('MEDIA_EPOCH')
+        return row
+
+    def renew(self, job_id, lease):
+        with self.transaction():
+            self.fenced(job_id, lease)
+            self.db.execute('UPDATE public_media_jobs SET lease_until=?,updated_at=? WHERE id=?', (self.now()+LEASE_MS, self.now(), job_id))
+
+    def bind_media(self, job_id, lease, sha256):
+        if not isinstance(sha256, str) or not re.fullmatch(r'[a-f0-9]{64}', sha256):
+            raise ValueError('MEDIA_HASH')
+        with self.transaction():
+            self.fenced(job_id, lease)
+            old = self.db.execute('SELECT sha256 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone()
+            if not old or old['sha256'] != sha256:
+                self.db.execute('DELETE FROM public_media_segments WHERE job_id=?', (job_id,))
+                self.db.execute('UPDATE public_media_jobs SET cursor_ms=0,coverage=NULL WHERE id=?', (job_id,))
+                self.db.execute('INSERT INTO public_media_blobs VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET sha256=excluded.sha256', (job_id, sha256))
+        return self.get(job_id)
+
+    def covered(self, job_id, end_ms):
+        cursor = 0
+        for row in self.db.execute("SELECT start_ms,end_ms FROM public_media_segments WHERE job_id=? AND kind='transcript' ORDER BY start_ms,end_ms", (job_id,)):
+            if row['start_ms'] > cursor:
+                return False
+            cursor = max(cursor, row['end_ms'])
+        return cursor >= end_ms
+
+    def checkpoint(self, job_id, lease, segments, cursor_ms):
+        if not isinstance(segments, list) or not 1 <= len(segments) <= 16 or type(cursor_ms) is not int or not 0 <= cursor_ms <= MAX_DURATION_MS:
+            raise ValueError('MEDIA_SEGMENT')
+        parsed = [segment_data(row) for row in segments]
+        with self.transaction():
+            job = self.fenced(job_id, lease)
+            if not self.db.execute('SELECT 1 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone():
+                raise ValueError('MEDIA_UNBOUND')
+            if cursor_ms < job['cursor_ms']:
+                raise ValueError('MEDIA_SEGMENT_CURSOR')
+            for row in parsed:
+                values = (job_id, row['kind'], row['startMs'], row['endMs'])
+                old = self.db.execute('SELECT text FROM public_media_segments WHERE job_id=? AND kind=? AND start_ms=? AND end_ms=?', values).fetchone()
+                if old and old['text'] != row['text']:
+                    raise ValueError('MEDIA_SEGMENT_CONFLICT')
+                self.db.execute('INSERT OR IGNORE INTO public_media_segments VALUES(?,?,?,?,?,?)', (*values, row['text'], row['speaker']))
+            if not self.covered(job_id, cursor_ms):
+                raise ValueError('MEDIA_SEGMENT_GAP')
+            self.db.execute('UPDATE public_media_jobs SET cursor_ms=?,lease_until=?,updated_at=? WHERE id=?', (cursor_ms, self.now()+LEASE_MS, self.now(), job_id))
+
+    def complete(self, job_id, lease, duration_ms):
+        if type(duration_ms) is not int or not 0 < duration_ms <= MAX_DURATION_MS:
+            raise ValueError('MEDIA_COVERAGE')
+        with self.transaction():
+            job = self.fenced(job_id, lease)
+            if job['cursor_ms'] != duration_ms or not self.covered(job_id, duration_ms):
+                raise ValueError('MEDIA_COVERAGE')
+            visual = self.db.execute("SELECT 1 FROM public_media_segments WHERE job_id=? AND kind IN ('visual','ocr') LIMIT 1", (job_id,)).fetchone()
+            coverage = {'audio': 'complete', 'durationMs': duration_ms, 'video': 'sampled' if visual else 'not-analyzed', 'speaker': 'unknown'}
+            self.db.execute("UPDATE public_media_jobs SET status='succeeded',lease=NULL,worker=NULL,updated_at=?,coverage=? WHERE id=?", (self.now(), json.dumps(coverage), job_id))
+        return self.get(job_id)
+
+    def pause(self, job_id, lease, reason, delay_ms=1000):
+        if reason not in ('live-asr', 'model-unprepared') or type(delay_ms) is not int or not 1000 <= delay_ms <= 3600000:
+            raise ValueError('MEDIA_PAUSE')
+        with self.transaction():
+            self.fenced(job_id, lease)
+            self.db.execute("UPDATE public_media_jobs SET status='paused',lease=NULL,worker=NULL,error=?,not_before=?,updated_at=? WHERE id=?", (reason, self.now()+delay_ms, self.now(), job_id))
+
+    def fail(self, job_id, lease, code):
+        if code not in ('MEDIA_DOWNLOAD_FAILED', 'MEDIA_AUTHOR_MISMATCH', 'MEDIA_DECODE_FAILED', 'MEDIA_ANALYSIS_FAILED'):
+            raise ValueError('MEDIA_ERROR')
+        with self.transaction():
+            row = self.fenced(job_id, lease)
+            retry = code != 'MEDIA_AUTHOR_MISMATCH' and row['failures'] < 2
+            self.db.execute('UPDATE public_media_jobs SET status=?,lease=NULL,worker=NULL,error=?,failures=failures+1,not_before=?,updated_at=? WHERE id=?',
+                            ('paused' if retry else 'failed', code, self.now()+60000*(row['failures']+1), self.now(), job_id))
+
+    def cancel(self, job_id, room, anchor):
+        scope(room, anchor)
+        with self.transaction():
+            job = self.get(job_id)
+            if job['room'] != room or job['anchor'] != anchor:
+                raise ValueError('MEDIA_SCOPE')
+            self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL,updated_at=? WHERE id=?", (self.now(), job_id))
+        return self.get(job_id)
+
+    def forget(self, room, anchor, subject, epoch):
+        if not isinstance(subject, str):
+            raise ValueError('MEDIA_SCOPE')
+        scope(room, anchor, subject)
+        if type(epoch) is not int or not 0 <= epoch < 2**53-1:
+            raise ValueError('MEDIA_EPOCH')
+        with self.transaction():
+            current = self.current_epoch(room, anchor, subject)
+            next_epoch = max(epoch+1, current or 0)
+            self.db.execute('INSERT INTO public_media_epochs VALUES(?,?,?,?) ON CONFLICT(room,anchor,subject) DO UPDATE SET epoch=excluded.epoch', (room, anchor, subject, next_epoch))
+            args = (room, anchor, subject)
+            self.db.execute('DELETE FROM public_media_segments WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
+            self.db.execute('DELETE FROM public_media_blobs WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
+            self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL,coverage=NULL,cursor_ms=0,updated_at=? WHERE room=? AND anchor=? AND subject=?", (self.now(), *args))
+        return next_epoch
+
+    def evidence(self, job_id, offset=0, limit=8):
+        self.get(job_id)
+        if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 8:
+            raise ValueError('MEDIA_SEGMENT_PAGE')
+        return [{'kind': r['kind'], 'startMs': r['start_ms'], 'endMs': r['end_ms'], 'text': r['text'], 'speaker': r['speaker']}
+                for r in self.db.execute('SELECT * FROM public_media_segments WHERE job_id=? ORDER BY start_ms,end_ms,kind LIMIT ? OFFSET ?', (job_id, limit, offset))]

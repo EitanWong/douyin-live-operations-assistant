@@ -384,6 +384,8 @@ async def main():
         if local_task:
             local_task.cancel()
             await asyncio.gather(local_task, return_exceptions=True)
+        if local:
+            await asyncio.to_thread(local.close)
         if task:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
