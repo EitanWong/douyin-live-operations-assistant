@@ -610,15 +610,15 @@ export class DouyinAdapter {
   }
   async prepareChatRequest(channel, isCurrent) {
     const prepared = await this.requestSender.prepare(channel);
-    if (!isCurrent()) return null;
     if (prepared?.available) return {token:prepared.token,channel};
+    if (!isCurrent()) return null;
     if (channel === 'admin') {
       const ordinary = await this.requestSender.prepare('chat');
       if (ordinary?.available) return {token:ordinary.token,channel:'chat',modeFallback:'当前账号管理员弹幕不可用'};
     }
     return null;
   }
-  async sendChatRequest(text, isCurrent, request, {beforeClick,mentions,mentionFallback}) {
+  async sendChatRequest(text, isCurrent, request, {beforeClick,mentions,mentionFallback,clearDraft}) {
     const guard = () => {
       if (!isCurrent()) return false;
       const editors = [...this.page.document.querySelectorAll('#chatInput [contenteditable="true"], #chatInput textarea')];
@@ -627,13 +627,28 @@ export class DouyinAdapter {
       }
       return true;
     };
-    if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
-    await beforeClick();
-    if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
-    // Once committed, all results stay on this transport, including rejection or uncertainty.
-    const result = await this.requestSender.commit(request.token,text,mentions);
-    const fallback = request.modeFallback || mentionFallback;
-    return {...result,channelUsed:request.channel,...(fallback ? {modeFallback:fallback} : {})};
+    let committed = false;
+    try {
+      if (!isCurrent()) return {submitted:false,reason:'请求前已暂停或断线'};
+      if (clearDraft && !clearDraft()) throw Object.assign(new Error('网页草稿尚未清理，等待恢复直接发送'),{retryable:true});
+      if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
+      await beforeClick();
+      if (!guard()) return {submitted:false,reason:'请求前已暂停或断线'};
+      // Once committed, all results stay on this transport, including rejection or uncertainty.
+      committed = true;
+      const result = await this.requestSender.commit(request.token,text,mentions);
+      const fallback = request.modeFallback || mentionFallback;
+      return {...result,channelUsed:request.channel,...(fallback ? {modeFallback:fallback} : {})};
+    } catch (error) {
+      // 保存意图不等于实际提交；引擎可安全保留尚未提交的原任务。
+      error.notSubmitted = !committed;
+      if (committed) error.clicked = true;
+      throw error;
+    } finally {
+      if (!committed && typeof this.requestSender.release === 'function') {
+        try { await this.requestSender.release(request.token); } catch {}
+      }
+    }
   }
   async send(text, isCurrent, {beforeClick = async()=>{},channel = 'chat',mentions = []} = {}) {
     const current = () => isCurrent() && this.healthy() && this.roomContext.current();
@@ -650,10 +665,8 @@ export class DouyinAdapter {
     const preferRequest = async clearDraft => {
       if (!current()) return canceled();
       const request = await this.prepareChatRequest(channel,current);
-      if (!current()) return canceled();
-      if (!request) return null;
-      if (clearDraft && !clearDraft()) throw Object.assign(new Error('网页草稿尚未清理，等待恢复直接发送'),{retryable:true});
-      return this.sendChatRequest(text,current,request,{beforeClick:checkpoint,mentions,mentionFallback});
+      if (!request) return current() ? null : canceled();
+      return this.sendChatRequest(text,current,request,{beforeClick:checkpoint,mentions,mentionFallback,clearDraft});
     };
     // Recheck fresh MAIN capabilities for every message; never latch into UI mode.
     for (const delay of [0,300,600]) {
@@ -758,10 +771,7 @@ export class DouyinAdapter {
         if (!handled && !this.page.document.execCommand?.('insertText', false, text)) throw new Error('富文本编辑器未接受输入，请用人工方式发送并检查页面适配');
       }
       if (readText() === text) this.ownedDraft = { text, at: Date.now() };
-      // 等待 React 更新按钮状态；取消时只清理本脚本的文本。
-      await new Promise(resolve => setTimeout(resolve, 120));
-      // 输入后的状态更新不保证在 120ms 内完成。等待当前控件真正就绪，
-      // 避免每次都在按钮启用前清空重填，并在重绘时重新定位。
+      // 就绪即继续；React 或粘贴处理器异步更新时再等待，并在重绘时重新定位。
       const inspectSend = () => {
         let button, unavailable;
         try { input = this.findInput(); }
@@ -780,32 +790,40 @@ export class DouyinAdapter {
       };
       const waitForSend = async () => {
         const deadline = Date.now() + 1800;
+        let nextRequestCheck = Date.now() + 300;
         while (true) {
-          if (!isCurrent() || !this.healthy()) return null;
+          if (!isCurrent() || !this.healthy()) return {};
           const {button,unavailable} = inspectSend();
-          if (button) return button;
+          if (button) return {button};
+          // 按钮不可用不代表请求不可用；等待期间继续争取直发。
+          // 异步粘贴尚未落入编辑器时不切通道，避免迟到粘贴留下草稿。
+          if (Date.now() >= nextRequestCheck && readText() === text) {
+            const result = await preferRequest(() => clearOwnText());
+            if (result) return {result};
+            nextRequestCheck = Date.now() + 300;
+          }
           if (Date.now() >= deadline) throw unavailable || temporary('发送按钮暂不可用，等待网页恢复');
           await new Promise(resolve => setTimeout(resolve, 60));
         }
       };
-      let button = await waitForSend();
-      if (!button) return {submitted:false,reason:'点击前已暂停或断线'};
+      let ready = await waitForSend();
+      if (ready.result) return ready.result;
+      if (!ready.button) return {submitted:false,reason:'点击前已暂停或断线'};
       // 抖音的发送控件是 SVGElement，没有 HTMLElement.click()。
       // 对真实控件派发一次冒泡点击，让页面自己的 React 处理发送。
       const recovered = await preferRequest(() => clearOwnText());
       if (recovered) return recovered;
       await beforeClick();
       // 异步钩子期间控件与草稿仍可能变化，点击前再次校验并获取当前节点。
-      button = await waitForSend();
-      if (!button) {
-        return {submitted:false,reason:'点击前已暂停或断线'};
-      }
+      ready = await waitForSend();
+      if (ready.result) return ready.result;
+      if (!ready.button) return {submitted:false,reason:'点击前已暂停或断线'};
       const saved = await preferRequest(() => clearOwnText());
       if (saved) return saved;
       // 请求桥异步复查期间也可能重绘或发生人工输入；最后一次校验同步完成。
       const final = inspectSend();
       if (!final.button) throw final.unavailable || temporary('发送控件已变更，等待网页恢复');
-      button = final.button;
+      const button = final.button;
       const toggle = this.findChatModeToggle(input);
       const hint = input.getAttribute('data-placeholder') || input.getAttribute('placeholder') || '';
       if (mode.used === 'admin' ? !this.isAdminChatMode(input, toggle) : this.chatMode(toggle) || /发送.*(?:至尊|高级|付费|钻)/.test(hint)) {
@@ -825,7 +843,8 @@ export class DouyinAdapter {
       }
       return withMode({submitted:false,clicked:true,reason:'点击后暂未观察到提交结果，为避免重复发送，不自动重发'});
     } catch (error) {
-      if (clicked) error.clicked = true;
+      if (clicked) { error.clicked = true; error.notSubmitted = false; }
+      else if (!error.clicked) error.notSubmitted = true;
       throw error;
     } finally {
       if (this.ownedDraft?.text === text) clearOwnText();

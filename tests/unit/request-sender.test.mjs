@@ -243,6 +243,57 @@ test('连续成功发送超过128条仍优先可用，旧回执淘汰后不能�
   } finally {f.page.close();}
 });
 
+test('释放未提交票据幂等且令旧票据失效，释放在途或完成票据不破坏去重',async()=>{
+  const f=fixture();let finish;
+  try {
+    const unused=f.sender.prepare('chat');
+    assert.equal(f.sender.release(unused.token),true);assert.equal(f.sender.release(unused.token),true);
+    assert.equal((await f.sender.commit(unused.token,'取消的消息')).submitted,false);assert.equal(f.requests.length,0);
+    f.client.request=async request=>{f.requests.push(request);return new Promise(resolve=>{finish=()=>resolve({data:{status_code:0}});});};
+    const ticket=f.sender.prepare('chat'),pending=f.sender.commit(ticket.token,'仅提交一次');
+    await Promise.resolve();
+    assert.equal(f.sender.release(ticket.token),false);
+    assert.equal(f.sender.commit(ticket.token,'不能重复'),pending);
+    finish();await pending;
+    assert.equal(f.sender.release(ticket.token),false);
+    await f.sender.commit(ticket.token,'仍不能重复');assert.equal(f.requests.length,1);
+  } finally {f.page.close();}
+});
+
+test('失效的未提交票据十秒后不再占容量，在途回执仍保留且只发一次',async t=>{
+  let now=1800000000000;t.mock.method(Date,'now',()=>now);const f=fixture();let finish;
+  try {
+    f.client.request=async request=>{f.requests.push(request);return new Promise(resolve=>{finish=()=>resolve({data:{status_code:0}});});};
+    const ticket=f.sender.prepare('chat'),pending=f.sender.commit(ticket.token,'在途消息');await Promise.resolve();
+    let expired;
+    for(let i=0;i<127;i++)expired=f.sender.prepare('chat').token;
+    assert.equal(f.sender.available('chat'),false);
+    now+=10001;
+    assert.equal(f.sender.available('chat'),true);
+    assert.equal((await f.sender.commit(expired,'不应发送')).submitted,false);
+    now+=300001;assert.equal(f.sender.available('chat'),true);
+    assert.equal(f.sender.commit(ticket.token,'不重复'),pending);
+    finish();await pending;assert.equal(f.requests.length,1);
+  } finally {f.page.close();}
+});
+
+test('聊天请求准备超时后的迟到票据由隔离桥释放，不占用下一条请求容量',async()=>{
+  const f=fixture();let complete,timeout;
+  f.page.setTimeout=callback=>{timeout=callback;return 1;};f.page.clearTimeout=()=>{};
+  const bridge=new RequestBridgeClient(f.page,message=>{
+    const command=message.command;
+    if(command.type==='cancel')return Promise.resolve({ok:true});
+    if(command.operation==='release')return Promise.resolve({ok:true,value:f.sender.release(command.token)});
+    const prepared=f.sender.prepare(command.channel);
+    return new Promise(resolve=>{complete=()=>resolve({ok:true,value:prepared});});
+  });
+  try {
+    const pending=bridge.prepare('chat');assert.equal(f.sender.tickets.size,1);
+    await timeout();complete();assert.equal((await pending).available,false);
+    assert.equal(f.sender.tickets.size,0);assert.equal(f.sender.available('chat'),true);assert.equal(f.requests.length,0);
+  } finally {f.page.close();}
+});
+
 test('点赞准备响应迟到时取消或超时都不返回可用会话，并注销已创建票据',async()=>{
   for(const mode of ['abort','timeout']) {
     const f=fixture(),controller=new AbortController();let complete,cancel;

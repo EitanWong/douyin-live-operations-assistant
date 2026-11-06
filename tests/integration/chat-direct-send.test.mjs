@@ -26,7 +26,7 @@ function fixture() {
   adapter.requestSender=new RequestBridgeClient(page,async message=>{
     const command=message.command;
     if(command.type==='cancel')return {ok:true,value:true};
-    const value=command.operation==='prepare'?sender.prepare(command.channel):await sender.commit(command.token,command.text,command.mentions);
+    const value=command.operation==='prepare'?sender.prepare(command.channel):command.operation==='release'?sender.release(command.token):await sender.commit(command.token,command.text,command.mentions);
     return {ok:true,value};
   });
   return {page,adapter,sender,client,requests,input,activity:()=>({edits,clicks}),close:()=>{
@@ -166,6 +166,49 @@ test('管理员权限不可用时改用普通直接请求，保留人工草稿�
   } finally {f.close();}
 });
 
+test('发送准备后被草稿、暂停或保存失败拦下时释放票据，重复取消不耗尽直发容量',async()=>{
+  const f=fixture();
+  try {
+    const prepare=f.sender.prepare.bind(f.sender);
+    for(let i=0;i<132;i++) {
+      f.sender.prepare=channel=>{
+        const result=prepare(channel);
+        assert.equal(result.available,true,`第${i+1}次取消不应占满容量`);
+        return result;
+      };
+      if(i%3===0) {
+        f.input.value='人工草稿';
+        await assert.rejects(f.adapter.send('自动候选',()=>true),/手动草稿/);
+        f.input.value='';
+      } else if(i%3===1) {
+        let active=true;
+        f.sender.prepare=channel=>{const result=prepare(channel);active=false;return result;};
+        assert.equal((await f.adapter.send('自动候选',()=>active)).submitted,false);
+      } else await assert.rejects(f.adapter.send('自动候选',()=>true,{beforeClick:async()=>{throw Error('保存失败');}}),/保存失败/);
+      assert.equal(f.sender.tickets.size,0);
+    }
+    f.sender.prepare=prepare;
+    assert.equal((await f.adapter.send('恢复正常直发',()=>true)).transport,'request');
+    assert.equal(f.requests.length,1);assert.deepEqual(f.activity(),{edits:0,clicks:0});
+  } finally {f.close();}
+});
+
+test('网页按钮一直不可用时仍探测请求恢复并直发，不必等待按钮启用',async()=>{
+  const f=fixture();let ready=false,timer,checkpoints=0;
+  try {
+    const prepare=f.sender.prepare.bind(f.sender),button=f.page.document.querySelector('button');
+    f.sender.prepare=channel=>ready?prepare(channel):{available:false};
+    f.input.addEventListener('input',()=>{
+      if(!f.input.value)return;
+      button.disabled=true;
+      timer=f.page.setTimeout(()=>{ready=true;},150);
+    });
+    const result=await f.adapter.send('按钮等待中切回请求',()=>true,{beforeClick:async()=>{checkpoints++;}});
+    assert.equal(result.transport,'request');assert.equal(button.disabled,true);
+    assert.equal(f.requests.length,1);assert.equal(f.input.value,'');assert.equal(f.activity().clicks,0);assert.equal(checkpoints,1);
+  } finally {f.page.clearTimeout(timer);f.close();}
+});
+
 test('直接请求结果未知时只提交一次，不回退编辑器重发',async()=>{
   const f=fixture();let calls=0;
   try {
@@ -202,4 +245,30 @@ test('提交前异步保存期间新增人工草稿时不发送、不覆盖内�
     assert.equal(f.requests.length,0);assert.equal(f.input.value,'保存期间输入的草稿');
     assert.equal(f.page.document.activeElement,f.input);assert.deepEqual(f.activity(),{edits:0,clicks:0});
   } finally {f.close();}
+});
+
+test('保存发送意图后被人工草稿拦下仍保留原消息，清空草稿后只直发一次',async()=>{
+  const f=fixture();let now=1800000000000,blocked=true;
+  const engine=new Engine({config:mergeConfig({selfId:'789'}),now:()=>now,send:f.adapter.send.bind(f.adapter),checkpoint:async()=>{
+    if(blocked && engine.deliveries.records.at(-1)?.state==='clicked')f.input.value='保存期间的人工草稿';
+  }});
+  try {
+    engine.start();engine.enqueue('gift','谢谢支持');await engine.tick();
+    assert.equal(f.requests.length,0);assert.equal(f.input.value,'保存期间的人工草稿');
+    assert.equal(engine.queue.length,1);assert.equal(engine.deliveries.records.at(-1).state,'cancelled');
+    blocked=false;f.input.value='';now+=30000;await engine.tick();
+    assert.equal(engine.queue.length,0);assert.equal(f.requests.length,1);
+    now+=30000;await engine.tick();assert.equal(f.requests.length,1);assert.equal(f.activity().clicks,0);
+  } finally {engine.stop();f.close();}
+});
+
+test('请求提交开始后桥接抛错仍标记未知，不把原消息当成未提交重发',async()=>{
+  const f=fixture();let now=1800000000000,commits=0;
+  const engine=new Engine({config:mergeConfig({selfId:'789'}),now:()=>now,send:f.adapter.send.bind(f.adapter)});
+  try {
+    f.adapter.requestSender.commit=async()=>{commits++;throw Error('提交后桥接响应丢失');};
+    engine.start();engine.enqueue('gift','谢谢支持');await engine.tick();
+    assert.equal(commits,1);assert.equal(engine.queue.length,0);assert.equal(engine.deliveries.records.at(-1).state,'unknown');
+    now+=30000;await engine.tick();assert.equal(commits,1);assert.equal(f.activity().clicks,0);
+  } finally {engine.stop();f.close();}
 });

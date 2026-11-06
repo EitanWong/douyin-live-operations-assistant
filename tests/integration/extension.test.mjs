@@ -1090,6 +1090,11 @@ test('构建后的隔离桥将真实@范围传到MAIN并序列化原生rtf_conte
     const result=await bridge.commit(ticket.token,'@懒二🐑 你好',[{id:'4143433474648240',start:0,length:5}]);
     assert.equal(result.submitted,true);
     assert.deepEqual(JSON.parse(requests[0].params.rtf_content),[{type:2,value:'{"uid":"4143433474648240","webcast_uid":""}',start:0,length:5}]);
+    assert.equal(await bridge.release(ticket.token),false,'已提交回执必须保留去重');
+    await bridge.commit(ticket.token,'不可重复发送');assert.equal(requests.length,1);
+    const unused=await bridge.prepare('chat');
+    assert.equal(await bridge.release(unused.token),true);assert.equal(await bridge.release(unused.token),true);
+    assert.equal((await bridge.commit(unused.token,'不可发送已取消票据')).submitted,false);assert.equal(requests.length,1);
   } finally {page.close();}
 });
 

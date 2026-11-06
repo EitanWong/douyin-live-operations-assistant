@@ -1455,7 +1455,7 @@ export class Engine {
     } catch (error) {
       if (this.epoch === epoch) {
         if(error.giveawayClaimed) {this.deliveries.finish(delivery,'cancelled',error.message);delivery.jobs=[];this.log('system',error.message);}
-        else if (delivery && (delivery.state !== 'prepared' || error.clicked)) {
+        else if (delivery && (error.clicked || !error.notSubmitted && delivery.state !== 'prepared')) {
           recordTurn();
           this.deliveries.finish(delivery,'unknown',error.message || '点击后结果未知；不自动重发');
         } else {

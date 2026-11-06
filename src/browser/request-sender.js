@@ -5,6 +5,7 @@ import { LotteryRequests } from './lottery-requests.js';
 import { GiftRequests } from './gift-requests.js';
 import {RedPacketRequests} from './red-packet-requests.js';
 import { encodeChatMentions } from '../core/chat-mentions.js';
+const CHAT_PREPARE_TTL = 10000, CHAT_RECEIPT_TTL = 300000, CHAT_TICKET_LIMIT = 128;
 // Reuse the live page's loaded HTTP client so its session and request interceptors
 // remain in charge. Cookies, signatures and remote code never cross the bridge;
 // paid gifts use fixed, budget-bound preparation and commit operations.
@@ -88,11 +89,14 @@ export class PageRequestSender {
     return true;
   }
   pruneTickets(now = Date.now()) {
-    for (const [id,ticket] of this.tickets) if (now-ticket.at > 300000) this.tickets.delete(id);
+    for (const [id,ticket] of this.tickets) {
+      const expired = now-ticket.at > (ticket.result ? CHAT_RECEIPT_TTL : CHAT_PREPARE_TTL);
+      if (expired && (!ticket.result || ticket.settled)) this.tickets.delete(id);
+    }
     // Completed receipts must not exhaust preparation capacity during a busy chat.
     // An evicted token is invalid, so duplicate bridge deliveries still cannot resend.
     for (const [id,ticket] of this.tickets) {
-      if (this.tickets.size < 128) break;
+      if (this.tickets.size < CHAT_TICKET_LIMIT) break;
       if (ticket.settled) this.tickets.delete(id);
     }
   }
@@ -102,7 +106,7 @@ export class PageRequestSender {
       this.pruneTickets();
       const context = this.context();
       return Boolean(context && typeof context.userId === 'string' && /^\d+$/.test(context.userId)
-        && this.client() && (channel !== 'admin' || context.admin) && this.tickets.size < 128);
+        && this.client() && (channel !== 'admin' || context.admin) && this.tickets.size < CHAT_TICKET_LIMIT);
     } catch { return false; }
   }
   prepare(channel) {
@@ -114,11 +118,16 @@ export class PageRequestSender {
       // Local display is best effort and does not determine request availability.
       const now = Date.now();
       this.pruneTickets(now);
-      if (this.tickets.size >= 128) return {available:false};
+      if (this.tickets.size >= CHAT_TICKET_LIMIT) return {available:false};
       const token = this.page.crypto.randomUUID();
       this.tickets.set(token, {context,client,channel,at:now});
       return {available:true,token};
     } catch { return {available:false}; }
+  }
+  release(token) {
+    if (this.tickets.get(token)?.result) return false;
+    this.tickets.delete(token);
+    return true;
   }
   commit(token, text, mentions = []) {
     const ticket = this.tickets.get(token);
@@ -134,7 +143,7 @@ export class PageRequestSender {
   }
   async perform(ticket,text,richText) {
     const current = this.context();
-    if (!current || current.path !== ticket.context.path || current.roomId !== ticket.context.roomId || current.userId !== ticket.context.userId || Date.now()-ticket.at > 10000) return {submitted:false,reason:'房间、账号或请求准备已变更'};
+    if (!current || current.path !== ticket.context.path || current.roomId !== ticket.context.roomId || current.userId !== ticket.context.userId || Date.now()-ticket.at > CHAT_PREPARE_TTL) return {submitted:false,reason:'房间、账号或请求准备已变更'};
     if (typeof text !== 'string' || !text.trim() || [...text].length > 50) return {submitted:false,reason:'消息长度无效'};
     if (ticket.channel === 'admin' && !current.admin) return {submitted:false,reason:'管理员身份已变更'};
     const params = {room_id:current.roomId,content:text};
@@ -172,7 +181,7 @@ export class RequestBridgeClient {
   constructor(page,send=payload=>page.chrome.runtime.sendMessage(payload)) { this.page=page;this.send=send;this.context=new RoomContext(page);this.room=this.context.room; }
   async call(operation,payload,timeout,{signal}={}) {
     const read=['gift-snapshot','gift-balance','gift-catalog','red-packet-catalog','acknowledge-gift'].includes(operation);
-    const unavailable=()=>operation.startsWith('prepare') || read ? {available:false,reason:'页面请求未完成，请刷新数据后重试'}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
+    const unavailable=()=>operation==='release'?false:operation.startsWith('prepare') || read ? {available:false,reason:'页面请求未完成，请刷新数据后重试'}:{submitted:false,unknown:true,clicked:true,transport:'request',reason:'请求结果未知，已停止，不自动重试'};
     if(!this.context.current() || signal?.aborted)return operation.startsWith('prepare')?{available:false}:{submitted:false};
     const id=this.page.crypto.randomUUID();
     let canceled=false;
@@ -186,6 +195,7 @@ export class RequestBridgeClient {
       if(canceled && operation.startsWith('prepare')) {
         // MAIN may have completed preparation before its reply was canceled.
         // Revoke that session before allowing another attempt.
+        if(operation==='prepare' && result?.ok && typeof result.value?.token==='string')await this.release(result.value.token);
         if(operation==='prepare-like' && result?.ok && typeof result.value?.token==='string')await this.stopLike(result.value.token);
         if(operation==='prepare-lottery' && result?.ok && typeof result.value?.token==='string')await this.stopLottery(result.value.token);
         if(operation==='prepare-gift' && result?.ok && typeof result.value?.token==='string')await this.stopGift(result.value.token);
@@ -213,5 +223,6 @@ export class RequestBridgeClient {
   stopLike(token) {return this.call('stop-like',{token},800);}
   commitModeration(token) {return this.call('commit-moderation',{token},10000);}
   prepare(channel) {return this.call('prepare',{channel},800);}
+  release(token) {return this.call('release',{token},800);}
   commit(token,text,mentions=[]) {return this.call('commit',{token,text,mentions},10000);}
 }

@@ -30,6 +30,7 @@ if(room && !Object.hasOwn(window,'__douyinAssistantPageV2')) {
       if(operation==='prepare-moderation')return await sender.prepareModeration(action,target);
       if(operation==='prepare')return await sender.prepare(channel);
       if(typeof token!=='string' || token.length>64)return {submitted:false};
+      if(operation==='release')return sender.release(token);
       if(operation==='commit-gift')return await sender.commitGift(token,count,sequence,{signal:controller.signal});
       if(operation==='stop-gift')return await sender.stopGift(token);
       if(operation==='commit-like')return await sender.commitLike(token,count,sequence,{signal:controller.signal});
