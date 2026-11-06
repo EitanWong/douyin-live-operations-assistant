@@ -3181,3 +3181,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终验证：更新夹具后的冻结源码全量1738/1738通过，0失败/取消/跳过，211.646秒；直发/请求专项32/32、PK专项23/23，恢复网页发送后的先前浏览器专项94/94。npm ci、agent:index（502模块/2872符号）、正式build、check及git diff --check通过。最终全测包含最后一次控件/人工草稿复查及取消清理改动；不以早期专项替代最终全测。
 - 构建交付：当前工作树dist/chrome-extension和dist/douyin-live-assistant.user.js已生成，未覆盖原工作区构建或重载用户扩展。没有真实弹幕发送或实播验收；crapper/dryer/mutator不可用，三项检查仍未执行。最终提交和dev推送回执随后补记。
 - 推送前同步：origin/dev在验证期间新增4个红包功能/回执提交（至550b10a）；本地修复cdd426c尚未推送，执行rebase集成。源码request-sender自动合并且逐项确认红包导出和聊天回执回收同时保留；行动日志按远端/本任务顺序保留双方段落，生成索引重新生成。上面的1738项为集成前结果，集成后的构建和完整回归重新执行；仅在当前隔离工作树操作，原工作区不变。
+- 集成后最终验证：npm test -- --test-concurrency=2完整1749/1749通过，0失败/取消/跳过，198.258秒；508模块/2912符号索引、正式build、check及git diff --check通过。新增红包用例与本次恢复的网页/请求发送用例共同纳入最终全测，证据为full-test-integrated.log、agent-index-integrated.log、build-integrated.log、check-integrated.log。依赖锁未变，沿用本轮成功的npm ci。其后只补验收回执，不改变已验证源码。
+- 推送回执：修复提交rebase后为9cc14b1ec254af91fe4a337511791d86e4898606，已推送origin/dev（550b10a→9cc14b1），git ls-remote核对远端SHA一致。保留另一任务的红包功能及日志；没有改main、版本或标签，没有核验远端CI，不算作本地检查结果。crapper/dryer/mutator不可用且未执行，真实弹幕与长期实播未验证；隔离工作树及最终构建仍保留供重载/审查，原工作区未覆盖或清理。本条最终验收与回执另作文档提交同步dev，最终文档SHA见完成报告。
