@@ -103,28 +103,35 @@ export async function runAgentCase(scenario,{key,workspaceId,request=fetchTransp
 }
 
 async function runResearchCase(scenario,{key,workspaceId,request}){
- const values=new Map(),room='evaluation',anchor='10001';let calls=0,searches=0;
+ const values=new Map(),room='evaluation',anchor='10001',promptChars=[],modelTimings=[],started=performance.now();let calls=0,searches=0,reads=0;
  const config=mergeConfig({anchorId:anchor,ai:{enabled:true,pipeline:{mode:'omni-only',workspaceId},search:{enabled:true}}});
  values.set(`live-assistant:config:${room}`,config);
  const transport=details=>{
-  if(details.operation!=='search'){calls++;return request(details);}
-  searches++;details.onload({status:200,responseText:JSON.stringify({code:200,data:{webPages:{value:scenario.sources.map(row=>({name:row.title,url:row.url,summary:row.content}))}}})});
+  if(details.operation!=='search'){calls++;promptChars.push(JSON.stringify(JSON.parse(details.data).messages).length);const at=performance.now();return request({...details,onload:response=>{modelTimings.push(performance.now()-at);details.onload(response);}});}
+  searches++;const query=JSON.parse(details.data).query,sources=scenario.searchFixtures?.find(row=>new RegExp(row.pattern,'iu').test(query))?.sources || scenario.sources;
+  details.onload({status:200,responseText:JSON.stringify({code:200,data:{webPages:{value:sources.map(row=>({name:row.title,url:row.url,summary:row.content}))}}})});
  };
  const tasks=createLocalAgentTasks({room,anchor:()=>anchor,request:transport,getKey:kind=>kind==='search' ? 'fixture-key' : key,
+  publicReader:async url=>{reads++;const page=scenario.pages?.find(row=>row.url===url);if(!page)throw Error('评测固定资料中没有该原文');return {...page,readAt:Date.now()};},
   get:(name,fallback)=>structuredClone(values.get(name) ?? fallback),set:(name,value)=>values.set(name,structuredClone(value))});
  try{
   const job={id:'evaluation-task',question:scenario.question,input:{anchor,ai:config.ai,context:{now:1793764800000},sources:[]}};
   await tasks.submit(job);if(scenario.duplicate)await tasks.submit(job);
-  const deadline=Date.now()+95000;let row;
+  const deadline=Date.now()+185000;let row;
   do{row=(await tasks.list())[0];if(['succeeded','failed','cancelled','interrupted'].includes(row?.status))break;
    if(Date.now()>deadline)throw new Error('后台评测等待超时');await new Promise(resolve=>setTimeout(resolve,10));
   }while(true);
   const output=row.result?.answer || '',stored=values.get(`live-assistant:ai-tasks:${room}`) || [];
-  const result={id:scenario.id,label:scenario.label,question:scenario.question,output,replies:output ? [{text:output,valid:output.length<=1000}] : [],calls,searches,sent:0,
+  const result={id:scenario.id,label:scenario.label,question:scenario.question,output,replies:output ? [{text:output,valid:output.length<=1000}] : [],calls,searches,reads,sent:0,promptChars,modelTimings,durationMs:performance.now()-started,
    pending:(await tasks.list()).filter(r=>['queued','running'].includes(r.status)).length,aborted:0,faultInjected:false,taskCount:stored.length,
-   secretStored:JSON.stringify(stored).includes(key),status:row.status,trace:row.trace,citationIndices:row.result?.citationIndices || [],sources:row.result?.sources || [],diagnostics:row.error ? [{kind:'error',text:row.error}] : []};
+   secretStored:JSON.stringify(stored).includes(key),status:row.status,trace:row.trace,runtime:row.result?.runtime,stopReason:row.result?.stopReason,toolActions:(row.result?.observations || []).map(r=>r.action),citationIndices:row.result?.citationIndices || [],sources:row.result?.sources || [],diagnostics:row.error ? [{kind:'error',text:row.error}] : []};
   result.checks=[...assessAgentResult(result,scenario),{label:'后台任务持久保存成功',pass:row.status==='succeeded' && stored.length===1},
-   {label:'密钥不写入任务记录',pass:!result.secretStored},{label:'来源贯通后台结果',pass:result.sources.length>0 && result.citationIndices.includes(1)}];
+   {label:'密钥不写入任务记录',pass:!result.secretStored},{label:'LangGraph实际完成查证',pass:result.runtime==='langgraph' && result.stopReason==='complete'},
+   {label:'引用均指向实际取得的来源',pass:result.citationIndices.every(id=>result.sources.some(s=>s.index===id))},
+   {label:'来源贯通后台结果',pass:scenario.sources.length===0 || result.sources.length>0 && result.citationIndices.length>0}];
+  if(scenario.minSearches)result.checks.push({label:'按证据完成追加检索',pass:searches>=scenario.minSearches});
+  if(scenario.maxPromptChars)result.checks.push({label:'每轮实际提示在字符预算内',pass:promptChars.every(n=>n<=scenario.maxPromptChars)});
+  for(const action of scenario.requiredTools || [])result.checks.push({label:`实际执行工具 ${action}`,pass:result.toolActions.includes(action)});
   result.passed=result.checks.every(r=>r.pass);return result;
  }finally{tasks.close();}
 }

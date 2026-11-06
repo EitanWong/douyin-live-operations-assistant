@@ -1,5 +1,10 @@
-import {createAIClient} from '../services/ai.js';
-import {createSearchClient} from '../services/search.js';
+import {makeAIRequest} from '../services/ai.js';
+import {createResearchGraph,RESEARCH_INSTRUCTION,RESEARCH_LIMITS} from './research-graph.js';
+import {sourceExpiresAt} from '../services/web-knowledge.js';
+import {relationshipEvidenceVersion} from '../services/relationship-query.js';
+import {createPublicDataClient} from '../services/public-data.js';
+import {createWeatherClient} from '../services/weather.js';
+import {createSearchClient,requestJSON} from '../services/search.js';
 import {validateEndpoint} from '../services/ai.js';
 import {validateSearchEndpoint} from '../services/search.js';
 import {z} from 'zod';
@@ -13,25 +18,32 @@ export function validateAgentInput(input){
  const context={};for(const key of ['persona','knowledge','context','recentReplies','liveContext','mediaContext','accountContext','relationshipContext','now'])if(data.context[key]!==undefined)context[key]=data.context[key];
  return {anchor:data.anchor,context,sources:data.sources,ai:{endpoint,model:raw.model,temperature:0.2,search,contextSources:z.object(Object.fromEntries(Object.keys(CONTEXT_DEFAULTS).map(key=>[key,z.boolean()]))).parse({...CONTEXT_DEFAULTS,...raw.contextSources}),memory:validateMemory(raw.memory || MEMORY_DEFAULTS),assistant:validateAssistant(raw.assistant || ASSISTANT_DEFAULTS),pipeline:{mode:'text',contextBudgetChars:24000}}};
 }
-// A bounded, read-only agent. Model planning cannot create tools, change URLs,
-// send messages, manage viewers or write factual memories on its own.
-export function createResearchAgent({request,getKey,readPublicPage,reserve=async()=>{}}){
+export function createResearchAgent({request,getKey,readPublicPage,reserve=async()=>{},reserveSearch=async()=>{},knowledge,relationships,checkpointer,guard=async()=>{}}){
  return async(job,{signal,checkpoint})=>{
-  const data=validateAgentInput(job.input);await checkpoint('context','读取任务提交时的上下文快照与本地知识');
-  const pages=[];for(const url of data.sources){if(signal.aborted)throw new Error('任务已取消');await checkpoint('public-source',new URL(url).hostname);try{const page=await readPublicPage(url,signal);pages.push({...page,text:page.text.slice(0,2000),truncated:page.text.length>2000});}catch(error){pages.push({url,error:error.message});}}
-  const sources=[],citationIndices=[];let modelCalls=0;const metered=details=>{if(!['search','weather','public-data'].includes(details.operation)){modelCalls++;if(modelCalls>3)throw new Error('Agent模型调用预算已用完');}return request(details);};
-  const search=createSearchClient({request:metered,getKey:endpoint=>getKey('search',endpoint)});
-  const client=createAIClient({request:metered,getKey:endpoint=>getKey('ai',endpoint),search,
-   onIntent:record=>{void checkpoint('plan',record.intent).catch(()=>{});},onSearch:record=>{sources.push(...(record.results || []));citationIndices.push(...(record.citationIndices || []));}});
-  await reserve(job.scope);await checkpoint('agent','常规2次模型调用，超长时最多压缩1次；最多2次并行搜索；后台结果不发送公屏');
-  const context=data.context;
-  const prompt={...context,task:{kind:'agent',instruction:'后台研究当前问题；按已核实上下文回答，必要时搜索，缺资料明确说明。'},target:{text:job.question,public_sources:pages},maxLength:1000,signal,isCurrent:()=>!signal.aborted,
-   canFollowup:()=>modelCalls<2};
-  // Reserve the second model call before allowing a search follow-up. The
-  // reservation is conservative: unused capacity is not refunded after failure.
-  prompt.reserveFollowup=async()=>{if(modelCalls>=3)return false;if(modelCalls===2)await reserve(job.scope);return true;};
-  await reserve(job.scope);
-  const answer=await client(prompt,data.ai);if(signal.aborted)throw new Error('任务已取消');await checkpoint('result','保存带来源结果，等待用户核对');
-  return {answer,citationIndices,sources:sources.slice(0,5),publicSources:pages,at:Date.now(),contextAt:context.now || null,modelCalls,coverage:'snapshot research; no automatic public posting or factual-memory write'};
+  const data=validateAgentInput(job.input);
+  const current=async state=>{
+   if(signal.aborted)throw Error('任务已取消');await guard();
+   if(state?.sources?.some(row=>row.expiresAt && row.expiresAt<=Date.now()))throw Error('研究来源已过期，请重新提交');
+   for(const row of state?.observations || [])if(row.action==='relationships' && !row.output?.error && relationships && relationshipEvidenceVersion(row.output)!==relationshipEvidenceVersion(await relationships(row.query)))throw Error('人物资料已变化，研究结果已作废');
+  };
+  await current();await checkpoint('context','读取当前有效知识与关系，恢复已落盘的研究步骤');
+  const search=createSearchClient({request,getKey:endpoint=>getKey('search',endpoint)});
+  const dated=(found,freshness='stable')=>({...found,results:(found.results || []).map(row=>{const at=found.searchedAt ?? Date.now();return {...row,at,expiresAt:sourceExpiresAt(`${job.question} ${found.query || ''}`,freshness,at)};})});
+  const runtime=createResearchGraph({checkpointer,checkpoint,guard:current,question:job.question,initialSources:data.sources,
+   search:async query=>{await reserveSearch(job.scope);return dated(await search(query,data.ai.search,{signal,timeout:15000}));},
+   read:async url=>{const page=await readPublicPage(url,signal),at=page.at ?? page.readAt ?? Date.now();return {...page,at,expiresAt:Math.min(Number.isFinite(page.expiresAt) ? page.expiresAt : Infinity,sourceExpiresAt(job.question,'stable',at))};},knowledge,relationships,
+   publicData:async call=>dated(await createPublicDataClient({request})(call,{signal,now:Date.now(),timeout:15000}),'realtime'),
+   weather:async({action,...plan})=>dated(await createWeatherClient({request})({...plan,intent:'weather'},{signal,now:Date.now(),timeout:15000}),'realtime'),
+   plan:async state=>{
+    await reserve(job.scope);await current();
+    const body=makeAIRequest({...data.context,task:{kind:'agent'},researchInstruction:RESEARCH_INSTRUCTION,target:{text:job.question,
+     agent_state:{...state.workingContext,remainingModelCalls:RESEARCH_LIMITS.modelCalls-state.modelCalls}},maxLength:1000},data.ai);
+    const result=await requestJSON(request,{url:data.ai.endpoint,key:getKey('ai',data.ai.endpoint),body,stream:body.stream,signal});
+    const raw=result.choices?.[0]?.message?.content;if(typeof raw!=='string')throw Error('研究模型没有返回文本');return raw;
+   }});
+  const id=`research-v1:${job.scope}:${job.id || crypto.randomUUID()}`;
+  const result=await runtime.run({id,signal});await current(result);await checkpoint('result','研究结果与原始来源已保存，前台可按问题检索原文');
+  return {answer:result.answer,citationIndices:result.citationIndices,sources:result.sources,publicSources:result.publicSources,observations:result.observations,
+   at:Date.now(),contextAt:data.context.now || null,modelCalls:result.modelCalls,stopReason:result.stopReason,runtime:'langgraph',coverage:'bounded public evidence; no automatic public posting; only source text may enter factual memory'};
  };
 }

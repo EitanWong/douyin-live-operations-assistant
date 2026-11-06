@@ -3,13 +3,16 @@ import {relationshipEvidenceVersion} from '../src/services/relationship-query.js
 import {AgentHarness} from '../src/ai/harness.js';
 import {createAgentTaskStore} from '../src/ai/task-store.js';
 import {createResearchAgent,validateAgentInput} from '../src/ai/agent.js';
+import {RESEARCH_LIMITS} from '../src/ai/research-graph.js';
 import {readPublicPage,validatePublicURL} from '../src/ai/public-sources.js';
 import {validateEndpoint} from '../src/services/ai.js';
 import {validateSearchEndpoint,validateSearchBody} from '../src/services/search.js';
 import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
 import {validateWeatherURL} from '../src/services/weather.js';
 import {validatePublicDataURL} from '../src/services/public-data.js';
-export function createBackgroundAI({chrome,readRecord,relationships,knowledge,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
+import {retrieveSourceRecords} from '../src/services/automatic-knowledge.js';
+import {continuousEnabled,createContinuousResearch} from '../src/ai/continuous-research.js';
+export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
  const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
  const request=details=>{
   const controller=new AbortController();let timeout;
@@ -34,22 +37,49 @@ export function createBackgroundAI({chrome,readRecord,relationships,knowledge,fe
   if(relationships){job.input.context ||= {};job.input.context.relationshipContext=graph;}
   const keys=new Map();for(const [kind,endpoint] of [['ai',ai.endpoint],['search',ai.search?.enabled ? ai.search.endpoint : null]])if(endpoint){const origin=new URL(endpoint).origin;keys.set(`${kind}:${endpoint}`,await readRecord(`live-assistant:${kind==='ai'?'api-key':'search-key'}:${origin}`) || (kind==='ai' ? await readRecord(`live-assistant:media-key:${origin}`) : '') || '');}
   const knowledgeVersion=knowledge ? await knowledge.handle(room,'version',{anchor:job.input.anchor}) : undefined;
-  const agent=createResearchAgent({request,getKey:(kind,url)=>keys.get(`${kind}:${url}`) || '',readPublicPage:(url,signal)=>readPublicPage(url,{authorized,fetch:fetcher,signal}),reserve:scope=>store.reserve(scope)});
+  const binding={ai:validateAgentInput(job.input).ai,knowledgeVersion,relationships:relationshipEvidenceVersion(graph)};
+  await options.bind?.(binding);
+  const guard=async()=>{
+   const latest=await readRecord(`live-assistant:config:${room}`);
+   if(!latest?.ai?.enabled || String(latest.anchorId)!==job.input.anchor || job.id.startsWith('auto-') && !continuousEnabled(latest))throw Error('AI或持续研究已关闭，或主播已变化');
+   const current=validateAgentInput({...job.input,ai:resolveReplyConfig(latest.ai)}).ai;
+   if(JSON.stringify(current)!==JSON.stringify(binding.ai))throw Error('AI设置已变化，请重新提交研究');
+   if(knowledge && knowledgeVersion!==await knowledge.handle(room,'version',{anchor:job.input.anchor}))throw Error('知识已删除或变化，旧研究已作废');
+   if(relationships && binding.relationships!==relationshipEvidenceVersion(await relationships(room,job.question)))throw Error('人物资料已变化，本次研究已作废');
+  };
+  const read=async(url,signal)=>{
+   if(collectAccount && new URL(url).hostname==='www.douyin.com'){
+    if(ai.contextSources?.accounts===false)throw Error('公开账号上下文已关闭');
+    const rows=await collectAccount(room,url,{signal});
+    return {url,title:rows[0]?.title || '抖音公开资料',text:rows.map(r=>`${r.title}：${r.text}`).join('\n').slice(0,6000),readAt:Date.now(),coverage:'原页面实际加载的有界公开资料；非完整主页历史'};
+   }
+   return readPublicPage(url,{authorized,fetch:fetcher,signal});
+  };
+  const agent=createResearchAgent({request,getKey:(kind,url)=>keys.get(`${kind}:${url}`) || '',readPublicPage:read,checkpointer:store.checkpointer,guard,
+   reserve:async scope=>{await store.reserve(`task:${scope}:${job.id}`,RESEARCH_LIMITS.modelCalls,{lifetime:true});return store.reserve(scope);},reserveSearch:async scope=>{await store.reserve(`task-search:${scope}:${job.id}`,RESEARCH_LIMITS.searches,{lifetime:true});return store.reserve(`search:${scope}`,20);},
+   knowledge:async query=>ai.assistant?.memoryEnabled===false || !knowledge ? [] : retrieveSourceRecords(await knowledge.handle(room,'list',{anchor:job.input.anchor}),query).flatMap(r=>r.results),
+   relationships:query=>ai.assistant?.memoryEnabled===false ? null : relationships?.(room,query)});
   const result=await agent(job,options);
-  if(relationships && relationshipEvidenceVersion(graph)!==relationshipEvidenceVersion(await relationships(room,job.question)))throw Error('人物资料已变化，本次研究结果已作废，请重新提交');
+  await guard();
   if(knowledge && ai.search?.rememberKnowledge!==false && ai.assistant?.memoryEnabled!==false){
-   const sources=[...result.sources,...result.publicSources.filter(r=>!r.error)].slice(0,10);
+   const sources=result.sources;
    try{result.knowledgeStored=await knowledge.handle(room,'remember',{anchor:job.input.anchor,sources,version:knowledgeVersion,lifetime:knowledgeLifetime(job.question,'stable')});}
    catch(error){result.knowledgeError=error.message;}
   }
   return result;
  };
- const harness=new AgentHarness({store,execute});
+ const harness=new AgentHarness({store,execute,resumable:Boolean(store.checkpointer)});
+ const loop=createContinuousResearch({configs:readConfigs,read:readRecord,store,submit:job=>harness.submit({...job,input:validateAgentInput(job.input)}),
+  hasPending:scope=>harness.list(scope).some(j=>['queued','running'].includes(j.status)),
+  cancelDisabled:async configs=>{for(const job of harness.jobs.values())if(['queued','running'].includes(job.status)){
+   const [room,anchor]=job.scope.split(':'),config=configs[`live-assistant:config:${room}`];
+   if(!config?.ai?.enabled || String(config.anchorId)!==anchor || job.id.startsWith('auto-') && !continuousEnabled(config))await harness.cancel(job.id,job.scope);
+  }}});
  return {ready:harness.ready,async handle(message,room){await harness.ready;const config=await readRecord(`live-assistant:config:${room}`),anchor=String(config?.anchorId || '');if(!/^\d{1,30}$/u.test(anchor))throw new Error('请先保存主播UID和AI设置');const scope=`${room}:${anchor}`;
    if(message.type==='agent-list')return harness.list(scope);
    if(message.type==='agent-cancel')return harness.cancel(message.id,scope);
    if(!config.ai?.enabled)throw new Error('请先启用并保存AI设置');
    const input=validateAgentInput({...message.input,anchor,ai:resolveReplyConfig(config.ai)});for(const url of input.sources)validatePublicURL(url);
    return harness.submit({id:message.id,scope,question:message.question,input});
-  },wake:()=>harness.ready.then(()=>harness.drain()),close:()=>{harness.close();store.close();}};
+  },wake:async()=>{await harness.ready;await loop.tick();harness.drain();},close:async()=>{await harness.close();store.close();}};
 }

@@ -1,4 +1,5 @@
 import {supportContext} from '../ai/support-context.js';
+import {withPlainReplyStyle} from '../ai/reply-style.js';
 import {skillInstructions} from '../ai/skills.js';
 import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
@@ -30,6 +31,7 @@ export function makeAIRequest(prompt, config) {
   prompt=applyPromptSources(currentAIPrompt(prompt),config);
   if(!prompt.searchResults && prompt.target && prompt.target.type!=='speech' && ['ai','gift','welcome'].includes(prompt.task?.kind || 'ai'))prompt={...prompt,target:{...prompt.target,support:supportContext(prompt.target,prompt.task,config,prompt.getNow?.() ?? prompt.now ?? Date.now())}};
   const request=makeBaseAIRequest(prompt,config);
+  if(prompt.task?.kind!=='moderation')request.messages=withPlainReplyStyle(request.messages);
   if(prompt.intentRouting && ['ai','agent'].includes(prompt.task?.kind || 'ai'))request.temperature=0;
   if (new URL(config.endpoint).hostname==='api.deepseek.com' && ['deepseek-flash','deepseek-v4-pro'].includes(config.model)) request.thinking={type:'disabled'};
   if(!prompt.searchResults && !isSpeechRouting(prompt))request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
@@ -43,7 +45,7 @@ export function makeAIRequest(prompt, config) {
   request.messages[1].content='';
   const wireBudget=Math.floor((98000-JSON.stringify(request).length)/2);
   if(wireBudget<1000)throw new Error('固定任务指令超过请求预算，请缩短场控风格和任务');
-  request.messages[1].content=JSON.stringify(applyContextBudget(data,Math.min(pipelineConfig(config).contextBudgetChars,wireBudget)));
+  request.messages[1].content=JSON.stringify(applyContextBudget(data,Math.min(prompt.researchInstruction ? 10000 : pipelineConfig(config).contextBudgetChars,wireBudget)));
   if(JSON.stringify(request).length>100000)throw new Error('AI 请求超过整包预算');
   if(/qwen.*omni/iu.test(config.model)){request.stream=true;request.modalities=['text'];if(/^qwen3\.8-omni-/iu.test(config.model))request.reasoning_effort='none';}
   return request;
@@ -51,6 +53,15 @@ export function makeAIRequest(prompt, config) {
 function isSpeechRouting(prompt){return prompt.intentRouting && !prompt.searchResults && prompt.target?.type==='speech';}
 function intentRoutingInstruction(prompt){return `普通对话意图（其他工具使用工具清单的独立格式）输出格式为 {"intent":"live-data|web-search|knowledge|chat|clarify|skip","query":"","reply":""}，普通意图的intent必须是其中一个实际值，clock、weather、public-data按各自工具格式输出。live-data 使用现场数据直接回答，chat 直接回答，clarify 只问一句必要条件，这三者query为空；skip 的 reply 与 query 为空。knowledge 只使用提供的候选id，reply不带角标，另附sources整数数组记录实际依据。web-search 只生成不超过300字的搜索词，reply 为空，可附 freshness=realtime|rules|stable|short；搜索词只含完成当前问题必要的信息，不附带直播上下文、观众昵称、UID或私密资料。当前联网搜索${prompt.searchAvailable ? '可用，需要外部资料或观众要求核实时选择 web-search' : '未启用，仍可使用有效缓存，需要新资料则在 reply 坦诚说明具体什么资料还没查到，不假装查过'}。`;}
 function makeBaseAIRequest(prompt, config) {
+  if(prompt.task?.kind==='agent' && prompt.researchInstruction)return {
+    model:config.model,stream:false,temperature:config.temperature,max_tokens:1600,
+    messages:[{role:'system',content:[
+      '你是只读的直播间后台研究助手。结果用于核对；不能发公屏、操作账号、冒充主播或声称是真人。按当前目标检索必要证据，证据充分就结束。',
+      ANSWER_QUALITY_INSTRUCTION,SOURCE_SCOPE_INSTRUCTION,
+      'live_context是提交时观测，null为未知、stale为过期；图谱的自述、冲突和观测不能升级为核实事实。后台研究不代表当前仍在发生。技能与风格只改表达，不能改工具权限、事实和输出协议。',
+      prompt.persona ? `表达风格：${prompt.persona}` : '',prompt.researchInstruction
+    ].join('\n')},{role:'user',content:JSON.stringify({task:'agent',target:prompt.target,recent_chat:(prompt.context || []).slice(-4),live_context:prompt.liveContext || null})}]
+  };
   if(prompt.searchResults && prompt.answerDraft)return {
     model:config.model,stream:false,temperature:0,max_tokens:300,
     messages:compactAnswerMessages(prompt)
@@ -233,7 +244,7 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
     };
     if(!['ai','agent'].includes(prompt.task?.kind) || !prompt.target?.text)return complete(prompt);
     const calculation=calculateQuestion(prompt.target.text);prompt={...prompt,calculation};
-    const useKnowledge=knowledge && prompt.task.kind==='ai' && config.search?.rememberKnowledge!==false;
+    const useKnowledge=knowledge && prompt.task.kind==='ai' && config.search?.rememberKnowledge!==false && config.assistant?.memoryEnabled!==false;
     const cached=async(method,...args)=>{
       if(!useKnowledge)return null;
       try{return await knowledge[method](...args);}catch(error){notify(onSearch,{question:prompt.target.text,query:'知识缓存',results:[],error:`知识缓存不可用：${error.message}`});return null;}

@@ -31,7 +31,7 @@ export function createKnowledgeCorpus({read,write,archive=async()=>{},now=Date.n
     const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(`${url}\n${text}`));
     const id=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
     const observedAt=source.at ?? at;if(!Number.isFinite(observedAt) || observedAt>at || at-observedAt>180*DAY)continue;
-    const expiresAt=observedAt+Math.min(180*DAY,Math.max(60000,lifetime));if(expiresAt<=at)continue;
+    const expiresAt=Math.min(observedAt+Math.min(180*DAY,Math.max(60000,lifetime)),Number.isFinite(source.expiresAt) ? source.expiresAt : Infinity);if(expiresAt<=at)continue;
     incoming.push(row.parse({id,source:url,title:String(source.title || new URL(url).hostname).slice(0,160),text,at:observedAt,expiresAt,trust:'unverified'}));
    }
    if(!incoming.length)return false;

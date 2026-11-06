@@ -41,3 +41,8 @@ test('重用搜索缓存保留原采集时间和原有效期，不靠重复回�
  let row=(await corpus.list('1','2'))[0];assert.equal(row.at,source.at);assert.equal(row.expiresAt,now+30000);
  clock+=40000;await corpus.remember('1','2',[source],{lifetime:60000});assert.equal((await corpus.list('1','2')).length,0);
 });
+
+test('研究重复使用已有来源时不能扩大来源原有效期',async()=>{
+ const {corpus}=fixture();await corpus.remember('1','2',[{url:'https://example.org/old',text:'旧天气原文',at:now-30000,expiresAt:now+30000}],{lifetime:86400000});
+ assert.equal((await corpus.list('1','2'))[0].expiresAt,now+30000);
+});

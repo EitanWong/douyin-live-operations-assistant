@@ -5,6 +5,7 @@ import {validateSearchEndpoint} from './search.js';
 
 const MINUTE=60000,DAY=86400000;
 const refreshRequest=/重新(?:查|搜|核)|再(?:查|搜)一次|更新(?:一下|资料|知识|缓存)|不要(?:用|使用)?缓存|最新|实时|此刻/iu;
+export const canReuseSource=(question,row,now=Date.now())=>!refreshRequest.test(question) && row.at<=now && row.expiresAt>now && now<sourceExpiresAt(question,'stable',row.at);
 const volatileQuestion=/天气|气温|降雨|预报|空气质量|新闻|赛果|比分|汇率|股价|价格|热搜|今天|今日|明天|昨天|现在|当前|最近|本周|本月|今年|\b(?:weather|news|today|tomorrow|price|score)\b/iu;
 const rulesQuestion=/规则|政策|机制|抖音|\bpk\b/iu;
 const normalize=value=>String(value || '').normalize('NFKC').trim().toLowerCase().replace(/\s+/gu,' ');
@@ -19,7 +20,7 @@ const recordSchema=z.strictObject({id:z.string().uuid(),key:z.string().max(5000)
 const profileFor=config=>JSON.stringify(['source-review-v2',config.provider || 'bocha',validateSearchEndpoint(config.endpoint,config.provider || 'bocha'),config.maxResults]);
 const keyFor=(query,profile)=>JSON.stringify([profile,normalize(query)]);
 function fresh(row,now){return recordSchema.safeParse(row).success && row.searchedAt<=now && row.expiresAt>now && row.expiresAt<=row.searchedAt+knowledgeLifetime(row.query,row.freshness) && row.key===keyFor(row.query,row.profile);}
-function expiry(query,freshness,at){
+export function sourceExpiresAt(query,freshness,at){
  const until=at+knowledgeLifetime(query,freshness);
  // Relative dates change at midnight even if the short weather TTL remains.
  const midnight=(Math.floor((at+8*3600000)/DAY)+1)*DAY-8*3600000;
@@ -53,7 +54,7 @@ export function createWebKnowledge({indexedDB=globalThis.indexedDB,IDBKeyRange=g
   async remember(found,config,{freshness='short',question='',revision:expected}={}){
    if(config.rememberKnowledge===false || !found || found.provider && found.provider!==(config.provider || 'bocha') || !['realtime','rules','stable','short'].includes(freshness))return;
    const profile=profileFor(config),query=String(found.query || '').trim();
-   const row={id:crypto.randomUUID(),key:keyFor(query,profile),profile,query,provider:found.provider || config.provider || 'bocha',freshness,searchedAt:found.searchedAt,expiresAt:expiry(`${query} ${question}`,freshness,found.searchedAt),results:structuredClone(found.results)};
+   const row={id:crypto.randomUUID(),key:keyFor(query,profile),profile,query,provider:found.provider || config.provider || 'bocha',freshness,searchedAt:found.searchedAt,expiresAt:sourceExpiresAt(`${query} ${question}`,freshness,found.searchedAt),results:structuredClone(found.results)};
    if(!fresh(row,now()))return;
    await transaction(async()=>{
     if(expected!==undefined && expected!==await revision())return;

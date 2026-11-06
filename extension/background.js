@@ -137,7 +137,7 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,knowledge:automaticKnowledge,relationships:(room,query)=>relationshipLibrary.query(room,query)});
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query)=>relationshipLibrary.query(room,query),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
@@ -285,7 +285,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         if (!message.key.startsWith('live-assistant:runtime:') && !message.key.startsWith('live-assistant:live-memory:') && size > 1024*1024) throw new Error('设置过大');
         if(message.key.startsWith('live-assistant:live-memory:') && !message.key.startsWith(`live-assistant:live-memory:${roomFromUrl(sender.tab.url)}:`))throw new Error('直播记忆范围无效');
         if(message.key.startsWith('live-assistant:live-memory:') && message.key.split(':').at(-1)!==(message.value?.anchor || 'unknown'))throw new Error('直播记忆归属无效');
-        await giftStore.transaction(async() => writeRecord(message.key,message.key.startsWith('live-assistant:live-memory:') ? mergeLiveMemory(await readRecord(message.key),message.value) : message.value)); value=true;
+        await giftStore.transaction(async() => writeRecord(message.key,message.key.startsWith('live-assistant:live-memory:') ? mergeLiveMemory(await readRecord(message.key),message.value) : message.value));
+        if(message.key.startsWith('live-assistant:config:'))void getAIBackground().wake().catch(()=>{});value=true;
       }
       else if (message.type === 'delete' && keyAllowed(message.key) && isRoom(sender)) {
         if(message.key.startsWith('live-assistant:live-memory:'))throw new Error('请通过记忆管理清空内容，保留删除标记');

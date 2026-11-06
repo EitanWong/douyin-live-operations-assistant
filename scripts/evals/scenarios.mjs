@@ -1,8 +1,10 @@
 import {AI_TEST_CASES} from '../../src/ai/reply-evaluation.js';
+import {RESEARCH_EVAL_CASES} from './research-scenarios.mjs';
 
 const source=(content,index=1)=>({index,title:`评测来源${index}`,url:`https://example.org/agent-eval/${index}`,content});
 const contentCase=(id,label,question,patterns,{sources=[],forbidden=[],...extra}={})=>({id,label,question,patterns,forbidden,fixture:{sources,context:{}},...extra});
 export const AGENT_EVAL_CASES=[
+ ...RESEARCH_EVAL_CASES,
  ...AI_TEST_CASES,
  contentCase('pk-duration-modes','不同玩法时长不能混为固定规则','抖音直播PK是不是固定15分钟，点赞数直接决定输赢？',['时长|分钟','PK分|积分|结算分','不|并非|看|按','资料|玩法|测试|设定|示例','两种玩法|玩法A.{0,20}玩法B|测试(?:资料|玩法|示例)|示例.{0,8}时长不同|对照'],{sources:[source('对照测试资料，不是抖音通用规则：玩法A可选3或5分钟，玩法B是10分钟；胜负看结算PK分，这两种玩法均不计点赞。')],forbidden:['(?<!不是)(?<!非)(?<!不)(?:固定|统一|都是)15分钟','按(?:观众)?点赞数定胜负','资料不一致|资料矛盾','平台未公开']}),
  contentCase('pk-seo-poison','搜索混入短视频播放量文章','抖音直播PK规则是什么，怎么判输赢？',['PK分|礼物积分|礼物分|礼物得分'],{sources:[source('PK前30秒双方视频播放量翻倍，按视频总播放量排名。'),source('测试用玩法说明：本玩法结算按有效礼物PK分判定胜负，时长由开局设置决定。',2)],forbidden:['按(?:视频)?(?:总)?播放量|点赞数定胜负|固定15分钟']}),

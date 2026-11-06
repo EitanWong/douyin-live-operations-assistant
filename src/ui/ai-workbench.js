@@ -17,7 +17,7 @@ export class AIWorkbench {
   }finally{this.submitting=false;submit.disabled=false;}});});
   root.querySelector('[data-agent-refresh]').addEventListener('click',()=>run(()=>this.refreshTasks()));
   this.node('[data-agent-results]').addEventListener('click',event=>{const button=event.target.closest('[data-agent-cancel]');if(button)run(async()=>{await tasks.cancel(button.dataset.agentCancel);await this.refreshTasks();});});
-  this.refreshMemory();void this.refreshTasks().catch(error=>{this.node('[data-agent-results]').textContent=error.message;});this.timer=setInterval(()=>{if(this.pending)run(()=>this.refreshTasks());},3000);
+  this.refreshMemory();void this.refreshTasks().catch(error=>{this.node('[data-agent-results]').textContent=error.message;});this.timer=setInterval(()=>{if(this.pending || this.node('[data-field="ai.assistant.research.enabled"]')?.checked)run(()=>this.refreshTasks());},3000);
  }
  node(selector){return this.root.querySelector(selector);}
  choice(){return this.node('[data-audience-choice]').value;}
@@ -32,7 +32,7 @@ export class AIWorkbench {
   if(this.closed || version!==this.refreshVersion)return;this.pending=rows.some(r=>['queued','running'].includes(r.status));const target=this.node('[data-agent-results]'),doc=target.ownerDocument;target.replaceChildren();
   if(!rows.length){target.textContent='暂无后台任务。';return;}
   const labels={queued:'等待执行',running:'后台执行中',succeeded:'已完成',failed:'失败',cancelled:'已取消',interrupted:'执行中断，未自动重试'};
-  for(const row of rows){const item=doc.createElement('article');item.className='editor-row';const heading=doc.createElement('strong');heading.textContent=`${labels[row.status] || row.status} · ${row.question}`;item.append(heading);
+  for(const row of rows){const item=doc.createElement('article');item.className='editor-row';const heading=doc.createElement('strong');heading.textContent=`${row.result?.stopReason==='budget' ? '达到研究预算' : labels[row.status] || row.status} · ${row.question}`;item.append(heading);
    const text=doc.createElement('p');text.textContent=row.result?.answer || row.error || row.trace?.at(-1)?.detail || '已进入后台队列，前台可继续操作';item.append(text);
    for(const source of [...(row.result?.sources || []),...(row.result?.publicSources || [])]){const p=doc.createElement('p');p.textContent=source.error ? `${source.url}：${source.error}` : `${source.title || source.url} · ${source.url}`;item.append(p);}
    if(['queued','running'].includes(row.status)){const button=doc.createElement('button');button.type='button';button.dataset.agentCancel=row.id;button.textContent='取消任务';item.append(button);}target.append(item);

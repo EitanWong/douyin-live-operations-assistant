@@ -4,6 +4,23 @@ import {runAgentCase} from '../../scripts/evals/live-agent-provider.mjs';
 import {AGENT_EVAL_CASES} from '../../scripts/evals/scenarios.mjs';
 
 const reply=(d,text)=>d.onload({status:200,responseText:JSON.parse(d.data).stream ? `data: ${JSON.stringify({choices:[{delta:{content:text},finish_reason:'stop'}]})}\n\ndata: [DONE]\n\n` : JSON.stringify({choices:[{message:{content:text}}]})});
+test('同名身份研究评测接受明确否认，仍拒绝未经证据的认人断言',async()=>{
+ const scenario=AGENT_EVAL_CASES.find(r=>r.id==='loop-identity');
+ for(const [answer,passed] of [['不一定是同一人，无法确认两者是同一人。',true],['一定是同一人，无法知道其其他情况。',false]]){
+  let calls=0;const result=await runAgentCase(scenario,{key:'fake',workspaceId:'space',request:d=>reply(d,JSON.stringify(++calls===1 ? {action:'search',query:scenario.question} : {action:'finish',answer,citations:[1,2]}))});
+  assert.equal(result.passed,passed,JSON.stringify(result));
+ }
+});
+test('长上下文评测记录真实请求大小，口语答案丢失条件或确定性会失败',async()=>{
+ const long=AGENT_EVAL_CASES.find(r=>r.id==='loop-progressive-context');let round=0;
+ const plans=[{action:'search',query:'岚叶实验报告'},{action:'read',source:1},{action:'finish',answer:'20℃下为42，室温结果未测量。',citations:[2]}];
+ const result=await runAgentCase(long,{key:'fake',workspaceId:'space',request:d=>{const body=JSON.parse(d.data);if(round===2)assert.match(body.messages[1].content,/仅在20℃.*室温结果尚未测量/);reply(d,JSON.stringify(plans[round++]));}});
+ assert.equal(result.passed,true,JSON.stringify(result));assert.equal(result.promptChars.length,3);assert.ok(result.promptChars.every(n=>n<=16000));assert.equal(result.reads,1);
+ const plain=AGENT_EVAL_CASES.find(r=>r.id==='loop-plain-faithful');
+ for(const [answer,pass] of [['阿青自述可能周五开播；试验在20℃下为42。',true],['阿青确定周五开播，数值是42。',false]]){
+  let n=0;const r=await runAgentCase(plain,{key:'fake',workspaceId:'space',request:d=>reply(d,JSON.stringify(++n===1 ? {action:'search',query:'阿青试验'} : {action:'finish',answer,citations:[1]}))});assert.equal(r.passed,pass,JSON.stringify(r));
+ }
+});
 test('开源评测入口跑真实Engine→搜索客户端→AI→队列→预览，原始模型错误不能由评测器修饰',async()=>{
  const scenario=AGENT_EVAL_CASES.find(r=>r.id==='weather');let calls=0;
  const result=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,++calls===1 ? '{"intent":"web-search","query":"上海天气"}' : '{"answer":"上海11月5日小雨，18至23℃。","sources":[2]}')});
@@ -86,7 +103,7 @@ test('后台Agent真实任务宿主贯通持久任务、研究路由、来源和
  for(const id of ['durable-research','durable-duplicate']){
   const scenario=AGENT_EVAL_CASES.find(r=>r.id===id);assert.ok(scenario);
   let calls=0;
-  const result=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,++calls===1 ? '{"intent":"web-search","query":"赤鹤星周期"}' : '{"answer":"赤鹤星周期73天。","sources":[1]}')});
+  const result=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,++calls===1 ? '{"action":"search","query":"赤鹤星周期"}' : '{"action":"finish","answer":"赤鹤星周期73天。","citations":[1]}')});
   assert.equal(result.passed,true,JSON.stringify(result));assert.equal(result.calls,2);assert.equal(result.searches,1);assert.equal(result.taskCount,1);assert.equal(result.sent,0);assert.equal(result.secretStored,false);
  }
 });
@@ -107,4 +124,16 @@ test('本场加成未知接受无法确认，但不能接受已开启或没有�
  assert.equal(assess('本场是否生效无实时数据确认。'),true);
  assert.equal(assess('本场现在已开启1.5倍。'),false);
  assert.equal(assess('本场没有开启1.5倍。'),false);
+});
+
+test('多跳和原文评测必须经过实际工具循环，猜中答案不能冒充执行通过',async()=>{
+ const scenario=AGENT_EVAL_CASES.find(r=>r.id==='loop-multihop');let calls=0;
+ const plans=[{action:'search',query:'赤鹤星周期'},{action:'search',query:'青鹭星颜色'},{action:'finish',answer:'周期73天，伴星蓝色。',citations:[1,2]}];
+ const result=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>{calls++;reply(d,JSON.stringify(plans.shift()));}});
+ assert.equal(result.passed,true,JSON.stringify(result));assert.equal(calls,3);assert.equal(result.searches,2);
+ const guessed=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,JSON.stringify({action:'finish',answer:'周期73天，伴星蓝色。',citations:[]}))});
+ assert.equal(guessed.passed,false);assert.ok(guessed.checks.some(r=>!r.pass && /追加检索/.test(r.label)));
+ const readPlans=[{action:'search',query:'岚叶实验最终测量'},{action:'read',url:'https://example.org/research/1'},{action:'finish',answer:'测量值42。',citations:[2]}];
+ const read=await runAgentCase(AGENT_EVAL_CASES.find(r=>r.id==='loop-read-source'),{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,JSON.stringify(readPlans.shift()))});
+ assert.equal(read.passed,true,JSON.stringify(read));assert.equal(read.reads,1);
 });
