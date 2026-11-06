@@ -93,7 +93,7 @@ export class PageRequestSender {
       this.pruneTickets();
       const context = this.context();
       return Boolean(context && typeof context.userId === 'string' && /^\d+$/.test(context.userId)
-        && this.client() && (channel === 'admin' ? context.admin : this.chatDisplay()) && this.tickets.size < 128);
+        && this.client() && (channel !== 'admin' || context.admin) && this.tickets.size < 128);
     } catch { return false; }
   }
   prepare(channel) {
@@ -102,9 +102,7 @@ export class PageRequestSender {
       const context = this.context(), client = context && this.client();
       if (!client || typeof context.userId !== 'string' || !/^\d+$/.test(context.userId)) return {available:false};
       if (channel === 'admin' && !context.admin) return {available:false};
-      // Fall back before submitting when we cannot complete the native chat UI
-      // flow. Otherwise the server echo is deliberately hidden on this page.
-      if (channel === 'chat' && !this.chatDisplay()) return {available:false};
+      // Local display is best effort and does not determine request availability.
       const now = Date.now();
       this.pruneTickets(now);
       if (this.tickets.size >= 128) return {available:false};

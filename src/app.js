@@ -641,9 +641,6 @@ export function boot(options = {}) {
         if (automatic) return false;
         throw new Error('尚未连接直播数据，请刷新直播页，先用仅预览检查事件');
       }
-      if (!adapter.requestAvailable?.('chat')) {
-        const input = adapter.findInput(); adapter.findSend(input);
-      }
     }
     starting = true; const startEpoch = engine.epoch;
     try {

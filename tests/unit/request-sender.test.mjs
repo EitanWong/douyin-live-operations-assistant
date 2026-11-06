@@ -86,12 +86,12 @@ test('普通感谢走网页原生本地队列显示一次，本地显示不充�
     assert.equal(delivery.state,'clicked');
   } finally {f.dom.window.close();}
 });
-test('缺少网页公屏队列时在请求前回退；服务端拒绝、超时都不插入本地感谢',async()=>{
+test('缺少网页公屏队列不影响直接请求；服务端拒绝、超时都不插入本地感谢',async()=>{
   const f=fixture();
   try {
     const messages=f.page.__STORE__.singletonStore.message;
     delete f.page.__STORE__.singletonStore.message;
-    assert.equal(f.sender.available('chat'),false);assert.equal(f.sender.prepare('chat').available,false);
+    assert.equal(f.sender.available('chat'),true);assert.equal(f.sender.prepare('chat').available,true);
     assert.equal(f.requests.length,0);
     f.page.__STORE__.singletonStore.message=messages;
     for (const request of [async()=>({data:{status_code:403}}),async()=>{throw Error('timeout');}]) {
