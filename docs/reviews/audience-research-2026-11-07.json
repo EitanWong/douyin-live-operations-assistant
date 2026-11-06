@@ -83,5 +83,13 @@
     "No new GraphRAG service or private trait inference.",
     "crapper, dryer and mutator unavailable; checks not executed."
   ],
-  "artifacts": "output/audience-agent-2026-11-07"
+  "artifacts": "output/audience-agent-2026-11-07",
+  "ciFollowup": {
+    "priorFailureRun": 42255560248,
+    "cause": "Node20 graph-chart test fixture omitted navigator",
+    "fix": "Install JSDOM window/document/navigator and restore original property descriptors",
+    "actualNode20TargetedTest": "passed 1/1",
+    "productCodeChanged": false,
+    "remoteCiStatus": "new run pending after compatibility fix; not claimed passed"
+  }
 }

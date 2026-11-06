@@ -3084,3 +3084,6 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 真实Chrome验收：受影响的AI设置→观众与研究页，1280×900和430×850；3处同时展开、3轮反复折叠、5条长结果、Home定位卡片正文、键盘Shift+方向键及两次鼠标拖动连续缩放。窄屏宿主410px/视口430px；桌面卡片横向溢出0；研究正文273px承接2601px内容，结果正文320px承接1112px；草稿保持原值，控制台warning/error为空。沿用共享尺寸和有界滚动，未测FPS或声称实播性能通过。浏览器尺寸已恢复，测试标签页已关闭。
 - 当前真实模型评测和长期实播未执行；仅使用合成模型/搜索和公开页面采集夹具验证链路，不把它们报告为真实模型准确率或平台抓取成功率。未重载用户扩展、未发送真实弹幕、未更改现有开关。
 - 提交与推送：功能/测试/索引/文档提交 `d894b1ee13584087f116a6d3f2b23ffe322748a3` 已推送到 `origin/dev`；`git ls-remote origin refs/heads/dev`核对一致。推送前远端仍是起点5ee585d，无需合并；未触碰main或发布标签。验收用4212端口服务已停止。本条交付回执单独作为文档提交同步。
+
+- 远端后续核对发现前一轮5ee585d的CI失败（run 42255560248）：Node20执行graph-chart集成测试时`navigator is not defined`。本机使用`node --no-experimental-global-navigator --test tests/integration/graph-chart.test.mjs`复现相同错误后，补齐JSDOM的window/document/navigator，并在finally按原属性描述符恢复；保留真实ECharts隐藏/展开/销毁断言。普通Node与无内置navigator模式专项均通过；只修改测试夹具，不改变产品代码。该修复及索引单独提交。
+- Node20实测：`npm exec --yes --package=node@20 -- node --test tests/integration/graph-chart.test.mjs`通过（1/1），证明修复兼容CI的实际Node版本。完整产品回归仍为前述1713/1713；此次后续仅改测试环境并完成定向复验，不冒称重新跑过全套。文档回执提交3ef2777也已推送并核对远端。
