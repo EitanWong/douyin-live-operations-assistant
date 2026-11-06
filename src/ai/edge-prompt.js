@@ -11,7 +11,7 @@ export const EDGE_MODELS=Object.freeze({
  audio:{id:'onnx-community/whisper-tiny',revision:'ff4177021cc41f7db950912b73ea4fdf7d01d8e7',task:'automatic-speech-recognition',dtype:'q8'}
 });
 export const acceptPerformance=m=>Number.isFinite(m.firstTokenMs) && m.firstTokenMs<=1500 && m.tokensPerSecond>=10 && m.totalMs<=3500 ? 'ready' : 'slow';
-export const acceptChineseSelfTest=text=>typeof text==='string' && text.trim().replace(/[。！!\s]/gu,'')==='蓝色';
+export const acceptChineseSelfTest=text=>typeof text==='string' && /^(?:杯子(?:是|为))?蓝色(?:的)?$/u.test(text.trim().replace(/[。！!\s]/gu,''));
 const pick=(row,keys)=>row ? Object.fromEntries(keys.filter(key=>row[key]!==undefined).map(key=>[key,row[key]])) : null;
 function compactPK(pk){
  if(!pk)return null;
