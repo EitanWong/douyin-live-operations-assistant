@@ -47,3 +47,10 @@ test('异常长标题与转义字符也受工作集硬预算约束，仍可按�
  const state={sources:Array.from({length:8},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'\u0000'.repeat(160),content:'陶瓷茶具不可加热。',at:Date.now()})),observations:[],focus:{source:8,offset:0}};
  const view=compactResearchState(state,'陶瓷茶具');assert.ok(JSON.stringify(view).length<=6500);assert.equal(view.catalog.length,8);assert.ok(view.evidence.some(r=>r.index===8 && r.content.includes('不可加热')));
 });
+
+test('完整来源的长覆盖声明和异常发布日期不会挤掉原文或突破工作集预算',async()=>{
+ const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const state={sources:Array.from({length:10},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'\u0000'.repeat(160),content:'陶瓷茶具不可加热。',at:Date.now(),evidenceKind:'public-page',publishedAt:'\u0000'.repeat(80),coverage:'\u0000'.repeat(500)})),observations:[]};
+ const view=compactResearchState(state,'陶瓷茶具');assert.ok(JSON.stringify(view).length<=6500);
+ assert.equal(view.catalog.length,10);assert.ok(view.evidence.some(r=>r.content.includes('不可加热')));
+});

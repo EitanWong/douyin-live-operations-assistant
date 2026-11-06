@@ -1,4 +1,5 @@
 import {accountSource,ACCOUNT_SAMPLE_LIMIT} from '../src/ai/account-context.js';
+import {selectPublicWorks} from '../src/services/public-work-progress.js';
 const check=signal=>{if(signal?.aborted)throw Error('账号采集已取消');};
 const pause=(ms,signal)=>new Promise((resolve,reject)=>{
  const finish=()=>{clearTimeout(timer);signal?.removeEventListener('abort',abort);resolve();};
@@ -30,20 +31,22 @@ async function readPage(chrome,source,{signal,deadline,now,pause,settleMs,analyz
 }
 
 // One serialized research job visits at most one profile and two of its works.
-export async function collectAccount(chrome,url,{signal,timeout=24000,settleMs=1500,now=Date.now,pause:wait=pause,analyze}={}){
+export async function collectAccount(chrome,url,{signal,timeout=24000,settleMs=1500,now=Date.now,pause:wait=pause,analyze,visited=[],onWork=()=>{}}={}){
  const source=accountSource(url);
  if(!await chrome.permissions.contains({origins:['https://www.douyin.com/*']}))throw Error('请在扩展权限中允许访问 www.douyin.com 后采集');
  const deadline=now()+timeout,options={signal,deadline:Math.min(deadline,now()+8000),now,pause:wait,settleMs,analyze};
  const rows=await readPage(chrome,source,options);
  if(source.kind==='work')return rows.slice(0,ACCOUNT_SAMPLE_LIMIT);
- const works=[...new Map(rows.filter(r=>r.kind==='work' && r.subject===source.id && r.url).map(r=>[r.id,r])).values()].sort((a,b)=>(b.publishedAt || 0)-(a.publishedAt || 0)).slice(0,2);
+ const works=selectPublicWorks(rows,source,visited,now());
  for(const work of works){
   check(signal);if(now()>=deadline)break;
   try{
    const collected=await readPage(chrome,accountSource(work.url),{...options,deadline:Math.min(deadline,now()+8000)});
    const related=collected.filter(r=>r.subject===source.id && (r.kind==='work' ? r.id : r.workId)===work.id);
+   if(!related.some(r=>r.kind==='work' && r.id===work.id))throw Error('作品作者与主页不匹配，未确认采集完成');
    rows.push(...related.map(r=>({...r,source:source.url})));
-  }catch(error){check(signal);work.coverage=`作品描述已读取；互动/音画采样未完成：${String(error.message).slice(0,160)}`;}
+   onWork({id:work.id,status:'complete',at:now()});
+  }catch(error){check(signal);work.coverage=`作品描述已读取；互动/音画采样未完成：${String(error.message).slice(0,160)}`;onWork({id:work.id,status:'failed',at:now()});}
  }
  const unique=new Map(rows.map(r=>[`${r.kind}:${r.id}`,r]));
  return [...unique.values()].slice(0,ACCOUNT_SAMPLE_LIMIT);

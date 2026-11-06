@@ -2,13 +2,16 @@ import {subjectKeySchema,subjectRow,subjectEpoch} from '../ai/audience-profile.j
 import {canReuseSource,knowledgeLifetime} from './web-knowledge.js';
 import {retrieveKnowledge} from './retrieval.js';
 
+const sourcePassage=(row,content)=>({index:1,title:row.title,url:row.source,content,sourceId:row.id,at:row.at,expiresAt:row.expiresAt,publishedAt:row.publishedAt ?? null,
+ ...(row.evidenceKind ? {evidenceKind:row.evidenceKind} : {}),...(row.coverage ? {coverage:row.coverage} : {})});
+
 export function retrieveSourceRecords(rows,question,now=Date.now(),{subject}={}){
  const available=rows.filter(row=>(!row.subject || row.subject===subject) && canReuseSource(question,row,now));
  const found=retrieveKnowledge(available.map(r=>({id:r.id,title:r.title,content:r.text,source:r.source,updatedAt:r.at,expiresOn:''})),question,{maxPerSource:1});
  return found.chunks.slice(0,3).map(chunk=>{
   const row=available.find(r=>r.id===chunk.entryId),id=`corpus:${row.id}:${chunk.range.start}-${chunk.range.end}`;
   return {id,query:id,cached:true,freshness:'stable',searchedAt:row.at,expiresAt:row.expiresAt,
-   results:[{index:1,title:row.title,url:row.source,content:chunk.content,sourceId:row.id,at:row.at,expiresAt:row.expiresAt,publishedAt:null}]};
+   results:[sourcePassage(row,chunk.content)]};
  });
 }
 
@@ -60,7 +63,7 @@ export function createKnowledgeMemory({cache,transport,anchor}){
     const [,id,range]=query.split(':'),row=rows.find(r=>r.id===id);if(!row || !canReuseSource(options.question || '',row))return null;
     const match=/^(\d+)-(\d+)$/u.exec(range || '');if(!match)return null;const start=Number(match[1]),end=Number(match[2]);
     if(end<=start || end-start>600 || end>row.text.length)return null;
-    return {id:query,query,cached:true,searchedAt:row.at,expiresAt:row.expiresAt,results:[{index:1,title:row.title,url:row.source,content:row.text.slice(start,end),sourceId:row.id,at:row.at,publishedAt:null}]};
+    return {id:query,query,cached:true,searchedAt:row.at,expiresAt:row.expiresAt,results:[sourcePassage(row,row.text.slice(start,end))]};
    }
    const record=await cache.find(query,config,options);return eligible(record,rows) ? record : null;
   },
@@ -74,7 +77,7 @@ export function createKnowledgeMemory({cache,transport,anchor}){
   async list(){
    const [cached,rows]=await Promise.all([cache.list(),call('list')]);
    const urls=new Set(rows.map(r=>r.source));
-   return [...rows.map(r=>({id:`corpus:${r.id}`,query:r.title,searchedAt:r.at,expiresAt:r.expiresAt,results:[{index:1,title:r.title,url:r.source,content:r.text}]})),...cached.filter(r=>eligible(r,rows) && !r.results.every(s=>urls.has(s.url)))].sort((a,b)=>b.searchedAt-a.searchedAt).slice(0,1000);
+   return [...rows.map(r=>({id:`corpus:${r.id}`,query:r.title,searchedAt:r.at,expiresAt:r.expiresAt,results:[sourcePassage(r,r.text)]})),...cached.filter(r=>eligible(r,rows) && !r.results.every(s=>urls.has(s.url)))].sort((a,b)=>b.searchedAt-a.searchedAt).slice(0,1000);
   },
   async remove(id){if(id.startsWith('corpus:')){const row=(await call('list')).find(r=>r.id===id.slice(7));await call('remove',{id:id.slice(7)});for(const cached of await cache.list())if(cached.results.some(s=>s.url===row?.source))await cache.remove(cached.id);}else await cache.remove(id);},
   async clear(){await call('clear');await cache.clear();}

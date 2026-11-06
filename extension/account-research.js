@@ -1,8 +1,9 @@
 import {accountSource} from '../src/ai/account-context.js';
 import {validateAccountCollection} from '../src/services/account-refresh.js';
+import {parseWorkProgress,advanceWorkProgress} from '../src/services/public-work-progress.js';
 
 // Only this queue writes its budget. Browser work never holds the live archive lock.
-export function createAccountResearch({readConfig,readBudget,writeBudget,collect,archive,now=Date.now}){
+export function createAccountResearch({readConfig,readBudget,writeBudget,readProgress=async()=>null,writeProgress=async()=>{},collect,archive,now=Date.now}){
  let tail=Promise.resolve(),pending=0;
  const state=async room=>{const c=await readConfig(room);return {anchor:String(c?.anchorId || ''),config:validateAccountCollection(c?.ai?.accountCollection)};};
  const check=async(room,anchor,signal)=>{
@@ -12,7 +13,7 @@ export function createAccountResearch({readConfig,readBudget,writeBudget,collect
   return current.config;
  };
  return {async collect(room,url,{signal}={}){
-  url=accountSource(url).url;
+  const source=accountSource(url);url=source.url;
   const initial=await state(room);await check(room,initial.anchor,signal);
   if(pending>=8)throw Error('公开资料采集队列已满，请稍后重试');
   pending++;
@@ -21,8 +22,12 @@ export function createAccountResearch({readConfig,readBudget,writeBudget,collect
    const calls=Array.isArray(saved) ? saved.filter(t=>Number.isFinite(t) && t<=at && at-t<3600000).slice(-30) : [];
    if(calls.length>=config.maxPerHour)throw Error('公开资料采集已达共享每小时上限');
    await writeBudget([...calls,at]);await check(room,initial.anchor,signal);
-   const records=await collect(url,{signal,room,anchor:initial.anchor});await check(room,initial.anchor,signal);
-   await archive({room,anchor:initial.anchor,source:url,records,at:now()});return records;
+   const progress=source.kind==='profile' ? parseWorkProgress(await readProgress(room,initial.anchor),now()) : null,visits=[];
+   const records=await collect(url,{signal,room,anchor:initial.anchor,visited:progress?.profiles.find(r=>r.url===url)?.works || [],onWork:visit=>visits.push(visit)});await check(room,initial.anchor,signal);
+   await archive({room,anchor:initial.anchor,source:url,records,at:now()});
+   await check(room,initial.anchor,signal);
+   if(progress && visits.length)await writeProgress(room,initial.anchor,advanceWorkProgress(progress,url,visits,now()));
+   return records;
   });
   tail=work.catch(()=>{}).finally(()=>{pending--;});
   return work;

@@ -56,3 +56,24 @@ test('客户端伪造深度无效；生成期间遗忘观众使旧任务失效�
   await until(async()=>(await host.handle({type:'agent-list'},'1')).find(r=>r.id==='forged-profile')?.status==='failed');assert.equal(calls,1);
  }finally{await host.close();}
 });
+
+test('作品评论和音画进入真实研究请求及记忆时保留发言人、时间和采样边界',async()=>{
+ const f=setup(),at=Date.now(),url='https://www.douyin.com/video/70';
+ const host=createBackgroundAI({...f.options,collectAccount:async()=>[
+  {kind:'comment',title:'评论者',text:'我喜欢陶瓷茶杯',actor:{uid:'3',name:'评论者'},subject:'viewer_2',workId:'70',url,observedAt:at,expiresAt:at+86400000,coverage:'仅加载到的评论'},
+  {kind:'transcript',title:'作品语音片段',text:'陶瓷茶杯只限冷水',subject:'viewer_2',workId:'70',url,positionMs:4200,observedAt:at,expiresAt:at+86400000,coverage:'约4秒音轨采样，不代表完整视频'}
+ ],fetch:async(_url,options)=>{
+  const target=JSON.parse(JSON.parse(options.body).messages[1].content).target;
+  const evidence=JSON.stringify(target.agent_state);
+  assert.match(evidence,/uid:3/);assert.match(evidence,/说话人未确认/);assert.match(evidence,/4200/);assert.match(evidence,/4秒/);
+  assert.match(evidence,/不等于发言人|不能当作本人自述/);
+  return response({action:'finish',answer:'公开片段提到陶瓷茶杯限用冷水，语音说话人未确认。',citations:[1]});
+ }});
+ try{
+  await host.handle({type:'agent-submit',id:'media-attribution',question:'陶瓷茶杯',input:{subject:'uid:2',context:{}}},'1');
+  const task=await until(async()=>{const row=(await host.handle({type:'agent-list'},'1'))[0];return ['succeeded','failed'].includes(row?.status) && row;});
+  assert.equal(task.status,'succeeded',task.error);
+  const rows=await f.corpus.list('1','10');assert.match(rows[0].text,/uid:3/);assert.match(rows[0].text,/说话人未确认/);
+  assert.match(rows[0].coverage,/不是完整/);
+ }finally{await host.close();}
+});

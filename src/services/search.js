@@ -1,4 +1,14 @@
 import {parseCompletionStream} from './completion-stream.js';
+import {parseHTML} from 'linkedom/worker';
+
+function sourceText(values,limit){
+ let text=values.find(value=>typeof value==='string' && value.trim()) || '';
+ if(/<\/?[a-z][^>]*>/iu.test(text)){
+  const {document}=parseHTML('<html><body></body></html>');document.body.innerHTML=text;
+  for(const node of document.querySelectorAll('script,style,noscript,iframe'))node.remove();text=document.body.textContent;
+ }
+ return text.replace(/\s+/gu,' ').trim().slice(0,limit);
+}
 
 export const SEARCH_PROVIDERS = {bocha:{label:'博查',endpoint:'https://api.bochaai.com/v1/web-search'},tavily:{label:'Tavily',endpoint:'https://api.tavily.com/search'},searxng:{label:'SearXNG（自建）',endpoint:'http://localhost:8080/search'}};
 export const SEARCH_DEFAULTS = {enabled:false,rememberKnowledge:true,provider:'bocha',endpoint:SEARCH_PROVIDERS.bocha.endpoint,maxResults:3,maxPerHour:60};
@@ -93,9 +103,10 @@ export function createSearchClient({request,getKey,now=Date.now}) {
     const seen=new Set(),results=[];
     for(const row of rows){
       let url;try{url=new URL(row.url);}catch{continue;}
-      if(!['https:','http:'].includes(url.protocol) || url.username || url.password || seen.has(url.href))continue;
+      if(!['https:','http:'].includes(url.protocol) || url.username || url.password || url.href.length>2000 || seen.has(url.href))continue;
       seen.add(url.href);
-      results.push({index:results.length+1,title:String(row.name || row.title || url.hostname).slice(0,160),url:url.href.slice(0,2000),content:String(row.summary || row.content || row.snippet || '').slice(0,1200),publishedAt:typeof row.datePublished==='string' ? row.datePublished.slice(0,80) : null});
+      const publishedAt=[row.datePublished,row.published_date,row.publishedDate].find(value=>typeof value==='string' && value.trim());
+      results.push({index:results.length+1,title:sourceText([row.name,row.title,url.hostname],160),url:url.href,content:sourceText([row.summary,row.content,row.snippet],1200),publishedAt:publishedAt?.trim().slice(0,80) || null});
       if(results.length===config.maxResults)break;
     }
     return {provider,query:body.query || body.q,searchedAt:now(),results};

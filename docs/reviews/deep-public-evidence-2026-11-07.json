@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-07",
+  "goalStatus": "active",
+  "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
+  "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
+  "integrationBranch": "dev",
+  "lastConfirmedResult": "1774 JavaScript tests, 85 Harness tests, 53 native tests passed; build/check/index/diff passed; source upgrade, restartable incremental visible-work sampling and attribution persistence implemented.",
+  "nextExecutableAction": "为本机公开视频持久任务、取消和遗忘阻断编写行为测试，确定既有原生 ASR 单实例资源租约，再接下载适配器。",
+  "inputPaths": [
+    "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
+    "extension/account-media.js",
+    "extension/account-collector.js",
+    "native/host.py",
+    "native/local_asr.py",
+    "native/data_host.py",
+    "src/ai/harness.js"
+  ],
+  "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
+  "validation": {
+    "javascript": {
+      "passed": 1774,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "command": [
+        "node",
+        "--test",
+        "--test-concurrency=2",
+        "tests"
+      ]
+    },
+    "harness": {
+      "passed": 85
+    },
+    "native": {
+      "passed": 53,
+      "runtime": "installed Python 3.12 virtual environment"
+    },
+    "npmCi": "passed; audit 0 vulnerabilities",
+    "build": "passed",
+    "check": "passed",
+    "index": {
+      "modules": 514,
+      "symbols": 2937
+    },
+    "diffCheck": "passed"
+  },
+  "benchmark": {
+    "runtime": "v26.12.1",
+    "platform": "darwin",
+    "records": 90,
+    "inputChars": 106824,
+    "outputChars": 4702,
+    "includedRecords": 4,
+    "coldMs": 33.57733400000001,
+    "warmMedianMs": 0.3624580000000037,
+    "warmP95Ms": 0.4481660000000005,
+    "samples": 100,
+    "basis": "Synthetic local CPU benchmark; no model, network, browser FPS or livestream acceptance claim."
+  },
+  "transaction": {
+    "filesVerified": 22,
+    "patchReconstructsModified": true,
+    "restoredAllOriginalHashes": true,
+    "newFilesRemoved": true,
+    "rollbackBehaviorMatchesBaseline": true,
+    "liveImplementationRemainsModified": true
+  },
+  "roles": {
+    "MODIFIED_FILE.tar": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/MODIFIED_FILE.tar",
+    "DIFF_FILE.patch": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/DIFF_FILE.patch",
+    "VERIFICATION.txt": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/VERIFICATION.txt",
+    "ROLLBACK.sh": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/ROLLBACK.sh"
+  },
+  "unavailableChecks": [
+    "crapper",
+    "dryer",
+    "mutator"
+  ],
+  "limitations": [
+    "Not a full-profile paginator or full-video analysis worker.",
+    "No real-model factuality, real-account end-to-end or long-duration live acceptance in this iteration.",
+    "Public evidence does not prove psychological traits, private life or wealth.",
+    "Native generic FTS keeps its existing response shape; provenance extensions remain in browser/raw archives."
+  ],
+  "commitPush": "pending"
+}

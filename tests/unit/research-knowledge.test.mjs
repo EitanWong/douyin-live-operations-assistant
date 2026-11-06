@@ -2,6 +2,21 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createKnowledgeMemory,retrieveSourceRecords} from '../../src/services/automatic-knowledge.js';
 import {createWebKnowledge} from '../../src/services/web-knowledge.js';
+import {createKnowledgeCorpus} from '../../src/ai/knowledge-corpus.js';
+
+test('研究原文的发布时间和音画覆盖范围跨保存、重启与前台检索保留',async()=>{
+ const now=Date.now();let saved;
+ const dependencies={read:async()=>saved,write:async(_key,value)=>{saved=structuredClone(value);},now:()=>now};
+ const corpus=createKnowledgeCorpus(dependencies);
+ await corpus.remember('1','10',[{url:'https://example.org/work',title:'赤鹤星公开视频',content:'赤鹤星周期73天',at:now,publishedAt:'2026-10-01',evidenceKind:'public-page',coverage:'只有页面文字；未分析完整视频音轨'}]);
+ const rows=await createKnowledgeCorpus(dependencies).list('1','10');
+ assert.equal(rows[0].publishedAt,'2026-10-01');assert.match(rows[0].coverage,/未分析完整视频/);
+ const result=retrieveSourceRecords(rows,'赤鹤星周期',now)[0].results[0];
+ assert.equal(result.publishedAt,'2026-10-01');assert.match(result.coverage,/未分析完整视频/);
+ const memory=createKnowledgeMemory({cache:createWebKnowledge({indexedDB:null}),anchor:()=> '10',transport:async action=>action==='list' ? rows : 0});
+ const reread=await memory.find(retrieveSourceRecords(rows,'赤鹤星周期',now)[0].query,{rememberKnowledge:true});
+ assert.equal(reread.results[0].publishedAt,'2026-10-01');assert.match(reread.results[0].coverage,/未分析完整视频/);
+});
 
 test('后台原文库进入前台候选和复核，删除后旧候选不可再回答',async()=>{
  const now=Date.now();let rows=[{id:'a'.repeat(64),title:'赤鹤星报告',source:'https://example.org/star',text:'赤鹤星周期73天。',at:now,expiresAt:now+86400000}];

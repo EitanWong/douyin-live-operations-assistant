@@ -24,7 +24,7 @@ test('同名身份研究评测接受明确否认，仍拒绝未经证据的认�
 });
 test('长上下文评测记录真实请求大小，口语答案丢失条件或确定性会失败',async()=>{
  const long=AGENT_EVAL_CASES.find(r=>r.id==='loop-progressive-context');let round=0;
- const plans=[{action:'search',query:'岚叶实验报告'},{action:'read',source:1},{action:'finish',answer:'20℃下为42，室温结果未测量。',citations:[2]}];
+ const plans=[{action:'search',query:'岚叶实验报告'},{action:'read',source:1},{action:'finish',answer:'20℃下为42，室温结果未测量。',citations:[1]}];
  const result=await runAgentCase(long,{key:'fake',workspaceId:'space',request:d=>{const body=JSON.parse(d.data);if(round===2)assert.match(body.messages[1].content,/仅在20℃.*室温结果尚未测量/);reply(d,JSON.stringify(plans[round++]));}});
  assert.equal(result.passed,true,JSON.stringify(result));assert.equal(result.promptChars.length,3);assert.ok(result.promptChars.every(n=>n<=16000));assert.equal(result.reads,1);
  const plain=AGENT_EVAL_CASES.find(r=>r.id==='loop-plain-faithful');
@@ -144,7 +144,7 @@ test('多跳和原文评测必须经过实际工具循环，猜中答案不能�
  assert.equal(result.passed,true,JSON.stringify(result));assert.equal(calls,3);assert.equal(result.searches,2);
  const guessed=await runAgentCase(scenario,{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,JSON.stringify({action:'finish',answer:'周期73天，伴星蓝色。',citations:[]}))});
  assert.equal(guessed.passed,false);assert.ok(guessed.checks.some(r=>!r.pass && /追加检索/.test(r.label)));
- const readPlans=[{action:'search',query:'岚叶实验最终测量'},{action:'read',url:'https://example.org/research/1'},{action:'finish',answer:'测量值42。',citations:[2]}];
+ const readPlans=[{action:'search',query:'岚叶实验最终测量'},{action:'read',url:'https://example.org/research/1'},{action:'finish',answer:'测量值42。',citations:[1]}];
  const read=await runAgentCase(AGENT_EVAL_CASES.find(r=>r.id==='loop-read-source'),{key:'fake-key',workspaceId:'test-space',request:d=>reply(d,JSON.stringify(readPlans.shift()))});
  assert.equal(read.passed,true,JSON.stringify(read));assert.equal(read.reads,1);
 });

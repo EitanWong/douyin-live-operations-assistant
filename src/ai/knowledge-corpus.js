@@ -4,7 +4,8 @@ import {validatePublicURL} from './public-sources.js';
 const DAY=86400000;
 export const KNOWLEDGE_CORPUS_LIMITS=Object.freeze({rows:1000,chars:400000,sourceChars:12000});
 function bounded(rows){let size=0;return rows.toSorted((a,b)=>b.at-a.at || b.id.localeCompare(a.id)).filter(r=>{if(size+r.text.length>KNOWLEDGE_CORPUS_LIMITS.chars)return false;size+=r.text.length;return true;}).slice(0,KNOWLEDGE_CORPUS_LIMITS.rows).reverse();}
-const row=z.object({subject:subjectKeySchema.optional(),subjectEpoch:z.number().int().nonnegative().optional(),id:z.string().max(100),source:z.string().max(2000),title:z.string().max(160),text:z.string().min(1).max(12000),at:z.number().finite(),expiresAt:z.number().finite(),trust:z.literal('unverified')});
+const provenance=z.object({evidenceKind:z.enum(['search-snippet','public-page','stored-passage','public-data']).optional(),publishedAt:z.string().max(80).nullable().optional(),coverage:z.string().max(500).optional()});
+const row=provenance.extend({subject:subjectKeySchema.optional(),subjectEpoch:z.number().int().nonnegative().optional(),id:z.string().max(100),source:z.string().max(2000),title:z.string().max(160),text:z.string().min(1).max(12000),at:z.number().finite(),expiresAt:z.number().finite(),trust:z.literal('unverified')});
 const pending=z.object({room:z.string(),anchor:z.string(),rows:z.array(row).max(10),retained:z.array(z.string()).max(1000),revision:z.number().int(),sequence:z.number().int(),at:z.number().finite()});
 const snapshot=z.object({version:z.literal(1),revision:z.number().int().nonnegative(),sequence:z.number().int().nonnegative().default(0),rows:z.array(row).max(1000),pending:pending.optional()});
 export const corpusKey=(room,anchor)=>`live-assistant:knowledge:${room}:${anchor}`;
@@ -33,7 +34,7 @@ export function createKnowledgeCorpus({read,write,archive=async()=>{},now=Date.n
     const id=Array.from(new Uint8Array(digest),n=>n.toString(16).padStart(2,'0')).join('');
     const observedAt=source.at ?? at;if(!Number.isFinite(observedAt) || observedAt>at || at-observedAt>180*DAY)continue;
     const expiresAt=Math.min(observedAt+Math.min(180*DAY,Math.max(60000,lifetime)),Number.isFinite(source.expiresAt) ? source.expiresAt : Infinity);if(expiresAt<=at)continue;
-    incoming.push(row.parse({... (subject ? {subject,subjectEpoch} : {}),id,source:url,title:String(source.title || new URL(url).hostname).slice(0,160),text,at:observedAt,expiresAt,trust:'unverified'}));
+    incoming.push(row.parse({...provenance.parse(source),... (subject ? {subject,subjectEpoch} : {}),id,source:url,title:String(source.title || new URL(url).hostname).slice(0,160),text,at:observedAt,expiresAt,trust:'unverified'}));
    }
    if(!incoming.length)return false;
    const merged=new Map(previous.rows.map(r=>[r.id,r]));for(const r of incoming)merged.set(r.id,r);
