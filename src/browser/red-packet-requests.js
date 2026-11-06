@@ -1,17 +1,18 @@
 import {parseRedPacketCatalog,validateRedPacket,redPacketForm,redPacketName} from '../core/red-packet.js';
 import {parseIdentityJSON} from './identity.js';
 
-const same=(a,b)=>['roomId','userId','path','anchorId'].every(key=>a[key]===b[key]);
+const same=(a,b)=>['roomId','userId','path','anchorId','generation'].every(key=>a[key]===b[key]);
 export class RedPacketRequests {
  constructor(sender) {
-  this.sender=sender;this.closed=false;
-  sender.page.addEventListener('pagehide',()=>{this.closed=true;});
+  this.sender=sender;this.closed=false;this.generation=0;
+  sender.page.addEventListener('pagehide',()=>{this.closed=true;++this.generation;});
+  sender.page.addEventListener('pageshow',event=>{if(event.persisted)this.closed=false;});
  }
  context() {
   if(this.closed)throw new Error('页面已关闭，红包任务已停止');
   const context=this.sender.gifts.context(false),store=this.sender.page.__STORE__;
   if(![2,'2'].includes(store.roomStore.roomInfo.room?.status) || store.feedStore?.isActive===false)throw new Error('当前直播已结束或不在前台房间');
-  return context;
+  return {...context,generation:this.generation};
  }
  assertCurrent(context,signal) {
   if(signal?.aborted || !same(context,this.context()))throw new Error('账号、直播间或任务状态已变化，未发放');

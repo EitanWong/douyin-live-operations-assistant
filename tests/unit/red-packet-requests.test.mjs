@@ -44,3 +44,21 @@ test('余额不足、套餐变价、账号变化或取消均不发送；未知�
   }finally{f.close();}
  }
 });
+test('缓存恢复允许重新读取并发放，但缓存前尚在核价的红包不会继续发送',async()=>{
+ const f=fixture();let resume;
+ try{
+  const request=f.sender.client().request,gate=new Promise(resolve=>{resume=resolve;});let paused=true;
+  f.sender.client=()=>({request:async options=>{const response=await request(options);if(options.method==='get' && paused)await gate;return response;}});
+  const pending=f.sender.sendRedPacket({packet:f.packet});
+  while(!f.calls.length)await new Promise(resolve=>setImmediate(resolve));
+  f.page.dispatchEvent(new f.page.PageTransitionEvent('pagehide',{persisted:true}));
+  assert.equal((await f.sender.redPacketCatalog()).available,false);
+  f.page.dispatchEvent(new f.page.PageTransitionEvent('pageshow',{persisted:true}));
+  paused=false;resume();
+  assert.equal((await pending).submitted,false);
+  assert.equal(f.calls.filter(row=>row.method==='post').length,0);
+  const catalog=await f.sender.redPacketCatalog();assert.equal(catalog.available,true,catalog.reason);
+  const sent=await f.sender.sendRedPacket({packet:f.packet});assert.equal(sent.submitted,true,sent.reason);
+  assert.equal(f.calls.filter(row=>row.method==='post').length,1);
+ }finally{resume?.();f.close();}
+});
