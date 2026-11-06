@@ -4,7 +4,8 @@ export const WORKBENCH_CSS=`
 .product-workbench{display:flex;flex-direction:column;block-size:var(--product-card-limit);min-block-size:var(--product-card-min-height);min-width:0;max-width:100%;overflow:hidden;border-radius:14px;background:var(--mantine-color-body)}
 .product-workbench-header{display:flex;align-items:center;justify-content:space-between;gap:var(--product-gap);padding:var(--product-gap) var(--product-card-padding);flex:none;border-bottom:1px solid var(--product-line)}
 .product-workbench-header h3{font-size:16px;letter-spacing:-.4px}.network-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.network-mark{color:#6db8ff;font-size:25px}.network-original{padding:12px;border:1px solid var(--product-line);border-radius:8px}.network-original p{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.8}.network-eyebrow{font-size:9px;letter-spacing:2px;color:var(--sg-brand);font-weight:700}
-.product-workbench-toolbar{display:flex;flex-direction:column;gap:var(--product-gap);padding:var(--product-card-padding);flex:none}
+.product-workbench-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--product-gap);padding:var(--product-card-padding);flex:none}
+.product-workbench-toolbar form{flex:1.3 1 calc(var(--product-card-min-width) + var(--product-control-height)*4)}.product-workbench-filters{flex:1 1 calc(var(--product-card-min-width) + var(--product-control-height)*4)}
 .product-workbench-toolbar form,.product-workbench-filters{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--product-gap);min-width:0}
 .product-workbench-toolbar form>.mantine-InputWrapper-root{flex:1 1 var(--product-card-min-width);width:auto}.product-workbench-filters>.mantine-InputWrapper-root{flex:1 1 100px;width:auto;min-width:0}.product-workbench-filters>button{flex:none}
 .product-workbench-columns{display:flex;flex-wrap:wrap;gap:var(--product-gap);flex:1;min-height:0;min-width:0;overflow:auto;padding:0 var(--product-card-padding);align-items:stretch;overscroll-behavior:contain}
@@ -25,4 +26,6 @@ export const WORKBENCH_CSS=`
 .product-inspection-content:has(.product-workbench)>.mantine-Modal-body{flex:1;min-height:0;overflow:hidden}
 .product-inspection-view:has(>.product-workbench){height:100%;min-height:0;--product-chart-height:var(--product-card-min-height)}
 .product-inspection-view .product-workbench{block-size:100%;min-block-size:0}
+.product-inspection-view .product-workbench-header{display:none}
+.network-warning{flex:none;margin:0;padding:0 var(--product-card-padding) var(--product-gap);font-size:11px;color:var(--mantine-color-orange-text)}
 `;

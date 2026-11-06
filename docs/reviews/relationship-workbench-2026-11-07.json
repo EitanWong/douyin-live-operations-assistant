@@ -1,0 +1,115 @@
+{
+  "date": "2026-11-07",
+  "engine": {
+    "name": "Cytoscape.js",
+    "version": "3.34.4",
+    "license": "MIT",
+    "renderer": "Canvas"
+  },
+  "validation": {
+    "javascript": {
+      "tests": 1724,
+      "passed": 1724,
+      "failed": 0,
+      "seconds": 220.45
+    },
+    "native": {
+      "tests": 53,
+      "passed": 52,
+      "skipped": 1,
+      "reason": "FFmpeg unavailable in this test environment; real decoder test skipped"
+    },
+    "build": true,
+    "index": true,
+    "checks": true,
+    "layout": {
+      "desktop": {
+        "cases": 56,
+        "overflow": 0
+      },
+      "narrow": {
+        "cases": 56,
+        "overflow": 0
+      },
+      "short": {
+        "cases": 4,
+        "overflow": 0
+      }
+    },
+    "fixture": {
+      "people": 24,
+      "relationships": 41,
+      "source": "synthetic data only",
+      "model": "mock Q&A for browser UI; actual service request paths verified in automated tests"
+    },
+    "interactions": [
+      "searchable person navigation",
+      "direct neighbourhood 1/2 hops",
+      "source-backed path with non-transitivity notice",
+      "status/type filters",
+      "three layouts",
+      "zoom/pan/fit and focused radial layout",
+      "long original record with terminal sentence",
+      "Q&A and draft preservation across subpages and actual resize drag",
+      "enlargement, Escape and focus restoration",
+      "JSON export: 24 entities / 41 relations with evidence",
+      "PNG export: file generated and signature checked"
+    ],
+    "browserLimits": [
+      "No real person investigation or real paid model call",
+      "No sustained live-session or browser FPS / RSS claim",
+      "System reduced-motion change not performed; shared runtime behavior covered by product-runtime tests"
+    ]
+  },
+  "benchmark": {
+    "at": "2026-11-06T20:09:15.596Z",
+    "environment": {
+      "node": "v26.12.1",
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpu": "Apple M5"
+    },
+    "basis": "Actual Cytoscape headless core: layout / projection + diff + style update. Excludes Canvas rendering, FPS, GPU and model latency.",
+    "nodes": 80,
+    "edges": 120,
+    "samples": 20,
+    "layouts": {
+      "concentric": {
+        "layout": {
+          "medianMs": 16.896,
+          "p95Ms": 65.517
+        },
+        "unchangedTopologyUpdate": {
+          "medianMs": 0.502,
+          "p95Ms": 10.418
+        }
+      },
+      "cose": {
+        "layout": {
+          "medianMs": 35.896,
+          "p95Ms": 88.437
+        },
+        "unchangedTopologyUpdate": {
+          "medianMs": 0.455,
+          "p95Ms": 5.862
+        }
+      },
+      "breadthfirst": {
+        "layout": {
+          "medianMs": 20.719,
+          "p95Ms": 47.599
+        },
+        "unchangedTopologyUpdate": {
+          "medianMs": 0.957,
+          "p95Ms": 2.513
+        }
+      }
+    }
+  },
+  "qualityTools": {
+    "crapper": "unavailable, not executed",
+    "dryer": "unavailable, not executed",
+    "mutator": "unavailable, not executed"
+  },
+  "evidenceDirectory": "output/relationship-workbench-2026-11-07/"
+}

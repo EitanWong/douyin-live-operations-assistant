@@ -12,11 +12,11 @@ const style=[
 export function createNetworkView(element,{onSelect,create=cytoscape,headless=false}={}){
  const view=element.ownerDocument.defaultView;
  const cy=create({container:headless ? undefined : element,headless,styleEnabled:true,style,layout:{name:'preset'},minZoom:.15,maxZoom:4,wheelSensitivity:.18,pixelRatio:Math.min(view.devicePixelRatio || 1,2),boxSelectionEnabled:false,autounselectify:true,textureOnViewport:true});
- let topology='',layoutName='',frame=0,touched=false,closed=false;
+ let topology='',layoutName='',focusId='',frame=0,touched=false,closed=false;
  const fit=()=>{if(cy.elements().length)cy.fit(cy.elements(),24);};
  const touch=()=>{touched=true;};
  element.addEventListener('pointerdown',touch);element.addEventListener('wheel',touch,{passive:true});
- const layout=name=>{touched=false;cy.layout({name,animate:false,fit:false,randomize:false,numIter:180,nodeRepulsion:()=>8000,idealEdgeLength:()=>85,minNodeSpacing:18,spacingFactor:1.05,concentric:n=>n.degree(),levelWidth:()=>2}).run();fit();};
+ const layout=name=>{touched=false;cy.layout({name,animate:false,fit:false,randomize:false,numIter:180,nodeRepulsion:()=>8000,idealEdgeLength:()=>85,minNodeSpacing:18,spacingFactor:1.05,concentric:n=>focusId ? Number(n.data('recordId')===focusId) : n.degree(),levelWidth:()=>focusId ? 1 : 2}).run();fit();};
  const resize=()=>{if(!frame)frame=view.requestAnimationFrame(()=>{frame=0;if(closed)return;cy.resize();if(!touched && element.clientWidth && element.clientHeight)fit();});};
  const observer=new view.ResizeObserver(resize);observer.observe(element);
  cy.on('tap','node,edge',event=>onSelect?.({kind:event.target.data('kind'),id:event.target.data('recordId')}));
@@ -26,6 +26,7 @@ export function createNetworkView(element,{onSelect,create=cytoscape,headless=fa
   if(nextTopology!==topology){
    const ids=new Set(elements.map(e=>e.data.id));cy.batch(()=>{cy.elements().filter(e=>!ids.has(e.id())).remove();for(const el of elements){const existing=cy.getElementById(el.data.id);if(existing.length)existing.data(el.data);else cy.add(el);}});
   }else cy.batch(()=>{for(const el of elements)cy.getElementById(el.data.id).data(el.data);});
+  focusId=selected?.kind==='entity' ? selected.id : '';
   if(nextTopology!==topology || nextLayout!==layoutName){topology=nextTopology;layoutName=nextLayout;if(elements.length){cy.resize();layout(nextLayout);resize();}}
   cy.batch(()=>{cy.elements().removeClass('muted selected path');if(selected){const item=cy.getElementById(`${selected.kind==='entity' ? 'node' : 'edge'}:${selected.id}`);if(item.length){const context=item.isNode() ? item.closedNeighborhood() : item.union(item.connectedNodes());cy.elements().difference(context).addClass('muted');item.addClass('selected');}}
    for(const id of path?.nodes || [])cy.getElementById(`node:${id}`).addClass('path').removeClass('muted');for(const id of path?.edges || [])cy.getElementById(`edge:${id}`).addClass('path').removeClass('muted');});

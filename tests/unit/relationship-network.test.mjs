@@ -19,6 +19,10 @@ test('画布数据到达后按最终尺寸适配；证据刷新和手动操作�
  Object.defineProperties(element,{clientWidth:{value:800},clientHeight:{value:400}});
  const renderer=createNetworkView(element,{headless:true});
  try{
+  const star={entities:['hub','a','b','c','d','e','f','g'].map(id=>({id,name:id})),relations:[...['a','b','c','d','e','f','g'].map(id=>['hub',id]),['a','b'],['a','c'],['a','d']].map(([from,to],i)=>({id:String(i),from,to,predicate:'朋友',status:'unverified'}))};
+  renderer.update(star,{selected:{kind:'entity',id:'hub'}});const center=renderer.core.getElementById('node:hub').position();
+  const distances=['a','b','c','d','e','f','g'].map(id=>{const p=renderer.core.getElementById(`node:${id}`).position();return Math.hypot(p.x-center.x,p.y-center.y);});
+  assert.ok(Math.max(...distances)-Math.min(...distances)<.01,'人物聚焦将所选人物放在中心，直接关系处于同一圈');
   renderer.update(projectNetwork(graph,{}));assert.equal(frames.size,1,'新拓扑安排最终尺寸适配');
   for(const [id,fn] of frames){frames.delete(id);fn();}
   renderer.command('in');renderer.pan(12,8);const zoom=renderer.core.zoom(),pan={...renderer.core.pan()},position={...renderer.core.nodes()[0].position()};
