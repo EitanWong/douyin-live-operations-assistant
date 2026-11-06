@@ -110,3 +110,5 @@ npm run dev
 [完整使用指南](docs/guides/usage.zh-CN.md) · [AI 配置](docs/guides/ai-context.zh-CN.md) · [互动抽奖](docs/guides/giveaway.zh-CN.md) · [主播数据与预测](docs/features/anchor-prediction.zh-CN.md) · [开发指南](docs/development/contributing.zh-CN.md) · [全部文档](docs/README.md)
 
 采用 [MIT 许可证](LICENSE)。本项目为独立开源工具，与抖音官方无隶属关系。
+
+可视化人物关系网、自动公开原文沉淀和本机中文全文服务的使用范围见[本地知识图谱说明](docs/research/knowledge-graph-local-2026-11-06.zh-CN.md)。在知识库打开关系网，支持拖动缩放、点选证据、状态筛选、独立放大和JSON导出；自动运行沿用公开资料设置及小时预算。

@@ -1,0 +1,140 @@
+{
+  "date": "2026-11-06",
+  "scope": "可视化动态关系图谱、自动公开原文知识库、既有本机独立服务",
+  "components": {
+    "visualization": "Apache ECharts 6.1.0 GraphChart",
+    "browserStorage": "Dexie / IndexedDB",
+    "localService": "现有Python原生宿主 + SQLite FTS5",
+    "backgroundRetrieval": "MiniSearch 7.2.0",
+    "cloudCallsForGraphQuery": 0
+  },
+  "validation": {
+    "fullJavaScript": {
+      "passed": 1671,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 208643.06225,
+      "fileConcurrency": 4,
+      "base": "origin/dev e2decb8",
+      "includesDynamicRegression": true
+    },
+    "subsequentDynamicRegression": {
+      "knowledgeLibraryTestsPassed": 13,
+      "newTests": 1,
+      "behavior": [
+        "运行中入库增加图谱连线",
+        "相反说法并列标冲突",
+        "保留已选节点",
+        "删除来源后撤除对应边",
+        "同日到期撤除边",
+        "不修改用户配置"
+      ]
+    },
+    "native": {
+      "passed": 52,
+      "skipped": 0,
+      "durationSeconds": 9.167
+    },
+    "build": "passed after upstream integration",
+    "check": "passed after upstream integration",
+    "installedDataComponent": "已更新既有注册，隔离临时数据库通过真实native长度前缀协议入库/中文查询；临时数据库已移除",
+    "beforeUpstreamIntegrationFullJavaScript": {
+      "passed": 1661,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "durationMs": 213269.7035,
+      "fileConcurrency": 4
+    }
+  },
+  "browser": {
+    "engine": "真实Chrome / 正式共享展示层 / 合成证据",
+    "views": 50,
+    "pages": 15,
+    "secondaryCategories": 10,
+    "horizontalOverflowCount": 0,
+    "viewports": [
+      [
+        1280,
+        900
+      ],
+      [
+        430,
+        850
+      ]
+    ],
+    "interactions": [
+      "拖动节点/滚轮缩放",
+      "点选及键盘选择证据",
+      "可信状态筛选",
+      "普通/独立放大视图",
+      "长内容和多处同时展开",
+      "多次收起/重开",
+      "实际拖动及键盘连续缩放",
+      "跨页及缩放保留查询"
+    ],
+    "ordinaryGraphHeightPx": 180,
+    "narrowGraphWidthPx": 352,
+    "rootCauseFixes": [
+      "隐藏零尺寸挂载导致ECharts graph transform异常",
+      "Stack flex收缩将普通图表压至0px"
+    ],
+    "console": "保留首次失败日志；修正构建重载后的验收未新增warn/error",
+    "repeatedAfterUpstreamIntegration": {
+      "views": 50,
+      "pages": 15,
+      "secondaryCategories": 10,
+      "horizontalOverflowCount": 0,
+      "warnOrErrorLogs": 0,
+      "evidence": "ui-audit-integrated.json / ui-console-integrated.json",
+      "graphZoomAndPan": "真实滚轮与背景拖动通过，最终截图已更新"
+    }
+  },
+  "retrievalBenchmark": {
+    "node": "v26.12.1",
+    "platform": "darwin",
+    "fixture": {
+      "rawSources": 1000,
+      "chars": 340780,
+      "relations": 1000
+    },
+    "coldMs": 119.163167,
+    "warmMedianMs": 2.0348330000000203,
+    "warmP95Ms": 3.138124999999974,
+    "graphOptionMs": 0.03611333000000002,
+    "displayed": {
+      "nodes": 80,
+      "relations": 40
+    },
+    "basis": "合成CPU基准，无模型/网络调用，不代表浏览器FPS或全天运行"
+  },
+  "workspaceProjectionBenchmark": {
+    "charts": 6,
+    "pointsPerChart": 1000,
+    "iterations": 100,
+    "medianMs": 0.5135839999999803,
+    "p95Ms": 0.6993330000000242,
+    "contentChanges": 0,
+    "hiddenOptionReads": 0
+  },
+  "limits": {
+    "corpusRowsPerScope": 1000,
+    "corpusTextCharsPerScope": 400000,
+    "sourceTextChars": 12000,
+    "overviewNodes": 80,
+    "overviewRelations": 100,
+    "relatedAccountDepth": 2,
+    "graphVisibleRefreshSeconds": 10
+  },
+  "evidenceDirectory": "output/knowledge-graph-2026-11-06",
+  "limitations": [
+    "真实抖音账号端到端、全天运行、真实关系准确率未验收",
+    "主页/作品/评论/弹幕为有界采样，采集依赖Chrome与直播页运行",
+    "仅结构化可解析的明确关系，其他内容保留原文检索，不自动训练模型权重",
+    "未部署LightRAG、RAGFlow或新云端图数据库",
+    "本机归档关闭时不入新镜像增量、不回填关闭期间资料；恢复后同步删除水位",
+    "本机审计原始档案独立保留，不自动重新成为AI有效记忆",
+    "crapper、dryer、mutator不可用，未执行；其他检查不替代"
+  ]
+}
