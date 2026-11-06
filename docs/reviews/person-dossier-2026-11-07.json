@@ -1,0 +1,94 @@
+{
+  "date": "2026-11-07",
+  "integrationBranch": "dev",
+  "baseline": "b9a9e3b",
+  "scope": "Evidence-backed person dossiers and original records, daily bounded public-profile refresh, shared content and hover boundaries",
+  "validation": {
+    "npmCi": "passed",
+    "build": "passed",
+    "check": "passed",
+    "agentIndex": {
+      "modules": 501,
+      "symbols": 2867
+    },
+    "javascript": {
+      "command": "npm test",
+      "tests": 1725,
+      "passed": 1725,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "durationMs": 238989.994959
+    },
+    "native": {
+      "tests": 53,
+      "passed": 53,
+      "skipped": 0,
+      "durationSeconds": 9.644,
+      "runtime": "installed native virtual environment; system Python first run skipped websocket coverage"
+    },
+    "browser": {
+      "engine": "Chrome",
+      "fixture": "synthetic local data; real shared React/Mantine workspace",
+      "viewports": [
+        [
+          1280,
+          900
+        ],
+        [
+          430,
+          850
+        ]
+      ],
+      "pageStates": 116,
+      "longDossierStates": 5,
+      "passedStates": 121,
+      "horizontalOverflow": false,
+      "wrappedGroupOverflow": false,
+      "consoleErrors": 0,
+      "consoleWarnings": 0,
+      "sourceAuditRows": 238,
+      "failedObservationRetained": "人物长档案 / 最终; before hover fix",
+      "originalRecordChars": 1634,
+      "boundedBodyPx": 320,
+      "maxBodyScrollHeightPx": 4887,
+      "cleanup": "viewport reset, task tab closed, port 4213 server stopped"
+    },
+    "graphBenchmark": {
+      "node": "v26.12.1",
+      "platform": "darwin",
+      "fixture": {
+        "rawSources": 1000,
+        "chars": 340780,
+        "relations": 1000
+      },
+      "coldMs": 154.387875,
+      "warmMedianMs": 5.642499999999984,
+      "warmP95Ms": 15.260458000000028,
+      "graphOptionMs": 0.10401124999999979,
+      "displayed": {
+        "nodes": 80,
+        "relations": 40
+      },
+      "basis": "合成CPU基准，无模型/网络调用，不代表浏览器FPS或全天运行"
+    }
+  },
+  "qualityBoundaries": [
+    "Every facet, event and relationship retains source, time and trust; co-occurrence and research subject do not prove identity or relationship.",
+    "Complete available original records remain in the existing archive; query projections are bounded and rebuildable.",
+    "Inferred wealth, private life and future gifting probability remain unknown.",
+    "Research is disabled by default; existing source switches, budgets, cancellation and forget epochs apply."
+  ],
+  "unavailableChecks": [
+    "crapper",
+    "dryer",
+    "mutator"
+  ],
+  "limits": [
+    "No real-model quality evaluation or hallucination-rate measurement in this task.",
+    "No real-account end-to-end collection or long-duration live-stream acceptance.",
+    "Public research is bounded, may be delayed, and does not guarantee complete biographies, every event or daily refresh of every person.",
+    "Synthetic CPU benchmarks do not prove browser frame rate or model/network latency."
+  ],
+  "localEvidenceDirectory": "output/person-dossier-2026-11-07/"
+}

@@ -6,6 +6,8 @@ import {copy,DEFAULTS} from '../../src/core/engine.js';
 import {createWorkspaceBridge} from '../../src/ui/product/bridge.js';
 import {createKnowledgeCorpus} from '../../src/ai/knowledge-corpus.js';
 import {createRelationshipLibrary} from '../../src/ai/relationship-library.js';
+import {AudienceMemory} from '../../src/ai/audience-memory.js';
+import {createRelationshipRetriever} from '../../src/ai/relationship-memory.js';
 
 const record=(id,title,extra={})=>({id,title,content:'主播每周六晚上八点开播',source:'主播确认',updatedAt:Date.now(),expiresOn:'',enabled:true,...extra});
 function setup(entries=[],callbacks={}){
@@ -19,6 +21,23 @@ function setup(entries=[],callbacks={}){
 }
 const visibleRows=panel=>[...panel.node('[data-memory-list]').children].filter(row=>!row.hidden);
 const walk=node=>[node,...(node?.children || []).flatMap(walk)];
+
+test('点选人物查看档案、事件与缺口，按需展开完整原文；删除后详情移除且草稿不变',async()=>{
+ const at=Date.now(),audience=new AudienceMemory({anchor:'10',now:()=>at}),retrieve=createRelationshipRetriever();
+ const text='我喜欢陶艺。'+'这次活动有很多细节。'.repeat(150)+'周六带陶土。';
+ audience.observe({id:'a',type:'chat',source:'socket',receivedAt:at,user:{id:'1',name:'小雨',secUid:'rain-account'},text});
+ const f=setup([],{relationships:(q,memory,options)=>retrieve({anchor:'10',audience,memory,now:at},q,options)});
+ try{
+  f.panel.tab('knowledge');const select=f.panel.node('[data-relationship-selection]');
+  select.value=`entity:${f.panel.knowledgeLibrary.relationshipGraph.entities.find(n=>n.name==='小雨').id}`;select.dispatchEvent(new f.dom.window.Event('change',{bubbles:true}));
+  const detail=f.panel.node('[data-relationship-detail]');assert.match(detail.textContent,/兴趣爱好.*陶艺/);assert.match(detail.textContent,/尚缺/);
+  assert.ok(detail.querySelector('a[href="https://www.douyin.com/user/rain-account"]'));
+  detail.querySelector('[data-person-record]').click();await new Promise(setImmediate);
+  assert.ok(detail.textContent.includes(text));assert.equal(f.panel.dirty,false);
+  audience.forget('uid:1');f.panel.knowledgeLibrary.previewRelationships(f.panel.knowledgeLibrary.relationships);
+  assert.equal(detail.textContent,'');assert.equal(f.panel.dirty,false);
+ }finally{f.close();}
+});
 
 test('人物图谱在知识库按当前草稿本机查询，展示原话、冲突与时间且不渲染不可信HTML',()=>{
  let seen;const f=setup([record('r','人物关系',{content:'阿明是小雨的师傅'})],{relationships:(query,memory)=>{

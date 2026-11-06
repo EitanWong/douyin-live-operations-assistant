@@ -1249,7 +1249,8 @@ test('人物关系后台查询跨房间读取持续档案，只返回相关证�
  }
  const w=await worker(values);let response=await w.send({type:'relationship-query',query:'青哥和小雨和阿明'});
  assert.equal(response.ok,true);assert.equal(response.value.relations.length,2);assert.equal(response.value.entities.filter(n=>['阿青','青哥'].includes(n.name)).length,1);
- assert.equal(JSON.stringify(response.value).includes('sec-account-a'),false);
+ assert.deepEqual(Array.from(response.value.entities.find(n=>['阿青','青哥'].includes(n.name)).dossier.profiles),['https://www.douyin.com/user/sec-account-a'],'只披露已配对的公开主页');
+ assert.doesNotMatch(JSON.stringify(response.value),/"(?:secUid|secUids|key)":/u,'不返回原始身份字段或整份存档');
  response=await w.send({type:'set',key:'live-assistant:live-memory:2:20',value:values['live-assistant:live-memory:2:20']});assert.equal(response.ok,false);
  await w.send({type:'set',key:'live-assistant:config:2',value:{...values['live-assistant:config:2'],ai:{assistant:{memoryEnabled:false}}}});
  response=await w.send({type:'relationship-query',query:'阿明'});assert.equal(response.value.relations.length,0);

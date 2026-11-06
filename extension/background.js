@@ -232,7 +232,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       }else if(message.type==='relationship-query' && isRoom(sender)){
         const override={};
         if(message.memory!==undefined)override.memory=validateMemory(message.memory);
-        const graphOptions={browse:message.browse===true,status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all'};
+        const graphOptions={browse:message.browse===true,status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all',...(typeof message.recordId==='string' && message.recordId.length<=4000 ? {recordId:message.recordId} : {})};
         value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override,graphOptions);
       }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');

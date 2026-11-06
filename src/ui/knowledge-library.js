@@ -1,6 +1,7 @@
 import {relationshipEvidenceVersion} from '../services/relationship-query.js';
 import {relationshipChartOption,RELATIONSHIP_STATUS_LABELS} from './relationship-graph.js';
 import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate} from '../services/knowledge.js';
+import {PERSON_FACETS} from '../ai/person-dossier.js';
 
 const fields=[['title','资料标题','text',80],['content','背景正文','textarea',MEMORY_LIMITS.content],['source','资料来源 / 确认人','text',200],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 const time=at=>new Date(at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
@@ -155,12 +156,41 @@ export class KnowledgeLibrary {
   link.href=url;link.download='人物关系图谱.json';link.click();view.URL.revokeObjectURL(url);
  }
  selectRelationship(){
+  this.recordRevision=(this.recordRevision || 0)+1;
   const target=this.root.querySelector('[data-relationship-detail]');target.replaceChildren();
   const value=this.root.querySelector('[data-relationship-selection]').value,graph=this.relationshipGraph;if(!value || !graph)return;
   const type=value.slice(0,value.indexOf(':')),id=value.slice(value.indexOf(':')+1);
   const row=(type==='entity' ? graph.entities : graph.relations).find(row=>row.id===id);if(!row)return;
   const p=this.document.createElement('p');p.textContent=type==='entity' ? `${row.name} · ${row.role || '人物提及'}` : `${graph.entities.find(n=>n.id===row.from)?.name} ${row.negative ? '不是' : '是'} ${graph.entities.find(n=>n.id===row.to)?.name}的${row.predicate} · ${RELATIONSHIP_STATUS_LABELS[row.status]}`;target.append(p);
   for(const evidence of row.evidence || []){const p=this.document.createElement('p');p.textContent=`${evidence.text} · ${evidence.source} · ${time(evidence.at)}${evidence.scope ? ` · 房间${evidence.scope.room}/主播${evidence.scope.anchor}` : ''}`;target.append(p);}
+  if(type==='entity' && row.dossier)this.showPersonDossier(target,row.dossier);
+ }
+ showPersonDossier(target,dossier){
+  const paragraph=text=>{const p=this.document.createElement('p');p.textContent=text;target.append(p);};
+  const origin=row=>`${RELATIONSHIP_STATUS_LABELS[row.trust] || '待核实'} · ${row.source} · ${time(row.at)}${row.scope ? ` · 房间${row.scope.room}/主播${row.scope.anchor}` : ''}`;
+  for(const url of dossier.profiles){const p=this.document.createElement('p'),link=this.document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=`抖音主页：${url}`;p.append(link);target.append(p);}
+  for(const row of dossier.facets)paragraph(`${PERSON_FACETS[row.category]}：${row.text} · ${origin(row)}`);
+  const observed=dossier.gifting?.observed;
+  if(observed)paragraph(`本房30天已观察送礼：${observed.count}件，已知价值${observed.knownDiamonds===null ? '未知' : `至少${observed.knownDiamonds}钻石`}，未知单价${observed.unknownPriceCount}件；未来送礼概率未知。`);
+  for(const row of dossier.gifting?.byScope || [])paragraph(`房间${row.scope?.room || '未知'}30天送礼观测：${row.count}件，已知价值${row.knownDiamonds ?? '未知'}钻石；不同房间分别统计。`);
+  for(const [label,records] of [['事件与记忆原话',dossier.events],['说话样本',dossier.speechSamples],['待查公开线索',dossier.leads]]){
+   if(!records.length)continue;paragraph(label);
+   for(const row of records){
+    paragraph(`${row.text} · ${origin(row)} · ${row.attribution} · 原文${row.range.start}–${row.range.end}/${row.originalChars}字`);
+    const button=this.document.createElement('button');button.type='button';button.dataset.personRecord=row.recordId;button.textContent='查看完整原文';
+    button.addEventListener('click',()=>{void this.showPersonRecord(row.recordId,target);});target.append(button);
+   }
+  }
+  if(dossier.missing.length)paragraph(`尚缺明确资料：${dossier.missing.map(key=>PERSON_FACETS[key]).join('、')}。`);
+  paragraph(`已存${dossier.coverage.records}条相关原记录、${dossier.coverage.leads}条待查线索；当前按问题选取片段。${dossier.policy}`);
+ }
+ async showPersonRecord(recordId,target){
+  const revision=this.recordRevision=(this.recordRevision || 0)+1;
+  try{
+   const query=this.root.querySelector('[data-relationship-query]').value.trim(),graph=await this.relationships(query,this.read(),{browse:!query,recordId});
+   if(this.closed || revision!==this.recordRevision)return;
+   target.querySelector('[data-person-original]')?.remove();const p=this.document.createElement('p');p.dataset.personOriginal='';p.textContent=graph.record ? `完整原文：${graph.record.text} · ${graph.record.source} · ${time(graph.record.at)}` : '原记录已删除或不再可用。';target.append(p);
+  }catch(reason){if(!this.closed && revision===this.recordRevision)this.error(reason);}
  }
  showRelationships(result){
    this.relationshipGraph=result;

@@ -105,7 +105,7 @@ export const PRODUCT_CSS=`
 .product-card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;flex:none;min-width:0;padding:var(--product-card-padding);border-bottom:1px solid var(--product-line)}
 .product-card-heading h3{min-height:var(--product-heading-height);display:flex;align-items:center}
 .product-card-body{min-height:0;min-width:0;display:flex;flex-direction:column;padding:var(--product-card-padding);overflow:visible;overscroll-behavior:auto;scroll-padding:var(--product-card-padding);flex:1 1 auto}
-.product-card-content{min-width:0;justify-content:flex-start}.product-card-content>*{flex-shrink:0}
+.product-card-content{min-width:0;justify-content:flex-start}.product-card-content>*,.product-disclosure-body>*{flex-shrink:0}
 .product-page .product-card-body{max-block-size:var(--product-card-limit);overflow:auto;scrollbar-gutter:stable;overscroll-behavior:auto}
 .product-page .product-card-run:not([data-card-run=full])>.product-card-slot>.mantine-Paper-root>.product-card-body{max-block-size:none}
 .product-page .product-disclosure-body{max-block-size:var(--product-card-limit);overflow:auto;scrollbar-gutter:stable;scroll-padding:var(--product-gap)}

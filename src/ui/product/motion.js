@@ -41,7 +41,9 @@ export function Button({disabled,loading,fullWidth,...props}) {
   return h(MotionButton,{...props,disabled,loading,fullWidth,initial:false,
     whileHover:interactive ? 'hover' : undefined,whileTap:interactive ? 'press' : undefined,
     animate:reduced ? {scale:1} : undefined,
-    variants:{hover:{scale:fullWidth ? 1 : 1.015},press:{scale:fullWidth ? .99 : .975}},transition:reduced ? {duration:0} : springs.control});
+    // Stack children can fill their parent without an explicit fullWidth prop.
+    // Hover feedback must stay inside that layout boundary.
+    variants:{hover:{scale:1},press:{scale:fullWidth ? .99 : .975}},transition:reduced ? {duration:0} : springs.control});
 }
 export function MotionIcon({html}) {
   const reduced=useMotionPreference();

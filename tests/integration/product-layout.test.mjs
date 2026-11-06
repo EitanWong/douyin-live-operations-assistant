@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {AdaptiveLayout} from '../../src/ui/adaptive-layout.js';
 import {describeLayout,gridOptions,layoutChildren} from '../../src/ui/product/layout.js';
+import {PRODUCT_CSS} from '../../src/ui/product/styles.js';
+
+test('有界折叠正文与卡片正文都保留换行按钮组的自然高度',()=>{
+ const dom=new JSDOM('<div class="product-card-content"><div class="actions">卡片操作</div></div><div class="product-disclosure-body"><div class="actions">换行操作</div><label>后续字段<input></label></div>');
+ try{
+  const style=dom.window.document.createElement('style');
+  // jsdom does not parse container queries; exercise the shared content rule
+  // through its CSSOM and verify wrapped geometry separately in real Chrome.
+  style.textContent=[...PRODUCT_CSS.matchAll(/([^{}]+)\{([^{}]*)\}/gu)].filter(m=>!m[1].trim().startsWith('@')).map(m=>`${m[1]}{${m[2]}}`).join('\n');dom.window.document.head.append(style);
+  for(const row of dom.window.document.querySelectorAll('.actions'))assert.equal(dom.window.getComputedStyle(row).flexShrink,'0');
+ }finally{dom.window.close();}
+});
 
 test('PK 比分、播报控制和并列概览保留各自的排列语义',()=>{
  const dom=new JSDOM('<div class="pk-scoreboard"></div><div class="pk-chart-head"></div><div class="pk-overview"></div><details class="pk-outlook"></details><div class="pk-broadcast-option"></div><div class="pk-broadcast-times"></div>');

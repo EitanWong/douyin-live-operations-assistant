@@ -1,19 +1,25 @@
 import {z} from 'zod';
-import {audienceProfile,subjectKeySchema,subjectEpoch} from './audience-profile.js';
+import {audienceProfile,subjectKeySchema,subjectEpoch,profileSources,subjectRow} from './audience-profile.js';
 export const RESEARCH_DEFAULTS=Object.freeze({enabled:false,intervalSec:180,maxPerHour:3});
 export const researchSettingsSchema=z.strictObject({enabled:z.boolean(),intervalSec:z.number().int().min(60).max(3600),maxPerHour:z.number().int().min(1).max(10)});
 export const continuousEnabled=config=>Boolean(config?.ai?.enabled && config.ai.assistant?.memoryEnabled!==false && config.ai.assistant?.research?.enabled);
 const normalize=text=>text.normalize('NFKC').trim().replace(/\s+/gu,' ').toLowerCase();
-function observations(memory,now,seen,includeAudience,turn){
+function observations(memory,now,seen,includeAudience,turn,includeAccounts){
  const viewers=(includeAudience ? memory.audience?.viewers || [] : []).flatMap(v=>{
   const subject=subjectKeySchema.safeParse(v.key).success ? v.key : undefined,priority=subject ? audienceProfile(v,memory.anchor,now).research.priority : 0;
   return (v.statements || []).slice(-3).map(r=>({...r,kind:'chat',subject,epoch:subjectEpoch(memory.audience,subject),priority}));
  });
- const rows=[...viewers,...(memory.perception?.observations || []).filter(r=>r.kind!=='video').slice(-3).map(r=>({...r,priority:0}))];
+ const refresh=(includeAudience && includeAccounts ? memory.audience?.viewers || [] : []).flatMap(v=>{
+  if(!subjectRow(memory.audience,v.key) || v.lastAt>now || now-v.lastAt>30*86400000)return [];
+  const sources=profileSources(v,memory.audience.viewers);if(!sources.length)return [];
+  return [{kind:'profile-refresh',subject:v.key,epoch:subjectEpoch(memory.audience,v.key),priority:0,at:now,sources,
+   text:`复查${v.name || '该账号'}的抖音公开主页和已提及的公开事件，更新有来源的人物背景、明确自述和关系线索；保留未知与冲突，不按昵称认人，不推断私人生活、财富或送礼概率。`}];
+ });
+ const rows=[...viewers,...(memory.perception?.observations || []).filter(r=>r.kind!=='video').slice(-3).map(r=>({...r,priority:0})),...refresh];
  const last=subject=>Math.max(0,...seen.filter(r=>r.subject===subject).map(r=>r.at));
  const fair=turn===2;
  return rows.filter(r=>typeof r.text==='string' && r.text.trim().length>=6 && Number.isFinite(r.at) && r.at<=now && now-r.at<300000)
-  .sort((a,b)=>(fair ? Number(b.priority<2)-Number(a.priority<2) : 0) || b.priority-a.priority || last(a.subject)-last(b.subject) || b.at-a.at);
+  .sort((a,b)=>Number(a.kind==='profile-refresh')-Number(b.kind==='profile-refresh') || (fair ? Number(b.priority<2)-Number(a.priority<2) : 0) || b.priority-a.priority || last(a.subject)-last(b.subject) || b.at-a.at);
 }
 async function digest(text){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(bytes)].map(n=>n.toString(16).padStart(2,'0')).join('');}
 
@@ -32,12 +38,13 @@ export function createContinuousResearch({configs,read,store,submit,cancelDisabl
    const calls=old.calls.filter(t=>t<=at && at-t<3600000);if(old.nextAt>at || calls.length>=settings.maxPerHour)continue;
    const memory=await read(`live-assistant:live-memory:${room}:${anchor}`);if(memory?.anchor!==anchor)continue;
    const turn=(old.turn ?? old.seen.length)%3,seen=old.seen.filter(r=>at-r.at<86400000);let candidate,hash;
-   for(const row of observations(memory,at,seen,config.ai.contextSources?.audience!==false,turn)){const key=await digest(`${row.subject || 'unattributed'}:${row.epoch || 0}:${normalize(row.text)}`);if(!seen.some(r=>r.key===key)){candidate=row;hash=key;break;}}
+   for(const row of observations(memory,at,seen,config.ai.contextSources?.audience!==false,turn,config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false)){const key=await digest(`${row.subject || 'unattributed'}:${row.epoch || 0}:${row.kind==='profile-refresh' ? row.kind : normalize(row.text)}`);if(!seen.some(r=>r.key===key)){candidate=row;hash=key;break;}}
    if(!candidate)continue;
    const id=`auto-${(await digest(`${scope}:${hash}:${Math.floor(candidate.at/86400000)}`)).slice(0,64)}`;
-   await submit({id,scope,question:candidate.text.trim().slice(0,1000),input:{anchor,...(candidate.subject ? {subject:candidate.subject,subjectEpoch:candidate.epoch} : {}),ai:config.ai,sources:[],context:{now:at,persona:config.ai.persona,knowledge:config.ai.knowledge,
+   await submit({id,scope,question:candidate.text.trim().slice(0,1000),input:{anchor,...(candidate.subject ? {subject:candidate.subject,subjectEpoch:candidate.epoch} : {}),ai:config.ai,sources:candidate.sources || [],context:{now:at,persona:config.ai.persona,knowledge:config.ai.knowledge,
     context:[{text:candidate.text.slice(0,1000),at:candidate.at,source:candidate.kind,identity:candidate.subject || 'unverified sampled conversation'}]}}});
-   await store.writeLoop({scope,turn:(turn+1)%3,updatedAt:at,seen:[...seen,{key:hash,at,subject:candidate.subject}].slice(-100),calls:[...calls,at],nextAt:at+settings.intervalSec*1000});
+   const nextSeen=[...seen,{key:hash,at,subject:candidate.subject,kind:candidate.kind}],retained=[...nextSeen.filter(r=>r.kind==='profile-refresh'),...nextSeen.filter(r=>r.kind!=='profile-refresh').slice(-100)];
+   await store.writeLoop({scope,turn:(turn+1)%3,updatedAt:at,seen:retained,calls:[...calls,at],nextAt:at+settings.intervalSec*1000});
   }
  };
  return {tick(){if(!pending)pending=tick().finally(()=>{pending=null;});return pending;}};
