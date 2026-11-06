@@ -50,6 +50,7 @@ git diff --check
 | 本地模型准备与安装进度 | `extension/model-preparation.js`、`extension/edge-offscreen.js`、`scripts/lib/native-deployment.mjs`、`src/ui/setup-progress.js` | 离屏仅用runtime、后台存储、重载恢复与显式释放；`model-preparation`、`edge-background-prepare`、`native-deployment`、`setup-progress` 测试 |
 | 产品内 Agent 任务 | `src/ai/harness.js`、`extension/ai-background.js`、`src/ai/task-store.js` | 后台持久任务、取消、额度与发送分离；`agent-execution`、`agent-lifecycle` 测试 |
 | 多步研究与断点恢复 | `src/ai/research-graph.js`、`src/ai/checkpoint-store.js` | LangGraph原生节点和pending writes、源时效与恢复绑定；`research-loop`、`research-checkpoint`、`continuous-research-flow` 测试 |
+| 观众画像与研究分级 | `src/ai/audience-profile.js`、`src/ai/research-profile.js` | 礼物下限、等级时效、遗忘版本、主体隔离；`audience-profile`、`profile-knowledge`、`profile-research-flow` 测试 |
 | 持续研究与前台原文复用 | `src/ai/continuous-research.js`、`src/services/automatic-knowledge.js` | alarm去重/预算、稳定任务ID、唯一知识库；`continuous-research`、`research-knowledge` 测试 |
 | 语音、视觉与原生宿主 | `src/browser/live-media.js`、`src/browser/native-perception.js`、`extension/native-perception.js`、`native/` | 实例独立状态与取消；`media-lifecycle`、`native-perception-*`、`native/test_*.py` |
 | 公共数据与检索 | `src/services/public-data.js`、`src/services/weather.js`、`src/services/retrieval.js` | 来源、时效、单位、取消与缓存边界；`public-data`、`weather`、`mature-retrieval` 测试 |

@@ -1,0 +1,87 @@
+{
+  "date": "2026-11-07",
+  "base": "5ee585d2ccaed2f40fe69bdaff8abe09ca87f268",
+  "branch": "dev",
+  "tests": {
+    "javascript": {
+      "passed": 1713,
+      "failed": 0,
+      "durationMs": 221679.379042,
+      "log": "output/audience-agent-2026-11-07/full-tests-delivery.log"
+    },
+    "harness": {
+      "passed": 80,
+      "failed": 0,
+      "log": "output/audience-agent-2026-11-07/harness-final.log"
+    },
+    "native": {
+      "passed": 53,
+      "failed": 0,
+      "log": "output/audience-agent-2026-11-07/native-tests.log"
+    }
+  },
+  "checks": {
+    "npmCi": "passed",
+    "build": "passed",
+    "check": "passed",
+    "agentIndex": "regenerated",
+    "diffCheck": "passed"
+  },
+  "evaluation": {
+    "promptfooScenarios": 64,
+    "researchScenarios": 11,
+    "realModelRun": false,
+    "reason": "QWEN_API_KEY and QWEN_WORKSPACE_ID unavailable; no credentials read or emitted"
+  },
+  "ui": {
+    "page": "AI设置 / 观众与研究",
+    "browser": "Chrome",
+    "fixture": "output/audience-agent-2026-11-07/browser/index.html",
+    "viewports": [
+      {
+        "width": 1280,
+        "height": 900
+      },
+      {
+        "width": 430,
+        "height": 850
+      }
+    ],
+    "simultaneousExpanded": [
+      "回复技能",
+      "执行范围、资料与额度",
+      "重点对象筛选"
+    ],
+    "repeatedCollapseExpandCycles": 3,
+    "longResults": 5,
+    "draftRetained": "核对茶杯清洗条件，保留未确定的内容。",
+    "narrowHostWidth": 410,
+    "narrowViewportWidth": 430,
+    "desktopCardHorizontalOverflows": 0,
+    "researchBody": {
+      "clientHeight": 273,
+      "scrollHeight": 2601
+    },
+    "longResult": {
+      "clientHeight": 320,
+      "scrollHeight": 1112
+    },
+    "resizes": [
+      "keyboard Shift+ArrowRight -> 890×694",
+      "pointer drag -> 1042×764",
+      "pointer drag -> 942×714"
+    ],
+    "keyboardHomeScroll": true,
+    "consoleWarningsAndErrors": [],
+    "cleanup": "viewport reset and test tab closed",
+    "limitations": "No measured FPS or real livestream performance claim; CSS fixture initially built without text loader was discarded, final checks used production CSS text loader."
+  },
+  "limitations": [
+    "Only observed stable accounts are modeled; unverified audio is not attributed to the anchor.",
+    "Research budgets increase opportunity to verify, not guaranteed answer quality or comprehensive profile collection.",
+    "Personal raw evidence remains browser-scoped; native generic FTS excludes it and audit archives retain it.",
+    "No new GraphRAG service or private trait inference.",
+    "crapper, dryer and mutator unavailable; checks not executed."
+  ],
+  "artifacts": "output/audience-agent-2026-11-07"
+}

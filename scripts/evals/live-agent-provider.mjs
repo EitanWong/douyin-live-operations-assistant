@@ -1,3 +1,4 @@
+import {AudienceMemory} from '../../src/ai/audience-memory.js';
 import {Engine,mergeConfig,cleanMessage} from '../../src/core/engine.js';
 import {createAIClient} from '../../src/services/ai.js';
 import {createResilientAI} from '../../src/services/ai-resilience.js';
@@ -58,8 +59,10 @@ export async function runAgentCase(scenario,{key,workspaceId,request=fetchTransp
   pipeline:{mode:'omni-only',workspaceId,region:'cn-beijing'},search:{enabled:true,rememberKnowledge:true,maxResults:5},
   ...(scenario.noise ? {knowledge:'无关直播背景。'.repeat(1500)} : {})}});
  const finalConfig=mergeConfig(scenario.config || {},config);
+ const memory=new AudienceMemory({anchor:'10001',now:()=>now});
+ for(const [i,event] of (scenario.observations || []).entries())memory.observe({source:'socket',id:`profile-${i}`,receivedAt:now,user:scenario.viewer,...event});
  const media=new MediaEvidence({now:()=>now});
- const engine=new Engine({config:finalConfig,ai,now:()=>now,random:()=>0.5,
+ const engine=new Engine({config:finalConfig,ai,viewerMemory:(user,query)=>memory.context(user,query),now:()=>now,random:()=>0.5,
   liveData:()=>income ? {income:{...income,anchorId:'10001',roomId:'eval-room',at:scenario.stale ? now-300000 : now}} : {},
   mediaContext:()=>media.context(60),send:async()=>{sent++;throw new Error('评测禁止真实发送');},
   log:(kind,text)=>{if(kind==='preview')replies.push({text,valid:cleanMessage(text,finalConfig).ok});else diagnostics.push({kind,text});}});
@@ -80,7 +83,7 @@ export async function runAgentCase(scenario,{key,workspaceId,request=fetchTransp
     media.add({id:'speech',kind:'audio',at:now-500,endedAt:now,text:scenario.question,isFinal:true});
     engine.requestProactive(now);if(scenario.duplicate)engine.requestProactive(now);
    }else{
-    const event={type:'chat',id:`eval-${turn}`,user:{id:`viewer-${turn}`,name:'测试提问'},text:scenario.direct===false ? scenario.question : `@场控 ${turn && scenario.followupQuestion ? scenario.followupQuestion : scenario.question}`,...(scenario.mentions ? {mentions:scenario.mentions} : {})};
+    const event={type:'chat',id:`eval-${turn}`,user:scenario.viewer || {id:`viewer-${turn}`,name:'测试提问'},text:scenario.direct===false ? scenario.question : `@场控 ${turn && scenario.followupQuestion ? scenario.followupQuestion : scenario.question}`,...(scenario.mentions ? {mentions:scenario.mentions} : {})};
     engine.ingest(event);if(scenario.duplicate)engine.ingest(event);
    }
    if(['cancel','late'].includes(scenario.fault)){

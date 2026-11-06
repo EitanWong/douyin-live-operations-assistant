@@ -9,7 +9,9 @@ export function supportContext(target,task,ai,now){
   if(!Number.isSafeInteger(g.count) || g.count<1 || g.count>1e9 || !Number.isFinite(g.unitDiamonds) || g.unitDiamonds<0 || g.unitDiamonds>1e9 || !Number.isSafeInteger(value) || !Number.isSafeInteger(result.known+value))return {...result,partial:true};
   return {...result,known:result.known+value};
  },{known:0,partial:false});
- const a=total(recent),b=total(gifts),known=Math.max(a.known,b.known);
- return {level:known>=1000 ? 'substantial' : known>0 ? 'observed' : 'unknown',knownRecentDiamonds:known || null,partial:a.partial || b.partial,basis:'bounded-observed-gifts',
+ const aggregate=memory?.profile?.gifts;
+ const valid=aggregate && Number.isFinite(aggregate.through) && aggregate.through<=now && now-aggregate.through<30000 && Number.isSafeInteger(aggregate.knownDiamonds) && aggregate.knownDiamonds>=0;
+ const a=valid ? {known:aggregate.knownDiamonds,partial:aggregate.partial} : total(recent),b=total(gifts),known=Math.max(a.known,b.known);
+ return {level:known>=1000 ? 'substantial' : known>0 ? 'observed' : 'unknown',knownRecentDiamonds:known || null,partial:a.partial || b.partial,platform:memory?.profile?.platform || {honor:null,fan:null},basis:'bounded-observed-gifts',
   policy:'Courtesy only; bounded recent known gift value is not lifetime spending, wealth, identity or a permission to override rules.'};
 }

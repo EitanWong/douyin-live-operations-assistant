@@ -35,7 +35,8 @@ function mergeViewer(rows,watermark){
  const gifts=new Map();for(const gift of active.flatMap(row=>row.gifts).filter(row=>row.at>watermark).sort((a,b)=>a.at-b.at)){
   const old=gifts.get(gift.key);gifts.set(gift.key,{...gift,count:Math.max(old?.count || 0,gift.count),unitDiamonds:gift.unitDiamonds ?? old?.unitDiamonds ?? null});
  }
- return {...latest,secUids:[...new Set(active.flatMap(row=>row.secUids || []))],firstAt:Math.min(...active.map(row=>row.firstAt>watermark ? row.firstAt : row.lastAt)),statements,gifts:[...gifts.values()],notes:[...new Set(active.filter(row=>row.firstAt>watermark).flatMap(row=>row.notes))]};
+ const platform=Object.fromEntries(['honor','fan'].map(key=>[key,active.map(r=>r.platform?.[key]).filter(r=>r && r.at>watermark).sort((a,b)=>b.at-a.at)[0] ?? null]));
+ return {...latest,platform,secUids:[...new Set(active.flatMap(row=>row.secUids || []))],firstAt:Math.min(...active.map(row=>row.firstAt>watermark ? row.firstAt : row.lastAt)),statements,gifts:[...gifts.values()],notes:[...new Set(active.filter(row=>row.firstAt>watermark).flatMap(row=>row.notes))]};
 }
 export function mergeLiveMemory(previous,incoming){
  const next=archiveSchema.parse(incoming);if(!previous)return next;

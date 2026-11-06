@@ -39,7 +39,13 @@ def synchronize(db,record):
             raise ValueError('知识原文无效')
         if any(type(row.get(k)) not in (int,float) for k in ('at','expiresAt')) or not 0<row['at']<=record['receivedAt'] or not row['at']<row['expiresAt']<=row['at']+180*86400000:
             raise ValueError('知识有效期无效')
-        if hashlib.sha256((row['source']+'\n'+row['text']).encode()).hexdigest()!=row['id']:
+        suffix=''
+        if row.get('subject') is not None:
+            subject=row['subject'];epoch=row.get('subjectEpoch')
+            if not isinstance(subject,str) or not re.fullmatch(r'(?:uid:[0-9]{1,30}|sec:[A-Za-z0-9_-]{8,160})',subject) or type(epoch) is not int or not 0<=epoch<2**53:
+                raise ValueError('人物知识范围无效')
+            suffix=f'\n{subject}:{epoch}'
+        if hashlib.sha256((row['source']+'\n'+row['text']+suffix).encode()).hexdigest()!=row['id']:
             raise ValueError('知识内容摘要不匹配')
     room,anchor=record['room'],record['anchor']
     if not anchor:raise ValueError('知识主播范围无效')
@@ -48,6 +54,9 @@ def synchronize(db,record):
     for old in db.execute('SELECT id FROM knowledge_sources WHERE room=? AND anchor=?',(room,anchor)).fetchall():
         if old['id'] not in retained:db.execute('DELETE FROM knowledge_sources WHERE room=? AND anchor=? AND id=?',(room,anchor,old['id']))
     for row in rows:
+        # Personal retrieval requires the browser's current deletion watermark.
+        # Retain the audit record, but never expose it through generic FTS.
+        if row.get('subject'):continue
         db.execute('INSERT INTO knowledge_sources(room,anchor,id,source,title,text,at,expires_at,trust,search_terms) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(room,anchor,id) DO UPDATE SET title=excluded.title,at=excluded.at,expires_at=excluded.expires_at,search_terms=excluded.search_terms',
                    (room,anchor,row['id'],row['source'],row['title'],row['text'],row['at'],row['expiresAt'],row['trust'],' '.join(terms(row['title']+' '+row['text']))))
     db.execute('INSERT INTO knowledge_scopes VALUES(?,?,?) ON CONFLICT(room,anchor) DO UPDATE SET sequence=excluded.sequence',(room,anchor,seq))

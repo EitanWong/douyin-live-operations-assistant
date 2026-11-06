@@ -53,7 +53,7 @@ const writeRecord = async (key,value) => {
   await notifyChanges({[key]:{newValue:value}});
 };
 const knowledgeCorpus=createKnowledgeCorpus({read:readRecord,write:writeRecord,archive:async({room,anchor,at,...payload})=>{await dataEngine().enqueue({id:`knowledge:${room}:${anchor}:${payload.sequence}`,room,anchor,kind:'knowledge',receivedAt:at,payload});void dataEngine().flush();}});
-const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readConfig:room=>readRecord(`live-assistant:config:${room}`)});
+const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readAudience:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,readConfig:room=>readRecord(`live-assistant:config:${room}`)});
 const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),
   collect:(url,options)=>collectAccountWithMedia(chrome,url,{...options,readAI:async()=>{const c=await readRecord(`live-assistant:config:${options.room}`);return String(c?.anchorId)===options.anchor && c?.ai?.accountCollection?.enabled!==false ? c.ai : null;}}),archive:async({room,anchor,source,records,at})=>{
     await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor,kind:'account',receivedAt:at,payload:{source,records}});void dataEngine().flush();

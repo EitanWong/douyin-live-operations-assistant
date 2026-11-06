@@ -17,6 +17,19 @@ def source(text, url='https://example.org/profile'):
     return {'id': hashlib.sha256((url+'\n'+text).encode()).hexdigest(), 'source': url, 'title': '公开资料', 'text': text, 'at': NOW, 'expiresAt': NOW+60000, 'trust': 'unverified'}
 
 class KnowledgeIndexTests(unittest.TestCase):
+    def test_personal_sources_archive_without_entering_general_search(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=DataStore(Path(folder)/'data.sqlite3')
+            row={**source('茶友自述喜欢陶瓷。'),'subject':'uid:7','subjectEpoch':0}
+            row['id']=hashlib.sha256((row['source']+'\n'+row['text']+'\nuid:7:0').encode()).hexdigest()
+            store.append([record(1,[row])])
+            self.assertEqual(store.knowledge('1','2','茶友',now=NOW)['rows'],[])
+            self.assertEqual(store.status()['records'],1)
+            general=source('陶瓷需用冷水清洗。')
+            store.append([record(2,[general],[row['id'],general['id']])])
+            self.assertEqual(len(store.knowledge('1','2','陶瓷',now=NOW)['rows']),1)
+            store.close()
+
     def test_restart_chinese_search_scope_and_forgetting(self):
         with tempfile.TemporaryDirectory() as folder:
             path=Path(folder)/'data.sqlite3'

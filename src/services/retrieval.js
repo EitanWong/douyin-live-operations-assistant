@@ -38,10 +38,11 @@ function rankChunks(chunks,index,query,contextQuery) {
   return chunks.filter(chunk=>scores.has(chunk.id)).map(chunk=>({...chunk,score:scores.get(chunk.id)}))
     .sort((a,b)=>b.score-a.score || b.row.updatedAt-a.row.updatedAt || a.row.id.localeCompare(b.row.id) || a.range.start-b.range.start);
 }
-function retrieve(chunks,index,query,{contextQuery=''}={}) {
+function retrieve(chunks,index,query,{contextQuery='',maxPerSource=Infinity}={}) {
   const ranked=rankChunks(chunks,index,query,contextQuery),selected=[];
   let usedChars=0;
   for(const chunk of ranked){
+    if(selected.filter(r=>r.source===chunk.row.source).length>=maxPerSource)continue;
     if(selected.some(row=>row.entryId===chunk.row.id && row.range.start<chunk.range.end && chunk.range.start<row.range.end))continue;
     if(selected.length===RETRIEVAL_LIMITS.chunks || usedChars+chunk.content.length>RETRIEVAL_LIMITS.chars)break;
     const {id,row,content,range,score}=chunk;

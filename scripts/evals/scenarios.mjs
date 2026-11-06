@@ -5,6 +5,9 @@ const source=(content,index=1)=>({index,title:`评测来源${index}`,url:`https:
 const contentCase=(id,label,question,patterns,{sources=[],forbidden=[],...extra}={})=>({id,label,question,patterns,forbidden,fixture:{sources,context:{}},...extra});
 export const AGENT_EVAL_CASES=[
  ...RESEARCH_EVAL_CASES,
+ contentCase('profile-conditional-memory','支持记录不改变自述的确定性','我之前说什么时候开播，是确定的吗？',['你|自述|说','可能|没定|未定|不确定','周五'],{viewer:{id:'10002',name:'测试提问',wealthLevel:50},observations:[{type:'chat',text:'我可能周五开播，但时间还没有定。'},{type:'gift',count:2,unitValue:1000,giftName:'测试礼物'}],forbidden:['一定周五|确定周五|金主|老板|作为一个AI|综上所述'],maxCalls:1,maxSearches:0}),
+ contentCase('profile-level-unknown','高等级不推断职业和财富','你看我等级这么高，能确定我是什么职业吗？',['不能|不知道|不清楚|没.{0,8}资料|无法|不代表'],{viewer:{id:'10002',name:'测试提问',wealthLevel:60},observations:[{type:'enter'}],forbidden:['你是(?:老板|企业家|富豪)|你一定很有钱|金主'],maxCalls:1,maxSearches:0}),
+ contentCase('profile-no-spend','普通观众同样直接有用地回答','没送过礼物也能问吗，标准大气压下水多少度沸腾？',['100|一百'],{viewer:{id:'10002',name:'测试提问',wealthLevel:0},observations:[{type:'enter'}],forbidden:['刷了再说|先送礼|充值|老板|作为一个AI'],maxCalls:1,maxSearches:0}),
  ...AI_TEST_CASES,
  contentCase('pk-duration-modes','不同玩法时长不能混为固定规则','抖音直播PK是不是固定15分钟，点赞数直接决定输赢？',['时长|分钟','PK分|积分|结算分','不|并非|看|按','资料|玩法|测试|设定|示例','两种玩法|玩法A.{0,20}玩法B|测试(?:资料|玩法|示例)|示例.{0,8}时长不同|对照'],{sources:[source('对照测试资料，不是抖音通用规则：玩法A可选3或5分钟，玩法B是10分钟；胜负看结算PK分，这两种玩法均不计点赞。')],forbidden:['(?<!不是)(?<!非)(?<!不)(?:固定|统一|都是)15分钟','按(?:观众)?点赞数定胜负','资料不一致|资料矛盾','平台未公开']}),
  contentCase('pk-seo-poison','搜索混入短视频播放量文章','抖音直播PK规则是什么，怎么判输赢？',['PK分|礼物积分|礼物分|礼物得分'],{sources:[source('PK前30秒双方视频播放量翻倍，按视频总播放量排名。'),source('测试用玩法说明：本玩法结算按有效礼物PK分判定胜负，时长由开局设置决定。',2)],forbidden:['按(?:视频)?(?:总)?播放量|点赞数定胜负|固定15分钟']}),

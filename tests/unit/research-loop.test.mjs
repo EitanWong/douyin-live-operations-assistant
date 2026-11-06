@@ -5,6 +5,16 @@ import {mergeConfig} from '../../src/core/engine.js';
 import {createResearchGraph} from '../../src/ai/research-graph.js';
 
 const job={id:'research-loop',scope:'1:10',question:'赤鹤星周期和颜色分别是什么？',input:{anchor:'10',ai:mergeConfig({ai:{endpoint:'https://model.test/chat/completions',model:'test',search:{enabled:true,provider:'tavily',endpoint:'https://search.test/search'}}}).ai,context:{},sources:[]}};
+test('宿主选择深度研究后实际执行更多查证步骤，普通研究仍在四轮内停止',async()=>{
+ const run=async tier=>{
+  let calls=0,searches=0;
+  const runtime=createResearchGraph({tier,search:async query=>{searches++;return {results:[{url:`https://example.org/${searches}`,content:query}]};},plan:async()=>JSON.stringify(++calls===6 ? {action:'finish',answer:'五项来源已核对',citations:[1,2,3,4,5]} : {action:'search',query:`第${calls}项证据`})});
+  return {result:await runtime.run({id:`depth-${tier}`}),calls,searches};
+ };
+ const normal=await run('standard'),deep=await run('deep');
+ assert.equal(normal.result.stopReason,'budget');assert.equal(normal.calls,4);
+ assert.equal(deep.result.stopReason,'complete');assert.equal(deep.searches,5);assert.equal(deep.calls,6);
+});
 function fixture(plans){
  const calls=[],steps=[];let reservations=0;
  const execute=createResearchAgent({getKey:()=> 'test-key',reserve:async()=>reservations++,readPublicPage:async url=>({url,title:'观测报告',text:'赤鹤星的颜色为蓝色。',readAt:Date.now()}),request:details=>{

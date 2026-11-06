@@ -23,7 +23,7 @@
     "test:unit": "node --test tests/unit",
     "test:integration": "node --test tests/integration",
     "eval:agent": "node scripts/evals/run.mjs",
-    "eval:harness": "node --test --test-concurrency=2 tests/unit/research-loop.test.mjs tests/unit/research-context.test.mjs tests/unit/continuous-research.test.mjs tests/unit/research-knowledge.test.mjs tests/unit/agent-execution.test.mjs tests/unit/agent-lifecycle.test.mjs tests/unit/ai-memory-agent.test.mjs tests/unit/knowledge-corpus.test.mjs tests/integration/research-checkpoint.test.mjs tests/integration/continuous-research-flow.test.mjs tests/integration/ai-agent-background.test.mjs tests/integration/current-facts-agent.test.mjs tests/integration/agent-evaluation.test.mjs"
+    "eval:harness": "node --test --test-concurrency=2 tests/unit/audience-profile.test.mjs tests/unit/profile-knowledge.test.mjs tests/integration/profile-research-flow.test.mjs tests/unit/research-loop.test.mjs tests/unit/research-context.test.mjs tests/unit/continuous-research.test.mjs tests/unit/research-knowledge.test.mjs tests/unit/agent-execution.test.mjs tests/unit/agent-lifecycle.test.mjs tests/unit/ai-memory-agent.test.mjs tests/unit/knowledge-corpus.test.mjs tests/integration/research-checkpoint.test.mjs tests/integration/continuous-research-flow.test.mjs tests/integration/ai-agent-background.test.mjs tests/integration/current-facts-agent.test.mjs tests/integration/agent-evaluation.test.mjs"
   },
   "engines": {
     "node": ">=20"

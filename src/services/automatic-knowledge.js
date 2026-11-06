@@ -1,9 +1,10 @@
+import {subjectKeySchema,subjectRow,subjectEpoch} from '../ai/audience-profile.js';
 import {canReuseSource,knowledgeLifetime} from './web-knowledge.js';
 import {retrieveKnowledge} from './retrieval.js';
 
-export function retrieveSourceRecords(rows,question,now=Date.now()){
- const available=rows.filter(row=>canReuseSource(question,row,now));
- const found=retrieveKnowledge(available.map(r=>({id:r.id,title:r.title,content:r.text,source:r.source,updatedAt:r.at,expiresOn:''})),question);
+export function retrieveSourceRecords(rows,question,now=Date.now(),{subject}={}){
+ const available=rows.filter(row=>(!row.subject || row.subject===subject) && canReuseSource(question,row,now));
+ const found=retrieveKnowledge(available.map(r=>({id:r.id,title:r.title,content:r.text,source:r.source,updatedAt:r.at,expiresOn:''})),question,{maxPerSource:1});
  return found.chunks.slice(0,3).map(chunk=>{
   const row=available.find(r=>r.id===chunk.entryId),id=`corpus:${row.id}:${chunk.range.start}-${chunk.range.end}`;
   return {id,query:id,cached:true,freshness:'stable',searchedAt:row.at,expiresAt:row.expiresAt,
@@ -13,7 +14,7 @@ export function retrieveSourceRecords(rows,question,now=Date.now()){
 
 // Background-owned canonical corpus. Page messages supply raw search sources,
 // not graph edges or verified facts. Every operation resolves the saved scope.
-export function createAutomaticKnowledge({corpus,readConfig,now=Date.now}){
+export function createAutomaticKnowledge({corpus,readConfig,readAudience=async()=>null,now=Date.now}){
  return {async handle(room,action,input={}){
   const config=await readConfig(room),anchor=String(config?.anchorId || '');
   if(!/^\d{1,30}$/u.test(anchor) || input.anchor!==anchor)throw Error('主播已变化，请刷新知识库');
@@ -23,10 +24,19 @@ export function createAutomaticKnowledge({corpus,readConfig,now=Date.now}){
    if(!/^[a-f0-9]{64}$/u.test(input.id || ''))throw Error('来源标识无效');
    return corpus.remove(room,anchor,input.id);
   }
-  if(action==='list')return (await corpus.list(room,anchor)).filter(r=>r.expiresAt>now());
+  if(action==='list'){
+   const audience=await readAudience(room,anchor);
+   return (await corpus.list(room,anchor)).filter(r=>r.expiresAt>now() && (!r.subject || config.ai?.assistant?.memoryEnabled!==false && config.ai?.contextSources?.audience!==false && subjectRow(audience,r.subject) && r.subjectEpoch===subjectEpoch(audience,r.subject)));
+  }
   if(action!=='remember')throw Error('知识库操作无效');
   if(!config.ai?.enabled || config.ai.assistant?.memoryEnabled===false || config.ai.search?.rememberKnowledge===false)throw Error('自动知识记忆已关闭');
-  return corpus.remember(room,anchor,input.sources,{version:input.version,lifetime:input.lifetime});
+  let scope={};
+  if(input.subject!==undefined){
+   const subject=subjectKeySchema.parse(input.subject),audience=await readAudience(room,anchor),epoch=subjectEpoch(audience,subject);
+   if(config.ai?.contextSources?.audience===false || !subjectRow(audience,subject) || input.subjectEpoch!==undefined && input.subjectEpoch!==epoch)throw Error('人物画像已删除或变化');
+   scope={subject,subjectEpoch:epoch};
+  }
+  return corpus.remember(room,anchor,input.sources,{version:input.version,lifetime:input.lifetime,...scope});
  }};
 }
 
@@ -39,12 +49,12 @@ export function createKnowledgeMemory({cache,transport,anchor}){
   async revision(){return {cache:await cache.revision(),corpus:await call('version'),anchor:String(anchor())};},
   async remember(found,config,options={}){
    const revision=options.revision;
-   await cache.remember(found,config,{...options,revision:revision?.cache});
+   if(!options.subject)await cache.remember(found,config,{...options,revision:revision?.cache});
    if(config.rememberKnowledge===false || !found?.results?.length || revision?.anchor && revision.anchor!==String(anchor()))return;
-   await call('remember',{sources:found.results.map(source=>({...source,at:found.searchedAt})),version:revision?.corpus,lifetime:knowledgeLifetime(`${found.query || ''} ${options.question || ''}`,options.freshness)});
+   await call('remember',{...(options.subject ? {subject:options.subject,subjectEpoch:options.subjectEpoch} : {}),sources:found.results.map(source=>({...source,at:found.searchedAt})),version:revision?.corpus,lifetime:knowledgeLifetime(`${found.query || ''} ${options.question || ''}`,options.freshness)});
   },
   async find(query,config,options={}){
-   const rows=await call('list');
+   const rows=(await call('list')).filter(r=>!r.subject || r.subject===options.subject);
    if(query.startsWith('corpus:')){
     if(config.rememberKnowledge===false)return null;
     const [,id,range]=query.split(':'),row=rows.find(r=>r.id===id);if(!row || !canReuseSource(options.question || '',row))return null;
@@ -54,10 +64,12 @@ export function createKnowledgeMemory({cache,transport,anchor}){
    }
    const record=await cache.find(query,config,options);return eligible(record,rows) ? record : null;
   },
-  async candidates(question,config){
+  async candidates(question,config,options={}){
    if(config.rememberKnowledge===false)return [];
    const [records,rows]=await Promise.all([cache.candidates(question,config),call('list')]);
-   return [...records.filter(r=>eligible(r,rows)),...retrieveSourceRecords(rows,question)].slice(0,3);
+   const scoped=rows.filter(r=>!r.subject || r.subject===options.subject),selected=retrieveSourceRecords(scoped,question,Date.now(),options),urls=new Set(selected.flatMap(r=>r.results.map(s=>s.url)));
+   for(const record of records.filter(r=>eligible(r,scoped)))if(selected.length<3 && record.results.every(s=>!urls.has(s.url))){selected.push(record);for(const s of record.results)urls.add(s.url);}
+   return selected;
   },
   async list(){
    const [cached,rows]=await Promise.all([cache.list(),call('list')]);

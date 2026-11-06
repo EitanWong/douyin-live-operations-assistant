@@ -30,6 +30,7 @@ export function makeAIRequest(prompt, config) {
   config=generationConfig(resolveReplyConfig(config),prompt.searchResults);
   prompt=applyPromptSources(currentAIPrompt(prompt),config);
   if(!prompt.searchResults && prompt.target && prompt.target.type!=='speech' && ['ai','gift','welcome'].includes(prompt.task?.kind || 'ai'))prompt={...prompt,target:{...prompt.target,support:supportContext(prompt.target,prompt.task,config,prompt.getNow?.() ?? prompt.now ?? Date.now())}};
+  if(prompt.target?.memory?.profile){const {profile,epoch,...memory}=prompt.target.memory;prompt={...prompt,target:{...prompt.target,memory}};}
   const request=makeBaseAIRequest(prompt,config);
   if(prompt.task?.kind!=='moderation')request.messages=withPlainReplyStyle(request.messages);
   if(prompt.intentRouting && ['ai','agent'].includes(prompt.task?.kind || 'ai'))request.temperature=0;
@@ -249,8 +250,9 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
       if(!useKnowledge)return null;
       try{return await knowledge[method](...args);}catch(error){notify(onSearch,{question:prompt.target.text,query:'知识缓存',results:[],error:`知识缓存不可用：${error.message}`});return null;}
     };
+    const subject=prompt.target?.memory?.key,subjectEpoch=prompt.target?.memory?.epoch;
     const revision=await cached('revision');
-    const knowledgeCandidates=(await cached('candidates',prompt.target.text,config.search) || []).map(found=>reviewResearch(prompt.target.text,found)).filter(found=>found.results.length);
+    const knowledgeCandidates=(await cached('candidates',prompt.target.text,config.search,{subject}) || []).map(found=>reviewResearch(prompt.target.text,found)).filter(found=>found.results.length);
     const raw=await complete({...prompt,intentRouting:true,knowledgeCandidates,searchAvailable:Boolean(config.search?.enabled && search)});
     if(!current())return '[SKIP]';
     const chatReply=calculation ? [...calculation.answer].length<=prompt.maxLength ? calculation.answer : '精确结果超过公屏字数限制，请拆分计算。' : undefined;
@@ -278,7 +280,7 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
     if(plan.intent==='knowledge'){
       const candidate=knowledgeCandidates.find(row=>row.id===plan.query);
       if(!candidate)return '这部分资料暂时没找到，还不能确定。';
-      const record=await cached('find',candidate.query,config.search,{question:prompt.target.text});
+      const record=await cached('find',candidate.query,config.search,{question:prompt.target.text,subject});
       const found=record && reviewResearch(prompt.target.text,record);
       if(!current())return '[SKIP]';
       if(found?.id===candidate.id){
@@ -304,7 +306,7 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
     }
     if(prompt.canFollowup && !prompt.canFollowup())return '这次暂时还答不了，晚点再问我吧。';
     if(!plan.query.trim() || [...plan.query].length>300)throw new Error('AI 搜索词无效');
-    const existing=toolFound || (plan.publicTool ? null : await cached('find',plan.query,config.search,{question:prompt.target.text}));
+    const existing=toolFound || (plan.publicTool ? null : await cached('find',plan.query,config.search,{question:prompt.target.text,subject}));
     let found=existing && reviewResearch(prompt.target.text,existing);
     if(found && !found.results.length)found=null;
     if(!found){
@@ -328,7 +330,7 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
     catch(error){notify(onSearch,{...found,question:prompt.target.text,error:found.error || error.message});throw error;}
     const unsupportedCurrent=!found.results.length && requiresCurrentSources(`${prompt.target.text} ${plan.query}`,plan.freshness);
     const answer=unsupportedCurrent ? unavailableCurrentAnswer({...found,query:found.query || plan.query},prompt.searchMaxLength ?? prompt.maxLength) : parsed.answer,grounded=!unsupportedCurrent && parsed.grounded;
-    if(current() && grounded && !found.error && !found.cached && !plan.publicTool && revision!==null)await cached('remember',found,config.search,{freshness:plan.freshness,question:prompt.target.text,revision});
+    if(current() && grounded && !found.error && !found.cached && !plan.publicTool && revision!==null)await cached('remember',found,config.search,{freshness:plan.freshness,question:prompt.target.text,revision,subject,subjectEpoch});
     notify(onSearch,{...found,question:prompt.target.text,answer,citationIndices:unsupportedCurrent ? [] : parsed.citationIndices,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});
     return answer;
   };
