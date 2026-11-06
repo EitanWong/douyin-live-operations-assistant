@@ -34,10 +34,9 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
  return async(prompt,config)=>{
   let researching=false;
   const onLookup=record=>{researching=true;prompt.onLookup?.(record);};
-  const routedLookup=['ai','agent'].includes(prompt.task?.kind) && Boolean(prompt.target?.text);
   const started=now(),limits={...LATENCY_DEFAULTS,...config.latency,...(config.edge?.autoTune ? edge?.tuning?.() : {})},current=()=>!prompt.signal?.aborted && (!prompt.isCurrent || prompt.isCurrent());
   const trace=(provider,status)=>{try{onTrace({provider,status,elapsedMs:now()-started,kind:prompt.task?.kind || 'ai',at:now()});}catch{}};
-  const cloudSignal=new AbortController(),edgeSignal=new AbortController();let delayTimer;
+  const cloudSignal=new AbortController(),edgeSignal=new AbortController();
   const abort=()=>{cloudSignal.abort();edgeSignal.abort();};
   prompt.signal?.addEventListener('abort',abort,{once:true});
   const provider=JSON.stringify([config.pipeline?.mode,config.pipeline?.workspaceId,config.pipeline?.region,config.endpoint,config.model,config.pipeline?.replyModel]);
@@ -48,28 +47,22 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
   };
   try{
    if(prompt.signal?.aborted)throw cancelled();
-   const remote=cloudWork().then(output=>({output,provider:'cloud'}));let cloudFailure;
-   const failed=remote.catch(error=>{cloudFailure=error;return null;});
-   const local=(async()=>{
-    const prepared=config.edge?.enabled && edge && await edge.ready('text');
-    if(!prepared){await failed;throw cloudFailure || new Error('端侧未准备');}
-    // A lookup has one owner; a short local answer cannot cancel source checking.
-    const completed=routedLookup ? await failed : await Promise.race([failed,new Promise(resolve=>{delayTimer=setTimeout(()=>resolve(null),limits.edgeDelayMs);})]);
-    if(completed)throw new Error('云端已完成');
-    if(researching)throw cloudFailure || new Error('联网查询未成功');
-    clearTimeout(delayTimer);if(!current() || edgeSignal.signal.aborted)throw cancelled();
+   let result;
+   try{result={output:await cloudWork(),provider:'cloud'};}
+   catch(error){
+    if(!current())throw cancelled();
+    // Cloud owns the request until it fails or reaches its deadline.
+    if(researching || !config.edge?.enabled || !edge || !await edge.ready('text'))throw error;
+    if(!current())throw cancelled();
     if(prompt.reserveLocal && !prompt.reserveLocal())throw new Error('本地推理调用额度已达上限');
-    const beforeLocal=now()-started;
-    const remaining=()=> (researching ? RESEARCH_TIMEOUT_MS : limits.totalMs)-beforeLocal;
-    if(remaining()<=0)throw new Error('AI 请求超时');
-    const output=await withDeadline(signal=>edge.reply({...prompt,signal,onLookup},config),{signal:edgeSignal.signal,timeout:remaining});
-    return {output,provider:'edge'};
-   })();
-   let winner;try{winner=await Promise.any([remote,local]);}catch{throw cloudFailure || new Error('AI 服务与端侧推理均不可用');}
+    const beforeLocal=now()-started,remaining=limits.totalMs-beforeLocal;
+    if(remaining<=0)throw new Error('AI 请求超时');
+    const output=await withDeadline(signal=>edge.reply({...prompt,signal,onLookup},config),{signal:edgeSignal.signal,timeout:()=> (researching ? RESEARCH_TIMEOUT_MS : limits.totalMs)-beforeLocal});
+    result={output,provider:'edge'};
+   }
    if(!current())throw cancelled();
-   if(winner.provider==='edge')cloudSignal.abort();else edgeSignal.abort();
-   trace(winner.provider,'ok');return winner.output;
+   trace(result.provider,'ok');return result.output;
   }catch(error){if(!current())throw cancelled();trace('cloud',error.code==='TIMEOUT' ? 'timeout' : 'unavailable');throw error;}
-  finally{clearTimeout(delayTimer);prompt.signal?.removeEventListener('abort',abort);abort();}
+  finally{prompt.signal?.removeEventListener('abort',abort);abort();}
  };
 }

@@ -29,15 +29,17 @@ test('cancellation never starts fallback or accepts stale answers',async()=>{
  const ai=createResilientAI({cloud:async()=>{c.abort();throw Error('cancelled');},edge:{ready:async()=>true,reply:async()=>{local++;}}});
  await assert.rejects(ai({signal:c.signal},{edge:{enabled:true}}),/取消/);assert.equal(local,0);
 });
-test('slow cloud races a prepared local model after the latency budget, loser is aborted and only one answer wins',async()=>{
- let aborted=false;const traces=[];
- const ai=createResilientAI({cloud:(_p,_c,{signal})=>new Promise(()=>signal.addEventListener('abort',()=>{aborted=true;})),edge:{ready:async()=>true,reply:async()=> '先说重点。'},onTrace:r=>traces.push(r)});
- assert.equal(await ai({},{edge:{enabled:true},latency:{cloudMs:1000,totalMs:2000,edgeDelayMs:10}}),'先说重点。');
- assert.equal(aborted,true);assert.ok(traces.at(-1).elapsedMs<500);assert.equal(traces.filter(r=>r.status==='ok').length,1);
+test('云端尚未超时即使本地更快也不启动本地推理',async()=>{
+ let local=0;const traces=[];
+ const ai=createResilientAI({cloud:async()=>{await new Promise(r=>setTimeout(r,30));return '云端答复';},
+  edge:{ready:async()=>true,reply:async()=>{local++;return '本地答复';}},onTrace:r=>traces.push(r)});
+ assert.equal(await ai({},{edge:{enabled:true},latency:{cloudMs:100,totalMs:200,edgeDelayMs:1}}),'云端答复');
+ assert.equal(local,0);assert.equal(traces.at(-1).provider,'cloud');
 });
-test('a failed local race still accepts a valid cloud answer',async()=>{
- const ai=createResilientAI({cloud:async()=>{await new Promise(r=>setTimeout(r,30));return '云端答复';},edge:{ready:async()=>true,reply:async()=>{throw Error('local invalid');}}});
- assert.equal(await ai({},{edge:{enabled:true},latency:{cloudMs:1000,totalMs:2000,edgeDelayMs:10}}),'云端答复');
+test('关闭本地开关后云端失败也不调用准备好的本地模型',async()=>{
+ let local=0;const ai=createResilientAI({cloud:async()=>{throw Error('cloud failed');},
+  edge:{ready:async()=>true,reply:async()=>{local++;return '本地';}}});
+ await assert.rejects(ai({},{edge:{enabled:false}}),/cloud failed/);assert.equal(local,0);
 });
 test('repeated cloud failures open a provider-specific circuit while local replies remain available',async()=>{
  let calls=0;const ai=createResilientAI({cloud:async()=>{calls++;throw Error('offline');},edge:{ready:async()=>true,reply:async()=> '本地回复'}});

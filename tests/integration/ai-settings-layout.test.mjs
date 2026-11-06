@@ -97,3 +97,15 @@ test('额度集中在高级设置且与模型配置分开，隐藏页签的输�
     assert.equal(panel.node('[data-ai-section-tab="advanced"]').getAttribute('aria-selected'),'true');
   }finally{s.close();}
 });
+
+test('本地 AI 总开关独立于云端，关闭后解除仅本地并保留模型选择',()=>{
+ const s=setup();try{
+  const {panel,change}=s;change('ai.pipeline.mode','omni-llm');change('ai.pipeline.workspaceId','workspace');
+  change('ai.edge.textModel','qwen-0.5b');change('ai.edge.localOnly',true);change('ai.edge.enabled',false);
+  const config=panel.read();assert.equal(config.ai.edge.localOnly,false);assert.equal(config.ai.edge.enabled,false);
+  assert.equal(config.ai.pipeline.mode,'omni-llm');assert.equal(config.ai.edge.textModel,'qwen-0.5b');
+  assert.equal(panel.node('[data-text-service]').hidden,false);assert.equal(panel.node('[data-field="ai.edge.localOnly"]').disabled,true);
+  change('ai.edge.enabled',true);assert.equal(panel.read().ai.edge.localOnly,false);
+  assert.equal(panel.node('[data-field="ai.edge.localOnly"]').disabled,false);
+ }finally{s.close();}
+});

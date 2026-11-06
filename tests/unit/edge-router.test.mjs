@@ -22,3 +22,9 @@ test('自动准备合并并发请求，缓存就绪结果，释放后允许重�
  assert.equal((await first).phase,'ready');await second;await router.ensure('text');assert.equal(calls,1);
  await router.release();await router.ensure('text');assert.equal(calls,2);
 });
+
+test('关闭本地 AI 开关后不执行手动弹幕模型复核',async()=>{
+ let enabled=false,calls=0;const router=createEdgeRouter({config:()=>({enabled}),browser:{classify:async()=>{calls++;return 'label';}}});
+ assert.throws(()=>router.classify('你好'),/启用本地 AI/);assert.equal(calls,0);
+ enabled=true;assert.equal(await router.classify('你好'),'label');assert.equal(calls,1);
+});

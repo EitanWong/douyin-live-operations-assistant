@@ -278,7 +278,7 @@ export function boot(options = {}) {
       if(result.phase==='released')return;
       if(!closed && localAttemptKey===key)foundationSettings?.status(result.phase==='ready' ? '本地中文回复已自动就绪；直播语音会在使用时自动准备。' : '设备速度不足，继续使用已配置的云端或规则回复。');
     },error=>{if(!closed && localAttemptKey===key)foundationSettings?.status(`本地回复暂不可用：${error.message}；可稍后点击准备重试。`);});
-    if(engine.config.ai.edge.localOnly && engine.config.ai.pipeline.mode==='local-audio')void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).catch(()=>{});
+    if(engine.config.ai.edge.audioEnabled && engine.config.ai.pipeline.mode==='local-audio')void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).catch(()=>{});
   }
   const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
     snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
@@ -300,6 +300,7 @@ export function boot(options = {}) {
   const captureMedia=options.mediaCapture || (args=>createDisplayCapture({...args,sourceFactory:sourceFor(args.config),vadFactory:options.vadFactory},window));
   const media=new LiveMediaAnalyzer({capture:async args=>{
     if(args.config.localAudio){
+      if(!engine.config.ai.edge.enabled || !engine.config.ai.edge.audioEnabled)throw new Error('请在本地与性能启用本地 AI 和中文识别，或选择云端感知组合');
       const result=await edge.ensure('audio',args.config.localAudioBackend);
       if(args.signal.aborted || !args.isCurrent())throw new Error('本地语音采集已停止');
       if(result?.phase!=='ready')throw new Error('此设备本地语音测速未达标，可在本地与性能选择其他方案');
@@ -889,14 +890,13 @@ export function boot(options = {}) {
     foundationSettings=new FoundationSettings(panel.root,{edge,deployment:options.nativeDeployment,activateLocal:async()=>{
       if(!options.edge)throw new Error('浏览器端侧推理需要 Chrome 扩展');
       const c=panel.read();c.ai.enabled=true;c.ai.chatEnabled=true;
-      Object.assign(c.ai.edge,{enabled:true,audioEnabled:true,autoTune:true,localOnly:true,textModel:'auto',audioBackend:'auto'});
-      c.ai.pipeline.mode='local-audio';c.ai.media.inputSource='direct';
+      c.ai.edge.enabled=true;c.ai.edge.localOnly=false;
       await panel.callbacks.save(c,panel.root.querySelector('[data-api-key]').value.trim(),panel.root.querySelector('[data-remember-key]').checked,panel.searchCredentials(),panel.aiSettings.credentials());panel.populate(c);
-      void foundationSettings?.prepareNative().catch(()=>{});
-      const [text,audio]=await Promise.allSettled([edge.ensure('text','auto'),edge.ensure('audio','auto')]);
+      if(c.ai.edge.audioEnabled)void foundationSettings?.prepareNative().catch(()=>{});
+      const [text,audio]=await Promise.allSettled([edge.ensure('text'),...(c.ai.edge.audioEnabled ? [edge.ensure('audio')] : [])]);
       if(closed || suspended || !roomContext.current())return '本地设置已保存，后台准备会继续。';
-      if(text.status!=='fulfilled' || text.value?.phase!=='ready')throw new Error('本地设置已保存，文字模型尚未就绪，请查看进度并重试');
-      return audio.status==='fulfilled' && audio.value?.phase==='ready' ? '本地 AI 已启用并保存，开始场控后自动读取直播音轨；无需模型密钥。' : '本地文字 AI 已启用并保存；语音暂不可用，可在后台进度查看原因并重试。';
+      if(text.status!=='fulfilled' || text.value?.phase!=='ready')return '本地 AI 已启用并保存；本地文字尚未就绪，继续使用云端，可查看进度并重试。';
+      return audio.status==='fulfilled' && audio.value?.phase==='ready' ? '本地 AI 已启用并保存；云端优先，本地仅在云端不可用或超时后兜底。' : '本地 AI 已启用并保存；云端优先，本地文字可兜底。语音未就绪或已关闭，可在本地与性能查看。';
     },collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
       changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
     syncLocalModels();

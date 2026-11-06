@@ -16,7 +16,7 @@ export class AISettings {
     root.addEventListener('change',event=>{
       if(event.target.matches('[data-field^="ai.media."]'))this.syncMedia();
       if(event.target.matches('[data-field^="ai.search."]'))this.syncSearch();
-      if(event.target.matches('[data-field="ai.edge.localOnly"]'))this.syncPipeline();
+      if(event.target.matches('[data-field="ai.edge.localOnly"],[data-field="ai.edge.enabled"]'))this.syncPipeline();
     });
     root.querySelector('[data-field="ai.pipeline.mode"]').addEventListener('change',()=>this.syncPipeline());
     for(const key of ['workspaceId','region'])root.querySelector(`[data-field="ai.pipeline.${key}"]`).addEventListener('input',()=>{root.querySelector('[data-media-key="pipeline"]').value='';});
@@ -72,7 +72,10 @@ export class AISettings {
     const mode=this.root.querySelector('[data-field="ai.pipeline.mode"]').value;
     this.root.querySelector('[data-pipeline-ali]').hidden=['custom','text','local-audio'].includes(mode);
     this.root.querySelector('[data-custom-media]').hidden=mode!=='custom';
-    const localOnly=this.root.querySelector('[data-field="ai.edge.localOnly"]').checked;
+    const localOnlyField=this.root.querySelector('[data-field="ai.edge.localOnly"]');
+    localOnlyField.disabled=!this.root.querySelector('[data-field="ai.edge.enabled"]').checked;
+    if(localOnlyField.disabled)localOnlyField.checked=false;
+    const localOnly=localOnlyField.checked;
     this.root.querySelector('[data-text-service]').hidden=mode==='omni-only' || localOnly;
     this.syncPerception();
     for(const node of this.root.querySelectorAll('[data-ai-modes]'))node.hidden=!node.dataset.aiModes.split(' ').includes(mode);
