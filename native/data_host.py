@@ -18,6 +18,8 @@ def handle(store, message):
         return store.summary(message.get('room'))
     if action == 'predict':
         return store.predict(message.get('room'), message.get('anchor'), message.get('asOf'), message.get('rows'))
+    if action == 'knowledge':
+        return store.knowledge(message.get('room'), message.get('anchor'), message.get('query'))
     if action == 'audience':
         return store.audience(message.get('room'), message.get('users'))
     raise ValueError('本地数据操作无效')
@@ -51,10 +53,11 @@ def main():
     parser = argparse.ArgumentParser(description='本地直播数据仓库')
     parser.add_argument('--database')
     parser.add_argument('--settings')
-    parser.add_argument('command', nargs='?', choices=['status', 'summary', 'export', 'dataset', 'pk-dataset', 'backup', 'train', 'audience', 'location'])
+    parser.add_argument('command', nargs='?', choices=['status', 'summary', 'export', 'dataset', 'pk-dataset', 'backup', 'train', 'audience', 'location', 'knowledge'])
     parser.add_argument('--directory')
     parser.add_argument('--room')
     parser.add_argument('--anchor')
+    parser.add_argument('--query')
     parser.add_argument('--user', action='append', default=[])
     parser.add_argument('--target', choices=['diamonds', 'online'], default='diamonds')
     parser.add_argument('--horizon', type=int, default=5)
@@ -88,6 +91,8 @@ def main():
             if not args.room or not args.anchor:
                 parser.error('train 需要 --room 和 --anchor')
             print(json.dumps(store.train(args.room, args.anchor, args.target, args.horizon), ensure_ascii=False))
+        elif args.command == 'knowledge':
+            print(json.dumps(store.knowledge(args.room,args.anchor,args.query),ensure_ascii=False))
         elif args.command == 'audience':
             print(json.dumps(store.audience(args.room, args.user), ensure_ascii=False))
         elif args.command:

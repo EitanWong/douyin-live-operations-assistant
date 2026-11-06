@@ -47,6 +47,7 @@ export function createWorkspaceBridge(panel) {
     if(node.matches('.stat-bars'))return {kind:'bars',id:id(node),label:node.getAttribute('aria-label'),items:[...node.querySelectorAll('.stat-bar')].map(bar=>({label:bar.getAttribute('aria-label'),value:cleanText(bar.querySelector('.stat-bar-value')),scale:Number(bar.querySelector('.stat-bar-fill')?.style.transform.match(/scaleY\(([^)]+)\)/u)?.[1] || 0)*100}))};
     if(node.matches('.stat-distribution'))return {kind:'distribution',id:id(node),label:node.getAttribute('aria-label'),parts:[...node.children].map(part=>({value:Number(part.style.flex),label:part.title,outcome:part.dataset.outcome}))};
     if(node.hasAttribute('data-record-browser'))return {kind:'record-browser',id:id(node),label:node.dataset.recordBrowser,children:[...node.children].filter(child=>child.hasAttribute('data-record-item')).map(project).filter(Boolean)};
+    if(node.hasAttribute('data-workspace-chart') && node.chartOption)return {kind:'chart',id:id(node),option:node.chartOption,label:node.getAttribute('aria-label')};
     const predictionName=node.getAttribute('data-pred-chart');
     if(predictionName && panel.predictionCharts?.options[predictionName])return {kind:'chart',id:id(node),option:panel.predictionCharts.options[predictionName],label:node.getAttribute('aria-label')};
     const chartName=node.getAttribute('data-pk-chart') || node.getAttribute('data-anchor-chart');
@@ -103,6 +104,7 @@ export function createWorkspaceBridge(panel) {
       if(node.type==='checkbox')node.checked=Boolean(value);else node.value=String(value);
       node.dispatchEvent(new view.Event(node.tagName==='SELECT' || ['checkbox','date','month','time','color','range'].includes(node.type) ? 'change' : 'input',{bubbles:true}));refresh();return true;},
     activate(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node) || node.disabled)return false;node.click();refresh();return true;},
+    chartSelect(key,selection){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node))return false;node.dispatchEvent(new view.CustomEvent('chart-select',{detail:selection}));refresh();return true;},
     toggle(key,open){const node=nodes.get(key);if(!node || !root.contains(node) || node.tagName!=='DETAILS')return false;node.open=open;refresh();return true;},
     reveal(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node))return false;for(let parent=node;parent && parent!==root;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;refresh();return true;},
     navigate(key){if(destroyed || !snapshot.nav.some(n=>n.key===key))return;panel.tab(key);refresh();},

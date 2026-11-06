@@ -13,9 +13,11 @@ import sqlite3
 import time
 from collections import deque
 
+import knowledge_index
+
 from data_models import train_calibration, predict_calibration
 
-KINDS = {'event', 'protocol', 'coverage', 'forecast', 'account', 'pk-state'}
+KINDS = {'event', 'protocol', 'coverage', 'forecast', 'account', 'pk-state', 'knowledge'}
 SECRETS = {'apikey', 'authorization', 'cookie', 'password', 'secret', 'accesstoken', 'refreshtoken'}
 
 
@@ -96,6 +98,7 @@ class DataStore:
                 outcome TEXT, ended_at INTEGER, label_at INTEGER, PRIMARY KEY(room,anchor,battle,bucket));
             PRAGMA user_version=1;
         ''')
+        knowledge_index.initialize(self.db)
         os.chmod(self.path, 0o600)
 
     def append(self, records):
@@ -116,6 +119,8 @@ class DataStore:
                 self.db.execute('INSERT INTO observations(id,room,anchor,kind,received_at,event_type,user_key,payload,digest) VALUES(?,?,?,?,?,?,?,?,?)',
                                 (row['id'], row['room'], row['anchor'], row['kind'], row['receivedAt'],
                                  str(event.get('type') or '')[:80], uid[:180], payload, digest))
+                if row['kind'] == 'knowledge':
+                    knowledge_index.synchronize(self.db,row)
                 if row['kind'] == 'forecast':
                     self._predictions(row)
                     self._pk_prediction(row)
@@ -189,6 +194,9 @@ class DataStore:
                 continue
             self.db.execute('UPDATE pk_predictions SET outcome=?,ended_at=?,label_at=? WHERE room=? AND anchor=? AND battle=? AND as_of<? AND outcome IS NULL',
                             (result['outcome'], ended, row['receivedAt'], row['room'], row['anchor'], result.get('battleKey'), ended))
+
+    def knowledge(self, room, anchor, query, now=None):
+        return knowledge_index.search(self.db,room,anchor,query,now or int(time.time()*1000))
 
     def status(self):
         row = self.db.execute('SELECT COUNT(*) AS records, MAX(received_at) AS latestAt FROM observations').fetchone()

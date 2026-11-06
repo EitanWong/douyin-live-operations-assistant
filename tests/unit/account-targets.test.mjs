@@ -23,3 +23,11 @@ test('unknown gift prices stay unknown and the result limit includes the anchor'
  const unknown=rankAccountTargets({now,profiles:[{secUid:'viewer'}],audience:[viewer('sec:viewer',5,[{key:'g',count:999,unitDiamonds:null,at:now}])]})[0];
  assert.equal(unknown.observedDiamonds,null);assert.equal(unknown.reason,'frequent-chat');
 });
+
+test('公开评论和回复按稳定账号扩展两层，不按昵称寻人，不跨身份冲突继续扩展',()=>{
+ const record=(actor,depth=0)=>({kind:'comment',actor,researchDepth:depth,observedAt:now});
+ const publicRecords=[record({uid:'7',secUid:'related',name:'相关人'}),record({secUid:'third',name:'第三层'},2),record({name:'仅昵称'}),record({uid:'9',secUid:'conflict'}),record({uid:'9',secUid:'other'})];
+ const result=rankAccountTargets({now,anchor:{secUid:'host'},publicRecords});
+ assert.deepEqual(result.map(r=>r.url),['https://www.douyin.com/user/host','https://www.douyin.com/user/related']);
+ assert.equal(result[1].depth,1);assert.equal(result[1].reason,'public-interaction');
+});

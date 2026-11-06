@@ -32,7 +32,7 @@ export class LocalDataEngine{
  async enabled(){return (await this.db.meta.get('settings'))?.enabled===true;}
  async enqueue(record){
   if(!await this.enabled())return false;
-  if(!record || !/^\d{1,30}$/.test(record.room) || !['event','protocol','forecast','coverage','account','pk-state'].includes(record.kind) || typeof record.id!=='string' || record.id.length>240 || !record.id.length || !Number.isFinite(record.receivedAt) || record.receivedAt<=0 || !record.payload || typeof record.payload!=='object')throw Error('本地归档记录无效');
+  if(!record || !/^\d{1,30}$/.test(record.room) || !['event','protocol','forecast','coverage','account','pk-state','knowledge'].includes(record.kind) || typeof record.id!=='string' || record.id.length>240 || !record.id.length || !Number.isFinite(record.receivedAt) || record.receivedAt<=0 || !record.payload || typeof record.payload!=='object')throw Error('本地归档记录无效');
   const size=bytes(record);if(size>500000)throw Error('本地归档记录过大');
   await this.db.transaction('rw',this.db.queue,this.db.meta,async()=>{
    const previous=await this.db.queue.get(record.id);

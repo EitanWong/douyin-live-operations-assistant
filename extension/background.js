@@ -1,3 +1,5 @@
+import {createKnowledgeCorpus} from '../src/ai/knowledge-corpus.js';
+import {createAutomaticKnowledge} from '../src/services/automatic-knowledge.js';
 import {validateMemory} from '../src/services/knowledge.js';
 import {createRelationshipLibrary} from '../src/ai/relationship-library.js';
 import {installNativeASRBridge} from './native-asr.js';
@@ -50,11 +52,13 @@ const writeRecord = async (key,value) => {
   await durableStorage.set(key,value);
   await notifyChanges({[key]:{newValue:value}});
 };
+const knowledgeCorpus=createKnowledgeCorpus({read:readRecord,write:writeRecord,archive:async({room,anchor,at,...payload})=>{await dataEngine().enqueue({id:`knowledge:${room}:${anchor}:${payload.sequence}`,room,anchor,kind:'knowledge',receivedAt:at,payload});void dataEngine().flush();}});
+const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readConfig:room=>readRecord(`live-assistant:config:${room}`)});
 const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),
   collect:(url,options)=>collectAccountWithMedia(chrome,url,{...options,readAI:async()=>{const c=await readRecord(`live-assistant:config:${options.room}`);return String(c?.anchorId)===options.anchor && c?.ai?.accountCollection?.enabled!==false ? c.ai : null;}}),archive:async({room,anchor,source,records,at})=>{
     await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor,kind:'account',receivedAt:at,payload:{source,records}});void dataEngine().flush();
   }});
-const relationshipLibrary=createRelationshipLibrary({all:()=>durableStorage.getAll(['live-assistant:config:','live-assistant:profile:','live-assistant:runtime:','live-assistant:live-memory:'])});
+const relationshipLibrary=createRelationshipLibrary({all:()=>durableStorage.getAll(['live-assistant:config:','live-assistant:profile:','live-assistant:runtime:','live-assistant:live-memory:','live-assistant:knowledge:'])});
 const deleteRecord = async keys => {
   const list = Array.isArray(keys) ? keys : [keys], durable = list.filter(durableKey), local = list.filter(key=>!durableKey(key));
   if (durable.length) await durableStorage.remove(durable);
@@ -133,7 +137,7 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,relationships:(room,query)=>relationshipLibrary.query(room,query)});
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,knowledge:automaticKnowledge,relationships:(room,query)=>relationshipLibrary.query(room,query)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
@@ -223,10 +227,13 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           void dataEngine().flush();
           value=await dataEngine().enrich(room,message.anchor,value);
         }
+      }else if(message.type==='knowledge-corpus' && isRoom(sender)){
+        value=await automaticKnowledge.handle(roomFromUrl(sender.tab.url),message.action,message.input);
       }else if(message.type==='relationship-query' && isRoom(sender)){
         const override={};
         if(message.memory!==undefined)override.memory=validateMemory(message.memory);
-        value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override);
+        const graphOptions={browse:message.browse===true,status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all'};
+        value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override,graphOptions);
       }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
         await chrome.tabs.create({url:`https://www.douyin.com/search/${encodeURIComponent(message.query.trim())}?type=general`,active:true});value=true;

@@ -1,3 +1,5 @@
+import {relationshipEvidenceVersion} from '../services/relationship-query.js';
+import {relationshipChartOption,RELATIONSHIP_STATUS_LABELS} from './relationship-graph.js';
 import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate} from '../services/knowledge.js';
 
 const fields=[['title','资料标题','text',80],['content','背景正文','textarea',MEMORY_LIMITS.content],['source','资料来源 / 确认人','text',200],['expiresOn','到期日期（可留空，当日仍有效）','date']];
@@ -8,7 +10,7 @@ const statusLabel={active:'可用',disabled:'已停用',expired:'已过期'};
 
 export class KnowledgeLibrary {
  constructor(root,{dirty,error,reveal,webKnowledge,relationships}){
-  this.root=root;this.document=root.ownerDocument;this.dirty=dirty;this.error=error;this.reveal=reveal;this.webKnowledge=webKnowledge;this.serial=0;
+  this.root=root;this.document=root.ownerDocument;this.dirty=dirty;this.error=error;this.reveal=reveal;this.webKnowledge=webKnowledge;this.serial=0;this.relationships=relationships;this.lastGraphAt=0;
   this.list=root.querySelector('[data-memory-list]');this.webList=root.querySelector('[data-web-knowledge-list]');
   const on=(selector,event,fn)=>root.querySelector(selector).addEventListener(event,fn);
   this.dialog=root.querySelector('[data-knowledge-dialog]');this.buildEditor();
@@ -18,6 +20,11 @@ export class KnowledgeLibrary {
   this.dialog.addEventListener('keydown',event=>this.editorKey(event));
   on('[data-memory-search]','click',()=>this.preview());
   on('[data-relationship-search]','click',()=>this.previewRelationships(relationships));
+  on('[data-relationship-overview]','click',()=>{root.querySelector('[data-relationship-query]').value='';this.previewRelationships(relationships);});
+  on('[data-relationship-status]','change',()=>this.previewRelationships(relationships));
+  on('[data-relationship-selection]','change',()=>this.selectRelationship());
+  on('[data-relationship-chart]','chart-select',event=>{root.querySelector('[data-relationship-selection]').value=`${event.detail.kind}:${event.detail.id}`;this.selectRelationship();});
+  on('[data-relationship-export]','click',()=>this.exportRelationships());
   on('[data-relationship-query]','keydown',event=>{if(event.key==='Enter'){event.preventDefault();this.previewRelationships(relationships);}});
   on('[data-memory-filter-query]','input',()=>this.filter());
   for(const key of ['kind','status','sort'])on(`[data-knowledge-${key}]`,'change',()=>this.filter());
@@ -126,21 +133,50 @@ export class KnowledgeLibrary {
  }
  populate(memory){this.closeEditor();this.list.replaceChildren();this.root.querySelector('[data-memory-undo]')?.remove();for(const record of memory.entries)this.add(record);this.metrics();this.filter();}
  read(){return validateMemory({enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>this.value(row))});}
+ destroy(){this.closed=true;this.relationshipRevision=(this.relationshipRevision || 0)+1;}
  previewRelationships(retrieve){
+  if(this.closed)return;this.graphPending=false;
   const revision=this.relationshipRevision=(this.relationshipRevision || 0)+1;
   try{
-   const query=this.root.querySelector('[data-relationship-query]').value.trim();if(!query)throw new Error('请先输入人物或关系问题');
+   const query=this.root.querySelector('[data-relationship-query]').value.trim();
    if(!retrieve)throw new Error('当前环境没有可用的人物记忆，请在直播工作台查询');
-   const result=retrieve(query,this.read());
-   const show=result=>{if(this.relationshipRevision===revision && this.root.querySelector('[data-relationship-query]').value.trim()===query)this.showRelationships(result);};
-   if(result?.then)return result.then(show,reason=>{if(this.relationshipRevision===revision)this.error(reason);});
+   const result=retrieve(query,this.read(),{browse:!query,status:this.root.querySelector('[data-relationship-status]').value});this.lastGraphAt=Date.now();
+   const show=result=>{if(!this.closed && this.relationshipRevision===revision && this.root.querySelector('[data-relationship-query]').value.trim()===query)this.showRelationships(result);};
+   if(result?.then){this.graphPending=true;return result.then(show,reason=>{if(!this.closed && this.relationshipRevision===revision)this.error(reason);}).finally(()=>{if(this.relationshipRevision===revision)this.graphPending=false;});}
    show(result);
   }catch(reason){this.error(reason);}
  }
+ tickRelationships(){
+  if(!this.closed && !this.graphPending && Date.now()-this.lastGraphAt>=10000 && this.relationships && this.root.querySelector('[data-relationship-panel]').open)this.previewRelationships(this.relationships);
+ }
+ exportRelationships(){
+  if(!this.relationshipGraph)return;
+  const view=this.document.defaultView,blob=new view.Blob([JSON.stringify(this.relationshipGraph,null,2)],{type:'application/json'}),url=view.URL.createObjectURL(blob),link=this.document.createElement('a');
+  link.href=url;link.download='人物关系图谱.json';link.click();view.URL.revokeObjectURL(url);
+ }
+ selectRelationship(){
+  const target=this.root.querySelector('[data-relationship-detail]');target.replaceChildren();
+  const value=this.root.querySelector('[data-relationship-selection]').value,graph=this.relationshipGraph;if(!value || !graph)return;
+  const type=value.slice(0,value.indexOf(':')),id=value.slice(value.indexOf(':')+1);
+  const row=(type==='entity' ? graph.entities : graph.relations).find(row=>row.id===id);if(!row)return;
+  const p=this.document.createElement('p');p.textContent=type==='entity' ? `${row.name} · ${row.role || '人物提及'}` : `${graph.entities.find(n=>n.id===row.from)?.name} ${row.negative ? '不是' : '是'} ${graph.entities.find(n=>n.id===row.to)?.name}的${row.predicate} · ${RELATIONSHIP_STATUS_LABELS[row.status]}`;target.append(p);
+  for(const evidence of row.evidence || []){const p=this.document.createElement('p');p.textContent=`${evidence.text} · ${evidence.source} · ${time(evidence.at)}${evidence.scope ? ` · 房间${evidence.scope.room}/主播${evidence.scope.anchor}` : ''}`;target.append(p);}
+ }
  showRelationships(result){
+   this.relationshipGraph=result;
+   const signature=relationshipEvidenceVersion(result);
+   const canvas=this.root.querySelector('[data-relationship-chart]');
+   if(this.graphSignature!==signature){canvas.chartOption=relationshipChartOption(result);canvas.replaceChildren(this.document.createTextNode(`关系网：${result.entities.length}个人物，${result.relations.length}条关系`));this.graphSignature=signature;}
+   const selection=this.root.querySelector('[data-relationship-selection]'),previous=selection.value;selection.replaceChildren();
+   const add=(value,text)=>{const option=this.document.createElement('option');option.value=value;option.textContent=text;selection.append(option);};add('','选择图中节点或关系');
+   for(const node of result.entities)add(`entity:${node.id}`,`${node.name} · ${node.role || '人物'}`);
+   const namesForSelection=new Map(result.entities.map(n=>[n.id,n.name]));
+   for(const edge of result.relations)add(`relation:${edge.id}`,`${namesForSelection.get(edge.from)} → ${namesForSelection.get(edge.to)} · ${edge.negative ? '不是' : ''}${edge.predicate} · ${RELATIONSHIP_STATUS_LABELS[edge.status]}`);
+   if([...selection.options].some(o=>o.value===previous))selection.value=previous;this.selectRelationship();
    const target=this.root.querySelector('[data-relationship-results]');target.replaceChildren();
    const paragraph=text=>{const p=this.document.createElement('p');p.textContent=text;target.append(p);};
    const names=new Map(result.entities.map(row=>[row.id,row.name]));
+   if(result.stats)paragraph(`已积累 ${result.stats.entities} 个人物、${result.stats.relations} 条关系；当前展示 ${result.relations.length} 条${result.stats.truncated ? '，更多关系可按人物检索' : ''}。`);
    paragraph(`找到 ${result.entities.length} 个人物节点、${result.relations.length} 条关系陈述；仅展示相关资料，不代表完整关系网。`);
    for(const node of result.entities){
     paragraph(`${node.name}${node.aliases?.length ? `（别名：${node.aliases.join('、')}）` : ''}${node.role ? ` · ${node.role}` : ''}`);
@@ -152,7 +188,7 @@ export class KnowledgeLibrary {
     for(const evidence of row.evidence)paragraph(`原话：${evidence.text} · ${evidence.source}${evidence.scope ? ` · 房间${evidence.scope.room} / 主播${evidence.scope.anchor}` : ''} · ${time(evidence.at)} · ${({verified:'核实资料',observed:'互动记录',unverified:'未核实陈述'})[evidence.trust]}`);
    }
    for(const row of result.ambiguities)paragraph(`“${row.name}”有多个候选身份，请补充账号或更多上下文。`);
-   if(!result.relations.length)paragraph('没有找到明确关系陈述；可以在“添加知识”核实补充人物、别名和关系，不按昵称或互动猜测。');
+   if(!result.relations.length)paragraph('没有找到明确关系陈述；持续运行会从已启用的对话与公开资料积累证据，也可添加核实知识；不按昵称或互动猜测关系。');
  }
 
  preview(){
@@ -170,7 +206,7 @@ export class KnowledgeLibrary {
   try{
    if(action==='clear')await this.webKnowledge.clear();if(action==='remove')await this.webKnowledge.remove(id);
    const rows=await this.webKnowledge.list();if(serial!==this.serial)return;
-   status.textContent=`${this.webKnowledge.persistent ? '本机已保存' : '当前环境仅临时保存，刷新后丢失'} · ${rows.length}/100条有效资料；停用后停止保存与复用。`;
+   status.textContent=`${this.webKnowledge.persistent ? '本机已保存' : '当前环境仅临时保存，刷新后丢失'} · ${rows.length}/${this.webKnowledge.capacity || 100}条有效资料；停用后停止保存与复用。`;
    this.webList.replaceChildren();
    for(const row of rows)this.addWeb(row);
    if(!rows.length){const p=this.document.createElement('p');p.className='empty';p.textContent='没有有效的自动联网知识。';this.webList.append(p);}

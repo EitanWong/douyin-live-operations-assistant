@@ -1,3 +1,4 @@
+import {createKnowledgeMemory} from './services/automatic-knowledge.js';
 import {createRelationshipLibrary} from './ai/relationship-library.js';
 import {withRelationshipEvidence} from './services/relationship-query.js';
 import {createSpeechRecognizer} from './services/speech-routing.js';
@@ -283,7 +284,7 @@ export function boot(options = {}) {
     if(engine.config.ai.edge.audioEnabled)void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).then(result=>{if(!closed && localAttemptKey===key && result?.phase==='ready'){mediaAttemptKey='';syncMedia();}}).catch(()=>{});
   }
   const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
-    snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
+    snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,publicRecords:[...accounts.history(engine.config.anchorId),...accounts.list(engine.config.anchorId)],profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
     changed:async()=>{accountRevision++;engine?.cancelAI();await persistRuntime(true);},onStatus:text=>{log('ai',text);foundationSettings?.showAccounts();}});
   const request = options.request || (details => GM_xmlhttpRequest(details));
   const secretKey = endpoint => `live-assistant:api-key:${new URL(validateEndpoint(endpoint)).origin}`;
@@ -316,7 +317,8 @@ export function boot(options = {}) {
   });
   const stopForegroundMedia=()=>{if(activeMediaConfig.inputSource!=='native')media.stop();};
   const searchSecretKey = endpoint => `live-assistant:search-key:${new URL(validateSearchEndpoint(endpoint)).origin}`;
-  const webKnowledge=createWebKnowledge();
+  const webCache=createWebKnowledge();
+  const webKnowledge=options.knowledgeTransport ? createKnowledgeMemory({cache:webCache,transport:options.knowledgeTransport,anchor:()=>engine.config.anchorId}) : webCache;
   const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
   const recordSearch=record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `${record.cached ? '知识缓存' : '联网搜索'}：${record.query} · ${record.results.length} 条来源`);};
   let aiStatusSequence=0;
@@ -329,13 +331,13 @@ export function boot(options = {}) {
     foundationSettings?.trace(r);if(r.provider==='edge'){panel?.setAIServiceStatus('');log('ai',`端侧兜底完成 · ${r.elapsedMs}ms`);}
   }});
   const relationshipLibrary=createRelationshipLibrary({all:options.all || (()=>Object.fromEntries((typeof GM_listValues==='function' ? GM_listValues() : []).filter(key=>/^live-assistant:(?:config|runtime|profile|live-memory):/u.test(key)).map(key=>[key,get(key,null)])))});
-  const retrieveRelationships=options.relationshipQuery || (demo ? null : (query,memory)=>relationshipLibrary.query(room,query,memory ? {memory} : {}));
-  const queryRelationships=async(query,memory)=>{
+  const retrieveRelationships=options.relationshipQuery || (demo ? null : (query,memory,graphOptions)=>relationshipLibrary.query(room,query,memory ? {memory} : {},graphOptions));
+  const queryRelationships=async(query,memory,graphOptions)=>{
     await persistRuntime(true);
-    if(retrieveRelationships)return retrieveRelationships(query,memory);
-    return localRelationships(query,memory);
+    if(retrieveRelationships)return retrieveRelationships(query,memory,graphOptions);
+    return localRelationships(query,memory,graphOptions);
   };
-  const localRelationships=(query,memory=engine.config.ai.memory)=>liveMemory.relationships(engine.config.anchorId,query,{memory,knowledge:engine.config.ai.knowledge,anchorName:identity.anchor?.name,anchorSecUid:identity.anchor?.secUid,accounts:engine.config.ai.contextSources.accounts ? [...accounts.history(engine.config.anchorId),...accounts.list(engine.config.anchorId)] : [],includeAccountHistory:true,includeAudience:engine.config.ai.assistant.memoryEnabled && engine.config.ai.contextSources.audience,includePerception:engine.config.ai.assistant.memoryEnabled});
+  const localRelationships=(query,memory=engine.config.ai.memory,graphOptions)=>liveMemory.relationships(engine.config.anchorId,query,{memory,knowledge:engine.config.ai.knowledge,anchorName:identity.anchor?.name,anchorSecUid:identity.anchor?.secUid,accounts:engine.config.ai.contextSources.accounts ? [...accounts.history(engine.config.anchorId),...accounts.list(engine.config.anchorId)] : [],includeAccountHistory:true,graphOptions,includeAudience:engine.config.ai.assistant.memoryEnabled && engine.config.ai.contextSources.audience,includePerception:engine.config.ai.assistant.memoryEnabled});
   const client=withRelationshipEvidence({reply:resilientClient,query:retrieveRelationships,persist:()=>persistRuntime(true)});
   const lock = options.lock || new RoomLock({ room });
   const makeAdapter = options.adapterFactory || (settings => new DouyinAdapter(settings));
@@ -838,6 +840,7 @@ export function boot(options = {}) {
     let stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
     const timer = setInterval(async () => {
       if (closed || suspended) return;
+      if(panel.open && panel.activeTab==='knowledge' && !document.hidden)panel.knowledgeLibrary.tickRelationships();
       if(roomContext.current())void accountRefresh.tick().catch(error=>log('ai',`公开资料更新：${error.message}`));
       tools.notify('tick');
       if(!persistenceDisabled && roomContext.current())void predictions.pulse(predictionPulse({engine,network,identity,connected:(demo || adapter.healthy()) && (!identity.live?.status || identity.live.status==='live')}));

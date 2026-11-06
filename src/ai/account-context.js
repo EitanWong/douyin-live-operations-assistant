@@ -37,7 +37,7 @@ export function normalizeAccountPayload(payload,source,at=Date.now(),options={})
  }
  return rows;
 }
-const record=z.object({kind:z.enum(['profile','work','comment','danmaku','transcript','visual']),id:z.string().min(1).max(160),subject:z.string().min(1).max(160),role:z.enum(['selected','anchor','viewer']).default('selected'),title:z.string().max(80),text:z.string().max(1200),source:z.string().max(300),observedAt:z.number().finite(),expiresAt:z.number().finite(),counts:z.partialRecord(z.enum(['followers','following','works','likes','comments','shares']),z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()),url:z.string().max(300).optional(),publishedAt:z.number().finite().nullable().optional(),actor:accountActor.optional(),target:accountActor.optional(),workId:z.string().regex(/^[A-Za-z0-9_.=-]{1,160}$/u).optional(),positionMs:z.number().int().nonnegative().max(86400000).optional(),coverage:z.string().max(500).optional()});
+const record=z.object({kind:z.enum(['profile','work','comment','danmaku','transcript','visual']),id:z.string().min(1).max(160),subject:z.string().min(1).max(160),role:z.enum(['selected','anchor','viewer']).default('selected'),researchDepth:z.number().int().min(0).max(2).default(0),title:z.string().max(80),text:z.string().max(1200),source:z.string().max(300),observedAt:z.number().finite(),expiresAt:z.number().finite(),counts:z.partialRecord(z.enum(['followers','following','works','likes','comments','shares']),z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable()),url:z.string().max(300).optional(),publishedAt:z.number().finite().nullable().optional(),actor:accountActor.optional(),target:accountActor.optional(),workId:z.string().regex(/^[A-Za-z0-9_.=-]{1,160}$/u).optional(),positionMs:z.number().int().nonnegative().max(86400000).optional(),coverage:z.string().max(500).optional()});
 const savedRecord=record.extend({anchor:z.string().max(80)}),historyAge=180*86400000;
 function parseRecords(anchor,url,input,now){
  if(typeof anchor!=='string' || !anchor || anchor.length>80)throw new Error('请先确认当前主播身份');
@@ -59,8 +59,8 @@ export class AccountContext {
   this.past=valid(result.data.history).filter(r=>r.kind!=='profile' && this.now()-r.observedAt<=historyAge);
   this.invalidated=new Set(result.data.invalidated);this.retriever.clear();
  }
- replace(anchor,url,input,{role='selected'}={}){
-  const rows=parseRecords(anchor,url,input.map(r=>({...r,role})),this.now()),source=accountSource(url).url;
+ replace(anchor,url,input,{role='selected',depth=0}={}){
+  const rows=parseRecords(anchor,url,input.map(r=>({...r,role,researchDepth:depth})),this.now()),source=accountSource(url).url;
   this.invalidated.delete(`${anchor}:${source}`);this.rows=this.rows.filter(r=>r.anchor!==anchor || r.source!==source).concat(rows).filter(r=>r.expiresAt>this.now()).slice(-300);
   const unique=new Map(this.past.concat(rows.filter(r=>r.kind!=='profile')).filter(r=>this.now()-r.observedAt<=historyAge).map(r=>[`${r.anchor}:${r.source}:${r.kind}:${r.id}:${r.observedAt}`,r]));
   this.past=[...unique.values()].slice(-3000);this.retriever.clear();
@@ -69,7 +69,7 @@ export class AccountContext {
  forget(anchor,url){const keep=r=>r.anchor!==anchor || url && r.source!==accountSource(url).url;this.rows=this.rows.filter(keep);this.past=this.past.filter(keep);this.retriever.clear();}
  list(anchor){return structuredClone(this.rows.filter(r=>r.anchor===anchor && r.expiresAt>this.now()));}
  history(anchor){return structuredClone(this.past.filter(r=>r.anchor===anchor && this.now()-r.observedAt<=historyAge && !this.invalidated.has(`${anchor}:${r.source}`)));}
- version(anchor){return [...this.list(anchor),...this.history(anchor)].map(r=>`${r.kind}:${r.id}:${r.source}:${r.observedAt}:${r.expiresAt}:${r.role}`).join('|');}
+ version(anchor){return [...this.list(anchor),...this.history(anchor)].map(r=>`${r.kind}:${r.id}:${r.source}:${r.observedAt}:${r.expiresAt}:${r.role}:${r.researchDepth}`).join('|');}
  snapshot(){return structuredClone({version:2,rows:this.rows,history:this.past,invalidated:[...this.invalidated]});}
  context(anchor,query,{subjects,includeHistory=false}={}){
   const labels={followers:'粉丝',following:'关注',works:'作品数',likes:'点赞',comments:'评论数',shares:'分享数'};

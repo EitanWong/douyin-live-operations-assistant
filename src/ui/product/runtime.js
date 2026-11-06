@@ -73,9 +73,9 @@ function Disclosure({node,bridge}) {
   useEffect(()=>{if(open && invalid){const input=body.current?.querySelector('[aria-invalid="true"]');input?.focus();input?.scrollIntoView?.({block:'center'});}},[open,invalid]);
   return h(Paper,{withBorder:true,className:['product-disclosure',node.classes].filter(Boolean).join(' '),'data-surface':node.surface,'data-view-id':node.id},h('div',{className:'product-disclosure-heading'},h(Button,{variant:'subtle',fullWidth:true,justify:'space-between','aria-expanded':open,'aria-controls':regionId,onClick:()=>bridge.toggle(node.id,!open),rightSection:h(Chevron,{open})},node.title),h(InspectButton,{node})),h(Reveal,{open,id:regionId,onOpened:scrollOpened},h(InspectionContents,null,h(Stack,{className:'product-disclosure-body',gap:'sm',ref:body,tabIndex:0,role:'region','aria-label':node.title},renderChildren(node.children,bridge)))));
 }
-function Chart({node}) {
+function Chart({node,bridge}) {
   const element=useRef(null),chart=useRef(null);
-  useEffect(()=>{chart.current=createChartView(element.current);return ()=>chart.current.destroy();},[]);
+  useEffect(()=>{chart.current=createChartView(element.current,{onSelect:selection=>bridge.chartSelect(node.id,selection)});return ()=>chart.current.destroy();},[bridge,node.id]);
   useEffect(()=>{chart.current.update(node.option);},[node.option]);
   return h(Inspectable,{node},h('div',{ref:element,className:'product-chart',role:'img','aria-label':node.label || '直播数据图表'}));
 }
@@ -104,7 +104,7 @@ const View=React.memo(function View({node,bridge}) {
   if(node.kind==='record-browser')return h(RecordBrowser,{node});
   if(node.kind==='table')return h(DataTable,{node,bridge});
   if(node.collection?.mode==='records')return h(RecordCollection,{node,bridge});
-  if(node.kind==='chart')return h(Chart,{node});
+  if(node.kind==='chart')return h(Chart,{node,bridge});
   if(node.kind==='progress')return node.value===null ? h('small',null,node.label) : h(Progress,{value:node.value,'aria-label':node.label});
   if(node.kind==='bars')return h(Inspectable,{node},h('div',{className:'product-stat-bars','aria-label':node.label},node.items.map((item,i)=>h('div',{key:i,title:item.label},h('small',null,item.label),h(Progress,{value:item.scale,'aria-label':item.label})))));
   if(node.kind==='distribution'){const total=node.parts.reduce((sum,part)=>sum+part.value,0);return h(Inspectable,{node},h(Progress.Root,{'aria-label':node.label},node.parts.map((part,i)=>h(Progress.Section,{key:i,value:part.value/total*100,color:({win:'teal',loss:'red',draw:'gray',pending:'orange'})[part.outcome],'aria-label':part.label},h(Progress.Label,null,part.label)))));}

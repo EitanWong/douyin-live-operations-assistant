@@ -37,3 +37,14 @@ test('removing an automatically selected viewer during collection discards the l
  const work=service.tick();await new Promise(setImmediate);targets=[];await service.tick();finish(normalizeAccountPayload({user:{sec_uid:'target',nickname:'旧目标'}},accountSource(url)));
  assert.equal(await work,false);assert.deepEqual(accounts.list('host'),[]);service.close();
 });
+
+test('持续刷新按最久未尝试选择，小时预算不让前排账号饿死后排，深度跨重启保留',async()=>{
+ let now=1800000000000;const accounts=new AccountContext({now:()=>now}),calls=[];
+ const urls=Array.from({length:8},(_,i)=>`https://www.douyin.com/user/person${i}`);
+ const config={enabled:true,autoRefresh:true,autoResearch:true,intervalMinutes:60,maxPerHour:2,urls:[]};
+ const options={accounts,now:()=>now,scope:()=> '2',config:()=>config,targets:()=>urls.map(url=>({url,role:'viewer',depth:1})),changed:async()=>{},collector:{collect:async url=>{calls.push(url);return normalizeAccountPayload({user:{sec_uid:accountSource(url).id,nickname:'用户'}},accountSource(url),now);},cancel:async()=>{}}};
+ let service=createAccountRefresh(options);await service.tick();now+=60001;await service.tick();
+ const saved=service.snapshot();service.close();service=createAccountRefresh({...options,snapshot:saved});now+=3600001;await service.tick();
+ assert.deepEqual(calls,urls.slice(0,3));assert.equal(accounts.list('2').at(-1).researchDepth,1);
+ const restored=new AccountContext({now:()=>now,snapshot:accounts.snapshot()});assert.equal(restored.list('2').at(-1).researchDepth,1);service.close();
+});

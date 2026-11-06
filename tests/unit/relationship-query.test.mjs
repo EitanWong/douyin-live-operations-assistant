@@ -20,3 +20,8 @@ test('生成期间关系证据被删除时，拒绝发送基于旧关系的回�
  let reads=0;const run=withRelationshipEvidence({persist:async()=>{},query:async()=>({entities:[],relations:reads++ ? [] : [{predicate:'朋友',evidence:[]}]}),reply:async()=> '他们是朋友'});
  await assert.rejects(run({target:{text:'谁和谁什么关系'}},{}),/资料.*变化/);
 });
+
+test('只有公开背景原文也必须在生成后复核，删除期间不交付旧来源回答',async()=>{
+ let reads=0;const run=withRelationshipEvidence({persist:async()=>{},query:async()=>({entities:[],relations:[],sources:{chunks:reads++ ? [] : [{content:'公开陶瓷资料'}]}}),reply:async()=> '旧资料回答'});
+ await assert.rejects(run({target:{text:'怎么清洗陶瓷'}},{}),/资料.*变化/);
+});

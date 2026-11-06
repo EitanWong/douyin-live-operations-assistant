@@ -63,9 +63,9 @@ export class LiveMemoryArchive {
   this.scopes.set(anchor,scope);return scope;
  }
  revision(scope){return `${scope.audience.revision}:${scope.perception.revision}`;}
- relationships(anchor,query,{includeAudience=true,includePerception=true,...options}={}){
+ relationships(anchor,query,{includeAudience=true,includePerception=true,graphOptions,...options}={}){
   const scope=this.current(anchor);
-  return scope.relationships({...options,anchor,audience:includeAudience ? scope.audience : undefined,perception:includePerception ? scope.perception : undefined,now:this.now()},query);
+  return scope.relationships({...options,anchor,audience:includeAudience ? scope.audience : undefined,perception:includePerception ? scope.perception : undefined,now:this.now()},query,graphOptions);
  }
  capture(){return [...this.scopes.values()].filter(scope=>scope.savedRevision!==this.revision(scope)).map(scope=>({key:scope.key,anchor:scope.anchor,revision:this.revision(scope),state:{version:1,anchor:scope.anchor,audience:scope.audience.snapshot(),perception:scope.perception.snapshot()}}));}
  async persist(entries){for(const entry of entries){await this.set(entry.key,entry.state);const scope=this.scopes.get(entry.anchor);if(scope)scope.savedRevision=entry.revision;}}

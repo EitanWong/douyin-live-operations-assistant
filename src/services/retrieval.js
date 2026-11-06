@@ -55,8 +55,8 @@ function retrieve(chunks,index,query,{contextQuery=''}={}) {
 
 // The key includes every source field: edits to evidence or metadata invalidate
 // together. The bounded cache stores indexes, never model replies or live facts.
-export function createKnowledgeRetriever(){
-  const cache=new LRUCache({max:4,maxSize:600000,ttl:300000,sizeCalculation:(_value,key)=>key.length*4+1024});
+export function createKnowledgeRetriever({maxSize=600000}={}){
+  const cache=new LRUCache({max:4,maxSize,ttl:300000,sizeCalculation:(_value,key)=>key.length*4+1024});
   const search=(entries,query,options)=>{
     const key=JSON.stringify(entries);let indexed=cache.get(key);
     if(!indexed){const chunks=entries.flatMap(splitEntry);indexed={chunks,index:makeIndex(chunks)};cache.set(key,indexed);}

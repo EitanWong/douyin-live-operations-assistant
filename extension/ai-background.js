@@ -1,3 +1,4 @@
+import {knowledgeLifetime} from '../src/services/web-knowledge.js';
 import {relationshipEvidenceVersion} from '../src/services/relationship-query.js';
 import {AgentHarness} from '../src/ai/harness.js';
 import {createAgentTaskStore} from '../src/ai/task-store.js';
@@ -8,7 +9,7 @@ import {validateSearchEndpoint,validateSearchBody} from '../src/services/search.
 import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
 import {validateWeatherURL} from '../src/services/weather.js';
 import {validatePublicDataURL} from '../src/services/public-data.js';
-export function createBackgroundAI({chrome,readRecord,relationships,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
+export function createBackgroundAI({chrome,readRecord,relationships,knowledge,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
  const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
  const request=details=>{
   const controller=new AbortController();let timeout;
@@ -32,9 +33,15 @@ export function createBackgroundAI({chrome,readRecord,relationships,fetch:fetche
   const room=job.scope.split(':')[0],graph=relationships ? await relationships(room,job.question) : null;
   if(relationships){job.input.context ||= {};job.input.context.relationshipContext=graph;}
   const keys=new Map();for(const [kind,endpoint] of [['ai',ai.endpoint],['search',ai.search?.enabled ? ai.search.endpoint : null]])if(endpoint){const origin=new URL(endpoint).origin;keys.set(`${kind}:${endpoint}`,await readRecord(`live-assistant:${kind==='ai'?'api-key':'search-key'}:${origin}`) || (kind==='ai' ? await readRecord(`live-assistant:media-key:${origin}`) : '') || '');}
+  const knowledgeVersion=knowledge ? await knowledge.handle(room,'version',{anchor:job.input.anchor}) : undefined;
   const agent=createResearchAgent({request,getKey:(kind,url)=>keys.get(`${kind}:${url}`) || '',readPublicPage:(url,signal)=>readPublicPage(url,{authorized,fetch:fetcher,signal}),reserve:scope=>store.reserve(scope)});
   const result=await agent(job,options);
   if(relationships && relationshipEvidenceVersion(graph)!==relationshipEvidenceVersion(await relationships(room,job.question)))throw Error('人物资料已变化，本次研究结果已作废，请重新提交');
+  if(knowledge && ai.search?.rememberKnowledge!==false && ai.assistant?.memoryEnabled!==false){
+   const sources=[...result.sources,...result.publicSources.filter(r=>!r.error)].slice(0,10);
+   try{result.knowledgeStored=await knowledge.handle(room,'remember',{anchor:job.input.anchor,sources,version:knowledgeVersion,lifetime:knowledgeLifetime(job.question,'stable')});}
+   catch(error){result.knowledgeError=error.message;}
+  }
   return result;
  };
  const harness=new AgentHarness({store,execute});

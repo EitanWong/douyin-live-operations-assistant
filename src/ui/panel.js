@@ -848,7 +848,7 @@ export class Panel {
       node.hidden = node.dataset.page !== key || Boolean(disabled);
     }
     this.workspaceLayout.show(key);
-    if(key==='knowledge') {this.knowledgeLibrary.filter();void this.knowledgeLibrary.refresh();}
+    if(key==='knowledge') {this.knowledgeLibrary.filter();void this.knowledgeLibrary.refresh();if(this.callbacks.relationships)this.knowledgeLibrary.previewRelationships(this.callbacks.relationships);}
     if(this.isPKVisible() && this.latest) this.renderPK(this.latest[0]);
     if(key==='anchor' && this.latest) this.renderAnchor(this.latest[0]);
   }
@@ -1141,5 +1141,5 @@ export class Panel {
     this.productUI?.refresh();
     for (const action of ['identify','test-ai','diagnose','refresh-anchor']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { this.productUI?.destroy();this.workspaceLayout.destroy();this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.predictionCharts.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
+  destroy() { this.knowledgeLibrary.destroy();this.productUI?.destroy();this.workspaceLayout.destroy();this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.predictionCharts.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
 }

@@ -9,24 +9,24 @@ export function createAccountRefresh({collector,accounts,scope,config,changed,ta
  const selection=()=>{
   const c={...ACCOUNT_COLLECTION_DEFAULTS,...config()},selected=c.urls.map(url=>({url:accountSource(url).url,role:'selected'}));
   if(c.autoResearch)for(const target of targets().slice(0,c.researchLimit))try{
-   const source=accountSource(target.url);if(source.kind==='profile' && ['anchor','viewer'].includes(target.role) && !selected.some(r=>r.url===source.url))selected.push({url:source.url,role:target.role});
+   const source=accountSource(target.url);if(source.kind==='profile' && ['anchor','viewer'].includes(target.role) && !selected.some(r=>r.url===source.url))selected.push({url:source.url,role:target.role,depth:Number.isInteger(target.depth) && target.depth>=0 && target.depth<=2 ? target.depth : 0});
   }catch{}
   return selected;
  };
- const selected=job=>selection().some(r=>r.url===job.url && r.role===job.role);
- const refresh=async(url,{automatic=false,role='selected'}={})=>{
+ const selected=job=>selection().some(r=>r.url===job.url && r.role===job.role && (r.depth ?? 0)===job.depth);
+ const refresh=async(url,{automatic=false,role='selected',depth=0}={})=>{
   if(closed || !collector)throw new Error('公开资料采集需要 Chrome 扩展版');
   if(active)throw new Error('资料采集正在进行，请稍候或取消');
   if(!config().enabled)throw new Error('公开资料采集已关闭');
   url=accountSource(url).url;const anchor=scope();if(!anchor)throw new Error('请先确认当前主播身份');
   calls=calls.filter(at=>now()-at<3600000);if(calls.length>=(config().maxPerHour ?? 6))throw new Error('公开资料采集已达每小时上限');
-  const job={anchor,url,automatic,role};active=job;calls.push(now());attempts.delete(`${anchor}:${url}`);attempts.set(`${anchor}:${url}`,now());while(attempts.size>100)attempts.delete(attempts.keys().next().value);
+  const job={anchor,url,automatic,role,depth};active=job;calls.push(now());attempts.delete(`${anchor}:${url}`);attempts.set(`${anchor}:${url}`,now());while(attempts.size>100)attempts.delete(attempts.keys().next().value);
   try{
    accounts.invalidate(anchor,url);await changed();
    if(active!==job || scope()!==anchor)throw new Error('采集已取消或主播已切换');
    const rows=await collector.collect(url);
    if(active!==job || scope()!==anchor || !config().enabled || automatic && (!config().autoRefresh || !selected(job)))throw new Error('采集已取消或上下文失效');
-   accounts.replace(anchor,url,rows,{role});await changed();return rows;
+   accounts.replace(anchor,url,rows,{role,depth});await changed();return rows;
   }finally{if(active===job)active=null;}
  };
  const cancel=async()=>{if(active)active=null;await collector?.cancel();};
@@ -36,9 +36,10 @@ export function createAccountRefresh({collector,accounts,scope,config,changed,ta
   if(closed || active || !collector || !scope() || !c.enabled || !c.autoRefresh || now()-lastAutomatic<60000)return false;
   calls=calls.filter(at=>now()-at<3600000);if(calls.length>=c.maxPerHour)return false;
   const records=accounts.list(scope());
-  const target=selection().find(({url})=>now()-Math.max(attempts.get(`${scope()}:${url}`) ?? -Infinity,...records.filter(r=>r.source===url).map(r=>r.observedAt))>=c.intervalMinutes*60000);
+  const last=url=>Math.max(attempts.get(`${scope()}:${url}`) ?? -Infinity,...records.filter(r=>r.source===url).map(r=>r.observedAt));
+  const target=selection().map((row,index)=>({...row,index,last:last(row.url)})).filter(row=>now()-row.last>=c.intervalMinutes*60000).sort((a,b)=>a.last-b.last || a.index-b.index)[0];
   if(!target)return false;lastAutomatic=now();
-  try{const rows=await refresh(target.url,{automatic:true,role:target.role});onStatus(`自动更新公开资料 ${rows.length} 条`);return true;}catch(error){onStatus(`公开资料更新：${error.message}`);return false;}
+  try{const rows=await refresh(target.url,{automatic:true,role:target.role,depth:target.depth ?? 0});onStatus(`自动更新公开资料 ${rows.length} 条`);return true;}catch(error){onStatus(`公开资料更新：${error.message}`);return false;}
  };
  return {refresh,tick,cancel,snapshot:()=>({calls:[...calls],attempts:[...attempts]}),close:()=>{closed=true;void cancel().catch(()=>{});}};
 }

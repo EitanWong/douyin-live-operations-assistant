@@ -1255,3 +1255,17 @@ test('人物关系后台查询跨房间读取持续档案，只返回相关证�
  response=await w.send({type:'relationship-query',query:'阿明'});assert.equal(response.value.relations.length,0);
  assert.equal((await w.send({type:'relationship-query',query:'x'.repeat(2001)})).ok,false);
 });
+
+test('自动知识库后台单写者保留原文，拒绝页面直写和旧主播范围，删除后图谱与重启均不复活',async()=>{
+ const values={'live-assistant:config:1':{anchorId:'10',ai:{enabled:true,assistant:{memoryEnabled:true},search:{rememberKnowledge:true}}}},indexedDB=new IDBFactory();
+ const w=await worker(values,indexedDB),input={anchor:'10',sources:[{url:'https://example.org/profile',title:'公开资料',text:'阿明是小雨的师傅'}]};
+ assert.equal((await w.send({type:'knowledge-corpus',action:'remember',input})).ok,true);
+ const records=await w.send({type:'knowledge-corpus',action:'list',input:{anchor:'10'}});assert.equal(records.value.length,1);
+ let graph=await w.send({type:'relationship-query',query:'',browse:true});assert.equal(graph.value.relations[0].status,'unverified');
+ assert.equal((await w.send({type:'set',key:'live-assistant:knowledge:1:10',value:{rows:[]}})).ok,false);
+ assert.equal((await w.send({type:'knowledge-corpus',action:'remember',input:{...input,anchor:'20'}})).ok,false);
+ const version=(await w.send({type:'knowledge-corpus',action:'version',input:{anchor:'10'}})).value;
+ await w.send({type:'knowledge-corpus',action:'clear',input:{anchor:'10'}});
+ await w.send({type:'knowledge-corpus',action:'remember',input:{...input,version}});
+ const reopened=await worker({},indexedDB);graph=await reopened.send({type:'relationship-query',query:'阿明'});assert.equal(graph.value.relations.length,0);
+});
