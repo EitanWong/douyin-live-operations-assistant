@@ -65,10 +65,10 @@ function pageHelp(page,key=page.dataset.page || page.dataset.toolPanel,title=pag
   help.dataset.workspaceUtility='help';summary.textContent=title;help.prepend(summary);if(intro)summary.after(intro);page.append(help);
 }
 function subviewHelp(page){
-  for(const scope of page.querySelectorAll('[data-ai-section],[data-anchor-content]')){
-    const ai=scope.dataset.aiSection,key=ai || scope.dataset.anchorContent;
-    const label=page.querySelector(ai ? `[data-ai-section-tab="${key}"]` : `[data-anchor-view="${key}"]`)?.textContent || key;
-    pageHelp(scope,`${ai ? 'ai' : 'anchor'}.${key}`,`${label} · 使用说明`);
+  for(const scope of page.querySelectorAll('[data-ai-section],[data-anchor-content],[data-knowledge-section]')){
+    const ai=scope.dataset.aiSection,knowledge=scope.dataset.knowledgeSection,key=ai || knowledge || scope.dataset.anchorContent;
+    const label=page.querySelector(ai ? `[data-ai-section-tab="${key}"]` : knowledge ? `[data-knowledge-section-tab="${key}"]` : `[data-anchor-view="${key}"]`)?.textContent || key;
+    pageHelp(scope,`${ai ? 'ai' : knowledge ? 'knowledge' : 'anchor'}.${key}`,`${label} · 使用说明`);
   }
 }
 function organizeShortSections(page){
@@ -110,5 +110,5 @@ export function organizePage(page){
     for(const wrapper of scope.children)if(!wrapper.matches('.ai-card') && wrapper.querySelector(':scope>.ai-card'))wrapper.dataset.workspaceContents='';
     for(const card of scope.querySelectorAll(':scope>.ai-card,:scope>[data-workspace-contents]>.ai-card')){card.dataset.workspaceCard='';card.classList.add('workspace-card');}
   }
-  subviewHelp(page);pageHelp(page);
+  subviewHelp(page);if(page.dataset.page!=='knowledge')pageHelp(page);
 }

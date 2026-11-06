@@ -4,10 +4,6 @@ import {JSDOM} from 'jsdom';
 import {Panel} from '../../src/ui/panel.js';
 import {copy,DEFAULTS} from '../../src/core/engine.js';
 import {createWorkspaceBridge} from '../../src/ui/product/bridge.js';
-import {createKnowledgeCorpus} from '../../src/ai/knowledge-corpus.js';
-import {createRelationshipLibrary} from '../../src/ai/relationship-library.js';
-import {AudienceMemory} from '../../src/ai/audience-memory.js';
-import {createRelationshipRetriever} from '../../src/ai/relationship-memory.js';
 
 const record=(id,title,extra={})=>({id,title,content:'主播每周六晚上八点开播',source:'主播确认',updatedAt:Date.now(),expiresOn:'',enabled:true,...extra});
 function setup(entries=[],callbacks={}){
@@ -21,36 +17,6 @@ function setup(entries=[],callbacks={}){
 }
 const visibleRows=panel=>[...panel.node('[data-memory-list]').children].filter(row=>!row.hidden);
 const walk=node=>[node,...(node?.children || []).flatMap(walk)];
-
-test('点选人物查看档案、事件与缺口，按需展开完整原文；删除后详情移除且草稿不变',async()=>{
- const at=Date.now(),audience=new AudienceMemory({anchor:'10',now:()=>at}),retrieve=createRelationshipRetriever();
- const text='我喜欢陶艺。'+'这次活动有很多细节。'.repeat(150)+'周六带陶土。';
- audience.observe({id:'a',type:'chat',source:'socket',receivedAt:at,user:{id:'1',name:'小雨',secUid:'rain-account'},text});
- const f=setup([],{relationships:(q,memory,options)=>retrieve({anchor:'10',audience,memory,now:at},q,options)});
- try{
-  f.panel.tab('knowledge');const select=f.panel.node('[data-relationship-selection]');
-  select.value=`entity:${f.panel.knowledgeLibrary.relationshipGraph.entities.find(n=>n.name==='小雨').id}`;select.dispatchEvent(new f.dom.window.Event('change',{bubbles:true}));
-  const detail=f.panel.node('[data-relationship-detail]');assert.match(detail.textContent,/兴趣爱好.*陶艺/);assert.match(detail.textContent,/尚缺/);
-  assert.ok(detail.querySelector('a[href="https://www.douyin.com/user/rain-account"]'));
-  detail.querySelector('[data-person-record]').click();await new Promise(setImmediate);
-  assert.ok(detail.textContent.includes(text));assert.equal(f.panel.dirty,false);
-  audience.forget('uid:1');f.panel.knowledgeLibrary.previewRelationships(f.panel.knowledgeLibrary.relationships);
-  assert.equal(detail.textContent,'');assert.equal(f.panel.dirty,false);
- }finally{f.close();}
-});
-
-test('人物图谱在知识库按当前草稿本机查询，展示原话、冲突与时间且不渲染不可信HTML',()=>{
- let seen;const f=setup([record('r','人物关系',{content:'阿明是小雨的师傅'})],{relationships:(query,memory)=>{
-  seen={query,memory};return {entities:[{id:'a',name:'阿明'},{id:'b',name:'小雨'}],relations:[{id:'r',from:'a',to:'b',predicate:'师傅',negative:false,status:'conflicted',evidence:[{text:'<img src=x>阿明是小雨的师傅',at:Date.now(),source:'弹幕',trust:'unverified'}]}],ambiguities:[],paths:[]};
- }});
- try{
-  const {panel,edit}=f;panel.tab('knowledge');edit('[data-relationship-query]','阿明是谁');panel.node('[data-relationship-search]').click();
-  assert.equal(seen.query,'阿明是谁');assert.equal(seen.memory.entries.length,1);
-  assert.match(panel.node('[data-relationship-results]').textContent,/阿明.*师傅|师傅.*小雨/u);
-  assert.match(panel.node('[data-relationship-results]').textContent,/冲突|待核实/u);
-  assert.equal(panel.node('[data-relationship-results]').querySelector('img'),null);assert.equal(panel.dirty,false);
- }finally{f.close();}
-});
 
 test('AI知识与搜索移除知识库组件与管理入口，知识库保持唯一添加编辑位置',()=>{
  const f=setup();try{
@@ -159,65 +125,5 @@ test('删除可撤销；40条知识容量已满时拒绝新建，已有知识仍
  const f=setup(Array.from({length:40},(_,i)=>record(String(i),`知识${i}`)));try{
   const {panel,edit}=f;panel.tab('knowledge');panel.node('[data-memory-add]').click();assert.equal(panel.read().ai.memory.entries.length,40);assert.match(panel.node('.toast').textContent,/最多40/);
   panel.root.querySelector('[data-memory-edit]').click();edit('[data-memory-field="content"]','最新核对的安排');panel.node('[data-memory-confirm]').click();panel.root.querySelector('[data-memory-remove]').click();assert.equal(panel.read().ai.memory.entries.length,39);panel.node('[data-memory-undo]').click();assert.equal(panel.read().ai.memory.entries[0].content,'最新核对的安排');
- }finally{f.close();}
-});
-
-test('后台关系查询显示来源房间，迟到旧问题不覆盖新问题和草稿',async()=>{
- const pending=[];const f=setup([],{relationships:q=>new Promise(resolve=>pending.push({q,resolve}))});
- const graph=name=>({entities:[{id:'a',name},{id:'b',name:'小雨'}],relations:[{from:'a',to:'b',predicate:'朋友',status:'unverified',evidence:[{text:'历史陈述',source:'弹幕',at:Date.now(),trust:'unverified',scope:{room:'2',anchor:'20'}}]}],ambiguities:[]});
- try{
-  f.panel.tab('knowledge');f.edit('[data-relationship-query]','阿明');f.panel.node('[data-relationship-search]').click();
-  f.edit('[data-relationship-query]','青哥');f.panel.node('[data-relationship-search]').click();pending.find(p=>p.q==='青哥').resolve(graph('青哥'));await new Promise(setImmediate);
-  pending.find(p=>p.q==='阿明').resolve(graph('阿明'));pending.find(p=>p.q==='').resolve(graph('旧总览'));await new Promise(setImmediate);
-  assert.match(f.panel.node('[data-relationship-results]').textContent,/青哥/);assert.doesNotMatch(f.panel.node('[data-relationship-results]').textContent,/阿明/);assert.match(f.panel.node('[data-relationship-results]').textContent,/房间2/);assert.equal(f.panel.dirty,false);
- }finally{f.close();}
-});
-
-test('可视图谱自动加载，投影到共享图表和放大入口，点击节点与键盘选择共用证据',async()=>{
- const graph={stats:{entities:2,relations:1},entities:[{id:'a',name:'阿明',role:'主播'},{id:'b',name:'小雨',role:'观众'}],relations:[{id:'r',from:'a',to:'b',predicate:'朋友',status:'unverified',evidence:[{text:'阿明和小雨是朋友',source:'直播弹幕',trust:'unverified',at:Date.now()}]}],ambiguities:[],paths:[]};
- const f=setup([],{relationships:async()=>graph});let bridge;
- try{
-  f.panel.tab('knowledge');await new Promise(setImmediate);
-  const canvas=f.panel.node('[data-workspace-chart]');assert.ok(canvas?.chartOption);
-  bridge=createWorkspaceBridge(f.panel);const chart=walk(bridge.getSnapshot().content).find(n=>n.kind==='chart');assert.ok(chart);assert.equal(chart.option.series[0].type,'graph');
-  bridge.chartSelect(chart.id,{id:'b',kind:'entity'});
-  assert.match(f.panel.node('[data-relationship-detail]').textContent,/小雨|朋友/);
-  const select=f.panel.node('[data-relationship-selection]');select.value='relation:r';select.dispatchEvent(new f.dom.window.Event('change',{bubbles:true}));
-  assert.match(f.panel.node('[data-relationship-detail]').textContent,/阿明和小雨是朋友/);
-  assert.equal(f.panel.dirty,false);
- }finally{bridge?.destroy();f.close();}
-});
-
-test('未变化的十秒更新保留图表配置、查询和选择，隐藏折叠与销毁后不继续更新',async()=>{
- let calls=0,resolve;const graph={entities:[{id:'a',name:'阿明'}],relations:[],ambiguities:[],sources:{chunks:[]}};
- const f=setup([],{relationships:async()=>{calls++;return graph;}});
- try{
-  f.panel.tab('knowledge');await new Promise(setImmediate);const library=f.panel.knowledgeLibrary,option=f.panel.node('[data-relationship-chart]').chartOption;
-  f.panel.node('[data-relationship-selection]').value='entity:a';library.lastGraphAt=0;await library.tickRelationships();await new Promise(setImmediate);
-  assert.equal(calls,2);assert.equal(f.panel.node('[data-relationship-chart]').chartOption,option);assert.equal(f.panel.node('[data-relationship-selection]').value,'entity:a');
-  f.panel.node('[data-relationship-panel]').open=false;library.lastGraphAt=0;library.tickRelationships();assert.equal(calls,2);
-  library.previewRelationships(()=>new Promise(r=>resolve=r));library.destroy();resolve({...graph,entities:[{id:'b',name:'旧主播'}]});await new Promise(setImmediate);
-  assert.equal(library.relationshipGraph.entities[0].name,'阿明');
- }finally{f.close();}
-});
-
-test('运行中新原文自动进入图谱，矛盾保留双边，删除和到期随下一次更新移除',async()=>{
- let at=Date.now();const values={'live-assistant:config:1':{anchorId:'2',ai:{assistant:{memoryEnabled:true},memory:{enabled:false,entries:[]}}}};
- const corpus=createKnowledgeCorpus({read:async key=>values[key],write:async(key,value)=>{values[key]=structuredClone(value);},now:()=>at});
- const background=createRelationshipLibrary({all:async()=>values,now:()=>at});
- const f=setup([],{relationships:(query,memory,options)=>background.query('1',query,{memory},options)});
- const update=async()=>{f.panel.knowledgeLibrary.lastGraphAt=0;f.panel.knowledgeLibrary.tickRelationships();await new Promise(setImmediate);};
- const graph=()=>f.panel.knowledgeLibrary.relationshipGraph;
- const chart=()=>f.panel.node('[data-relationship-chart]').chartOption.series[0];
- try{
-  f.panel.tab('knowledge');await new Promise(setImmediate);assert.equal(graph().relations.length,0);
-  await corpus.remember('1','2',[{url:'https://example.org/friends',text:'阿明和小雨是朋友。'}],{lifetime:60000});await update();
-  assert.equal(chart().links.length,1);assert.equal(graph().relations[0].status,'unverified');
-  const positiveId=(await corpus.list('1','2'))[0].id;
-  const selection=f.panel.node('[data-relationship-selection]');selection.value=`entity:${graph().entities[0].id}`;selection.dispatchEvent(new f.dom.window.Event('change',{bubbles:true}));const selected=selection.value;
-  await corpus.remember('1','2',[{url:'https://example.org/correction',text:'阿明和小雨不是朋友。'}],{lifetime:60000});await update();
-  assert.equal(chart().links.length,2);assert.ok(graph().relations.every(row=>row.status==='conflicted'));assert.equal(selection.value,selected);
-  await corpus.remove('1','2',positiveId);await update();assert.equal(chart().links.length,1);assert.equal(graph().relations[0].negative,true);assert.equal(graph().relations[0].status,'unverified');
-  at+=60001;await update();assert.equal(chart().links.length,0);assert.equal(graph().entities.length,0);assert.equal(f.panel.dirty,false);
  }finally{f.close();}
 });

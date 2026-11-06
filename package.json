@@ -47,6 +47,7 @@
     "@tanstack/react-table": "9.3.1",
     "cockatiel": "4.0.0",
     "cordis": "4.0.0-rc.12",
+    "cytoscape": "3.34.4",
     "dexie": "4.4.7",
     "echarts": "^6.1.0",
     "eventsource-parser": "3.0.6",

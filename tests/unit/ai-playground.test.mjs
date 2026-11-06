@@ -131,3 +131,20 @@ test('引用修订仍失败在问答测试内显示真实原因，不会被判�
  const result=await f.service.run({question:'上海天气'});
  assert.equal(result.status,'failed');assert.equal(result.answer,'');assert.match(result.error,/引用/);assert.equal(result.calls.cloud,3);assert.equal(result.trace.at(-1).status,'failed');
 });
+
+test('关系问答共用预览额度，围绕指定人物证据回答且不受公屏短字数截断',async()=>{
+ const answer='小雨与阿明的朋友关系来自本人自述，仍待核实。'.repeat(8);
+ const bodies=[],f=fixture({request:d=>{bodies.push(JSON.parse(d.data));respond(d,plan('chat',answer));}});const graph={entities:[{id:'p',name:'小雨'}],relations:[],focus:{entityIds:['p'],names:['小雨']},policy:'没有原话不能编造关系'};
+ const result=await f.service.run({question:'他有哪些关系？',mode:'relationships',relationshipContext:graph});
+ assert.equal(result.status,'succeeded');const input=JSON.parse(bodies[0].messages[1].content);
+ assert.deepEqual(input.evidence_context.relationships.focus.entityIds,['p']);assert.equal(input.data.replyMode,'relationships');
+ assert.ok(JSON.stringify(bodies[0]).includes('不能编造'));assert.equal(result.calls.cloud,1);
+ assert.equal(result.answer,answer);assert.ok(result.checks.every(c=>c.pass));
+ await assert.rejects(f.service.run({question:'没有证据',mode:'relationships'}),/人物证据/);
+});
+
+test('工作台人物证据超过模型预算时明确失败，不让无证据回答冒充梳理结果',async()=>{
+ const f=fixture();f.config.ai.pipeline.contextBudgetChars=16000;
+ const result=await f.service.run({question:'他们是什么关系',mode:'relationships',relationshipContext:{entities:[{name:'阿明',evidence:[{text:'原话'.repeat(20000)}]}],relations:[]}});
+ assert.equal(result.status,'failed');assert.match(result.error,/人物证据.*预算/);assert.equal(f.requests.length,0);
+});

@@ -47,6 +47,7 @@ export function createWorkspaceBridge(panel) {
     if(node.matches('.stat-bars'))return {kind:'bars',id:id(node),label:node.getAttribute('aria-label'),items:[...node.querySelectorAll('.stat-bar')].map(bar=>({label:bar.getAttribute('aria-label'),value:cleanText(bar.querySelector('.stat-bar-value')),scale:Number(bar.querySelector('.stat-bar-fill')?.style.transform.match(/scaleY\(([^)]+)\)/u)?.[1] || 0)*100}))};
     if(node.matches('.stat-distribution'))return {kind:'distribution',id:id(node),label:node.getAttribute('aria-label'),parts:[...node.children].map(part=>({value:Number(part.style.flex),label:part.title,outcome:part.dataset.outcome}))};
     if(node.hasAttribute('data-record-browser'))return {kind:'record-browser',id:id(node),label:node.dataset.recordBrowser,children:[...node.children].filter(child=>child.hasAttribute('data-record-item')).map(project).filter(Boolean)};
+    if(node.hasAttribute('data-relationship-workspace') && node.networkView)return {kind:'network',id:id(node),label:node.getAttribute('aria-label'),view:node.networkView};
     if(node.hasAttribute('data-workspace-chart') && node.chartOption)return {kind:'chart',id:id(node),option:node.chartOption,label:node.getAttribute('aria-label')};
     const predictionName=node.getAttribute('data-pred-chart');
     if(predictionName && panel.predictionCharts?.options[predictionName])return {kind:'chart',id:id(node),option:panel.predictionCharts.options[predictionName],label:node.getAttribute('aria-label')};
@@ -96,7 +97,7 @@ export function createWorkspaceBridge(panel) {
   });
   observer.observe(root.querySelector('.workspace') || root,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['hidden','open','disabled','aria-invalid','aria-pressed','aria-selected','aria-busy','aria-valuenow','aria-valuemax','class','data-nav-collapsed','data-nav-side']});
   const themeObserver=new view.MutationObserver(refresh);themeObserver.observe(panel.host,{attributes:true,attributeFilter:['data-theme','data-palette','data-material']});
-  root.addEventListener('input',refresh);root.addEventListener('change',refresh);
+  root.addEventListener('network-update',refresh);root.addEventListener('input',refresh);root.addEventListener('change',refresh);
   refresh();
   return {
     getSnapshot:()=>snapshot,subscribe(listener){if(destroyed)return ()=>{};listeners.add(listener);return ()=>listeners.delete(listener);},refresh,
@@ -104,10 +105,11 @@ export function createWorkspaceBridge(panel) {
       if(node.type==='checkbox')node.checked=Boolean(value);else node.value=String(value);
       node.dispatchEvent(new view.Event(node.tagName==='SELECT' || ['checkbox','date','month','time','color','range'].includes(node.type) ? 'change' : 'input',{bubbles:true}));refresh();return true;},
     activate(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node) || node.disabled)return false;node.click();refresh();return true;},
+    networkAction(key,action){const node=nodes.get(key);if(!node || !available(node))return false;node.dispatchEvent(new view.CustomEvent('network-action',{detail:action}));refresh();return true;},
     chartSelect(key,selection){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node))return false;node.dispatchEvent(new view.CustomEvent('chart-select',{detail:selection}));refresh();return true;},
     toggle(key,open){const node=nodes.get(key);if(!node || !root.contains(node) || node.tagName!=='DETAILS')return false;node.open=open;refresh();return true;},
     reveal(key){const node=nodes.get(key);if(!node || !root.contains(node) || !available(node))return false;for(let parent=node;parent && parent!==root;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;refresh();return true;},
     navigate(key){if(destroyed || !snapshot.nav.some(n=>n.key===key))return;panel.tab(key);refresh();},
-    destroy(){destroyed=true;observer.disconnect();themeObserver.disconnect();root.removeEventListener('input',refresh);root.removeEventListener('change',refresh);listeners.clear();nodes.clear();snapshot=null;focus=null;}
+    destroy(){destroyed=true;observer.disconnect();themeObserver.disconnect();root.removeEventListener('network-update',refresh);root.removeEventListener('input',refresh);root.removeEventListener('change',refresh);listeners.clear();nodes.clear();snapshot=null;focus=null;}
   };
 }

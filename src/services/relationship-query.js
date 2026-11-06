@@ -1,5 +1,11 @@
 import {aiContextQuery} from './ai-context.js';
 const cancelled=()=>Object.assign(Error('人物资料查询已取消'),{name:'AbortError'});
+// The answer retains every selected relationship, conflict and identity boundary.
+// Rich dossiers are only needed for the selected people, not every neighbour.
+export function relationshipAnswerContext(graph,focus){
+ const chosen=new Set(focus.entityIds.length ? focus.entityIds : graph.entities.slice(0,3).map(n=>n.id));
+ return {...graph,focus,entities:graph.entities.map(({dossier,...person})=>({...person,...(chosen.has(person.id) && dossier ? {dossier} : {})})),coverage:`${graph.coverage || ''}; detailed dossiers limited to focused people; absent details remain unknown`};
+}
 export const relationshipEvidenceVersion=graph=>JSON.stringify([graph?.entities,graph?.relations,graph?.ambiguities,graph?.sources],function(key,value){
  if(key==='at' && this?.source==='运营本场资料' || ['from','through'].includes(key) && this?.basis==='deduplicated observed gifts in this room over 30 days; lower bound, not lifetime spending')return 0;
  return value;
