@@ -99,3 +99,19 @@ test('重名片段不抢占完整人物名，高度连接的人物仍优先返�
  const direct=store.relationships('10','观众300和小雨什么关系',options);
  assert.ok(direct.relations.some(row=>row.predicate==='师傅'));
 });
+
+test('中文口语省略“的”和反向自述仍绑定实际说话账号，第三人称不猜身份',()=>{
+ const {store}=fixture(),scope=store.current('10');
+ scope.audience.observe(chat('a','阿明是我师父。小李的朋友是我。','1','小雨'));
+ scope.audience.observe(chat('b','我是阿明徒弟。','2','青哥'));
+ const result=store.relationships('10','小雨和阿明和小李和青哥');
+ const names=new Map(result.entities.map(n=>[n.id,n.name]));
+ assert.ok(result.relations.some(r=>names.get(r.from)==='阿明' && names.get(r.to)==='小雨' && r.predicate==='师傅'));
+ assert.ok(result.relations.some(r=>names.get(r.from)==='青哥' && names.get(r.to)==='阿明' && r.predicate==='徒弟'));
+ assert.ok(result.relations.some(r=>names.get(r.from)==='小雨' && names.get(r.to)==='小李' && r.predicate==='朋友'));
+});
+
+test('口语省略不把“甲和乙是好朋友”误解为“甲和乙”与“好”的关系',()=>{
+ const {store}=fixture();const result=store.relationships('10','阿明和小雨',{memory:memory([entry('f','阿明和小雨是好朋友。')])});
+ assert.equal(result.relations.length,1);assert.deepEqual(new Set(result.entities.map(n=>n.name)),new Set(['阿明','小雨']));assert.equal(result.relations[0].predicate,'朋友');
+});

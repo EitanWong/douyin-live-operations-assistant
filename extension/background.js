@@ -1,7 +1,9 @@
+import {validateMemory} from '../src/services/knowledge.js';
+import {createRelationshipLibrary} from '../src/ai/relationship-library.js';
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
 import {requestNativeDeployment} from './native-deployment.js';
-import {collectAccount} from './account-collector.js';
+import {collectAccountWithMedia} from './account-media.js';
 import {createAccountResearch} from './account-research.js';
 import {installNativePerceptionBridge} from './native-perception.js';
 import {createBackgroundAI} from './ai-background.js';
@@ -49,9 +51,10 @@ const writeRecord = async (key,value) => {
   await notifyChanges({[key]:{newValue:value}});
 };
 const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),
-  collect:(url,options)=>collectAccount(chrome,url,options),archive:async({room,anchor,source,records,at})=>{
+  collect:(url,options)=>collectAccountWithMedia(chrome,url,{...options,readAI:async()=>{const c=await readRecord(`live-assistant:config:${options.room}`);return String(c?.anchorId)===options.anchor && c?.ai?.accountCollection?.enabled!==false ? c.ai : null;}}),archive:async({room,anchor,source,records,at})=>{
     await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor,kind:'account',receivedAt:at,payload:{source,records}});void dataEngine().flush();
   }});
+const relationshipLibrary=createRelationshipLibrary({all:()=>durableStorage.getAll(['live-assistant:config:','live-assistant:profile:','live-assistant:runtime:','live-assistant:live-memory:'])});
 const deleteRecord = async keys => {
   const list = Array.isArray(keys) ? keys : [keys], durable = list.filter(durableKey), local = list.filter(key=>!durableKey(key));
   if (durable.length) await durableStorage.remove(durable);
@@ -130,7 +133,7 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord});
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,relationships:(room,query)=>relationshipLibrary.query(room,query)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
@@ -220,6 +223,10 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
           void dataEngine().flush();
           value=await dataEngine().enrich(room,message.anchor,value);
         }
+      }else if(message.type==='relationship-query' && isRoom(sender)){
+        const override={};
+        if(message.memory!==undefined)override.memory=validateMemory(message.memory);
+        value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override);
       }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
         await chrome.tabs.create({url:`https://www.douyin.com/search/${encodeURIComponent(message.query.trim())}?type=general`,active:true});value=true;

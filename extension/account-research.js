@@ -21,7 +21,7 @@ export function createAccountResearch({readConfig,readBudget,writeBudget,collect
    const calls=Array.isArray(saved) ? saved.filter(t=>Number.isFinite(t) && t<=at && at-t<3600000).slice(-30) : [];
    if(calls.length>=config.maxPerHour)throw Error('公开资料采集已达共享每小时上限');
    await writeBudget([...calls,at]);await check(room,initial.anchor,signal);
-   const records=await collect(url,{signal});await check(room,initial.anchor,signal);
+   const records=await collect(url,{signal,room,anchor:initial.anchor});await check(room,initial.anchor,signal);
    await archive({room,anchor:initial.anchor,source:url,records,at:now()});return records;
   });
   tail=work.catch(()=>{}).finally(()=>{pending--;});

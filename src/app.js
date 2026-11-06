@@ -1,3 +1,5 @@
+import {createRelationshipLibrary} from './ai/relationship-library.js';
+import {withRelationshipEvidence} from './services/relationship-query.js';
 import {createSpeechRecognizer} from './services/speech-routing.js';
 import {createAccountRefresh} from './services/account-refresh.js';
 import {rankAccountTargets} from './services/account-targets.js';
@@ -217,8 +219,8 @@ export function boot(options = {}) {
   }
   async function registerProfile(name) {
     if (persistenceDisabled) return;
-    const profile = { room, anchorId: engine.config.anchorId, name: name || identity.anchor?.name };
-    const signature = `${profile.anchorId}:${profile.name || ''}`;
+    const profile = { room, anchorId: engine.config.anchorId, name: name || identity.anchor?.name,secUid:identity.anchor?.secUid };
+    const signature = `${profile.anchorId}:${profile.name || ''}:${profile.secUid || ''}`;
     if (profileSignature === signature) return;
     await syncPredictionIdentity();
     await repository.profile(profile); profileSignature = signature;
@@ -323,9 +325,18 @@ export function boot(options = {}) {
     onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',weather:'天气查询',clock:'当前时间','public-data':'公共数据工具',knowledge:'复用知识',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:recordSearch
   });
-  const client=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,request,search:searchClient,knowledge:webKnowledge,onSearch:recordSearch})},onTrace:r=>{
+  const resilientClient=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,request,search:searchClient,knowledge:webKnowledge,onSearch:recordSearch})},onTrace:r=>{
     foundationSettings?.trace(r);if(r.provider==='edge'){panel?.setAIServiceStatus('');log('ai',`端侧兜底完成 · ${r.elapsedMs}ms`);}
   }});
+  const relationshipLibrary=createRelationshipLibrary({all:options.all || (()=>Object.fromEntries((typeof GM_listValues==='function' ? GM_listValues() : []).filter(key=>/^live-assistant:(?:config|runtime|profile|live-memory):/u.test(key)).map(key=>[key,get(key,null)])))});
+  const retrieveRelationships=options.relationshipQuery || (demo ? null : (query,memory)=>relationshipLibrary.query(room,query,memory ? {memory} : {}));
+  const queryRelationships=async(query,memory)=>{
+    await persistRuntime(true);
+    if(retrieveRelationships)return retrieveRelationships(query,memory);
+    return localRelationships(query,memory);
+  };
+  const localRelationships=(query,memory=engine.config.ai.memory)=>liveMemory.relationships(engine.config.anchorId,query,{memory,knowledge:engine.config.ai.knowledge,anchorName:identity.anchor?.name,anchorSecUid:identity.anchor?.secUid,accounts:engine.config.ai.contextSources.accounts ? [...accounts.history(engine.config.anchorId),...accounts.list(engine.config.anchorId)] : [],includeAccountHistory:true,includeAudience:engine.config.ai.assistant.memoryEnabled && engine.config.ai.contextSources.audience,includePerception:engine.config.ai.assistant.memoryEnabled});
+  const client=withRelationshipEvidence({reply:resilientClient,query:retrieveRelationships,persist:()=>persistRuntime(true)});
   const lock = options.lock || new RoomLock({ room });
   const makeAdapter = options.adapterFactory || (settings => new DouyinAdapter(settings));
   let stoppedBroadcast = '';
@@ -442,7 +453,7 @@ export function boot(options = {}) {
       const subject=user?.secUid || engine.audience.users.get(user?.id ? `uid:${user.id}` : '')?.secUid;
       const subjects=[identity.anchor?.secUid,subject].filter(Boolean);
       return accounts.context(engine.config.anchorId,query,{subjects:subjects.length ? subjects : undefined,includeHistory:true});
-    },relationshipContext:(query,c)=>liveMemory.relationships(c.anchorId,query,{memory:c.ai.memory,knowledge:c.ai.knowledge,anchorName:identity.anchor?.name,accounts:c.ai.contextSources.accounts ? accounts.list(c.anchorId) : [],includeAudience:c.ai.contextSources.audience}),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
+    },relationshipContext:query=>localRelationships(query),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;
@@ -703,7 +714,7 @@ export function boot(options = {}) {
         syncLocalModels();
       },
       webKnowledge,
-      relationships:(query,memory)=>liveMemory.relationships(engine.config.anchorId,query,{memory,knowledge:engine.config.ai.knowledge,anchorName:identity.anchor?.name,accounts:engine.config.ai.contextSources.accounts ? accounts.list(engine.config.anchorId) : [],includeAudience:engine.config.ai.assistant.memoryEnabled && engine.config.ai.contextSources.audience,includePerception:engine.config.ai.assistant.memoryEnabled}),
+      relationships:queryRelationships,
       startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
       stopMedia:()=>{mediaManuallyStopped=true;mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
@@ -909,7 +920,7 @@ export function boot(options = {}) {
       exportReport:report=>download(`douyin-ai-tests-${room}-${giftDate()}.json`,JSON.stringify(report,null,2))
     });
     workbench=new AIWorkbench(panel.root,{memory:currentMemory,perceptionMemory:()=>memoryScope().perception,saveMemory:()=>{accountRevision++;engine.cancelAI();return persistRuntime(true);},onError:error=>panel.toast(error.message,true),tasks:{
-      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,relationshipContext:current.getRelationshipContext(question),accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
+      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,relationshipContext:await queryRelationships(question),accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
       list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
     }});
     const installCommand=panel.root.querySelector('[data-native-install-command]');

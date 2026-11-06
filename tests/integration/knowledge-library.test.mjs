@@ -140,3 +140,14 @@ test('删除可撤销；40条知识容量已满时拒绝新建，已有知识仍
   panel.root.querySelector('[data-memory-edit]').click();edit('[data-memory-field="content"]','最新核对的安排');panel.node('[data-memory-confirm]').click();panel.root.querySelector('[data-memory-remove]').click();assert.equal(panel.read().ai.memory.entries.length,39);panel.node('[data-memory-undo]').click();assert.equal(panel.read().ai.memory.entries[0].content,'最新核对的安排');
  }finally{f.close();}
 });
+
+test('后台关系查询显示来源房间，迟到旧问题不覆盖新问题和草稿',async()=>{
+ const pending=[];const f=setup([],{relationships:q=>new Promise(resolve=>pending.push({q,resolve}))});
+ const graph=name=>({entities:[{id:'a',name},{id:'b',name:'小雨'}],relations:[{from:'a',to:'b',predicate:'朋友',status:'unverified',evidence:[{text:'历史陈述',source:'弹幕',at:Date.now(),trust:'unverified',scope:{room:'2',anchor:'20'}}]}],ambiguities:[]});
+ try{
+  f.panel.tab('knowledge');f.edit('[data-relationship-query]','阿明');f.panel.node('[data-relationship-search]').click();
+  f.edit('[data-relationship-query]','青哥');f.panel.node('[data-relationship-search]').click();pending[1].resolve(graph('青哥'));await new Promise(setImmediate);
+  pending[0].resolve(graph('阿明'));await new Promise(setImmediate);
+  assert.match(f.panel.node('[data-relationship-results]').textContent,/青哥/);assert.doesNotMatch(f.panel.node('[data-relationship-results]').textContent,/阿明/);assert.match(f.panel.node('[data-relationship-results]').textContent,/房间2/);assert.equal(f.panel.dirty,false);
+ }finally{f.close();}
+});

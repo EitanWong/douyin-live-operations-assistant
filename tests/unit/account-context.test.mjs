@@ -53,3 +53,22 @@ test('automatic viewer records do not become general anchor background without m
  assert.equal(store.context('host','陶艺',{subjects:[source.id]})[0].subject,source.id);
  assert.deepEqual(store.context('host','陶艺',{subjects:['another']}),[]);
 });
+
+test('公开评论、回复与作品弹幕只归属已核对的作品，保留作者身份与时间并在重启后可查',()=>{
+ let at=Date.now();const source=accountSource('https://www.douyin.com/video/70'),work={id:'70',subject:'MS4wLjAB-test'};
+ const payload={comments:[{cid:'c1',aweme_id:'70',text:'我是小雨的朋友。',user:{uid:'9999999999999999999',sec_uid:'comment-user-a',nickname:'阿青'},create_time:Math.floor(at/1000),reply_comment:{cid:'c0',user:{uid:'2',nickname:'小雨'}}},{cid:'bad',aweme_id:'71',text:'串台评论',user:{uid:'3',nickname:'其他人'}}]};
+ const rows=normalizeAccountPayload(payload,source,at,{work});assert.equal(rows.length,1);assert.equal(rows[0].kind,'comment');assert.equal(rows[0].actor.uid,'9999999999999999999');assert.equal(rows[0].target.uid,'2');assert.equal(rows[0].workId,'70');
+ assert.deepEqual(normalizeAccountPayload(payload,source,at),[],'评论不能自己证明作品作者');
+ const danmaku=normalizeAccountPayload({danmaku_list:[{danmaku_id:'d1',text:'阿青和小雨是朋友',offset_time:1250}]},source,at,{work});
+ assert.equal(danmaku[0].positionMs,1250);assert.equal(danmaku[0].actor,undefined);
+ const store=new AccountContext({now:()=>at});store.replace('host',source.url,rows.concat(danmaku));at+=25*3600000;
+ const restored=new AccountContext({now:()=>at,snapshot:store.snapshot()});assert.equal(restored.history('host').length,2);
+ assert.ok(restored.context('host','阿青',{includeHistory:true}).some(r=>r.kind==='comment'));restored.invalidate('host',source.url);assert.equal(restored.history('host').length,0);
+ const forged={...rows[0],url:'https://www.douyin.com/video/71'};assert.throws(()=>store.replace('host',source.url,[forged]),/来源|目标/);
+});
+
+test('公开互动响应含空行或不完整身份时保留其余有效证据，不用无效UID覆盖有效secUID',()=>{
+ const source=accountSource('https://www.douyin.com/video/70'),at=Date.now();
+ const rows=normalizeAccountPayload({comments:[null,{cid:'c',text:'有效评论',user:{uid:9007199254740992,sec_uid:'valid-sec-id',nickname:'阿青'}}]},source,at,{work:{id:'70',subject:'author-sec'}});
+ assert.equal(rows.length,1);assert.equal(rows[0].actor.uid,undefined);assert.equal(rows[0].actor.secUid,'valid-sec-id');
+});

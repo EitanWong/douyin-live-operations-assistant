@@ -8,7 +8,7 @@ const statement=z.object({id:z.string().max(200),text:z.string().max(12000),at:z
 const roomStatement=statement.extend({id:z.string().max(500),name:z.string().max(80),source:z.enum(['socket','demo']),type:z.enum(['chat','emoji-chat','screen-chat'])});
 const chatTypes=new Set(['chat','emoji-chat','screen-chat']);
 const gift=z.object({key:z.string().max(400),name:z.string().max(80),count:z.number().int().min(1).max(1e9),unitDiamonds:z.number().min(0).max(1e9).nullable(),at:z.number().finite()});
-const rowSchema=z.object({key:z.string().max(180),name:z.string().max(80),firstAt:z.number().finite(),lastAt:z.number().finite(),statements:z.array(statement),gifts:z.array(gift),notes:z.array(z.string().max(500)).default([])});
+const rowSchema=z.object({secUids:z.array(z.string().regex(/^[\w-]{8,160}$/u)).default([]),key:z.string().max(180),name:z.string().max(80),firstAt:z.number().finite(),lastAt:z.number().finite(),statements:z.array(statement),gifts:z.array(gift),notes:z.array(z.string().max(500)).default([])});
 export const audienceStateSchema=z.object({version:z.union([z.literal(1),z.literal(2)]),anchor:z.string().max(40),viewers:z.array(rowSchema),unattributed:z.array(roomStatement).default([]),interactions:z.array(relationshipEvent).default([]),forgetBefore:z.number().finite().default(0),forgotten:z.array(z.object({key:z.string().max(180),at:z.number().finite()})).default([])});
 // Ranking reduces the request, never the stored evidence. Keep source text intact.
 export function selectMemoryRows(rows,query,textOf,limit=3){
@@ -37,6 +37,7 @@ export class AudienceMemory {
   if(!['chat','emoji-chat','screen-chat','gift','enter'].includes(event?.type))return false;
   if(!key)return this.observeUnattributed(event,at);
   const row=this.viewers.get(key) || {key,name:'',firstAt:at,lastAt:at,statements:[],gifts:[],notes:[]};
+  row.secUids=[...new Set([...(row.secUids || []),...(/^[\w-]{8,160}$/u.test(event.user.secUid || '') ? [event.user.secUid] : [])])];
   row.name=String(event.user.name || row.name).slice(0,80);row.firstAt=Math.min(at,row.firstAt);row.lastAt=Math.max(at,row.lastAt);
   if(chatTypes.has(event.type) && typeof event.id==='string' && event.id && typeof event.text==='string' && event.text.trim()){
    if(event.text.length>12000)return false;

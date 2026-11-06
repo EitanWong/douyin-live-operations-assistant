@@ -442,6 +442,9 @@ export class GiftStore {
       if (!/^(\d+|demo)$/.test(room)) throw new Error('直播间地址无效');
       const key = `live-assistant:profile:${room}`, old = await this.get(key, {});
       const next = { ...old, room, name: String(profile.name || old.name || `直播间 ${room}`).slice(0, 60), anchorId: /^\d+$/.test(profile.anchorId || '') ? profile.anchorId : old.anchorId || '', updatedAt: this.now() };
+      const sameAnchor=next.anchorId===old.anchorId;
+      const secUid=/^[\w-]{8,160}$/u.test(profile.secUid || '') ? profile.secUid : sameAnchor ? old.secUid : undefined;
+      if(secUid)next.secUid=secUid;else delete next.secUid;
       await this.set(key, next); return next;
     });
   }

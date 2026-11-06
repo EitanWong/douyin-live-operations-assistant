@@ -1,3 +1,4 @@
+import {relationshipEvidenceVersion} from '../src/services/relationship-query.js';
 import {AgentHarness} from '../src/ai/harness.js';
 import {createAgentTaskStore} from '../src/ai/task-store.js';
 import {createResearchAgent,validateAgentInput} from '../src/ai/agent.js';
@@ -7,7 +8,7 @@ import {validateSearchEndpoint,validateSearchBody} from '../src/services/search.
 import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
 import {validateWeatherURL} from '../src/services/weather.js';
 import {validatePublicDataURL} from '../src/services/public-data.js';
-export function createBackgroundAI({chrome,readRecord,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
+export function createBackgroundAI({chrome,readRecord,relationships,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
  const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
  const request=details=>{
   const controller=new AbortController();let timeout;
@@ -28,9 +29,13 @@ export function createBackgroundAI({chrome,readRecord,fetch:fetcher=globalThis.f
   const config=await readRecord(`live-assistant:config:${job.scope.split(':')[0]}`);
   if(!config?.ai?.enabled || String(config.anchorId)!==job.input.anchor)throw new Error('AI已关闭或主播已变化，请核对后重新提交');
   const ai=resolveReplyConfig(config.ai);job.input.ai=ai;
+  const room=job.scope.split(':')[0],graph=relationships ? await relationships(room,job.question) : null;
+  if(relationships){job.input.context ||= {};job.input.context.relationshipContext=graph;}
   const keys=new Map();for(const [kind,endpoint] of [['ai',ai.endpoint],['search',ai.search?.enabled ? ai.search.endpoint : null]])if(endpoint){const origin=new URL(endpoint).origin;keys.set(`${kind}:${endpoint}`,await readRecord(`live-assistant:${kind==='ai'?'api-key':'search-key'}:${origin}`) || (kind==='ai' ? await readRecord(`live-assistant:media-key:${origin}`) : '') || '');}
   const agent=createResearchAgent({request,getKey:(kind,url)=>keys.get(`${kind}:${url}`) || '',readPublicPage:(url,signal)=>readPublicPage(url,{authorized,fetch:fetcher,signal}),reserve:scope=>store.reserve(scope)});
-  return agent(job,options);
+  const result=await agent(job,options);
+  if(relationships && relationshipEvidenceVersion(graph)!==relationshipEvidenceVersion(await relationships(room,job.question)))throw Error('人物资料已变化，本次研究结果已作废，请重新提交');
+  return result;
  };
  const harness=new AgentHarness({store,execute});
  return {ready:harness.ready,async handle(message,room){await harness.ready;const config=await readRecord(`live-assistant:config:${room}`),anchor=String(config?.anchorId || '');if(!/^\d{1,30}$/u.test(anchor))throw new Error('请先保存主播UID和AI设置');const scope=`${room}:${anchor}`;

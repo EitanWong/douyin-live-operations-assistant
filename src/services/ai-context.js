@@ -18,11 +18,13 @@ export function currentAIPrompt(prompt) {
   return current ? {...prompt,liveContext:current.liveContext,context:current.context,recentReplies:current.recentReplies,mediaContext:current.mediaContext} : prompt;
 }
 
+export const aiContextQuery=prompt=>String(prompt.target?.text || prompt.task?.instruction || prompt.task?.data?.reference || '').slice(0,2000);
+
 export function assembleAIContext(prompt,config) {
   const now=prompt.getNow?.() ?? prompt.now ?? Date.now();
   const media=prompt.task?.kind==='moderation' ? null : typeof prompt.getMediaContext==='function' ? prompt.getMediaContext() : prompt.mediaContext || null;
   const contextQuery=[...(prompt.context || []).slice(-4).map(row=>row.text),...(media?.observations || []).slice(-3).map(row=>row.text)].join(' ').slice(-2400);
-  const query=String(prompt.target?.text || prompt.task?.instruction || prompt.task?.data?.reference || '').slice(0,2000);
+  const query=aiContextQuery(prompt);
   const retrieval=retrieveMemories(config.memory,query,now,{contextQuery});
   // Keep the established memories field; serialize each passage only once.
   const {chunks,contextQuery:retrievalContext,...retrievalMeta}=retrieval;

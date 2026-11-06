@@ -1240,3 +1240,18 @@ test('天气备用接口通过扩展固定GET通道，拒绝任意路径和敏�
  for(const bad of [url+'&key=secret',url.replace('/29.15698,120.31478','/London'),url.replace('https:','http:'),url.replace('29.15698','99')])assert.equal((await w.send({type:'weather',url:bad})).ok,false);
  assert.equal(w.requests.length,1);
 });
+
+test('人物关系后台查询跨房间读取持续档案，只返回相关证据并保持写入隔离',async()=>{
+ const at=Date.now(),values={};
+ for(const [room,anchor,name,text] of [['1','10','阿青','我是小雨的朋友。'],['2','20','青哥','我是阿明的徒弟。']]){
+  values[`live-assistant:config:${room}`]={anchorId:anchor,ai:{assistant:{memoryEnabled:true},contextSources:{audience:true}}};
+  values[`live-assistant:live-memory:${room}:${anchor}`]={version:1,anchor,audience:{version:2,anchor,viewers:[{key:'uid:1',name,secUids:['sec-account-a'],firstAt:at,lastAt:at,statements:[{id:room,text,at}],gifts:[],notes:[]}]},perception:{observations:[],forgetBefore:0}};
+ }
+ const w=await worker(values);let response=await w.send({type:'relationship-query',query:'青哥和小雨和阿明'});
+ assert.equal(response.ok,true);assert.equal(response.value.relations.length,2);assert.equal(response.value.entities.filter(n=>['阿青','青哥'].includes(n.name)).length,1);
+ assert.equal(JSON.stringify(response.value).includes('sec-account-a'),false);
+ response=await w.send({type:'set',key:'live-assistant:live-memory:2:20',value:values['live-assistant:live-memory:2:20']});assert.equal(response.ok,false);
+ await w.send({type:'set',key:'live-assistant:config:2',value:{...values['live-assistant:config:2'],ai:{assistant:{memoryEnabled:false}}}});
+ response=await w.send({type:'relationship-query',query:'阿明'});assert.equal(response.value.relations.length,0);
+ assert.equal((await w.send({type:'relationship-query',query:'x'.repeat(2001)})).ok,false);
+});
