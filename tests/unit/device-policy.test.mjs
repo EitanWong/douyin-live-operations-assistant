@@ -5,8 +5,8 @@ import {detectDevice} from '../../src/browser/device-capabilities.js';
 
 test('automatic recommendations prefer a larger Chinese model only with sufficient known resources',()=>{
  const high={webgpu:true,memoryGB:8,cores:8,maxBufferMB:2048,maxStorageMB:1024,storageFreeMB:6000,shaderF16:true};
- assert.equal(recommendDevice(high).textModel,'qwen-1.5b');
- assert.deepEqual(textCandidates('auto',high),['qwen-1.5b','qwen-0.5b']);
+ assert.equal(recommendDevice(high).textModel,'qwen3.5-4b');
+ assert.deepEqual(textCandidates('auto',high),['qwen3.5-4b','qwen3.5-2b','qwen3.5-0.8b','qwen-1.5b','qwen-0.5b']);
  assert.equal(recommendDevice({...high,memoryGB:null}).textModel,'qwen-0.5b');
  assert.equal(recommendDevice({...high,shaderF16:false}).textModel,'qwen-0.5b');
  assert.equal(TEXT_MODELS['qwen-1.5b'].dtype,'q4f16');
@@ -20,8 +20,8 @@ test('automatic recommendations prefer a larger Chinese model only with sufficie
 });
 test('automatic preparation demotes a slow model, manual selection does not silently change it',async()=>{
  const tried=[],device={webgpu:true,memoryGB:8,cores:8,maxBufferMB:2048,maxStorageMB:1024,shaderF16:true};
- const run=async key=>{tried.push(key);return {phase:key==='qwen-1.5b' ? 'slow' : 'ready'};};
- assert.equal((await prepareRecommendedText('auto',device,run)).selection,'qwen-0.5b');assert.equal(tried.length,2);
+ const run=async key=>{tried.push(key);return {phase:key==='qwen-0.5b' ? 'ready' : 'slow'};};
+ assert.equal((await prepareRecommendedText('auto',device,run)).selection,'qwen-0.5b');assert.equal(tried.length,5);
  tried.length=0;assert.equal((await prepareRecommendedText('qwen-1.5b',device,run)).phase,'slow');assert.deepEqual(tried,['qwen-1.5b']);
 });
 test('capability detection releases its GPU and reports unknowns honestly without downloading a model',async()=>{

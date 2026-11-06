@@ -29,10 +29,11 @@ export function createEdgeClient({connect,pollMs=1000}){
    if(state?.phase==='error' || state?.phase==='released')throw new Error(state.error || '模型准备已停止');return state;
   }finally{watchers.delete(controller);}
  };
- return {detect:()=>call('device'),status,subscribe:listener=>{observers.add(listener);return ()=>observers.delete(listener);},ready:async kind=>{try{return (await status())?.[kind]?.phase==='ready';}catch{return false;}},
+ return {detect:()=>call('device'),status,subscribe:listener=>{observers.add(listener);return ()=>observers.delete(listener);},ready:async kind=>{try{const state=await status();return kind==='vision' ? state?.text?.phase==='ready' && state.text.vision?.phase==='ready' : state?.[kind]?.phase==='ready';}catch{return false;}},
   prepare,release:()=>call('release'),
   reply:async(p,c)=>{const fresh=currentAIPrompt(p),facts=liveFactFingerprint(fresh.liveContext),limit=p.intentRouting ? 600 : Math.min(p.maxLength || 50,50);const text=await call('infer',{kind:'text',messages:makeEdgeMessages(fresh,c),maxLength:limit,intentRouting:Boolean(p.intentRouting)},p.signal);if(typeof text!=='string' || !text.trim() || [...text].length>limit)throw new Error('端侧回复未通过长度检查');if(!p.intentRouting && !p.searchResults)p.onLiveFacts?.(facts);return text.trim();},
   classify:async(text,signal)=>parseSemanticLabels(await call('infer',{kind:'text',messages:semanticMessages(text),maxLength:40},signal)),
   transcribe:(sample,signal)=>call('infer',{kind:'audio',data:sample.data},signal),
+  observe:(sample,signal)=>call('infer',{kind:'vision',data:sample.data},signal),
   close:()=>{for(const controller of watchers)controller.abort();watchers.clear();observers.clear();const active=port;failure();active?.disconnect();}};
 }

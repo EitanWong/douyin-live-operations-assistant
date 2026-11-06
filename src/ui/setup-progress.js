@@ -1,4 +1,4 @@
-const stages={queued:'等待后台执行',restoring:'正在恢复后台任务',starting:'正在启动安装',loading:'正在加载模型',download:'正在下载当前文件',warmup:'正在预热',benchmark:'正在测速','self-test':'正在执行推理自检',fallback:'正在改用轻量模型',runtime:'正在准备运行时','runtime-download':'正在下载运行时',python:'正在安装 Python',dependencies:'正在安装推理依赖',model:'正在准备中文语音模型','model-download':'正在下载中文语音模型','model-verify':'正在校验模型',register:'正在接入扩展',ready:'已就绪',slow:'设备测速未达标',released:'已释放，自动恢复已取消',interrupted:'任务中断，请重试',unavailable:'尚未接入本机安装代理（可选）'};
+const stages={queued:'等待后台执行',restoring:'正在恢复后台任务',starting:'正在启动安装',loading:'正在加载模型',download:'正在下载当前文件',warmup:'正在预热',benchmark:'正在测速','self-test':'正在执行推理自检','vision-self-test':'正在检验画面理解','vision-warmup':'正在预热视觉模型',fallback:'正在改用轻量模型',runtime:'正在准备运行时','runtime-download':'正在下载运行时',python:'正在安装 Python',dependencies:'正在安装推理依赖',model:'正在准备中文语音模型','model-download':'正在下载中文语音模型','model-verify':'正在校验模型',register:'正在接入扩展',ready:'已就绪',slow:'设备测速未达标',released:'已释放，自动恢复已取消',interrupted:'任务中断，请重试',unavailable:'尚未接入本机安装代理（可选）'};
 export function setupProgress(kind,state){
  if(!state)return null;
  const label=({text:'中文回复',audio:'浏览器中文语音',native:'本机组件'})[kind],p=state.progress || {};

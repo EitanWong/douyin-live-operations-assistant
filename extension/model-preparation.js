@@ -28,6 +28,7 @@ export function createModelPreparation({read,write,createWorker,detect,onChange=
   if((data.error || data.value?.phase==='slow') && slot.index+1<slot.candidates.length){
    terminate(slot);slot.index++;await update(slot,{progress:{stage:'fallback'}});await load(slot);return;
   }
+  if(data.error || data.value?.phase==='slow')terminate(slot);
   await update(slot,data.error ? {phase:'error',error:'本地模型准备失败，请检查网络、WebGPU和存储后重试',progress:{stage:'error'}} : {...data.value,progress:{stage:data.value?.phase==='ready' ? 'ready' : 'slow'}});
  }
  async function begin(kind,selection,previous){
@@ -53,8 +54,8 @@ export function createModelPreparation({read,write,createWorker,detect,onChange=
  return {ready,status,async prepare(kind,selection='auto'){
    await ready;if(!kinds.includes(kind))throw new Error('模型类型无效');return begin(kind,selection);
   },async release(){await ready;for(const slot of slots.values())terminate(slot);slots.clear();for(const kind of kinds)if(states[kind])states[kind]={...states[kind],phase:'released',progress:{stage:'released'}};await persist();},
-  async infer(message){await ready;const slot=slots.get(message.kind);if(states[message.kind]?.phase!=='ready' || !slot?.worker)throw new Error('端侧模型尚未就绪');if(slot.inference)throw new Error('端侧推理繁忙');
+  async infer(message){await ready;const kind=message.kind==='vision' ? 'text' : message.kind,slot=slots.get(kind);if(states[kind]?.phase!=='ready' || !slot?.worker || message.kind==='vision' && states.text.vision?.phase!=='ready')throw new Error('端侧模型尚未就绪');if(slot.inference)throw new Error('端侧推理繁忙');
    return new Promise((resolve,reject)=>{slot.inference={id:message.id,resolve,reject};slot.worker.postMessage(message);});
-  },cancel(id){for(const slot of slots.values())if(slot.inference?.id===id){terminate(slot);states[slot.kind]={...states[slot.kind],phase:'error',progress:{stage:'interrupted'}};void persist().catch(()=>{});}},
+  },cancel(id){for(const slot of slots.values())if(slot.inference?.id===id){terminate(slot);void update(slot,{phase:'loading',vision:{phase:'unavailable'},progress:{stage:'restoring'}}).then(()=>load(slot)).catch(()=>{});}},
   close(){closed=true;for(const slot of slots.values())terminate(slot);slots.clear();}};
 }

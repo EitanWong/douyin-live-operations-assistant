@@ -32,6 +32,8 @@ test('edge score summaries compute observed differences and leave stale or unkno
 test('local readiness requires the known Chinese fact check as well as token speed',()=>{
  assert.equal(acceptChineseSelfTest('蓝色。'),true);
  assert.equal(acceptChineseSelfTest('蓝色'),true);
+ assert.equal(acceptChineseSelfTest('杯子是蓝色的。'),true);
+ assert.equal(acceptChineseSelfTest('杯子是蓝色的，也可能是红色。'),false);
  assert.equal(acceptChineseSelfTest('红色'),false);
  assert.equal(acceptChineseSelfTest('"{}!!!!!!!!!!!!!!!!!!!!'),false);
  assert.equal(acceptChineseSelfTest(''),false);

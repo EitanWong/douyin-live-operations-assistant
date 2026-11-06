@@ -1,0 +1,196 @@
+{
+  "date": "2026-11-06",
+  "environment": {
+    "hardware": "Apple M5, 24 GiB unified memory, 10 CPU / 10 GPU cores",
+    "browser": "Codex in-app Chromium with actual WebGPU",
+    "reported": {
+      "memoryGB": 16,
+      "cores": 10,
+      "shaderF16": true,
+      "maxBufferMB": 4095.9999961853027,
+      "maxStorageMB": 4095.9999961853027,
+      "storageFreeMB": 10240
+    },
+    "runtime": "Transformers.js 4.3.2 / bundled ONNX Runtime"
+  },
+  "candidates": {
+    "qwen3.5-4b": {
+      "id": "onnx-community/Qwen3.5-4B-ONNX-OPT",
+      "revision": "bb072268d0912bdc5cf4f41c8c6f53a03fd68624",
+      "dtype": "q4f16",
+      "inputTokens": 4096
+    },
+    "qwen3.5-2b": {
+      "id": "onnx-community/Qwen3.5-2B-ONNX-OPT",
+      "revision": "ed446636739bf426e73c5a00714fd8e010d36c21",
+      "dtype": "q4f16",
+      "inputTokens": 4096
+    },
+    "qwen3.5-0.8b": {
+      "id": "onnx-community/Qwen3.5-0.8B-ONNX-OPT",
+      "revision": "9a4c21d8f724176b0a7edaaed36303044451886e",
+      "dtype": "q4f16",
+      "inputTokens": 4096
+    }
+  },
+  "selectedLargestVerified": "qwen3.5-4b",
+  "readinessRuns": {
+    "qwen3.5-4b": [
+      {
+        "at": "2026-11-06T14:49:17.649Z",
+        "selfTestPassed": true,
+        "phase": "ready",
+        "firstTokenMs": 580.5,
+        "tokensPerSecond": 26.875699888017916,
+        "totalMs": 1473.5,
+        "generatedTokens": 24,
+        "routingMs": 5029.600000023842,
+        "vision": {
+          "phase": "ready",
+          "firstTokenMs": 699.4000000357628,
+          "tokensPerSecond": 31.525165779706075,
+          "totalMs": 1619.300000011921,
+          "generatedTokens": 29
+        },
+        "model": "onnx-community/Qwen3.5-4B-ONNX-OPT",
+        "device": "webgpu",
+        "dtype": "q4f16"
+      },
+      {
+        "at": "2026-11-06T14:50:32.201Z",
+        "selfTestPassed": true,
+        "phase": "ready",
+        "firstTokenMs": 612.0999999642372,
+        "tokensPerSecond": 30.472320974191828,
+        "totalMs": 1399.699999988079,
+        "generatedTokens": 24,
+        "routingMs": 5099.5,
+        "vision": {
+          "phase": "ready",
+          "firstTokenMs": 778.3000000119209,
+          "tokensPerSecond": 31.239153075727874,
+          "totalMs": 1066.3999999761581,
+          "generatedTokens": 9
+        },
+        "model": "onnx-community/Qwen3.5-4B-ONNX-OPT",
+        "device": "webgpu",
+        "dtype": "q4f16"
+      }
+    ],
+    "qwen3.5-0.8b": [
+      {
+        "at": "2026-11-06T14:42:14.638Z",
+        "selfTestPassed": true,
+        "phase": "ready",
+        "firstTokenMs": 123.5,
+        "tokensPerSecond": 53.535578852022766,
+        "totalMs": 571.8000000119209,
+        "generatedTokens": 24,
+        "routingMs": 1179,
+        "vision": {
+          "phase": "ready",
+          "firstTokenMs": 178.9000000357628,
+          "tokensPerSecond": 66.77796329869967,
+          "totalMs": 298.69999998807907,
+          "generatedTokens": 8
+        },
+        "model": "onnx-community/Qwen3.5-0.8B-ONNX-OPT",
+        "device": "webgpu",
+        "dtype": "q4f16"
+      }
+    ]
+  },
+  "visionMemory": {
+    "method": "Synthetic cloud-unavailable function followed by real bundled WebGPU Worker JPEG inference; existing LiveMemoryArchive persisted via localStorage, page reloaded, history restored. No live room/cloud outage was exercised.",
+    "large": {
+      "step": "saved-local-vision",
+      "calls": [
+        "cloud:simulated-unavailable",
+        "browser:webgpu"
+      ],
+      "row": {
+        "kind": "video",
+        "at": 1793976757520,
+        "endedAt": 1793976757520,
+        "frameCount": 1,
+        "isFinal": true,
+        "text": "画面中显示两个并排的矩形色块：左侧为蓝色矩形，右侧为红色矩形，背景为浅粉色。无其他可见物体或人物。",
+        "model": "onnx-community/Qwen3.5-4B-ONNX-OPT",
+        "transport": "local",
+        "inputSource": "synthetic-test",
+        "receivedAt": 1793976760268
+      },
+      "at": "2026-11-06T14:52:40.274Z"
+    },
+    "small": {
+      "step": "saved-local-vision",
+      "calls": [
+        "cloud:simulated-unavailable",
+        "browser:webgpu"
+      ],
+      "row": {
+        "kind": "video",
+        "at": 1793976197842,
+        "endedAt": 1793976197842,
+        "frameCount": 1,
+        "isFinal": true,
+        "text": "画面中显示两个正方形，左侧为蓝色，右侧为红色，两者均居中排列，背景为浅粉色。",
+        "model": "onnx-community/Qwen3.5-0.8B-ONNX-OPT",
+        "transport": "local",
+        "inputSource": "synthetic-test",
+        "receivedAt": 1793976198664
+      },
+      "at": "2026-11-06T14:43:18.665Z"
+    },
+    "reload": {
+      "retainedRecords": 2,
+      "sampleTimestampsPreserved": true,
+      "anotherAnchorRecords": 0,
+      "coverage": "historical sampled recognition; untrusted text, not current live evidence"
+    }
+  },
+  "validation": {
+    "javascript": {
+      "tests": 1654,
+      "passed": 1654,
+      "failed": 0,
+      "durationMs": 217000.180917
+    },
+    "nativePython": {
+      "tests": 50,
+      "passed": 50
+    },
+    "build": "passed",
+    "check": "passed",
+    "diffCheck": "passed",
+    "qualityTools": {
+      "crapper": "unavailable, not run",
+      "dryer": "unavailable, not run",
+      "mutator": "unavailable, not run"
+    },
+    "ui": {
+      "viewports": [
+        "1440x960",
+        "430x850"
+      ],
+      "continuousDragSizes": [
+        "1282x918",
+        "1052x733",
+        "1362x928"
+      ],
+      "desktopCardBodyHeight": 465,
+      "narrowCardBodyHeight": 277,
+      "horizontalOverflow": false,
+      "keyboardScrollable": true,
+      "draftPreserved": true,
+      "consoleWarningsOrErrors": 0
+    }
+  },
+  "limitations": [
+    "Readiness uses bounded synthetic correctness and latency probes, not a general accuracy evaluation or P95.",
+    "Both OPT models correctly identified left blue/right red on the JPEG, but incorrectly described its white background as pale pink. Observation text remains untrusted recognition evidence.",
+    "Qwen3.5 2B OPT is a pinned compatible candidate; it was not separately benchmarked on this machine.",
+    "Ordinary unoptimized 4B ONNX passed correctness but took 92692.5ms for routing and 12242.2ms for vision, so it was rejected and replaced with OPT.",
+    "Model downloads depend on network and browser cache; the browser must remain running. No all-day live broadcast test or running user extension reload was performed."
+  ]
+}
