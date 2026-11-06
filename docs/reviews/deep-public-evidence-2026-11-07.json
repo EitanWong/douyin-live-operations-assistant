@@ -102,7 +102,7 @@
     "implementation": "pushed origin/dev",
     "verifiedRemoteImplementationSHA": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
     "documentationReceipt": "separate following commit; final SHA in completion report",
-    "nativeStage": "validation complete; implementation commit/push receipt follows"
+    "nativeStage": "pushed origin/dev; verified remote da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46"
   },
   "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
   "nativeStage": {
@@ -137,5 +137,6 @@
     "status": "completed",
     "conclusion": "success",
     "appliesTo": "previous stage only"
-  }
+  },
+  "nativeStageImplementationCommit": "da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46"
 }
