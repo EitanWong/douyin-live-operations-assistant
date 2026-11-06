@@ -2959,3 +2959,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 本轮功能与样例验收已完成。使用新版需重载 `dist/chrome-extension`，在“连接与模型”选择本地音画组合并授权回环服务，在“本地与性能”重新准备 SenseVoice；视觉需运行 `ollama serve`。本机安装与模型保留，临时服务已停止，未设置开机启动。尚未执行长期真实直播、多方言/音乐/多人重叠准确率及平台账号端到端验收；图谱覆盖实际采集且可解析的资料，不是全平台关系网。crapper、dryer、mutator不可用，未执行，其他检查不替代。最终提交和dev推送回执随后追加。
 
 提交记录：功能与回归已保存为 `3bcc9cc`（feat(ai): ground local multimodal replies in relationship evidence），包括生成索引和中文测速音频；源码与验证结论一致。使用说明、实测摘要和本日志单独提交，随后一起推送dev；未创建版本、标签、Release或直接修改main。
+
+交付回执：功能 `3bcc9cc` 与说明/实测 `f704889` 已成功推送 `origin/dev`（`4aee9cd..f704889`），`git ls-remote` 核对远端一致，工作区干净；提交后 `agent:check` 与 `git diff --check` 仍通过。4206和11434临时监听均已停止，已安装的模型及原生组件保留，正在使用的扩展未重载。此条为纯文档推送回执，其最终提交与远端SHA核对保存在 `output/ai-core-2026-11-06/delivery-receipt.json`。没有创建PR或发布，未将远端CI算作本地通过项。
