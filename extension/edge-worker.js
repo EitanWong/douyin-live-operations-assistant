@@ -1,6 +1,7 @@
 import {pipeline,env,TextStreamer} from '@huggingface/transformers';
 import {EDGE_MODELS,acceptPerformance,decodePCM16,fitEdgeMessages,makeEdgeMessages,acceptChineseSelfTest} from '../src/ai/edge-prompt.js';
 import {TEXT_MODELS} from '../src/ai/device-policy.js';
+import {benchmarkChineseASR,audioInferenceOptions} from '../src/ai/asr-performance.js';
 
 env.allowLocalModels=false;
 env.backends.onnx.wasm.wasmPaths=new URL('./ort/',import.meta.url).href;
@@ -39,18 +40,18 @@ self.onmessage=async({data:m})=>{
     if(!acceptChineseSelfTest(check.text))throw new Error('中文结构化上下文自检失败，模型未启用');
     postMessage({id:m.id,value:{selfTestPassed:true,phase:acceptPerformance(warm.metrics),...warm.metrics,model:spec.id,device:'webgpu',dtype:spec.dtype}});
    }else{
-    // Silence only warms the encoder; it is never emitted as live evidence.
-    await model(new Float32Array(16000),{language:'chinese',task:'transcribe',max_new_tokens:8});
-    progress('benchmark');const started=performance.now();await model(new Float32Array(64000),{language:'chinese',task:'transcribe',max_new_tokens:40});
-    const elapsedMs=performance.now()-started;
-    postMessage({id:m.id,value:{phase:elapsedMs<=2000 ? 'ready' : 'slow',elapsedMs,model:spec.id,device:'wasm',dtype:spec.dtype}});
+    const wav=new Uint8Array(await (await fetch(new URL('./asr-benchmark-zh.wav',import.meta.url))).arrayBuffer());
+    let binary='';for(let offset=0;offset<wav.length;offset+=8192)binary+=String.fromCharCode(...wav.subarray(offset,offset+8192));
+    const samples=decodePCM16(btoa(binary));
+    progress('warmup');const result=await benchmarkChineseASR((pcm,options)=>model(pcm,options),samples);
+    postMessage({id:m.id,value:{...result,model:spec.id,device:'wasm',dtype:spec.dtype}});
    }
   }else if(m.action==='infer' && model){
    if(kind==='text'){
     const messages=await fitEdgeMessages(m.messages,async rows=>(await model.tokenizer(model.tokenizer.apply_chat_template(rows,{tokenize:false,add_generation_prompt:true}))).input_ids.dims.at(-1));
     postMessage({id:m.id,value:(await generate(messages,Math.min(m.intentRouting ? 256 : 72,m.maxLength*2))).text.trim()});
    }
-   else {const pcm=decodePCM16(m.data),started=performance.now(),result=await model(pcm,{language:'chinese',task:'transcribe',max_new_tokens:100});
+   else {const pcm=decodePCM16(m.data),started=performance.now(),result=await model(pcm,audioInferenceOptions(pcm));
     if(performance.now()-started>Math.min(3000,pcm.length/16*.7))throw new Error('语音推理超过实时预算');
     postMessage({id:m.id,value:result.text.trim()});}
   }else throw new Error('端侧模型尚未准备');

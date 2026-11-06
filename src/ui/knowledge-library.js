@@ -7,7 +7,7 @@ const statusOf=row=>!row.enabled ? 'disabled' : row.expiresOn && row.expiresOn<b
 const statusLabel={active:'可用',disabled:'已停用',expired:'已过期'};
 
 export class KnowledgeLibrary {
- constructor(root,{dirty,error,reveal,webKnowledge}){
+ constructor(root,{dirty,error,reveal,webKnowledge,relationships}){
   this.root=root;this.document=root.ownerDocument;this.dirty=dirty;this.error=error;this.reveal=reveal;this.webKnowledge=webKnowledge;this.serial=0;
   this.list=root.querySelector('[data-memory-list]');this.webList=root.querySelector('[data-web-knowledge-list]');
   const on=(selector,event,fn)=>root.querySelector(selector).addEventListener(event,fn);
@@ -17,6 +17,8 @@ export class KnowledgeLibrary {
   for(const selector of ['[data-memory-cancel]','[data-memory-close]'])on(selector,'click',()=>this.closeEditor());
   this.dialog.addEventListener('keydown',event=>this.editorKey(event));
   on('[data-memory-search]','click',()=>this.preview());
+  on('[data-relationship-search]','click',()=>this.previewRelationships(relationships));
+  on('[data-relationship-query]','keydown',event=>{if(event.key==='Enter'){event.preventDefault();this.previewRelationships(relationships);}});
   on('[data-memory-filter-query]','input',()=>this.filter());
   for(const key of ['kind','status','sort'])on(`[data-knowledge-${key}]`,'change',()=>this.filter());
   on('[data-knowledge-reset]','click',()=>this.reset());
@@ -124,6 +126,27 @@ export class KnowledgeLibrary {
  }
  populate(memory){this.closeEditor();this.list.replaceChildren();this.root.querySelector('[data-memory-undo]')?.remove();for(const record of memory.entries)this.add(record);this.metrics();this.filter();}
  read(){return validateMemory({enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>this.value(row))});}
+ previewRelationships(retrieve){
+  try{
+   const query=this.root.querySelector('[data-relationship-query]').value.trim();if(!query)throw new Error('请先输入人物或关系问题');
+   if(!retrieve)throw new Error('当前环境没有可用的人物记忆，请在直播工作台查询');
+   const result=retrieve(query,this.read()),target=this.root.querySelector('[data-relationship-results]');target.replaceChildren();
+   const paragraph=text=>{const p=this.document.createElement('p');p.textContent=text;target.append(p);};
+   const names=new Map(result.entities.map(row=>[row.id,row.name]));
+   paragraph(`找到 ${result.entities.length} 个人物节点、${result.relations.length} 条关系陈述；仅展示相关资料，不代表完整关系网。`);
+   for(const node of result.entities){
+    paragraph(`${node.name}${node.aliases?.length ? `（别名：${node.aliases.join('、')}）` : ''}${node.role ? ` · ${node.role}` : ''}`);
+    for(const evidence of node.evidence || [])paragraph(`${evidence.text} · ${evidence.source} · ${time(evidence.at)}`);
+   }
+   for(const row of result.relations){
+    const description=row.status==='observed' ? `${names.get(row.from)} ↔ ${names.get(row.to)} · ${row.predicate}` : `${names.get(row.from)} ${row.negative ? '不是' : '是'} ${names.get(row.to)}的${row.predicate}`;
+    paragraph(`${description} · ${({verified:'运营核实',unverified:'待核实',conflicted:'存在冲突',observed:'已观察互动'})[row.status]}`);
+    for(const evidence of row.evidence)paragraph(`原话：${evidence.text} · ${evidence.source} · ${time(evidence.at)} · ${({verified:'核实资料',observed:'互动记录',unverified:'未核实陈述'})[evidence.trust]}`);
+   }
+   for(const row of result.ambiguities)paragraph(`“${row.name}”有多个候选身份，请补充账号或更多上下文。`);
+   if(!result.relations.length)paragraph('没有找到明确关系陈述；可以在“添加知识”核实补充人物、别名和关系，不按昵称或互动猜测。');
+  }catch(reason){this.error(reason);}
+ }
  preview(){
   try{
    const query=this.root.querySelector('[data-memory-query]').value.trim();if(!query)throw new Error('请先输入要检索的问题');

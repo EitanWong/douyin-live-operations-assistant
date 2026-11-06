@@ -31,10 +31,11 @@ export function assembleAIContext(prompt,config) {
   const perceptionHistory=prompt.getPerceptionMemory?.(query) || null;
   const sessionMemory=prompt.getSessionMemory?.(query) || null;
   const conversationHistory=prompt.getConversationMemory?.(query) || null;
+  const relationships=config.assistant?.memoryEnabled===false ? null : prompt.getRelationshipContext?.(query) || prompt.relationshipContext || null;
   if(sessionMemory)sessionMemory.records=sessionMemory.records.filter(row=>!media?.observations?.some(current=>current.id===row.id && current.at===row.at));
   if(perceptionHistory)perceptionHistory.records=perceptionHistory.records.filter(row=>![...(media?.observations || []),...(sessionMemory?.records || [])].some(current=>current.id===row.id && current.at===row.at));
   return {
-    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta,sessionMemory,perceptionHistory,conversationHistory,accounts:config.contextSources?.accounts===false ? [] : prompt.getAccountContext?.(query) || prompt.accountContext || []},
+    evidence_context:{at:now,rules:DOUYIN_RULES,sessionKnowledge:prompt.knowledge || '',memories,retrieval:retrievalMeta,sessionMemory,perceptionHistory,conversationHistory,relationships,accounts:config.contextSources?.accounts===false ? [] : prompt.getAccountContext?.(query) || prompt.accountContext || []},
     media_context:compactMediaContext(media,now,{maxAgeMs:(config.media?.contextAgeSec ?? 60)*1000}),
     context_meta:{schemaVersion:1,assembledAt:now,liveObservedAt:prompt.liveContext?.observedAt ?? null,
       sourcePolicy:'media_context.scene separates recent speech, visual samples and multimodal observations; inspect ages and sampling coverage before claiming current activity. Viewer memories are limited observed events or operator notes, not verified personality. Current structured live observations for metrics; media recognition for sampled scene clues; local passages for background; web results for external facts. Conflicts and missing evidence stay unknown.',
@@ -51,6 +52,7 @@ export function applyContextBudget(input,limit){
     if(!value || typeof value!=='object')return out;
     for(const [key,child] of Object.entries(value)){
       const next=[...path,key];if(['target','data','web_search'].includes(next[0]) || next.join('.')==='context_meta.budget')continue;
+      if(next.join('.')==='evidence_context.relationships' && child){out.push({parent:value,key,path:next.join('.'),chars:JSON.stringify(child).length,removable:[child],atomic:true});continue;}
       if(Array.isArray(child) && child.length){
         const removable=next.join('.')==='media_context.observations' ? optionalMediaRows(data.media_context) : child;
         if(removable.length)out.push({parent:value,key,path:next.join('.'),chars:JSON.stringify(removable).length,removable});
@@ -62,7 +64,8 @@ export function applyContextBudget(input,limit){
     const row=candidates(data).sort((a,b)=>b.chars-a.chars)[0];
     if(row){
       const before=row.parent[row.key],count=Math.max(1,Math.ceil(row.removable.length/2));
-      if(row.path==='media_context.observations'){
+      if(row.atomic)row.parent[row.key]=null;
+      else if(row.path==='media_context.observations'){
         const removed=new Set(row.removable.slice(0,count));row.parent[row.key]=before.filter(value=>!removed.has(value));
       }else row.parent[row.key]=['recent_chat','recent_replies','recentChat'].includes(row.key) ? before.slice(count) : before.slice(0,before.length-count);
       const existing=omissions.find(value=>value.path===row.path);if(existing)existing.removedRecords+=count;else omissions.push({path:row.path,removedRecords:count});

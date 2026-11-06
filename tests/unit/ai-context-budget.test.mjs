@@ -2,6 +2,16 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {applyContextBudget,liveFactFingerprint} from '../../src/services/ai-context.js';
 
+test('人物图谱超预算时整块省略并披露，不能留下缺失实体的关系或路径',()=>{
+ const graph={entities:[{id:'p1',name:'阿明',evidence:[{text:'原话'.repeat(1000)}]},{id:'p2',name:'小雨'}],relations:[{id:'r1',from:'p1',to:'p2',predicate:'师傅'}],paths:[['r1']]};
+ const input={target:{text:'阿明是谁'},evidence_context:{relationships:graph}};
+ assert.deepEqual(applyContextBudget(input,10000).evidence_context.relationships,graph);
+ const result=applyContextBudget(input,600);
+ assert.equal(result.evidence_context.relationships,null);
+ assert.ok(result.context_meta.budget.omissions.some(row=>row.path==='evidence_context.relationships'));
+ assert.equal(result.target.text,'阿明是谁');assert.deepEqual(input.evidence_context.relationships,graph);
+});
+
 test('上下文预算保留问题与汇总，裁减明细并明确披露缺口，始终输出完整 JSON',()=>{
   const input={target:{text:'本场收了多少钻石'},data:{fixedText:'本场已采集100钻'},live_context:{income:{diamonds:100,pending:0,contributors:Array.from({length:100},(_,i)=>({name:`观众${i}`,note:'详细资料'.repeat(200)}))}},recent_chat:Array.from({length:100},()=>({text:'长弹幕'.repeat(200)})),context_meta:{schemaVersion:1}};
   const before=JSON.stringify(input);const result=applyContextBudget(input,16000);

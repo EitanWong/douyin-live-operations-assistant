@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {AudienceMemory,audienceStateSchema,selectMemoryPassages} from './audience-memory.js';
+import {createRelationshipRetriever} from './relationship-memory.js';
 
 const observation=z.object({id:z.string().max(300),kind:z.enum(['audio','video','omni']),text:z.string().min(1).max(12000),at:z.number().finite(),endedAt:z.number().finite(),inputSource:z.string().max(80).default('')});
 const perceptionState=z.object({observations:z.array(observation),forgetBefore:z.number().finite().default(0)});
@@ -43,7 +44,8 @@ export function mergeLiveMemory(previous,incoming){
  for(const row of [...old.audience.forgotten,...next.audience.forgotten])forgotten.set(row.key,Math.max(forgotten.get(row.key) || 0,row.at));
  const viewers=new Map();for(const row of [...old.audience.viewers,...next.audience.viewers]){const rows=viewers.get(row.key) || [];rows.push(row);viewers.set(row.key,rows);}
  const perceptionCutoff=Math.max(old.perception.forgetBefore,next.perception.forgetBefore);
- return {version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0))).filter(Boolean),unattributed:unique([...old.audience.unattributed,...next.audience.unattributed].filter(row=>row.at>forgetBefore).sort((a,b)=>a.at-b.at),row=>row.id)},
+ const interactions=unique([...old.audience.interactions,...next.audience.interactions].filter(row=>row.at>Math.max(forgetBefore,forgotten.get(row.from.key) || 0,forgotten.get(row.to.key) || 0)).sort((a,b)=>a.at-b.at),row=>row.id);
+ return {version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0))).filter(Boolean),unattributed:unique([...old.audience.unattributed,...next.audience.unattributed].filter(row=>row.at>forgetBefore).sort((a,b)=>a.at-b.at),row=>row.id),interactions},
   perception:{forgetBefore:perceptionCutoff,observations:unique([...old.perception.observations,...next.perception.observations].filter(row=>row.at>perceptionCutoff).sort((a,b)=>a.at-b.at),identity)}};
 }
 
@@ -56,11 +58,15 @@ export class LiveMemoryArchive {
   const key=`live-assistant:live-memory:${this.room}:${anchor || 'unknown'}`,saved=this.get(key,null);
   if(saved && (saved.version!==1 || saved.anchor!==anchor))throw new Error('直播记忆归属无效，已保留原存档');
   if(saved && !archiveSchema.safeParse(saved).success)throw new Error('直播记忆格式损坏，已保留原存档，请导出后修复');
-  const scope={key,anchor,audience:new AudienceMemory({anchor,state:saved?.audience || (this.legacy?.anchor===anchor ? this.legacy : undefined),now:this.now}),perception:new PerceptionMemory({state:saved?.perception,now:this.now}),savedRevision:''};
+  const scope={key,anchor,audience:new AudienceMemory({anchor,state:saved?.audience || (this.legacy?.anchor===anchor ? this.legacy : undefined),now:this.now}),perception:new PerceptionMemory({state:saved?.perception,now:this.now}),relationships:createRelationshipRetriever(),savedRevision:''};
   if(saved)scope.savedRevision=this.revision(scope);
   this.scopes.set(anchor,scope);return scope;
  }
  revision(scope){return `${scope.audience.revision}:${scope.perception.revision}`;}
+ relationships(anchor,query,{includeAudience=true,includePerception=true,...options}={}){
+  const scope=this.current(anchor);
+  return scope.relationships({...options,anchor,audience:includeAudience ? scope.audience : undefined,perception:includePerception ? scope.perception : undefined,now:this.now()},query);
+ }
  capture(){return [...this.scopes.values()].filter(scope=>scope.savedRevision!==this.revision(scope)).map(scope=>({key:scope.key,anchor:scope.anchor,revision:this.revision(scope),state:{version:1,anchor:scope.anchor,audience:scope.audience.snapshot(),perception:scope.perception.snapshot()}}));}
  async persist(entries){for(const entry of entries){await this.set(entry.key,entry.state);const scope=this.scopes.get(entry.anchor);if(scope)scope.savedRevision=entry.revision;}}
  export(){

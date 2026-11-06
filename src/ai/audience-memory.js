@@ -1,5 +1,6 @@
 import {z} from 'zod';
 import {retrieveKnowledge} from '../services/retrieval.js';
+import {relationshipEvent,observedRelationships} from './relationship-events.js';
 const day=86400000;
 export const AUDIENCE_MEMORY_LIMITS=Object.freeze({days:30,statements:3,gifts:3});
 const keyOf=user=>/^\d{1,30}$/u.test(String(user?.id || '')) ? `uid:${user.id}` : typeof user?.secUid==='string' && /^[\w-]{8,160}$/u.test(user.secUid) ? `sec:${user.secUid}` : '';
@@ -8,7 +9,7 @@ const roomStatement=statement.extend({id:z.string().max(500),name:z.string().max
 const chatTypes=new Set(['chat','emoji-chat','screen-chat']);
 const gift=z.object({key:z.string().max(400),name:z.string().max(80),count:z.number().int().min(1).max(1e9),unitDiamonds:z.number().min(0).max(1e9).nullable(),at:z.number().finite()});
 const rowSchema=z.object({key:z.string().max(180),name:z.string().max(80),firstAt:z.number().finite(),lastAt:z.number().finite(),statements:z.array(statement),gifts:z.array(gift),notes:z.array(z.string().max(500)).default([])});
-export const audienceStateSchema=z.object({version:z.union([z.literal(1),z.literal(2)]),anchor:z.string().max(40),viewers:z.array(rowSchema),unattributed:z.array(roomStatement).default([]),forgetBefore:z.number().finite().default(0),forgotten:z.array(z.object({key:z.string().max(180),at:z.number().finite()})).default([])});
+export const audienceStateSchema=z.object({version:z.union([z.literal(1),z.literal(2)]),anchor:z.string().max(40),viewers:z.array(rowSchema),unattributed:z.array(roomStatement).default([]),interactions:z.array(relationshipEvent).default([]),forgetBefore:z.number().finite().default(0),forgotten:z.array(z.object({key:z.string().max(180),at:z.number().finite()})).default([])});
 // Ranking reduces the request, never the stored evidence. Keep source text intact.
 export function selectMemoryRows(rows,query,textOf,limit=3){
  if(!query || !rows.length)return rows.slice(-limit);
@@ -22,10 +23,18 @@ export function selectMemoryPassages(rows,query){
  return retrieveKnowledge(entries,query).chunks.slice(0,3).map(chunk=>({...rows[Number(chunk.entryId)],text:chunk.content,range:chunk.range}));
 }
 export class AudienceMemory {
- constructor({anchor,state,now=Date.now}){this.anchor=String(anchor || '');this.now=now;const parsed=audienceStateSchema.safeParse(state);if(state && !parsed.success)throw new Error('观众记忆格式损坏，已保留原存档，请导出后修复');const saved=parsed.success && parsed.data.anchor===this.anchor ? parsed.data : null;this.viewers=new Map(saved?.viewers.map(row=>[row.key,row]) || []);this.unattributed=new Map(saved?.unattributed.map(row=>[row.id,row]) || []);this.forgetBefore=saved?.forgetBefore || 0;this.forgotten=new Map(saved?.forgotten.map(row=>[row.key,row.at]) || []);this.revision=1;}
+ constructor({anchor,state,now=Date.now}){this.anchor=String(anchor || '');this.now=now;const parsed=audienceStateSchema.safeParse(state);if(state && !parsed.success)throw new Error('观众记忆格式损坏，已保留原存档，请导出后修复');const saved=parsed.success && parsed.data.anchor===this.anchor ? parsed.data : null;this.viewers=new Map(saved?.viewers.map(row=>[row.key,row]) || []);this.unattributed=new Map(saved?.unattributed.map(row=>[row.id,row]) || []);this.interactions=new Map(saved?.interactions.map(row=>[row.id,row]) || []);this.forgetBefore=saved?.forgetBefore || 0;this.forgotten=new Map(saved?.forgotten.map(row=>[row.key,row.at]) || []);this.revision=1;}
  observe(event){
-  if(!this.anchor || !['socket','demo'].includes(event?.source) || !['chat','emoji-chat','screen-chat','gift','enter'].includes(event?.type))return false;
+  if(!this.anchor || !['socket','demo'].includes(event?.source))return false;
   const key=keyOf(event.user),at=event.receivedAt ?? this.now();if(!Number.isFinite(at) || Math.abs(this.now()-at)>30000 || at<=Math.max(this.forgetBefore,this.forgotten.get(key) || 0))return false;
+  const interactions=observedRelationships(event,this.anchor,at);let changed=false;
+  for(const row of interactions){
+   if(row.at<=Math.max(this.forgotten.get(row.from.key) || 0,this.forgotten.get(row.to.key) || 0))continue;
+   const old=this.interactions.get(row.id);
+   if(!old || old.to.name!==row.to.name && row.to.name){this.interactions.set(row.id,row);changed=true;}
+  }
+  if(changed){this.revision++;return true;}
+  if(!['chat','emoji-chat','screen-chat','gift','enter'].includes(event?.type))return false;
   if(!key)return this.observeUnattributed(event,at);
   const row=this.viewers.get(key) || {key,name:'',firstAt:at,lastAt:at,statements:[],gifts:[],notes:[]};
   row.name=String(event.user.name || row.name).slice(0,80);row.firstAt=Math.min(at,row.firstAt);row.lastAt=Math.max(at,row.lastAt);
@@ -58,7 +67,7 @@ export class AudienceMemory {
  }
  list(){return [...this.viewers.values()].reverse().map(row=>({key:row.key,name:row.name,lastAt:row.lastAt,statements:row.statements.map(s=>s.text),gifts:row.gifts.map(g=>g.name),notes:row.notes || []}));}
  annotate(key,text){const row=this.viewers.get(key);if(!row)throw new Error('请先选择观众');if(typeof text!=='string' || !text.trim() || text.length>500)throw new Error('核实补充需为1–500字');row.notes=[...(row.notes || []),text.trim()];this.revision++;}
- forget(key){if(!this.viewers.has(key))return;this.forgotten.set(key,Math.max(this.forgotten.get(key) || 0,this.now()));this.viewers.delete(key);this.revision++;}
- clear(){this.forgetBefore=Math.max(this.forgetBefore,this.now());this.forgotten.clear();this.viewers.clear();this.unattributed.clear();this.revision++;}
- snapshot(){return structuredClone({version:2,anchor:this.anchor,forgetBefore:this.forgetBefore,forgotten:[...this.forgotten].map(([key,at])=>({key,at})),viewers:[...this.viewers.values()],unattributed:[...this.unattributed.values()]});}
+ forget(key){if(!this.viewers.has(key))return;this.forgotten.set(key,Math.max(this.forgotten.get(key) || 0,this.now()));this.viewers.delete(key);for(const [id,row] of this.interactions)if(row.from.key===key || row.to.key===key)this.interactions.delete(id);this.revision++;}
+ clear(){this.forgetBefore=Math.max(this.forgetBefore,this.now());this.forgotten.clear();this.viewers.clear();this.unattributed.clear();this.interactions.clear();this.revision++;}
+ snapshot(){return structuredClone({version:2,anchor:this.anchor,forgetBefore:this.forgetBefore,forgotten:[...this.forgotten].map(([key,at])=>({key,at})),viewers:[...this.viewers.values()],unattributed:[...this.unattributed.values()],interactions:[...this.interactions.values()]});}
 }

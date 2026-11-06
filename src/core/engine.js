@@ -264,7 +264,8 @@ function cloneRuntime(value) {
 const keyFor = u => u.id || u.secUid || `name:${u.name}`;
 
 export class Engine {
-  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, perceptionMemory=()=>null, sessionMemory=()=>null, conversationMemory=()=>null, accountContext=()=>[], evidenceVersion=()=>0, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
+  constructor({ config = copy(DEFAULTS), now = Date.now, random = Math.random, send = async () => {}, ai = async () => '', log = () => {}, changed = () => {}, checkpoint = async () => {}, manage = async () => ({submitted:false,reason:'管理能力不可用，请管理员手动核查'}), onStop = () => {}, liveData = () => ({}),mediaContext=()=>null, viewerMemory=()=>null, perceptionMemory=()=>null, sessionMemory=()=>null, conversationMemory=()=>null, accountContext=()=>[], relationshipContext=()=>null, evidenceVersion=()=>0, giveawayCurrent=()=>true, claimGiveaway=async()=>true } = {}) {
+    this.relationshipContext=relationshipContext;
     this.viewerMemory=viewerMemory;this.perceptionMemory=perceptionMemory;this.sessionMemory=sessionMemory;this.conversationMemory=conversationMemory;this.accountContext=accountContext;this.evidenceVersion=evidenceVersion;this.chatInteractionRevision=0;
     this.config = validateConfig(mergeConfig(config)); this.now = now; this.send = send; this.ai = ai; this.log = log; this.changed = changed; this.checkpoint = checkpoint; this.onStop = onStop;
     this.queue = []; this.giftJobs = new Map(); this.history = []; this.seen = new Map(); this.cooldowns = new Map(); this.gifts = new Map(); this.duplicates = new Map();
@@ -1131,7 +1132,7 @@ export class Engine {
       const liveContext=liveReplyContext(this,this.now(),config);
       return {liveContext,context:liveContext.recentChat,recentReplies:[...this.duplicates.keys(),...this.queue.map(job=>job.text)].slice(-8),mediaContext:this.mediaContext(config)};
     };
-    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getPerceptionMemory:query=>config.ai.assistant.memoryEnabled ? this.perceptionMemory(query) : null,getSessionMemory:query=>config.ai.assistant.memoryEnabled ? this.sessionMemory(query) : null,getConversationMemory:query=>config.ai.assistant.memoryEnabled && config.ai.contextSources.audience ? this.conversationMemory(query) : null,getAccountContext:query=>config.ai.contextSources.accounts ? this.accountContext(query) : []};
+    return {...read(),getAIContext:read,getMediaContext:()=>this.mediaContext(config),getNow:()=>this.now(),getRelationshipContext:query=>config.ai.assistant.memoryEnabled ? this.relationshipContext(query,config) : null,getPerceptionMemory:query=>config.ai.assistant.memoryEnabled ? this.perceptionMemory(query) : null,getSessionMemory:query=>config.ai.assistant.memoryEnabled ? this.sessionMemory(query) : null,getConversationMemory:query=>config.ai.assistant.memoryEnabled && config.ai.contextSources.audience ? this.conversationMemory(query) : null,getAccountContext:query=>config.ai.contextSources.accounts ? this.accountContext(query) : []};
   }
   cancelAI({includeResearch=true}={}){const active=this.activeAI;this.activeAI=null;this.aiBusy=false;active?.controller.abort();if(includeResearch){for(const job of this.researchAI)job.controller.abort();this.researchAI.clear();}}
   researchNotices() {

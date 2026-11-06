@@ -18,16 +18,21 @@ export function createEdgeRouter({browser,native,config}){
   const requested=selection || config().audioBackend;
   const selected=requested==='auto' ? (await detect()).recommendation.audioBackend : requested;
   if(epoch!==generation)throw new Error('模型准备已取消');
-  if(!audio(selected))throw new Error('此端侧方案需要 Chrome 扩展与对应本地组件');
-  let result;
-  try{result=await audio(selected).prepare(kind);}
-  catch(error){if(requested!=='auto' || selected!=='native-sensevoice' || !browser)throw error;}
-  if(epoch!==generation)throw new Error('模型准备已取消');
-  if(requested==='auto' && selected==='native-sensevoice' && result?.phase!=='ready'){
-   result=await browser.prepare(kind);
-   if(epoch!==generation)throw new Error('模型准备已取消');autoAudio='browser-whisper';
-  }else autoAudio=selected;
-  return {...result,backend:autoAudio};
+  const candidates=requested==='auto' ? [selected,selected==='native-sensevoice' ? 'browser-whisper' : 'native-sensevoice'] : [selected];
+  const attempts=[];let best,error;
+  for(const backend of candidates){
+   if(!audio(backend)?.prepare)continue;
+   try{
+    const result={...await audio(backend).prepare(kind),backend};
+    if(epoch!==generation)throw new Error('模型准备已取消');
+    attempts.push({backend,phase:result.phase,elapsedMs:result.elapsedMs});
+    if(!best || result.elapsedMs<best.elapsedMs)best=result;
+    if(result.phase==='ready'){autoAudio=backend;return {...result,attempts};}
+   }catch(cause){error=cause;attempts.push({backend,phase:'error'});}
+   if(epoch!==generation)throw new Error('模型准备已取消');
+  }
+  if(best){autoAudio=best.backend;return {...best,attempts};}
+  throw error || new Error('此端侧方案需要 Chrome 扩展与对应本地组件');
  };
  const prepare=(kind,selection)=>{
   const selected=selection || config()[kind==='text' ? 'textModel' : 'audioBackend'] || 'auto',active=preparing.get(kind);

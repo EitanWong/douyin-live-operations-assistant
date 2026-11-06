@@ -137,7 +137,7 @@ export class Panel {
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
       forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
-    this.knowledgeLibrary=new KnowledgeLibrary(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),reveal:element=>this.revealError(element),webKnowledge:this.callbacks.webKnowledge});
+    this.knowledgeLibrary=new KnowledgeLibrary(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),reveal:element=>this.revealError(element),webKnowledge:this.callbacks.webKnowledge,relationships:this.callbacks.relationships});
     this.modelPickers=new ModelPickers(this.root);
     this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});this.workspaceLayout.show(this.activeTab);
     this.productUI=mountProductPanel(this);

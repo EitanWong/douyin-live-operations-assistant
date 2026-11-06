@@ -86,6 +86,7 @@ await writeFile(`${ext}/gifts.js`,await readFile(`${root}src/data/gifts.js`));
 await build({entryPoints:[`${root}extension/collection-keeper.js`],bundle:true,format:'esm',target:'chrome120',outfile:`${ext}/collection-keeper.js`});
 // Runtime code and ORT executable assets stay inside MV3; only pinned model data is downloaded.
 for(const name of ['edge-offscreen.html'])await copyFile(`${root}extension/${name}`,`${ext}/${name}`);
+await copyFile(`${root}vendor/runtime-fixtures/asr-benchmark-zh.wav`,`${ext}/asr-benchmark-zh.wav`);
 for(const name of ['edge-worker','edge-offscreen','account-page','speech-vad'])await build({entryPoints:[`${root}extension/${name}.js`],bundle:true,format:name==='account-page' ? 'iife' : 'esm',platform:'browser',target:'chrome120',outfile:`${ext}/${name}.js`});
 await rm(`${ext}/vad`,{recursive:true,force:true});
 await mkdir(`${ext}/vad/ort`,{recursive:true});

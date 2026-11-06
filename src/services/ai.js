@@ -34,6 +34,7 @@ export function makeAIRequest(prompt, config) {
   if (new URL(config.endpoint).hostname==='api.deepseek.com' && ['deepseek-flash','deepseek-v4-pro'].includes(config.model)) request.thinking={type:'disabled'};
   if(!prompt.searchResults && !isSpeechRouting(prompt))request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {}),current_time:currentTime(prompt)};
+  if(data.evidence_context?.relationships)request.messages[0].content='人物问题先查 evidence_context.relationships 的实体、别名和原话证据。只把 verified 作为运营核实资料；unverified 要说明是谁的未核实陈述，observed 只描述确实采集的互动；conflicted 说明冲突，ambiguities 非空不能按重名认人。两跳路径不证明两端有直接关系。\n'+request.messages[0].content;
   if(prompt.intentRouting)request.messages[0].content=`${CURRENT_FACTS_INSTRUCTION}\n${PUBLIC_DATA_INSTRUCTION}\nclock和weather使用各自的工具JSON格式，不含query或reply。\n`+request.messages[0].content;
   if(!prompt.searchResults)request.messages[0].content=`${VISUAL_ANSWER_INSTRUCTION}\n${AUDIO_ANSWER_INSTRUCTION}\n`+request.messages[0].content;
   if(prompt.mediaCorrection)request.messages[0].content='上次回答与已提供的有效音画证据矛盾。本次直接依据观察回答当前问题，不重复否认感知能力，不补造证据没有的细节；仍只输出原定意图JSON。\n'+request.messages[0].content;

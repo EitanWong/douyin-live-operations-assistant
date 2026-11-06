@@ -28,3 +28,11 @@ test('关闭本地 AI 开关后不执行手动弹幕模型复核',async()=>{
  assert.throws(()=>router.classify('你好'),/启用本地 AI/);assert.equal(calls,0);
  enabled=true;assert.equal(await router.classify('你好'),'label');assert.equal(calls,1);
 });
+
+test('浏览器中文识别测速不足时自动尝试可用原生组件，显式选择不被改写',async()=>{
+ const calls=[];let selection='auto';
+ const router=createEdgeRouter({config:()=>({audioBackend:selection}),browser:{detect:async()=>({}),prepare:async()=>{calls.push('browser');return {phase:'slow',elapsedMs:2800};},ready:async()=>false},
+  native:{inspect:async()=>({available:false}),prepare:async()=>{calls.push('native');return {phase:'ready',elapsedMs:220};},ready:async()=>true,transcribe:async()=> '中文原话'}});
+ assert.equal((await router.prepare('audio')).backend,'native-sensevoice');assert.equal(await router.transcribe({}),'中文原话');
+ selection='browser-whisper';assert.equal((await router.prepare('audio')).phase,'slow');assert.deepEqual(calls,['browser','native','browser']);
+});

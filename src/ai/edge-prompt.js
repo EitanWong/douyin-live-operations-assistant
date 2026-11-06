@@ -29,6 +29,7 @@ export function makeEdgeMessages(input,config){
   media_context:evidence.media_context ? {availability:evidence.media_context.availability,scene:evidence.media_context.scene,moment:evidence.media_context.moment} : null,
   media:(evidence.media_context?.observations || []).filter(r=>[evidence.media_context.scene.visualId,evidence.media_context.scene.speechId,evidence.media_context.scene.multimodalId].includes(r.id)).map(r=>({id:r.id,kind:r.kind,at:r.at,endedAt:r.endedAt,text:r.text.slice(0,400)})),
   accounts:(evidence.evidence_context.accounts || []).slice(0,2).map(r=>({content:r.content.slice(0,200),source:r.source})),
+  relationships:evidence.evidence_context.relationships,
   sessionMemory:(evidence.evidence_context.sessionMemory?.records || []).slice(0,2).map(r=>({kind:r.kind,text:r.text.slice(0,300),at:r.at})),
   perceptionHistory:(evidence.evidence_context.perceptionHistory?.records || []).slice(0,2).map(r=>({kind:r.kind,text:r.text.slice(0,300),at:r.at})),
   conversationHistory:(evidence.evidence_context.conversationHistory?.records || []).slice(0,2).map(r=>({name:r.name,text:r.text.slice(0,200),at:r.at,...(r.attribution ? {attribution:r.attribution} : {})})),
@@ -54,6 +55,7 @@ export async function fitEdgeMessages(messages,measure,budget=1024){
   let removed=false;
   for(const key of optional){const owner=key==='roomSignals' ? data.live_context : data;if(owner?.[key]?.length){owner[key].pop();removed=true;break;}}
   if(!removed && data.knowledge){data.knowledge='';removed=true;}
+  if(!removed && data.relationships){delete data.relationships;data.coverage+='人物图谱因预算省略，不能猜测关系。';removed=true;}
   if(!removed && data.live_context?.predictions){data.live_context.predictions=null;data.coverage+='统计预测因预算省略。';removed=true;}
   if(!removed)throw new Error('端侧固定问题与事实超出输入预算');
   copy[1].content=JSON.stringify(data);

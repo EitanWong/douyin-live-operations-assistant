@@ -278,7 +278,7 @@ export function boot(options = {}) {
       if(result.phase==='released')return;
       if(!closed && localAttemptKey===key)foundationSettings?.status(result.phase==='ready' ? '本地中文回复已自动就绪；直播语音会在使用时自动准备。' : '设备速度不足，继续使用已配置的云端或规则回复。');
     },error=>{if(!closed && localAttemptKey===key)foundationSettings?.status(`本地回复暂不可用：${error.message}；可稍后点击准备重试。`);});
-    if(engine.config.ai.edge.audioEnabled && engine.config.ai.pipeline.mode==='local-audio')void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).catch(()=>{});
+    if(engine.config.ai.edge.audioEnabled && ['local-audio','local-multimodal'].includes(engine.config.ai.pipeline.mode))void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).catch(()=>{});
   }
   const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
     snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
@@ -303,7 +303,7 @@ export function boot(options = {}) {
       if(!engine.config.ai.edge.enabled || !engine.config.ai.edge.audioEnabled)throw new Error('请在本地与性能启用本地 AI 和中文识别，或选择云端感知组合');
       const result=await edge.ensure('audio',args.config.localAudioBackend);
       if(args.signal.aborted || !args.isCurrent())throw new Error('本地语音采集已停止');
-      if(result?.phase!=='ready')throw new Error('此设备本地语音测速未达标，可在本地与性能选择其他方案');
+      if(result?.phase!=='ready')throw new Error(`本地中文语音尚未通过实测${Number.isFinite(result?.elapsedMs) ? `（${result.backend}：${Math.round(result.elapsedMs)}ms）` : ''}；请在“本地与性能”安装或更新 SenseVoice 组件后重新准备`);
     }
     return captureMedia(args);
   },
@@ -442,7 +442,7 @@ export function boot(options = {}) {
       const subject=user?.secUid || engine.audience.users.get(user?.id ? `uid:${user.id}` : '')?.secUid;
       const subjects=[identity.anchor?.secUid,subject].filter(Boolean);
       return accounts.context(engine.config.anchorId,query,{subjects:subjects.length ? subjects : undefined,includeHistory:true});
-    },evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
+    },relationshipContext:(query,c)=>liveMemory.relationships(c.anchorId,query,{memory:c.ai.memory,knowledge:c.ai.knowledge,anchorName:identity.anchor?.name,accounts:c.ai.contextSources.accounts ? accounts.list(c.anchorId) : [],includeAudience:c.ai.contextSources.audience}),evidenceVersion:()=>[accountRevision,accounts.version(engine.config.anchorId)],
     claimGiveaway:(message,owner)=>tools.invoke('giveaway','claimFeedback',{key:message.key,owner}),
     giveawayCurrent:message=>{
       if(!tools || tools.closed || tools.suspended)return null;
@@ -551,7 +551,7 @@ export function boot(options = {}) {
   }
   function prepareMediaKeys(c,credentials={}) {
     const keys=new Map();
-    const preset=!['custom','text','local-audio'].includes(pipelineConfig(c.ai).mode);
+    const preset=!['custom','text','local-audio','local-multimodal'].includes(pipelineConfig(c.ai).mode);
     for(const kind of preset ? ['pipeline'] : ['vision','audio']){
       const value=credentials[kind];if(!value?.key)continue;
       const name=mediaSecretKey(preset ? aliEndpoints(c.ai).chat : c.ai.media[`${kind}Endpoint`]);
@@ -703,6 +703,7 @@ export function boot(options = {}) {
         syncLocalModels();
       },
       webKnowledge,
+      relationships:(query,memory)=>liveMemory.relationships(engine.config.anchorId,query,{memory,knowledge:engine.config.ai.knowledge,anchorName:identity.anchor?.name,accounts:engine.config.ai.contextSources.accounts ? accounts.list(engine.config.anchorId) : [],includeAudience:engine.config.ai.assistant.memoryEnabled && engine.config.ai.contextSources.audience,includePerception:engine.config.ai.assistant.memoryEnabled}),
       startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
       stopMedia:()=>{mediaManuallyStopped=true;mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
@@ -907,8 +908,8 @@ export function boot(options = {}) {
       describe:()=>{const ai=resolveReplyConfig(engine.config.ai);return `已保存 · ${ai.model} · 联网${ai.search.enabled ? '开启' : '关闭'} · 每条最多${engine.config.sending.maxLength}字`;},
       exportReport:report=>download(`douyin-ai-tests-${room}-${giftDate()}.json`,JSON.stringify(report,null,2))
     });
-    workbench=new AIWorkbench(panel.root,{memory:currentMemory,perceptionMemory:()=>memoryScope().perception,saveMemory:()=>persistRuntime(true),onError:error=>panel.toast(error.message,true),tasks:{
-      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
+    workbench=new AIWorkbench(panel.root,{memory:currentMemory,perceptionMemory:()=>memoryScope().perception,saveMemory:()=>{accountRevision++;engine.cancelAI();return persistRuntime(true);},onError:error=>panel.toast(error.message,true),tasks:{
+      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,relationshipContext:current.getRelationshipContext(question),accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
       list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
     }});
     const installCommand=panel.root.querySelector('[data-native-install-command]');

@@ -2,9 +2,11 @@
 import base64
 import io
 import importlib.util
+import os
 from pathlib import Path
 import re
 import time
+import statistics
 import wave
 
 
@@ -30,7 +32,36 @@ def clean_transcript(text):
 
 
 def performance_phase(elapsed_ms, audio_ms):
-    return 'ready' if elapsed_ms <= 2000 and 0 < elapsed_ms <= audio_ms * .6 else 'slow'
+    # A short VAD utterance still pays fixed encoder/decoder overhead. Keep
+    # the latency ceiling and headroom without rejecting every short word.
+    return 'ready' if 0 < audio_ms and 0 < elapsed_ms <= min(2000, max(1000, audio_ms) * .6) else 'slow'
+
+
+def trim_silence(frames):
+    import numpy as np
+    samples = np.frombuffer(frames, dtype='<i2')
+    complete = len(samples) // 160
+    if not complete:
+        return frames
+    blocks = samples[:complete * 160].astype(np.float32).reshape(-1, 160) / 32768
+    active = np.flatnonzero(np.sqrt(np.mean(blocks ** 2, axis=1)) >= .003)
+    if not len(active):
+        return b''
+    start = max(0, (int(active[0]) - 12) * 160)
+    end = min(len(samples), (int(active[-1]) + 13) * 160)
+    return frames[start * 2:end * 2]
+
+
+def benchmark_frames(frames):
+    import numpy as np
+    # Match live four-second chunks, selecting real speech rather than timing
+    # silence or a much longer bundled recording against a two-second limit.
+    frames = trim_silence(frames)
+    size = 4 * 16000 * 2
+    if len(frames) <= size:
+        return frames
+    chunks = [frames[start:start + size] for start in range(0, len(frames) - size + 1, 16000 * 2)]
+    return max(chunks, key=lambda chunk: float(np.mean(np.frombuffer(chunk, dtype='<i2').astype(np.float32) ** 2)))
 
 
 class LocalASR:
@@ -43,6 +74,9 @@ class LocalASR:
 
     def decode(self, frames):
         import numpy as np
+        frames = trim_silence(frames)
+        if not frames:
+            return ''
         samples = np.frombuffer(frames, dtype='<i2').astype(np.float32) / 32768
         if np.sqrt(np.mean(samples ** 2)) < .003:
             return ''
@@ -55,17 +89,33 @@ class LocalASR:
         import sherpa_onnx
         if not self.folder or not all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav']):
             raise ValueError('LOCAL_ASR_INSTALL')
-        self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-            model=str(self.folder / 'model.int8.onnx'), tokens=str(self.folder / 'tokens.txt'),
-            num_threads=2, provider='cpu', language='zh', use_itn=True, debug=False)
-        frames = pcm16(base64.b64encode((self.folder / 'test_wavs/zh.wav').read_bytes()).decode())
-        self.decode(frames)  # Warm memory and kernels; no warmup output is evidence.
-        started = time.perf_counter()
-        self.decode(frames)
-        elapsed = (time.perf_counter() - started) * 1000
+        frames = benchmark_frames(pcm16(base64.b64encode((self.folder / 'test_wavs/zh.wav').read_bytes()).decode()))
+        if not frames:
+            raise ValueError('LOCAL_ASR_SELF_TEST')
         audio_ms = len(frames) / 32
+        candidates = [n for n in [1, 2, 4] if n <= max(1, (os.cpu_count() or 2) - 1)]
+        best = None
+        benchmarks = []
+        for threads in candidates:
+            self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+                model=str(self.folder / 'model.int8.onnx'), tokens=str(self.folder / 'tokens.txt'),
+                num_threads=threads, provider='cpu', language='zh', use_itn=True, debug=False)
+            if not self.decode(frames):
+                raise ValueError('LOCAL_ASR_SELF_TEST')
+            timings = []
+            for _ in range(3):
+                started = time.perf_counter()
+                if not self.decode(frames):
+                    raise ValueError('LOCAL_ASR_SELF_TEST')
+                timings.append((time.perf_counter() - started) * 1000)
+            elapsed = statistics.median(timings)
+            benchmarks.append({'threads': threads, 'medianMs': round(elapsed), 'maxMs': round(max(timings))})
+            if best is None or elapsed < best[0]:
+                best = (elapsed, threads, self.recognizer)
+        elapsed, threads, self.recognizer = best
         self.status = {**self.status, 'phase': performance_phase(elapsed, audio_ms),
-                       'elapsedMs': round(elapsed), 'realTimeFactor': elapsed / audio_ms, 'threads': 2}
+                       'elapsedMs': round(elapsed), 'realTimeFactor': elapsed / audio_ms, 'threads': threads,
+                       'sampleMs': audio_ms, 'benchmarks': benchmarks, 'selfTestPassed': True, 'consecutiveOverruns': 0}
         return self.status
 
     def infer(self, data):
@@ -75,7 +125,9 @@ class LocalASR:
         started = time.perf_counter()
         result = self.decode(frames)
         elapsed = (time.perf_counter() - started) * 1000
-        if performance_phase(elapsed, len(frames) / 32) != 'ready':
+        overrun = performance_phase(elapsed, len(frames) / 32) != 'ready'
+        self.status.update({'lastInferenceMs': round(elapsed), 'consecutiveOverruns': self.status.get('consecutiveOverruns', 0) + 1 if overrun else 0})
+        if self.status['consecutiveOverruns'] >= 3:
             self.status['phase'] = 'slow'
             raise ValueError('LOCAL_ASR_SLOW')
         return result

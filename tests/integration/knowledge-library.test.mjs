@@ -18,6 +18,19 @@ function setup(entries=[],callbacks={}){
 const visibleRows=panel=>[...panel.node('[data-memory-list]').children].filter(row=>!row.hidden);
 const walk=node=>[node,...(node?.children || []).flatMap(walk)];
 
+test('人物图谱在知识库按当前草稿本机查询，展示原话、冲突与时间且不渲染不可信HTML',()=>{
+ let seen;const f=setup([record('r','人物关系',{content:'阿明是小雨的师傅'})],{relationships:(query,memory)=>{
+  seen={query,memory};return {entities:[{id:'a',name:'阿明'},{id:'b',name:'小雨'}],relations:[{id:'r',from:'a',to:'b',predicate:'师傅',negative:false,status:'conflicted',evidence:[{text:'<img src=x>阿明是小雨的师傅',at:Date.now(),source:'弹幕',trust:'unverified'}]}],ambiguities:[],paths:[]};
+ }});
+ try{
+  const {panel,edit}=f;panel.tab('knowledge');edit('[data-relationship-query]','阿明是谁');panel.node('[data-relationship-search]').click();
+  assert.equal(seen.query,'阿明是谁');assert.equal(seen.memory.entries.length,1);
+  assert.match(panel.node('[data-relationship-results]').textContent,/阿明.*师傅|师傅.*小雨/u);
+  assert.match(panel.node('[data-relationship-results]').textContent,/冲突|待核实/u);
+  assert.equal(panel.node('[data-relationship-results]').querySelector('img'),null);assert.equal(panel.dirty,false);
+ }finally{f.close();}
+});
+
 test('AI知识与搜索移除知识库组件与管理入口，知识库保持唯一添加编辑位置',()=>{
  const f=setup();try{
   const {panel}=f;panel.tab('ai');panel.node('[data-ai-section-tab="knowledge"]').click();
