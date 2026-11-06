@@ -2985,3 +2985,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 可提交验收摘要：`docs/reviews/relationship-continuity-benchmarks-2026-11-06.json`；合成媒体、完整测试日志、截图与基准保存在 `output/relationship-continuity-2026-11-06`。尚未完成真实抖音账号/作品（含登录验证及平台播放器）的端到端验收、全天运行及多人重叠语音准确率验证；有限采样无法保证读到全部评论/弹幕，媒体来源无法确认时不执行识别。crapper、dryer、mutator不可用，均未执行，不将其他回归算作其通过。最终提交和dev推送回执继续追加。
 
 功能提交：`6365c4a`（feat(ai): connect persistent relationships across rooms and public works），包含核心实现、行为回归和生成索引。使用说明、术语、验收摘要及本行动日志单独提交，随后一并推送dev；不创建版本、标签或Release，不直接推送main。
+
+交付回执：功能 `6365c4a` 与说明/验收 `bec5e7a` 已成功推送 `origin/dev`（`db93bd1..bec5e7a`），`git ls-remote` 核对远端为 `bec5e7a14b69011482d3d84477c518d3e39bbcad`，提交后工作区干净、索引检查与diff检查通过。`dist/chrome-extension`已构建，正在使用的扩展未重载；重载后在“AI 设置 → 观众与研究”保存持续记忆、已确认来源及自动更新选项，在“知识库 → 人物关系图谱”查询。本轮未创建PR或发布；未把远端CI算作本地验证。本条为纯文档回执，最终日志提交和推送SHA保存在 `output/relationship-continuity-2026-11-06/delivery-receipt.json`。
