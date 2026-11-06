@@ -62,11 +62,12 @@ ${panel.toggle('ai.edge.enabled','启用本地 AI（云端优先，本地兜底�
 <div class="actions"><button type="button" class="primary" data-edge-auto>一键启用本地 AI</button></div><p class="hint">单独控制本地回复与中文识别，保存后生效。可与云端同时启用；云端失败、超时或额度耗尽才用已就绪的本地模型。点击“一键启用本地 AI”保存并准备，不改变云端组合，也不勾选“仅使用本地回复模型”。本地推理无需模型密钥。刷新页面不取消准备，重载扩展后自动恢复并复用已缓存文件；未通过自检前不用于回复。开始场控后才会按设置回复。</p>
 ${panel.toggle('ai.edge.localOnly','仅使用本地回复模型（不调用云端回复接口）')}
 ${panel.toggle('ai.edge.autoTune','自动设置云端与兜底等待时限')}
-${panel.select('ai.edge.textModel','端侧文字模型',[['auto','自动选择 · 兼顾理解与延迟'],...Object.entries(TEXT_MODELS).map(([key,spec])=>[key,spec.label])])}
+${panel.select('ai.edge.textModel','浏览器本地模型',[['auto','自动选择 · 优先较大多模态模型'],...Object.entries(TEXT_MODELS).map(([key,spec])=>[key,spec.label])])}
+${panel.toggle('ai.edge.visionEnabled','允许浏览器视觉兜底（云端优先）')}
 ${panel.toggle('ai.edge.audioEnabled','允许本地中文识别兜底（需启用本地 AI）')}
 ${panel.select('ai.edge.audioBackend','本地中文识别方案',[['auto','自动检测 · 优先已安装的 SenseVoice'],['native-sensevoice','SenseVoice int8 · 本地组件'],['browser-whisper','Whisper tiny · 浏览器']])}
-<p class="hint">文字和语音分别使用独立 Worker 或本地组件。已启用的本地回复会自动准备；选择本地语音组合时会在采集前自动准备，云端感知不受本地测速影响；下方可手动重试或更换模型。</p>`)
-+card('设备检测与模型准备',`<p class="hint">进入页面自动检测设备。自动选择先按可用资源筛选，再用真实中文结构化上下文自检与推理测速；较大模型加载、自检或性能不达标则降为 0.5B。启用本地 AI 后自动准备本地回复；设备不支持或准备失败时会显示原因。</p>
+<p class="hint">无需安装模型服务或打开终端，模型在浏览器后台下载、缓存并实测。Qwen3.5 的文字和视觉共用权重与队列，语音使用独立浏览器识别；已安装的 SenseVoice 可选复用。启用画面识别与持续记忆后，识别文本按时间保存在本机，原始画面不入档。云端正常时本地不抢答。</p>`)
++card('设备检测与模型准备',`<p class="hint">进入页面自动检测设备。自动选择从资源允许的 Qwen3.5 4B、2B、0.8B 逐级实测，加载、自检或速度不足才降档；旧文字模型保留兼容。只有文字和视觉自检通过后才会用于对应兜底，首次下载可能需要几分钟。</p>
 <div class="actions"><button type="button" data-edge-detect>重新检测设备</button></div>
 <p role="status" aria-live="polite" data-device-status>正在检测设备与中文语音组件…</p>
 <div class="actions"><button type="button" data-edge-prepare="text">准备并测速中文回复</button><button type="button" data-edge-prepare="audio">准备并测速中文语音</button><button type="button" data-edge-status-refresh>检查就绪状态</button><button type="button" data-edge-release>释放内存</button></div>

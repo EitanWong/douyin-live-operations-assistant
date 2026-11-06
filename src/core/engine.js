@@ -24,6 +24,7 @@ import { SEARCH_DEFAULTS, validateSearchEndpoint } from '../services/search.js';
 import { REWARDS_DEFAULTS } from '../browser/rewards.js';
 import { MEMORY_DEFAULTS, validateMemory } from '../services/knowledge.js';
 import {AI_PIPELINE_DEFAULTS,validatePipeline,resolveMediaConfig} from '../services/ai-pipeline.js';
+import {TEXT_MODELS} from '../ai/device-policy.js';
 import { MEDIA_DEFAULTS, validateMediaConfig } from '../services/media.js';
 import {CONTEXT_DEFAULTS} from '../ai/context-policy.js';
 import {ACCOUNT_COLLECTION_DEFAULTS,validateAccountCollection} from '../services/account-refresh.js';
@@ -175,8 +176,8 @@ export function validateConfig(c) {
   for(const [key,min,max] of [['cloudMs',1000,25000],['totalMs',2000,42000],['edgeDelayMs',500,10000]])range(c.ai.latency[key],min,max,'AI 等待时限');
   if(c.ai.latency.totalMs<c.ai.latency.cloudMs)throw new Error('AI 总时限不能小于云端时限');
   choice(c.ai.edge.audioBackend,['auto','native-sensevoice','browser-whisper'],'本地语音方案');
-  choice(c.ai.edge.textModel,['auto','qwen-0.5b','qwen-1.5b'],'端侧文字模型');
-  for(const key of ['enabled','audioEnabled','autoTune','localOnly'])if(typeof c.ai.edge[key]!=='boolean')throw new Error('端侧开关无效');
+  choice(c.ai.edge.textModel,['auto',...Object.keys(TEXT_MODELS)],'端侧文字模型');
+  for(const key of ['enabled','audioEnabled','visionEnabled','autoTune','localOnly'])if(typeof c.ai.edge[key]!=='boolean')throw new Error('端侧开关无效');
   range(c.ai.edge.maxPerHour,1,3600,'本地推理每小时额度');
   if(!Number.isInteger(c.ai.edge.maxPerHour))throw new Error('本地推理额度须为整数');
   if(c.ai.edge.localOnly && !c.ai.edge.enabled)throw new Error('仅本地回复需要启用端侧模型');

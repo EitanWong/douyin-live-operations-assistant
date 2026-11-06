@@ -41,6 +41,7 @@ export function createEdgeRouter({browser,native,config}){
   preparing.set(kind,{selection:selected,promise});return promise;
  };
  const ready=async(kind,selection)=>{
+   if(kind==='vision')return browser?.ready('vision') || false;
    if(kind!=='text')return audio(selection==='auto' ? autoAudio : selection || audioBackend())?.ready(kind) || false;
    if(!await browser?.ready(kind))return false;
    const state=await browser.status?.();if(state?.text)textStatus=state.text;
@@ -54,7 +55,7 @@ export function createEdgeRouter({browser,native,config}){
  };
  const status=async()=>{const state=await browser?.status() || {};textStatus=state.text || {};return {...state,audio:{...(audioBackend()==='native-sensevoice' ? await native?.status() : state.audio) || {phase:'unprepared'},backend:audioBackend()}};};
  return {detect,prepare,ensure,ready,audioBackend,tuning:()=>automaticLatency(textStatus),
-  reply:(p,c)=>browser.reply(p,c),classify:(text,signal)=>{if(config().enabled===false)throw new Error('请先启用本地 AI');if(!browser?.classify)throw new Error('此浏览器未连接中文端侧模型');return browser.classify(text,signal);},transcribe:(sample,signal)=>audio().transcribe(sample,signal),
+  reply:(p,c)=>browser.reply(p,c),classify:(text,signal)=>{if(config().enabled===false)throw new Error('请先启用本地 AI');if(!browser?.classify)throw new Error('此浏览器未连接中文端侧模型');return browser.classify(text,signal);},transcribe:(sample,signal)=>audio().transcribe(sample,signal),observe:(sample,signal)=>browser.observe(sample,signal),
   status,subscribe:listener=>browser?.subscribe?.(listener) || (()=>{}),
   release:async()=>{generation++;preparing.clear();textStatus={};native?.close();await browser?.release();},close:()=>{generation++;preparing.clear();textStatus={};native?.close();browser?.close();}};
 }

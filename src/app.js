@@ -278,9 +278,9 @@ export function boot(options = {}) {
     foundationSettings?.status('正在自动准备本地中文回复，首次下载可能需要几分钟；其他功能可继续使用…');
     void edge.status().then(state=>closed || localAttemptKey!==key || state.text?.phase==='released' ? {phase:'released'} : edge.ensure('text')).then(result=>{
       if(result.phase==='released')return;
-      if(!closed && localAttemptKey===key)foundationSettings?.status(result.phase==='ready' ? '本地中文回复已自动就绪；直播语音会在使用时自动准备。' : '设备速度不足，继续使用已配置的云端或规则回复。');
+      if(!closed && localAttemptKey===key){foundationSettings?.status(result.phase==='ready' ? `浏览器本地回复已就绪${result.vision?.phase==='ready' ? '，视觉可兜底' : ''}；云端优先。` : '设备速度不足，继续使用已配置的云端或规则回复。');if(result.phase==='ready'){mediaAttemptKey='';syncMedia();}}
     },error=>{if(!closed && localAttemptKey===key)foundationSettings?.status(`本地回复暂不可用：${error.message}；可稍后点击准备重试。`);});
-    if(engine.config.ai.edge.audioEnabled && ['local-audio','local-multimodal'].includes(engine.config.ai.pipeline.mode))void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).catch(()=>{});
+    if(engine.config.ai.edge.audioEnabled)void edge.status().then(state=>{if(!closed && state.audio?.phase!=='released')return edge.ensure('audio');}).then(result=>{if(!closed && localAttemptKey===key && result?.phase==='ready'){mediaAttemptKey='';syncMedia();}}).catch(()=>{});
   }
   const accountRefresh=createAccountRefresh({collector:options.accountCollector,accounts,scope:()=>engine?.config.anchorId || config.anchorId,config:()=>engine?.config.ai.accountCollection || config.ai.accountCollection,
     snapshot:runtimeSnapshot?.accountResearch,targets:()=>rankAccountTargets({anchor:identity.anchor,profiles:engine.audience.snapshot().map(([,row])=>row),audience:currentMemory().snapshot().viewers,...engine.config.ai.accountCollection,limit:engine.config.ai.accountCollection.researchLimit}),
@@ -578,8 +578,12 @@ export function boot(options = {}) {
     mediaAttemptKey=mediaRunKey();
     if(media.state!=='idle')return;
     if(closed || suspended || !demo && !roomContext.current())throw new Error('页面或直播间已切换，请刷新后重新选择直播标签页');
-    const effective=resolveMediaConfig(c.ai);validateMediaConfig(effective,true);const persistKeys=prepareMediaKeys(c,credentials);
-    for(const kind of ['vision','audio'])if(!(effective.localAudio && kind==='audio') && !(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
+    const effective=resolveMediaConfig(c.ai),fallback={};
+    // Do not await model status before capture: screen sharing needs this user activation.
+    // The recognizer checks actual readiness only when a cloud request fails.
+    for(const kind of ['vision','audio'])fallback[kind]=Boolean(options.edge) && effective.transport==='sampled' && !effective.omniEnabled && c.ai.edge.enabled && c.ai.edge[kind==='vision' ? 'visionEnabled' : 'audioEnabled'];
+    validateMediaConfig({...effective,visionModel:effective.visionModel || (fallback.vision ? 'browser-fallback' : ''),audioModel:effective.audioModel || (fallback.audio ? 'browser-fallback' : '')},true);const persistKeys=prepareMediaKeys(c,credentials);
+    for(const kind of ['vision','audio'])if(!fallback[kind] && !(effective.localAudio && kind==='audio') && !(effective.omniEnabled && kind==='audio') && effective[kind==='vision' ? 'videoEnabled' : 'audioEnabled'] && !mediaKey(effective[`${kind}Endpoint`]) && !['localhost','127.0.0.1','[::1]'].includes(new URL(effective[`${kind}Endpoint`]).hostname))throw new Error('请先填写音视频服务 API Key');
     activeMediaConfig=copy(effective);mediaAnchor=engine.config.anchorId;clearMedia();
     const started=media.start(activeMediaConfig);
     try {await Promise.all([persistKeys(),started]);}catch(error){media.stop();throw error;}
@@ -904,7 +908,7 @@ export function boot(options = {}) {
       const c=panel.read();c.ai.enabled=true;c.ai.chatEnabled=true;
       c.ai.edge.enabled=true;c.ai.edge.localOnly=false;
       await panel.callbacks.save(c,panel.root.querySelector('[data-api-key]').value.trim(),panel.root.querySelector('[data-remember-key]').checked,panel.searchCredentials(),panel.aiSettings.credentials());panel.populate(c);
-      if(c.ai.edge.audioEnabled)void foundationSettings?.prepareNative().catch(()=>{});
+      if(c.ai.edge.audioEnabled && c.ai.edge.audioBackend==='native-sensevoice')void foundationSettings?.prepareNative().catch(()=>{});
       const [text,audio]=await Promise.allSettled([edge.ensure('text'),...(c.ai.edge.audioEnabled ? [edge.ensure('audio')] : [])]);
       if(closed || suspended || !roomContext.current())return '本地设置已保存，后台准备会继续。';
       if(text.status!=='fulfilled' || text.value?.phase!=='ready')return '本地 AI 已启用并保存；本地文字尚未就绪，继续使用云端，可查看进度并重试。';

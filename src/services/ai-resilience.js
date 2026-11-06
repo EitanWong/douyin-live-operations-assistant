@@ -2,7 +2,7 @@ import {circuitBreaker,handleWhen,ConsecutiveBreaker} from 'cockatiel';
 
 export const LATENCY_DEFAULTS=Object.freeze({cloudMs:8000,totalMs:16000,edgeDelayMs:1500});
 export const RESEARCH_TIMEOUT_MS=120000;
-export const EDGE_DEFAULTS=Object.freeze({enabled:true,audioEnabled:true,audioBackend:'auto',textModel:'auto',autoTune:true,localOnly:false,maxPerHour:1200});
+export const EDGE_DEFAULTS=Object.freeze({enabled:true,audioEnabled:true,visionEnabled:true,audioBackend:'auto',textModel:'auto',autoTune:true,localOnly:false,maxPerHour:1200});
 const cancelled=()=>Object.assign(new Error('AI 请求已取消'),{name:'AbortError'});
 export function withDeadline(run,{signal,timeout=16000}={}){
  const controller=new AbortController(),started=Date.now();let timer,listener;

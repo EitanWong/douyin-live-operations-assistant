@@ -16,7 +16,7 @@ test('device recommendation, local controls, selected account refresh and source
  try{
   panel=new Panel({config:engine.config,callbacks:{}});
   settings=new FoundationSettings(panel.root,{edge:{detect:async()=>({device:d,recommendation:recommendDevice(d,{available:true})})},accounts:new AccountContext(),anchor:()=> '123',changed:async()=>{},dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[{name:'已观测观众',url:'https://www.douyin.com/user/known'}],onError:e=>errors.push(e)});
-  await flush();assert.match(panel.root.querySelector('[data-device-status]').textContent,/1.5B/);
+  await flush();assert.match(panel.root.querySelector('[data-device-status]').textContent,/4B/);
   const model=panel.root.querySelector('[data-field="ai.edge.textModel"]');model.value='qwen-0.5b';panel.root.querySelector('[data-edge-auto]').click();await flush();
   assert.equal(model.value,'qwen-0.5b','未连接一键准备控制器时保留草稿');
   assert.match(panel.root.querySelector('[data-edge-status]').textContent,/未启用/);model.value='auto';

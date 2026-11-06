@@ -33,9 +33,9 @@ test('同一模型多处点击合并，显式释放写入取消状态，重载�
 });
 test('自动文字选型与性能降级归后台持有，旧worker结果不能覆盖新模型',async()=>{
  const f=fixture(),manager=createModelPreparation(f.options);await manager.ready;
- const task=await manager.prepare('text','auto');assert.equal(f.workers[0].sent[0].model,'qwen-1.5b');
+ const task=await manager.prepare('text','auto');assert.equal(f.workers[0].sent[0].model,'qwen3.5-4b');
  f.workers[0].emit({id:task.id,value:{phase:'slow'}});await flush();
- assert.equal(f.workers.length,2);assert.equal(f.workers[1].sent[0].model,'qwen-0.5b');
+ assert.equal(f.workers.length,2);assert.equal(f.workers[1].sent[0].model,'qwen3.5-2b');
  f.workers[0].emit({id:task.id,value:{phase:'ready',model:'old'}});await flush();
  assert.equal(manager.status().text.phase,'loading');
  f.workers[1].emit({id:task.id,value:{phase:'ready',model:'small'}});await flush();
