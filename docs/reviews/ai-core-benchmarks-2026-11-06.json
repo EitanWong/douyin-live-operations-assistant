@@ -1,0 +1,384 @@
+{
+  "date": "2026-11-06",
+  "machine": {
+    "platform": "macOS arm64",
+    "processor": "Apple M5",
+    "memoryGiB": 24
+  },
+  "asr": {
+    "model": "SenseVoiceSmall-int8",
+    "sampleMs": 4000,
+    "beforeThreads": 2,
+    "afterThreads": 4,
+    "beforeWarmMedianMs": 70.69,
+    "afterWarmMedianMs": 44.1,
+    "speedupPercent": 37.6,
+    "latestDoctor": {
+      "ready": true,
+      "elapsedMs": 57,
+      "realTimeFactor": 0.01427070850331802,
+      "threads": 4
+    },
+    "runs": {
+      "before": {
+        "status": {
+          "phase": "ready",
+          "available": true,
+          "model": "SenseVoiceSmall-int8",
+          "device": "cpu",
+          "elapsedMs": 107,
+          "realTimeFactor": 0.019180391629850052,
+          "threads": 2
+        },
+        "prepareMs": 2691,
+        "samples": [
+          {
+            "ms": 88.48,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 76.28,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 70.69,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 69.59,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 66.24,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          }
+        ]
+      },
+      "after": {
+        "status": {
+          "phase": "ready",
+          "available": true,
+          "model": "SenseVoiceSmall-int8",
+          "device": "cpu",
+          "elapsedMs": 44,
+          "realTimeFactor": 0.011115187488030642,
+          "threads": 4,
+          "sampleMs": 4000,
+          "benchmarks": [
+            {
+              "threads": 1,
+              "medianMs": 114,
+              "maxMs": 138
+            },
+            {
+              "threads": 2,
+              "medianMs": 70,
+              "maxMs": 71
+            },
+            {
+              "threads": 4,
+              "medianMs": 44,
+              "maxMs": 45
+            }
+          ],
+          "selfTestPassed": true,
+          "consecutiveOverruns": 0
+        },
+        "prepareMs": 1932,
+        "samples": [
+          {
+            "ms": 44.9,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 43.96,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 44.01,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 44.1,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          },
+          {
+            "ms": 44.18,
+            "audioMs": 4000,
+            "text": "放时间早上9点至下午5点。"
+          }
+        ]
+      }
+    },
+    "scope": "fixed bundled Chinese speech; inference latency excludes capture, VAD, transport and reply time"
+  },
+  "vision": {
+    "model": "qwen2.5vl:3b",
+    "runs": [
+      {
+        "elapsedMs": 7102.348667,
+        "result": {
+          "kind": "video",
+          "frameCount": 1,
+          "at": 1793963013457,
+          "endedAt": 1793963013457,
+          "receivedAt": 1793963020560,
+          "text": "画面中显示两个矩形，一个蓝色，一个红色。",
+          "source": "model-recognition",
+          "model": "qwen2.5vl:3b",
+          "transport": "chat-completions",
+          "inputSource": "direct",
+          "isFinal": true
+        },
+        "usage": {
+          "cloudCalls": 0,
+          "localCalls": 1,
+          "windowMs": 3600000
+        }
+      },
+      {
+        "elapsedMs": 2384.291292000001,
+        "result": {
+          "kind": "video",
+          "frameCount": 1,
+          "at": 1793963020560,
+          "endedAt": 1793963020560,
+          "receivedAt": 1793963022944,
+          "text": "画面中显示两个矩形，一个蓝色，一个红色。",
+          "source": "model-recognition",
+          "model": "qwen2.5vl:3b",
+          "transport": "chat-completions",
+          "inputSource": "direct",
+          "isFinal": true
+        },
+        "usage": {
+          "cloudCalls": 0,
+          "localCalls": 1,
+          "windowMs": 3600000
+        }
+      },
+      {
+        "elapsedMs": 2470.6315830000003,
+        "result": {
+          "kind": "video",
+          "frameCount": 1,
+          "at": 1793963022944,
+          "endedAt": 1793963022944,
+          "receivedAt": 1793963025415,
+          "text": "画面中显示两个矩形，一个蓝色，一个红色。",
+          "source": "model-recognition",
+          "model": "qwen2.5vl:3b",
+          "transport": "chat-completions",
+          "inputSource": "direct",
+          "isFinal": true
+        },
+        "usage": {
+          "cloudCalls": 0,
+          "localCalls": 1,
+          "windowMs": 3600000
+        }
+      }
+    ],
+    "fixture": "generated 640x360 white background with blue and red rectangles",
+    "scope": "synthetic fixture through real createMediaClient on loopback; no live-room or cloud data"
+  },
+  "relationships": {
+    "runs": [
+      {
+        "mode": "cloud-compatible",
+        "question": "明哥和小雨是什么关系",
+        "elapsedMs": 1801.9964579999998,
+        "status": 200,
+        "answer": "明哥是小雨的师傅。"
+      },
+      {
+        "mode": "edge-prompt",
+        "question": "明哥和小李是朋友吗",
+        "elapsedMs": 906.6241669999999,
+        "status": 200,
+        "answer": "明哥是小雨的师傅，小雨和小李是朋友。"
+      }
+    ],
+    "scope": "operator-verified synthetic statements with actual cloud-compatible and edge prompts, served by local qwen2.5vl:3b; edge prompt test does not measure browser Qwen 0.5B"
+  },
+  "browserASR": {
+    "model": "onnx-community/whisper-tiny",
+    "device": "wasm",
+    "dtype": "q8",
+    "phase": "error",
+    "selfTestPassed": false,
+    "note": "real synthesized Chinese fixture failed correctness gate; not reported ready or used as speech speed proof; SenseVoice passed"
+  },
+  "ui": {
+    "desktop": {
+      "viewport": [
+        1440,
+        960
+      ],
+      "panel": [
+        963,
+        700
+      ],
+      "graph": {
+        "width": 721,
+        "scrollWidth": 721,
+        "height": 320,
+        "scrollHeight": 446,
+        "scrollTop": 126
+      },
+      "modelCards": {
+        "first": [
+          369.5,
+          320
+        ],
+        "last": [
+          747,
+          320
+        ]
+      }
+    },
+    "narrow": {
+      "viewport": [
+        430,
+        850
+      ],
+      "panel": [
+        410,
+        700
+      ],
+      "graph": {
+        "width": 352,
+        "scrollWidth": 352,
+        "height": 320,
+        "scrollHeight": 558
+      },
+      "visionCard": {
+        "width": 378,
+        "height": 240,
+        "bodyWidth": 368,
+        "bodyScrollWidth": 368
+      }
+    },
+    "interaction": [
+      "saved knowledge survives reload",
+      "two disclosures open",
+      "repeated close/open retains query/results",
+      "drag 1123x800 to 923x700; keyboard to 963x700",
+      "long model field retained across tabs and viewport",
+      "query focus retained across viewport",
+      "End scroll reaches 126+320=446",
+      "help dialog closes and restores focus"
+    ],
+    "consoleWarnings": [],
+    "scope": "local demo, no real live or microphone"
+  },
+  "validation": {
+    "javascript": {
+      "pass": 1626,
+      "fail": 0,
+      "skipped": 0,
+      "durationMs": 168268.277791
+    },
+    "native": {
+      "pass": 50
+    },
+    "build": true,
+    "syntaxCheck": true,
+    "agentIndex": true,
+    "specialTools": {
+      "crapper": "unavailable",
+      "dryer": "unavailable",
+      "mutator": "unavailable"
+    }
+  },
+  "limitations": [
+    "sampled vision is not continuous video",
+    "Chinese sentence extraction is conservative, arbitrary language remains raw retrieval",
+    "only actually collected data forms graph, no full-platform relationship claim",
+    "no long live-room soak or streaming/microphone acceptance performed",
+    "current installed extension not reloaded"
+  ],
+  "graphPerformance": {
+    "viewers": 1000,
+    "statements": 10000,
+    "cold": {
+      "ms": 50.15033400000001,
+      "entities": 9,
+      "relations": 12,
+      "chars": 3569
+    },
+    "warm": [
+      {
+        "ms": 1.0198330000000055,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 1.2554999999999978,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 1.085958000000005,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 0.500124999999997,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 0.46562500000000284,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 0.4037500000000023,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 3.5202919999999978,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 0.29929200000000833,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 0.18787499999999113,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      },
+      {
+        "ms": 0.18166599999999278,
+        "entities": 9,
+        "relations": 12,
+        "chars": 3569
+      }
+    ],
+    "revisionRebuildMs": 21.634208,
+    "scope": "Node synthetic 1000 actors / 10000 claims; not browser FPS or unlimited historical scale"
+  }
+}
