@@ -3063,3 +3063,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 
 - 冻结实现6dc9d51的最终 npm test：**1700/1700通过，0失败/取消/跳过，204.587秒**；原生52/52、Harness专项67/67、原缓存10/10通过。正式build、check、agent:check、git diff --check全部通过。可提交验证摘要在docs/reviews/browser-agent-harness-2026-11-07.json；原始日志、调研、浏览器尺寸/截图及红测证据保留output/agent-harness-2026-11-06。实际打包metafile核对新增运行时依赖全部带许可证；shuorenhua以固定提交和MIT声明记录。
 - 当前未完成的是实际模型61场景评分（环境缺评测凭据）、真实账号端到端、长时间实播及自然度人工盲评；crapper/dryer/mutator不可用，未执行。没有把受控夹具、浏览器恢复时间或本地压缩性能当成真实模型效果承诺。临时4212验收服务关闭；没有重载用户正在使用的扩展或发送真实直播弹幕。下一步将实现和文档提交推送dev，随后追加远端回执。
+
+最终推送回执：实现 `6dc9d51cb04a46b19aae2bb9c8a7603a306492be` 与架构/验证文档 `6c445b336b505c3ce3d7eb587a25c013b103704a` 已成功推送 `origin/dev`（`e334d27..6c445b3`），`git ls-remote` 核对远端SHA一致。对应 [CI 42255289819](https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42255289819) 已启动，记录时仍运行中，未宣称CI已通过。完整本机1700项JS、52项原生及构建/check均通过；源码和索引与实测版本一致。4212临时服务已退出，真实浏览器Worker已由验收页终止；未修改main、版本、标签或发布稳定版。本回执作为独立文档提交同步dev，最终远端SHA在完成报告中给出。
