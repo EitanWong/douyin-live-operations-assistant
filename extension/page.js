@@ -21,6 +21,8 @@ if(room && !Object.hasOwn(window,'__douyinAssistantPageV2')) {
       if(operation==='gift-balance')return await sender.giftBalance({signal:controller.signal});
       if(operation==='gift-snapshot')return await sender.giftSnapshot({signal:controller.signal});
       if(operation==='gift-catalog')return await sender.giftCatalog({signal:controller.signal});
+      if(operation==='red-packet-catalog')return await sender.redPacketCatalog({signal:controller.signal});
+      if(operation==='send-red-packet')return await sender.sendRedPacket(config,{signal:controller.signal});
       if(operation==='prepare-gift')return await sender.prepareGift(config,{signal:controller.signal});
       if(operation==='acknowledge-gift' && typeof recordId==='string' && recordId.length<=64)return await sender.acknowledgeGift(recordId);
       if(operation==='prepare-like')return await sender.prepareLike({signal:controller.signal});

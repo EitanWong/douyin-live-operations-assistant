@@ -1,6 +1,8 @@
 import {GIVEAWAY_DEFAULTS,giveawayAnnouncement,giveawayCSV,giveawayPrizes,giveawaySlots,giveawayWeight,giveawayDrawRules} from '../../core/giveaway.js';
 import {giftDate} from '../../data/gifts.js';
 import {updateGiftPicker,refreshGiftPicker} from './gift-picker.js';
+import {hydratePacketPicker,updatePacketPicker,refreshPacketPicker,packetConfig} from './packet-picker.js';
+import {isRedPacketGiveaway} from '../../core/red-packet.js';
 
 const esc=value=>String(value ?? '').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const time=value=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(value);
@@ -56,7 +58,11 @@ function entrantsTable(round) {
   }).join('')}</tbody></table>`;
 }
 function historyHTML(rounds) {
-  return [...rounds].reverse().map(round=>`<details class="giveaway-record" data-round-id="${esc(round.id)}" data-record-item="${esc(round.id)}"><summary>${esc(giveawayPrizes(round.config))} · ${status[round.status]} · ${round.entrants.length} 人参与 · ${time(round.startedAt)} · ${round.awards.length} 人中奖</summary><h4>规则与时间</h4><p>开始 ${time(round.startedAt)} · 截止 ${time(round.endsAt)}${round.closedAt ? ` · 结束 ${time(round.closedAt)}` : ''}</p><p>${round.config.chatEnabled ? `弹幕「${esc(round.config.keyword)}」，或 @当前场控账号 发送“参与抽奖”/指定文字` : ''}${round.config.chatEnabled && round.config.giftEnabled ? ' 或 ' : ''}${round.config.giftEnabled ? `指定礼物「${esc(round.config.gifts)}」累计 ${round.config.giftMin} 个` : ''} · 计划抽取 ${giveawaySlots(round.config)} 人 · ${round.config.durationSec} 秒</p><p>${esc(giveawayDrawRules(round.config))}${round.config.anchorGuaranteed ? ` · 主播 UID ${esc(round.anchorId)}` : ''}</p><h4>开奖结果</h4><p>${esc(giveawayAnnouncement(round) || round.reason || '等待开奖')}</p><h4>参与明细</h4>${entrantsTable(round)}</details>`).join('');
+  return [...rounds].reverse().map(round=>isRedPacketGiveaway(round.config) ? packetHistoryHTML(round) : `<details class="giveaway-record" data-round-id="${esc(round.id)}" data-record-item="${esc(round.id)}"><summary>${esc(giveawayPrizes(round.config))} · ${status[round.status]} · ${round.entrants.length} 人参与 · ${time(round.startedAt)} · ${round.awards.length} 人中奖</summary><h4>规则与时间</h4><p>开始 ${time(round.startedAt)} · 截止 ${time(round.endsAt)}${round.closedAt ? ` · 结束 ${time(round.closedAt)}` : ''}</p><p>${round.config.chatEnabled ? `弹幕「${esc(round.config.keyword)}」，或 @当前场控账号 发送“参与抽奖”/指定文字` : ''}${round.config.chatEnabled && round.config.giftEnabled ? ' 或 ' : ''}${round.config.giftEnabled ? `指定礼物「${esc(round.config.gifts)}」累计 ${round.config.giftMin} 个` : ''} · 计划抽取 ${giveawaySlots(round.config)} 人 · ${round.config.durationSec} 秒</p><p>${esc(giveawayDrawRules(round.config))}${round.config.anchorGuaranteed ? ` · 主播 UID ${esc(round.anchorId)}` : ''}</p><h4>开奖结果</h4><p>${esc(giveawayAnnouncement(round) || round.reason || '等待开奖')}</p><h4>参与明细</h4>${entrantsTable(round)}</details>`).join('');
+}
+function packetHistoryHTML(round) {
+  const packet=round.config.prizes[0].redPacket,receipt=round.redPacketDeliveries?.[0];
+  return `<details class="giveaway-record" data-round-id="${esc(round.id)}" data-record-item="${esc(round.id)}"><summary>${esc(round.config.prizes[0].name)} · ${esc(receipt?.reason || round.reason)} · ${time(round.startedAt)}</summary><h4>红包与时间</h4><p>消费 ${packet.diamondCount}钻 · ${packet.packNum}份 · 发放后等待 ${packet.delayTime}秒领取</p><p>计划发放 ${time(round.endsAt)} · 全直播间可领取</p><h4>发放结果</h4><p>${esc(receipt?.reason || round.reason)}</p>${receipt?.boxId ? `<p>红包 ID：${esc(receipt.boxId)}</p>` : ''}</details>`;
 }
 
 function hydrate(panel,config) {
@@ -65,8 +71,9 @@ function hydrate(panel,config) {
     const value=config[input.dataset.giveaway];
     if(input.type==='checkbox')input.checked=value;else input.value=value ?? '';
   }
-  panel.node('[data-giveaway-prizes]').innerHTML=config.prizes.map(prizeRow).join('');
+  if(!isRedPacketGiveaway(config))panel.node('[data-giveaway-prizes]').innerHTML=config.prizes.map(prizeRow).join('');
   panel.node('[data-giveaway-weights]').innerHTML=config.weights.map(weightRow).join('');
+  hydratePacketPicker(panel,config);
   page.dataset.hydrated='true';
 }
 
@@ -86,12 +93,23 @@ export const giveawayView = {
     </style>
     <h2>互动抽奖</h2><p class="intro">观众发送指定弹幕或赠送指定礼物即可参与。倒计时结束自动开奖，每人每轮一个名额。</p>
     <fieldset class="giveaway-config"><legend>奖品与开奖时间</legend>
-      <div data-giveaway-prizes>${GIVEAWAY_DEFAULTS.prizes.map(prizeRow).join('')}</div>
+      <label class="field"><span>奖品类型</span><select data-packet-type><option value="custom">自定义</option><option value="red-packet">直播间红包</option></select></label>
+      <div data-custom-prizes><div data-giveaway-prizes>${GIVEAWAY_DEFAULTS.prizes.map(prizeRow).join('')}</div>
       <div class="actions"><button type="button" data-action="giveaway-add-prize">添加奖品</button></div>
-      <p class="hint">最多 20 项奖品、合计 1000 人。每人最多中一项；人数不足时按列表顺序分配。本轮开始后规则固定。</p>
+      <p class="hint">最多 20 项奖品、合计 1000 人。每人最多中一项；人数不足时按列表顺序分配。本轮开始后规则固定。</p></div>
+      <div data-packet-settings hidden>
+        <p class="hint">每次发送一个钻石红包，全直播间可领取，无需报名或产生中奖者。开始任务后按设置时间发放，会消耗当前账号钻石余额，独立于弹幕预览模式。</p>
+        <p class="hint" data-packet-balance role="status" aria-live="polite">切换后自动读取余额和套餐。</p>
+        <label class="field"><span>红包额度与份数</span><select data-packet-meta><option value="">请选择红包额度</option></select><small>只允许选择余额足够的套餐；发送前再次核对余额、金额和份数。</small></label>
+        <label class="field"><span>发放后多久可领取</span><select data-packet-delay><option value="">请选择领取等待时间</option></select></label>
+        <label class="giveaway-option" data-packet-activity hidden><input type="checkbox" data-packet-voucher><span data-packet-activity-title>参与平台活动</span></label>
+        <div class="actions"><button type="button" data-action="giveaway-refresh-packets">刷新余额与红包套餐</button></div>
+        <label class="field"><span>发放方式</span><select data-packet-timing><option value="countdown">倒计时发放</option><option value="scheduled">指定时间发放</option></select></label>
+        <label class="field" data-packet-scheduled hidden><span>发放时间（本机时间）</span><input type="datetime-local" step="1" data-packet-at><small>选择未来24小时内的时间，保持直播页在线。错过超过1分钟不补发。</small></label>
+      </div>
       <label class="field"><span>倒计时 / 秒</span><input type="number" data-giveaway="durationSec" value="300" min="1" max="86400" step="1"></label>
     </fieldset>
-    <fieldset class="giveaway-config"><legend>弹幕参与与中奖规则</legend><p class="hint">弹幕与礼物满足任意一种即可参与，每人每轮一个名额。</p>
+    <fieldset class="giveaway-config" data-custom-participation><legend>弹幕参与与中奖规则</legend><p class="hint">弹幕与礼物满足任意一种即可参与，每人每轮一个名额。</p>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="chatEnabled" checked>发送指定弹幕参与</label>
       <label class="field"><span>参与弹幕</span><input type="text" data-giveaway="keyword" value="参与抽奖" maxlength="100"><small>直接发指定文字，或 @当前场控账号 发送“参与抽奖”/指定文字；重复报名会提醒，不增加名额。</small></label>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="presenceBias" checked>提高近期在场活动观众的中奖权重</label><p class="hint">截止前2分钟有弹幕、礼物、点赞或进场记录的参与者，基础权重乘3；其余乘1。未近期观测不代表已经离开，安静观看的观众仍可中奖。重复口令不增加名额或叠加倍数。</p>
@@ -103,7 +121,7 @@ export const giveawayView = {
       <label class="giveaway-option"><input type="checkbox" data-giveaway="anchorGuaranteed">主播参与必中</label>
       <p class="hint" data-giveaway-anchor>需识别当前主播 UID。主播须先满足参与条件；中奖占用第一项奖品的一个名额。</p>
     </fieldset>
-    <fieldset class="giveaway-config"><legend>礼物参与</legend>
+    <fieldset class="giveaway-config" data-custom-participation><legend>礼物参与</legend>
       <label class="giveaway-option"><input type="checkbox" data-giveaway="giftEnabled">赠送指定礼物直接参与</label>
       <div class="grid"><label class="field"><span>已选礼物名称或 ID · 可手动补充</span><input type="text" data-giveaway="gifts" value="小心心" maxlength="1000"><small>勾选目录会填入 ID；手动填写多项时用逗号分隔。指定礼物合并累计。</small></label>
       <label class="field"><span>累计礼物数量</span><input type="number" data-giveaway="giftMin" value="1" min="1" max="100000" step="1"><small>仅累计本轮指定礼物；达到门槛自动入池，无需再发弹幕。</small></label></div>
@@ -117,8 +135,8 @@ export const giveawayView = {
       </details>
     </fieldset>
     <section class="giveaway-live workspace-wide" aria-label="当前抽奖"><h3 data-giveaway-round-title>尚未开始</h3><p class="giveaway-clock" data-giveaway-countdown role="timer" aria-live="off">设置奖品和参与方式，然后开始第一轮抽奖。</p><p class="giveaway-result" data-giveaway-result role="status" aria-live="polite"></p><div class="actions"><button type="button" data-action="giveaway-copy" disabled>复制开奖公告</button></div>
-      <label class="giveaway-option"><input type="checkbox" data-giveaway="announcePrizeNames" checked>开场播报奖品名称</label>
-      <details><summary>弹幕播报与提醒规则</summary><p class="hint">开场可隐藏奖品，中奖后始终 @ 中奖者并播报奖品，不公开抽取规则。每分钟主动提示参与方式，最后 10 秒停止招募；播报开轮、@报名成功、@重复参与提醒和开奖结果；同一观众重复报名提醒每30秒至多一次。剩余时间前段每分钟提醒，最后两分钟在 120、90、60、30、10、5 秒时提醒，越接近开奖反馈越及时。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；按实际剩余秒数播报，过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p></details>
+      <div data-custom-participation><label class="giveaway-option"><input type="checkbox" data-giveaway="announcePrizeNames" checked>开场播报奖品名称</label>
+      <details><summary>弹幕播报与提醒规则</summary><p class="hint">开场可隐藏奖品，中奖后始终 @ 中奖者并播报奖品，不公开抽取规则。每分钟主动提示参与方式，最后 10 秒停止招募；播报开轮、@报名成功、@重复参与提醒和开奖结果；同一观众重复报名提醒每30秒至多一次。剩余时间前段每分钟提醒，最后两分钟在 120、90、60、30、10、5 秒时提醒，越接近开奖反馈越及时。短轮次跳过不适用节点。报名高峰合并确认，抽奖消息至少间隔 2 秒；按实际剩余秒数播报，过时提醒自动跳过。场控未开启时也会发送，发送模式为“仅预览”时只记录日志。</p></details></div>
     <div class="actions"><button type="button" class="primary" data-action="giveaway-start">开始抽奖</button><button type="button" class="danger" data-action="giveaway-cancel" disabled>取消本轮</button></div>
     <p class="hint" data-giveaway-status role="status" aria-live="polite">正在读取抽奖记录</p>
     <p class="hint" data-giveaway-feedback role="status" aria-live="polite">开轮后显示弹幕反馈状态</p>
@@ -144,9 +162,14 @@ export const giveawayView = {
     const seconds=active ? Math.max(0,Math.ceil((round.endsAt-(state.now || Date.now()))/1000)) : 0;
     const clock=`${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(seconds%60).padStart(2,'0')}`;
     panel.text('[data-giveaway-countdown]',round ? active ? `剩余 ${clock} · ${round.entrants.length} 人参与 · 抽取 ${giveawaySlots(round.config)} 人` : `${round.entrants.length} 人参与 · ${round.awards.length} 人中奖 · ${round.closedAt ? time(round.closedAt) : ''}` : '设置奖品和参与方式，然后开始第一轮抽奖。');
+    if(round && isRedPacketGiveaway(round.config)) {
+      panel.text('[data-giveaway-countdown]',active ? `距发放 ${clock} · ${time(round.endsAt)} 发放一个红包` : round.redPacketDeliveries?.[0]?.reason || round.reason);
+      panel.text('[data-giveaway-feedback]','红包领取由平台处理，全直播间可领取。');
+    }
     panel.text('[data-giveaway-result]',giveawayAnnouncement(round));
     const target=panel.node('[data-giveaway-history]'),signature=JSON.stringify(rounds.map(({giftProgress,feedback,...round})=>round));
     if(panel.giveawayHistorySignature!==signature){target.innerHTML=historyHTML(rounds);panel.giveawayHistorySignature=signature;}
+    updatePacketPicker(panel);
   },
   actions:{
     'add-prize':panel=>{
@@ -155,6 +178,7 @@ export const giveawayView = {
       updatePrizeControls(panel);panel.root.querySelector('[data-giveaway-prize]:last-child [data-prize=name]').focus();
     },
     'refresh-gifts':refreshGiftPicker,
+    'refresh-packets':refreshPacketPicker,
     'add-weight':panel=>{
       if(!editable(panel) || panel.root.querySelectorAll('[data-giveaway-weight]').length>=100)return;
       panel.node('[data-giveaway-weights]').insertAdjacentHTML('beforeend',weightRow({userId:'',weight:1}));
@@ -165,7 +189,7 @@ export const giveawayView = {
       const value=Object.fromEntries([...panel.root.querySelectorAll('[data-giveaway]')].map(input=>[input.dataset.giveaway,input.type==='checkbox' ? input.checked : input.type==='number' ? Number(input.value) : input.value]));
       value.prizes=[...panel.root.querySelectorAll('[data-giveaway-prize]')].map(row=>({name:row.querySelector('[data-prize=name]').value,count:Number(row.querySelector('[data-prize=count]').value)}));
       value.weights=[...panel.root.querySelectorAll('[data-giveaway-weight]')].map(row=>({userId:row.querySelector('[data-weight=userId]').value.trim(),weight:Number(row.querySelector('[data-weight=weight]').value)}));
-      try{await invoke('start',value);panel.toast('本轮抽奖已开始，正在接收参与弹幕和礼物');}
+      try{const packet=packetConfig(panel);if(packet)Object.assign(value,packet);await invoke('start',value);panel.toast(packet ? '红包任务已开始，将按设定时间发放' : '本轮抽奖已开始，正在接收参与弹幕和礼物');}
       finally{panel.updateToolState('giveaway',panel.toolStates.get('giveaway') || {});}
     },
     cancel:async(panel,invoke)=>{await invoke('cancel');panel.toast('本轮已取消，参与记录已保留');},
