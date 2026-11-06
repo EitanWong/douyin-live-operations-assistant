@@ -1,6 +1,7 @@
 {
   "date": "2026-11-07",
   "integrationBranch": "dev",
+  "implementationCommit": "3bdec77c2067775cf8bcf26af6df427642965745",
   "baseline": "b9a9e3b",
   "scope": "Evidence-backed person dossiers and original records, daily bounded public-profile refresh, shared content and hover boundaries",
   "validation": {
