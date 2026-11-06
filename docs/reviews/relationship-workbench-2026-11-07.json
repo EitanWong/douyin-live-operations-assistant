@@ -8,10 +8,12 @@
   },
   "validation": {
     "javascript": {
-      "tests": 1724,
-      "passed": 1724,
+      "tests": 1762,
+      "passed": 1762,
       "failed": 0,
-      "seconds": 220.45
+      "cancelled": 0,
+      "skipped": 0,
+      "seconds": 267.129
     },
     "native": {
       "tests": 53,
@@ -59,7 +61,8 @@
       "No real person investigation or real paid model call",
       "No sustained live-session or browser FPS / RSS claim",
       "System reduced-motion change not performed; shared runtime behavior covered by product-runtime tests"
-    ]
+    ],
+    "integratedDev": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49"
   },
   "benchmark": {
     "at": "2026-11-06T20:09:15.596Z",

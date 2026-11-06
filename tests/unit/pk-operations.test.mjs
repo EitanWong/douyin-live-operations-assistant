@@ -16,6 +16,11 @@ function harness(time = at('2026-10-24T23:54:00'), ai = async()=> '[SKIP]') {
   engine.start();
   return {engine,logs,time:()=>now,set:time=>{now=time;},advance:ms=>{now+=ms;}};
 }
+function sendingAdapter(page,requestSender) {
+  const adapter=new DouyinAdapter({page,getConfig:()=>copy(DEFAULTS),onEvent(){},onLog(){},onStatus(){}});
+  adapter.status.connected=true;adapter.requestSender=requestSender;
+  return adapter;
+}
 const start = (h,extra={}) => h.engine.ingest({type:'pk-start',id:'start',battleId:'battle',roomId:'456',opponentId:'789',opponentName:'对手',selfScore:10,opponentScore:20,remainingMs:300000,at:h.time(),receivedAt:h.time(),...extra});
 let serial=0;
 const task = (h,extra={}) => h.engine.ingest({type:'anchor-pk-tasks',source:'native-task-panel',id:`pk-tasks:${h.time()}:${++serial}`,anchorId:'123',valid:2,target:5,firstWin:false,receivedAt:h.time(),...extra});
@@ -178,8 +183,8 @@ test('平台拒绝后的重试保留PK原始有效期，异步发送准备期间
 
   const dom=new JSDOM('',{url:'https://live.douyin.com/456'});let current=true,committed=false;
   try {
-    const adapter={page:dom.window,healthy:()=>true,requestSender:{prepare:async()=>({available:true,token:'token'}),commit:async()=>{committed=true;}}};
-    const result=await DouyinAdapter.prototype.send.call(adapter,'提醒',()=>current,{beforeClick:async()=>{current=false;}});
+    const adapter=sendingAdapter(dom.window,{prepare:async()=>({available:true,token:'token'}),commit:async()=>{committed=true;}});
+    const result=await adapter.send('提醒',()=>current,{beforeClick:async()=>{current=false;}});
     assert.equal(result.submitted,false);assert.equal(committed,false);
   } finally {dom.window.close();}
 });
@@ -217,9 +222,8 @@ test('请求发送仅在提交前无管理员能力时回退普通弹幕，提�
   const dom=new JSDOM('',{url:'https://live.douyin.com/456'});
   try {
     for(const admin of [true,false]) {
-      const calls=[],adapter={page:dom.window,healthy:()=>true};
-      adapter.requestSender={prepare:async channel=>{calls.push(channel);return {available:channel==='chat'||admin,token:channel};},commit:async token=>{calls.push(`commit:${token}`);return {submitted:false,clicked:true};}};
-      const result=await DouyinAdapter.prototype.send.call(adapter,'PK提醒',()=>true,{channel:'admin'});
+      const calls=[],adapter=sendingAdapter(dom.window,{prepare:async channel=>{calls.push(channel);return {available:channel==='chat'||admin,token:channel};},commit:async token=>{calls.push(`commit:${token}`);return {submitted:false,clicked:true};}});
+      const result=await adapter.send('PK提醒',()=>true,{channel:'admin'});
       assert.deepEqual(calls,admin?['admin','commit:admin']:['admin','chat','commit:chat']);
       assert.equal(result.channelUsed,admin?'admin':'chat');
       if(!admin)assert.match(result.modeFallback,/管理员/);
