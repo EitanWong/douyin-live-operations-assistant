@@ -329,6 +329,7 @@ async def main():
     streams = StreamSource(emit, resolve_streams)
     local = None
     local_task = None
+    public_media = None
     async def local_request(message):
         nonlocal local
         try:
@@ -352,6 +353,15 @@ async def main():
         while True:
             message = await queue.get()
             if message is None or message.get('type') == 'stop':
+                return
+            if message.get('type') == 'public-media' and not task and local is None:
+                if public_media is None:
+                    from public_media_session import PublicMediaSession
+                    public_media = PublicMediaSession(ROOT, emit)
+                public_media.handle(message)
+                continue
+            if public_media is not None:
+                emit({'type': 'error', 'code': 'INVALID'})
                 return
             if message.get('type') == 'streams' and task:
                 streams.receive(message)
@@ -381,6 +391,8 @@ async def main():
                 return
             task = asyncio.create_task(session(message, streams.resolve))
     finally:
+        if public_media:
+            await public_media.close()
         if local_task:
             local_task.cancel()
             await asyncio.gather(local_task, return_exceptions=True)

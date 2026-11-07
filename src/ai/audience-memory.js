@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {audienceProfile,observePlatform,platformSchema} from './audience-profile.js';
+import {audienceProfile,observePlatform,platformSchema,subjectKeySchema} from './audience-profile.js';
 import {retrieveKnowledge} from '../services/retrieval.js';
 import {relationshipEvent,observedRelationships} from './relationship-events.js';
 const day=86400000;
@@ -70,7 +70,7 @@ export class AudienceMemory {
  }
  list(){return [...this.viewers.values()].reverse().map(row=>({key:row.key,name:row.name,lastAt:row.lastAt,statements:row.statements.map(s=>s.text),gifts:row.gifts.map(g=>g.name),notes:row.notes || []}));}
  annotate(key,text){const row=this.viewers.get(key);if(!row)throw new Error('请先选择观众');if(typeof text!=='string' || !text.trim() || text.length>500)throw new Error('核实补充需为1–500字');row.notes=[...(row.notes || []),text.trim()];this.revision++;}
- forget(key){if(!this.viewers.has(key))return;this.forgotten.set(key,Math.max(this.forgotten.get(key) || 0,this.now()));this.viewers.delete(key);for(const [id,row] of this.interactions)if(row.from.key===key || row.to.key===key)this.interactions.delete(id);this.revision++;}
+ forget(key){if(!subjectKeySchema.safeParse(key).success)return;this.forgotten.set(key,Math.max(this.forgotten.get(key) || 0,this.now()));this.viewers.delete(key);for(const [id,row] of this.interactions)if(row.from.key===key || row.to.key===key)this.interactions.delete(id);this.revision++;}
  clear(){this.forgetBefore=Math.max(this.forgetBefore,this.now());this.forgotten.clear();this.viewers.clear();this.unattributed.clear();this.interactions.clear();this.revision++;}
  snapshot(){return structuredClone({version:2,anchor:this.anchor,forgetBefore:this.forgetBefore,forgotten:[...this.forgotten].map(([key,at])=>({key,at})),viewers:[...this.viewers.values()],unattributed:[...this.unattributed.values()],interactions:[...this.interactions.values()]});}
 }

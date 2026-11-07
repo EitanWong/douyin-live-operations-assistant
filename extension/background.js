@@ -7,6 +7,10 @@ import {installEdgeBridge} from './edge-background.js';
 import {requestNativeDeployment} from './native-deployment.js';
 import {collectAccountWithMedia} from './account-media.js';
 import {createAccountResearch} from './account-research.js';
+import {createPublicMediaResearch} from './public-media-research.js';
+import {createPublicMediaProfileResolver} from './public-media-profile.js';
+import {publicMediaWorkerClient} from './public-media-worker-client.js';
+import {checkResearchProfile} from '../src/ai/research-profile.js';
 import {installNativePerceptionBridge} from './native-perception.js';
 import {createBackgroundAI} from './ai-background.js';
 import {APPEARANCE_PREFERENCES} from '../src/ui/appearance.js';
@@ -34,7 +38,7 @@ import {parsePulse} from '../src/analytics/schema.js';
 const collectionKeeper = installCollectionKeeper(chrome);
 installNativePerceptionBridge(chrome,{onStart:async room=>{await storageReady;return readRecord(`live-assistant:config:${room}`);},onObservation:async(room,row,scope)=>{await storageReady;await persistNativeMemory({room,row,scope,read:readRecord,write:writeRecord,transaction:work=>giftStore.transaction(work)});}});
 installEdgeBridge(chrome);
-installNativeASRBridge(chrome);
+const modelOwnership=installNativeASRBridge(chrome);
 const accountCollections=new Map();
 
 const durableStorage = new DurableStorage({ local:chrome.storage.local });
@@ -44,6 +48,8 @@ const durableKey = isDurableKey;
 const readRecord = async key => durableKey(key) ? durableStorage.get(key) : (await chrome.storage.local.get(key))[key];
 let predictionHost;
 let localData;
+let publicMedia;
+const publicMediaPrivacy=new Map();
 const dataEngine=()=>localData ||=new LocalDataEngine({request:nativeDataRequest(chrome)});
 const opponentCollector=createOpponentCollector(chrome);
 const readAll = async () => durableStorage.getAll(['live-assistant:config:','live-assistant:profile:']);
@@ -53,11 +59,15 @@ const writeRecord = async (key,value) => {
   await notifyChanges({[key]:{newValue:value}});
 };
 const knowledgeCorpus=createKnowledgeCorpus({read:readRecord,write:writeRecord,archive:async({room,anchor,at,...payload})=>{await dataEngine().enqueue({id:`knowledge:${room}:${anchor}:${payload.sequence}`,room,anchor,kind:'knowledge',receivedAt:at,payload});void dataEngine().flush();}});
-const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readAudience:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,readConfig:room=>readRecord(`live-assistant:config:${room}`)});
+const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readAudience:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,readProfile:room=>readRecord(`live-assistant:profile:${room}`),readConfig:room=>readRecord(`live-assistant:config:${room}`)});
+const mediaWorker=publicMediaWorkerClient(chrome,{allowed:()=>modelOwnership.backgroundAllowed(),onResult:()=>{void publicMedia?.wakeAll().catch(()=>{});}});
+publicMedia=createPublicMediaResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),request:nativeDataRequest(chrome),worker:mediaWorker,knowledge:automaticKnowledge,canArchive:()=>dataEngine().enabled(),readPrivacy:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience ?? null});
 const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),
   readProgress:(room,anchor)=>readRecord(`live-assistant:account-progress:${room}:${anchor}`),writeProgress:(room,anchor,value)=>writeRecord(`live-assistant:account-progress:${room}:${anchor}`,value),
   collect:(url,options)=>collectAccountWithMedia(chrome,url,{...options,readAI:async()=>{const c=await readRecord(`live-assistant:config:${options.room}`);return String(c?.anchorId)===options.anchor && c?.ai?.accountCollection?.enabled!==false ? c.ai : null;}}),archive:async({room,anchor,source,records,at})=>{
     await dataEngine().enqueue({id:`account:${crypto.randomUUID()}`,room,anchor,kind:'account',receivedAt:at,payload:{source,records}});void dataEngine().flush();
+    try{const result=await publicMedia.collect({room,anchor,records});if(result.error)for(const work of records.filter(r=>r.kind==='work'))work.coverage=`${work.coverage || ''}；${result.error}`.slice(0,500);}
+    catch{for(const work of records.filter(r=>r.kind==='work'))work.coverage=`${work.coverage || ''}；完整音轨任务未启动，请检查本地数据组件和感知组件`.slice(0,500);}
   }});
 const relationshipLibrary=createRelationshipLibrary({all:()=>durableStorage.getAll(['live-assistant:config:','live-assistant:profile:','live-assistant:runtime:','live-assistant:live-memory:','live-assistant:knowledge:'])});
 const deleteRecord = async keys => {
@@ -140,8 +150,9 @@ async function writeStorage(key, value) {
 }
 let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query)=>relationshipLibrary.query(room,query),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
-chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake')void getAIBackground().wake().catch(()=>{});});
+chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake'){void getAIBackground().wake().catch(()=>{});void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});}});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
+void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
   if(['edge-offscreen','edge-background'].includes(message?.target))return;
   if (message?.type === 'fanclub-frame') {
@@ -186,7 +197,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
     try {
       await storageReady;
       let value;
-      if(message.type==='data-configure' && extensionPage){value=await dataEngine().configure(message.enabled);if(message.enabled)void dataEngine().flush();}
+      if(message.type==='data-configure' && extensionPage){value=await dataEngine().configure(message.enabled);if(message.enabled)void dataEngine().flush();void publicMedia.wakeAll().catch(()=>{});}
       else if(message.type==='data-flush' && extensionPage){await dataEngine().flush();value=await dataEngine().status();}
       else if(message.type==='data-relocate' && extensionPage){
         if(typeof message.directory!=='string' || message.directory.length>4096 || typeof message.expectedDatabase!=='string' || message.expectedDatabase.length>4096)throw Error('存储位置无效，请刷新状态后重试');
@@ -391,6 +402,15 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
   return true;
 });
 async function notifyChanges(changes) {
+  let mediaChanged=false;
+  for(const [key,change] of Object.entries(changes)){
+    if(/^live-assistant:config:\d+$/u.test(key))mediaChanged=true;
+    else if(/^live-assistant:live-memory:\d+:\d+$/u.test(key)){
+      const value=change.newValue?.audience,signature=JSON.stringify([value?.forgetBefore || 0,value?.forgotten || []]);
+      if(publicMediaPrivacy.get(key)!==signature){mediaChanged=true;publicMediaPrivacy.delete(key);publicMediaPrivacy.set(key,signature);while(publicMediaPrivacy.size>64)publicMediaPrivacy.delete(publicMediaPrivacy.keys().next().value);}
+    }
+  }
+  if(mediaChanged && publicMedia)void publicMedia.wakeAll().catch(()=>{});
   const relevant = Object.fromEntries(Object.entries(changes).filter(([key]) => /^(live-assistant:(config|income|income-calibration|profile):\d+|douyin-live-assistant:(theme|palette|material))$/.test(key)));
   if (!Object.keys(relevant).length) return;
   // Delivery of change notifications must never turn a committed write into a failure.

@@ -63,7 +63,7 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
   };
   const agent=createResearchAgent({tier,profile:subject?.profile,request,getKey:(kind,url)=>keys.get(`${kind}:${url}`) || '',readPublicPage:read,checkpointer:store.checkpointer,guard,
    reserve:async scope=>{await store.reserve(`task:${scope}:${job.id}`,limits.modelCalls,{lifetime:true});return store.reserve(scope);},reserveSearch:async scope=>{await store.reserve(`task-search:${scope}:${job.id}`,limits.searches,{lifetime:true});return store.reserve(`search:${scope}`,20);},
-   knowledge:async query=>ai.assistant?.memoryEnabled===false || !knowledge ? [] : retrieveSourceRecords(await knowledge.handle(room,'list',{anchor:job.input.anchor}),query,Date.now(),{subject:job.input.subject}).flatMap(r=>r.results),
+   knowledge:async query=>ai.assistant?.memoryEnabled===false || !knowledge ? [] : retrieveSourceRecords(await knowledge.handle(room,'list',{anchor:job.input.anchor}),query,Date.now(),{subject:job.input.subject,anchor:job.input.anchor}).flatMap(r=>r.results),
    relationships:query=>ai.assistant?.memoryEnabled===false ? null : relationships?.(room,query)});
   const result=await agent(job,options);
   await guard();

@@ -75,7 +75,7 @@ class LocalASR:
         self.recognizer = None
         available = bool(self.folder and all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav'])
                          and importlib.util.find_spec('sherpa_onnx') and importlib.util.find_spec('numpy'))
-        self.status = {'phase': 'unprepared', 'available': available, 'model': 'SenseVoiceSmall-int8', 'device': 'cpu'}
+        self.status = {'phase': 'unprepared', 'available': available, 'model': 'SenseVoiceSmall-int8', 'device': 'cpu', 'modelLease': 1}
 
     def decode(self, frames):
         self.check_priority()

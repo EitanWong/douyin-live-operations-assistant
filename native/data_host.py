@@ -15,8 +15,14 @@ def public_media(store, message):
     public=lambda row:{k:v for k,v in row.items() if k not in ('lease','leaseUntil')}
     if operation=='submit':
         return public(jobs.submit(message.get('request')))
+    if operation=='scopes':
+        return jobs.scopes(message.get('after'))
     room,anchor=message.get('room'),message.get('anchor')
     scope(room,anchor)
+    if operation=='reconcile':
+        return jobs.reconcile(room,anchor,message.get('privacy'),message.get('allowed'))
+    if operation=='sync':
+        return {'epoch':jobs.sync_subject(room,anchor,message.get('subject'),message.get('epoch'),message.get('allowed'))}
     if operation=='list':
         return [public(row) for row in jobs.list(room,anchor)]
     if operation=='forget':
@@ -30,6 +36,8 @@ def public_media(store, message):
         return public(jobs.cancel(job['id'],room,anchor))
     if operation=='evidence':
         return jobs.evidence(job['id'],message.get('offset',0),message.get('limit',8))
+    if operation=='ack':
+        return public(jobs.acknowledge_import(job['id'],message.get('cursor'),message.get('complete')))
     raise ValueError('MEDIA_OPERATION')
 
 

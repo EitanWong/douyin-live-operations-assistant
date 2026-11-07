@@ -30,6 +30,8 @@ def initialize(db):
        job_id TEXT,kind TEXT,start_ms INTEGER,end_ms INTEGER,text TEXT,speaker TEXT,
        PRIMARY KEY(job_id,kind,start_ms,end_ms),FOREIGN KEY(job_id) REFERENCES public_media_jobs(id));
       CREATE TABLE IF NOT EXISTS public_media_blobs(job_id TEXT PRIMARY KEY,sha256 TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS public_media_controls(room TEXT,anchor TEXT,subject TEXT,allowed INTEGER NOT NULL,PRIMARY KEY(room,anchor,subject));
+      CREATE TABLE IF NOT EXISTS public_media_imports(job_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0);
     ''')
 
 
@@ -39,7 +41,8 @@ def scope(room, anchor, subject=None):
 
 
 def request_data(request):
-    if not isinstance(request, dict) or set(request) != {'room', 'anchor', 'subject', 'epoch', 'workId', 'author', 'url'}:
+    keys = {'room', 'anchor', 'subject', 'epoch', 'workId', 'author', 'url'}
+    if not isinstance(request, dict) or set(request) not in (keys, keys | {'knowledgeVersion'}):
         raise ValueError('MEDIA_INPUT')
     if not isinstance(request['subject'], str):
         raise ValueError('MEDIA_SCOPE')
@@ -49,7 +52,10 @@ def request_data(request):
             or not isinstance(request['author'], str) or not re.fullmatch(r'[A-Za-z0-9_.=-]{1,160}', request['author'])
             or request['url'] != 'https://www.douyin.com/video/' + request['workId']):
         raise ValueError('MEDIA_INPUT')
-    return dict(request)
+    version = request.get('knowledgeVersion', 0)
+    if type(version) is not int or not 0 <= version < 2**53:
+        raise ValueError('MEDIA_INPUT')
+    return {**request, 'knowledgeVersion': version}
 
 
 def segment_data(value):
@@ -80,19 +86,26 @@ class PublicMediaJobs:
 
     def submit(self, request):
         data = request_data(request)
-        identity = [data[k] for k in ('room', 'anchor', 'subject', 'epoch', 'workId', 'author')]+['sensevoice-v1']
+        identity = [data[k] for k in ('room', 'anchor', 'subject', 'epoch', 'workId', 'author')]+['sensevoice-v1', data['knowledgeVersion']]
         job_id = hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest()
         with self.transaction():
             current = self.current_epoch(data['room'], data['anchor'], data['subject'])
             if current is not None and data['epoch'] != current:
                 raise ValueError('MEDIA_EPOCH')
+            permission = self.db.execute('SELECT allowed FROM public_media_controls WHERE room=? AND anchor=? AND subject=?', (data['room'], data['anchor'], data['subject'])).fetchone()
+            if permission and not permission['allowed']:
+                raise ValueError('MEDIA_DISABLED')
             self.db.execute('INSERT OR IGNORE INTO public_media_epochs VALUES(?,?,?,?)', (data['room'], data['anchor'], data['subject'], data['epoch']))
-            if not self.db.execute('SELECT 1 FROM public_media_jobs WHERE id=?', (job_id,)).fetchone():
-                if self.db.execute("SELECT COUNT(*) FROM public_media_jobs WHERE status IN ('queued','running','paused')").fetchone()[0] >= 32:
-                    raise ValueError('MEDIA_QUEUE_FULL')
+            existing = self.db.execute('SELECT status FROM public_media_jobs WHERE id=?', (job_id,)).fetchone()
+            if (not existing or existing['status'] == 'cancelled') and self.db.execute("SELECT COUNT(*) FROM public_media_jobs WHERE status IN ('queued','running','paused')").fetchone()[0] >= 32:
+                raise ValueError('MEDIA_QUEUE_FULL')
+            if not existing:
                 at = self.now()
                 self.db.execute('INSERT INTO public_media_jobs(id,room,anchor,subject,epoch,work_id,author,url,analysis_version,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                                 (job_id, data['room'], data['anchor'], data['subject'], data['epoch'], data['workId'], data['author'], data['url'], 'sensevoice-v1', 'queued', at, at))
+                self.db.execute('INSERT INTO public_media_imports(job_id,revision) VALUES(?,?)', (job_id, data['knowledgeVersion']))
+            else:
+                self.db.execute("UPDATE public_media_jobs SET status='queued',error=NULL,not_before=0,failures=0,recoveries=0 WHERE id=? AND status='cancelled'", (job_id,))
         return self.get(job_id)
 
     def get(self, job_id):
@@ -100,15 +113,88 @@ class PublicMediaJobs:
         if row is None:
             raise ValueError('MEDIA_JOB')
         blob = self.db.execute('SELECT sha256 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone()
+        receipt = self.db.execute('SELECT * FROM public_media_imports WHERE job_id=?', (job_id,)).fetchone()
         return {'id': row['id'], 'room': row['room'], 'anchor': row['anchor'], 'subject': row['subject'], 'epoch': row['epoch'],
                 'workId': row['work_id'], 'author': row['author'], 'url': row['url'], 'analysisVersion': row['analysis_version'],
                 'status': row['status'], 'cursorMs': row['cursor_ms'], 'lease': row['lease'], 'leaseUntil': row['lease_until'],
                 'mediaHash': blob['sha256'] if blob else None,
+                'createdAt': row['created_at'], 'updatedAt': row['updated_at'],
+                'knowledgeVersion': receipt['revision'] if receipt else 0,
+                'importCursor': receipt['cursor'] if receipt else 0, 'imported': bool(receipt['complete']) if receipt else False,
                 'error': row['error'], 'coverage': json.loads(row['coverage']) if row['coverage'] else {'audio': 'pending', 'video': 'not-analyzed'}}
 
     def list(self, room, anchor):
         scope(room, anchor)
-        return [self.get(row['id']) for row in self.db.execute('SELECT id FROM public_media_jobs WHERE room=? AND anchor=? ORDER BY created_at DESC,id LIMIT 32', (room, anchor))]
+        return [self.get(row['id']) for row in self.db.execute("SELECT j.id FROM public_media_jobs j LEFT JOIN public_media_imports i ON j.id=i.job_id WHERE room=? AND anchor=? ORDER BY CASE WHEN status IN ('queued','running','paused') THEN 0 WHEN status='succeeded' AND COALESCE(i.complete,0)=0 THEN 1 ELSE 2 END,created_at DESC,j.id LIMIT 32", (room, anchor))]
+
+    def scopes(self, after=None):
+        if after is not None:
+            if not isinstance(after, list) or len(after) != 2:
+                raise ValueError('MEDIA_SCOPE')
+            scope(*after)
+        return [dict(row) for row in self.db.execute('SELECT room,anchor FROM public_media_epochs WHERE (room,anchor)>(?,?) GROUP BY room,anchor ORDER BY room,anchor LIMIT 64', tuple(after or ['', '']))]
+
+    def sync_subject(self, room, anchor, subject, epoch, allowed):
+        if not isinstance(subject, str):
+            raise ValueError('MEDIA_SCOPE')
+        scope(room, anchor, subject)
+        if type(epoch) is not int or not 0 <= epoch < 2**53 or type(allowed) is not bool:
+            raise ValueError('MEDIA_EPOCH')
+        with self.transaction():
+            return self._sync_subject(room, anchor, subject, epoch, allowed)
+
+    def _sync_subject(self, room, anchor, subject, epoch, allowed):
+        current = self.current_epoch(room, anchor, subject)
+        if current is not None and epoch < current:
+            if allowed:
+                raise ValueError('MEDIA_EPOCH')
+            epoch = current
+        args = (room, anchor, subject)
+        if current is not None and epoch > current:
+            self._erase_subject(args)
+        if not allowed:
+            self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL WHERE room=? AND anchor=? AND subject=?", args)
+        self.db.execute('INSERT INTO public_media_epochs VALUES(?,?,?,?) ON CONFLICT(room,anchor,subject) DO UPDATE SET epoch=excluded.epoch', (*args, epoch))
+        self.db.execute('INSERT INTO public_media_controls VALUES(?,?,?,?) ON CONFLICT(room,anchor,subject) DO UPDATE SET allowed=excluded.allowed', (*args, int(allowed)))
+        return epoch
+
+    def _erase_subject(self, args):
+        self.db.execute('DELETE FROM public_media_segments WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
+        self.db.execute('DELETE FROM public_media_blobs WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
+        self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL,coverage=NULL,cursor_ms=0,updated_at=? WHERE room=? AND anchor=? AND subject=?", (self.now(), *args))
+
+    def reconcile(self, room, anchor, privacy, allowed):
+        scope(room, anchor)
+        if (type(allowed) is not bool or not isinstance(privacy, dict) or set(privacy) != {'present', 'forgetBefore', 'forgotten'}
+                or type(privacy['present']) is not bool or type(privacy['forgetBefore']) is not int or not 0 <= privacy['forgetBefore'] < 2**53
+                or not isinstance(privacy['forgotten'], list) or len(privacy['forgotten']) > 5000):
+            raise ValueError('MEDIA_PRIVACY')
+        epochs = {}
+        for row in privacy['forgotten']:
+            if not isinstance(row, dict) or set(row) != {'key', 'at'} or not isinstance(row['key'], str) or type(row['at']) is not int or not 0 <= row['at'] < 2**53:
+                raise ValueError('MEDIA_PRIVACY')
+            scope(room, anchor, row['key'])
+            epochs[row['key']] = max(epochs.get(row['key'], 0), row['at'])
+        with self.transaction():
+            subjects = self.db.execute('SELECT subject,epoch FROM public_media_epochs WHERE room=? AND anchor=?', (room, anchor)).fetchall()
+            for row in subjects:
+                epoch = max(row['epoch'], privacy['forgetBefore'], epochs.get(row['subject'], 0))
+                self._sync_subject(room, anchor, row['subject'], epoch, allowed and privacy['present'])
+                if not privacy['present']:
+                    self._erase_subject((room, anchor, row['subject']))
+        return {'subjects': len(subjects)}
+
+    def acknowledge_import(self, job_id, cursor, complete):
+        if type(cursor) is not int or cursor < 0 or type(complete) is not bool:
+            raise ValueError('MEDIA_IMPORT')
+        with self.transaction():
+            job = self.get(job_id)
+            total = self.db.execute('SELECT COUNT(*) FROM public_media_segments WHERE job_id=?', (job_id,)).fetchone()[0]
+            if (job['status'] != 'succeeded' or job['epoch'] != self.current_epoch(job['room'], job['anchor'], job['subject'])
+                    or not job['importCursor'] <= cursor <= min(total, job['importCursor']+8) or complete and cursor != total):
+                raise ValueError('MEDIA_IMPORT')
+            self.db.execute('INSERT INTO public_media_imports VALUES(?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET cursor=excluded.cursor,complete=MAX(complete,excluded.complete)', (job_id, job['knowledgeVersion'], cursor, int(complete)))
+        return self.get(job_id)
 
     def claim(self, worker):
         if not isinstance(worker, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', worker):
@@ -145,6 +231,7 @@ class PublicMediaJobs:
             old = self.db.execute('SELECT sha256 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone()
             if not old or old['sha256'] != sha256:
                 self.db.execute('DELETE FROM public_media_segments WHERE job_id=?', (job_id,))
+                self.db.execute('UPDATE public_media_imports SET cursor=0,complete=0 WHERE job_id=?', (job_id,))
                 self.db.execute('UPDATE public_media_jobs SET cursor_ms=0,coverage=NULL WHERE id=?', (job_id,))
                 self.db.execute('INSERT INTO public_media_blobs VALUES(?,?) ON CONFLICT(job_id) DO UPDATE SET sha256=excluded.sha256', (job_id, sha256))
         return self.get(job_id)
@@ -225,9 +312,7 @@ class PublicMediaJobs:
             next_epoch = max(epoch+1, current or 0)
             self.db.execute('INSERT INTO public_media_epochs VALUES(?,?,?,?) ON CONFLICT(room,anchor,subject) DO UPDATE SET epoch=excluded.epoch', (room, anchor, subject, next_epoch))
             args = (room, anchor, subject)
-            self.db.execute('DELETE FROM public_media_segments WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
-            self.db.execute('DELETE FROM public_media_blobs WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
-            self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL,coverage=NULL,cursor_ms=0,updated_at=? WHERE room=? AND anchor=? AND subject=?", (self.now(), *args))
+            self._erase_subject(args)
         return next_epoch
 
     def evidence(self, job_id, offset=0, limit=8):

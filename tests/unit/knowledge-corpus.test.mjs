@@ -46,3 +46,9 @@ test('研究重复使用已有来源时不能扩大来源原有效期',async()=>
  const {corpus}=fixture();await corpus.remember('1','2',[{url:'https://example.org/old',text:'旧天气原文',at:now-30000,expiresAt:now+30000}],{lifetime:86400000});
  assert.equal((await corpus.list('1','2'))[0].expiresAt,now+30000);
 });
+
+test('完整音轨原文保留媒体种类和覆盖声明，重启后仍可复核',async()=>{
+ const {values,corpus}=fixture();await corpus.remember('1','2',[{url:'https://www.douyin.com/video/70',text:'机器转录：茶杯不能加热',evidenceKind:'public-media',coverage:'0–4000ms；说话人未确认；画面未分析'}]);
+ const restarted=createKnowledgeCorpus({read:async k=>values[k],write:async(k,v)=>values[k]=v,now:()=>now});
+ const [row]=await restarted.list('1','2');assert.equal(row.evidenceKind,'public-media');assert.match(row.coverage,/说话人未确认/);
+});

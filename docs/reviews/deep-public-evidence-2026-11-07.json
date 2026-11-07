@@ -4,8 +4,8 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "JavaScript serial full suite 1774/1774, native 78/78 with ResourceWarning elevated, build/check/index passed; 43 aggregate files reconstruct and rollback correctly. Native public-video queue/audio worker implemented; actual platform download HTTP 403, not browser connected or deployed.",
-  "nextExecutableAction": "为浏览器到原生视频任务的桥接与权威遗忘版本同步编写行为测试，沿用既有账号采集/原文库控制器，并先检查所有已运行原生宿主版本与模型所有权。",
+  "lastConfirmedResult": "Frozen JavaScript serial full suite 1795/1795; native 86/86 with ResourceWarning elevated; npm ci/build/check/index passed. Browser/native bridge and canonical anchor knowledge retrieval implemented. 67 aggregate files reconstruct and roll back. Real public-page video acquired and decoded, but automated product fallback/real-model acceptance remain pending.",
+  "nextExecutableAction": "基于 account-page 已观测的作品/作者/mediaSources 绑定，为原下载适配器实现有界公开媒体回退；先写失败行为测试，覆盖未匹配作者、过期媒体、重定向、取消/遗忘与重启，再以已取得的真实公开作品验证。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
     "native/public_media_jobs.py",
@@ -17,12 +17,20 @@
     "extension/background.js",
     "extension/local-data.js",
     "src/ai/knowledge-corpus.js",
-    "src/ai/harness.js"
+    "src/ai/harness.js",
+    "extension/public-media-research.js",
+    "extension/public-media-profile.js",
+    "extension/public-media-worker-client.js",
+    "extension/account-page.js",
+    "src/ai/audience-profile.js",
+    "src/ai/research-profile.js",
+    "src/services/automatic-knowledge.js",
+    "output/deep-research-2026-11-07/browser-stage/public-work-decode.json"
   ],
   "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
   "validation": {
     "javascript": {
-      "passed": 1774,
+      "passed": 1795,
       "failed": 0,
       "skipped": 0,
       "cancelled": 0,
@@ -31,13 +39,17 @@
         "--test",
         "--test-concurrency=1",
         "tests"
-      ]
+      ],
+      "outerElapsedSeconds": 518.615,
+      "runnerReportedDurationMs": 1114623.170333,
+      "timingBasis": "Literal outer and test-runner values kept separately; not reconciled or mixed."
     },
     "harness": {
-      "passed": 85
+      "previousStagePassed": 85,
+      "thisStage": "Harness tests included in full 1795; standalone eval:harness not rerun"
     },
     "native": {
-      "passed": 78,
+      "passed": 86,
       "runtime": "installed Python 3.12 virtual environment",
       "resourceWarnings": "elevated to errors; final frozen run passed"
     },
@@ -45,18 +57,14 @@
     "build": "passed",
     "check": "passed",
     "index": {
-      "modules": 514,
-      "symbols": 2937
+      "modules": 524,
+      "symbols": 2962
     },
     "diffCheck": "passed",
     "javascriptThisStage": {
-      "firstPassed": 1773,
-      "firstFailed": 1,
-      "isolatedGiveawayPassed": 12,
-      "recheck": "serial 1774/1774 passed; prior parallel failures retained",
-      "secondPassed": 1772,
-      "secondFailed": 2,
-      "isolatedRoomMonitorPassed": 5
+      "final": "1795/1795 serial passed",
+      "interrupted": "First serial runner interrupted after source correction; exit 1, not a passing validation.",
+      "logs": "output/deep-research-2026-11-07/browser-stage/javascript-final.*"
     }
   },
   "benchmark": {
@@ -73,7 +81,7 @@
     "basis": "Synthetic local CPU benchmark; no model, network, browser FPS or livestream acceptance claim."
   },
   "transaction": {
-    "filesVerified": 43,
+    "filesVerified": 67,
     "patchReconstructsModified": true,
     "restoredAllOriginalHashes": true,
     "newFilesRemoved": true,
@@ -92,17 +100,18 @@
     "mutator"
   ],
   "limitations": [
-    "Native worker is not yet connected to browser job submission, authoritative subject deletion epochs or knowledge ingestion.",
-    "No visual timeline or real public-video end-to-end acceptance; platform returned HTTP 403.",
-    "No real-model transcription/factuality accuracy or long-duration livestream acceptance.",
-    "Already running legacy native hosts do not participate in the new model lease; no upgrade/reload performed.",
+    "Product yt-dlp route still returns HTTP 403. Normal unauthenticated public page plays the same work and manual browser media download/real FFmpeg decode succeeded; automated product fallback not implemented.",
+    "No full visual timeline or real ASR/factuality accuracy acceptance.",
+    "No long-duration livestream/resource acceptance or commercial accuracy conclusion.",
+    "Installed legacy native host still running; no deployment/reload or second real model load.",
     "Public evidence does not establish sensitive psychological traits, private life or wealth."
   ],
   "commitPush": {
     "implementation": "pushed origin/dev",
     "verifiedRemoteImplementationSHA": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
     "documentationReceipt": "separate following commit; final SHA in completion report",
-    "nativeStage": "pushed origin/dev; verified remote da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46"
+    "nativeStage": "pushed origin/dev; verified remote da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
+    "browserStage": "pending"
   },
   "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
   "nativeStage": {
@@ -138,5 +147,38 @@
     "conclusion": "success",
     "appliesTo": "previous stage only"
   },
-  "nativeStageImplementationCommit": "da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46"
+  "nativeStageImplementationCommit": "da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
+  "browserStage": {
+    "status": "implemented and fully regression-tested; dev commit/push pending; not deployed",
+    "capabilities": {
+      "publicMedia": 1,
+      "modelLease": 1
+    },
+    "nativeAPIOperations": [
+      "submit",
+      "list",
+      "get",
+      "cancel",
+      "forget",
+      "evidence",
+      "scopes",
+      "sync",
+      "reconcile",
+      "ack"
+    ],
+    "anchorIdentity": "canonical saved room profile plus audience deletion clock; no fabricated chat",
+    "import": "8 segments/page, persisted ack, original corpus, retry de-duplication",
+    "manualPublicMedia": {
+      "workId": "6961737553342991651",
+      "bytes": 3676544,
+      "sha256": "af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881",
+      "durationSeconds": 19.735011,
+      "decodedFrames": 592,
+      "decodeExit": 0,
+      "cookiesExported": false,
+      "productFallback": false
+    },
+    "nativeTests": 86,
+    "javascriptTests": 1795
+  }
 }
