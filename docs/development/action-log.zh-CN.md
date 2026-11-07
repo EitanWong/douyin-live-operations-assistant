@@ -3952,3 +3952,8 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 第一次专项48/49通过：Lucy已为1节点；剩余断言错误假设不同范围内无账号的“阿明”也应合并。保留该错误exit1，改为验证两条原始关系均连接同一Lucy，另一个人物保持各自来源边界；53/53专项及工作台集成通过。没有再添加昵称跨范围合并规则。
 - npm ci完成，183包、audit 0漏洞；crapper、dryer、mutator的CLI与启用工具目录不可用，三项未执行，其他检查不替代。定位时一次rg包含不存在的extension/shared-knowledge.js退出2，已改查src/services/shared-knowledge.js。原生数据库仅用mode=ro与query_only检查表名，无数据写入；本轮无界面布局或原生源码改动。
 - 四角色继续为 /Users/eitan/.codex/relationship-identity-dedup-20261107-rbctkf5h 下 MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；上一阶段原件先备份于lucy-origin/previous-*，本轮父源码单独冻结为lucy-origin/PARENT.tar。索引、完整回归、构建/check、三行为回滚、最终提交和dev推送随后追加。
+
+- 2026-11-08最终验收：合并origin/dev的12个并行提交（至22f5c3b），关系源码无交集；rebase仅行动日志追加冲突，保留双方全部记录并重建索引为582模块/3200符号。中止的合并前全测exit1不算通过；合并树完整JavaScript回归 **2019/2019通过**，0失败/取消/跳过，383777.715292ms、exit0，产品与测试SHA全程未变。build、check与差异空白检查通过。
+- 同一固定合成probe：BASELINE2节点→MODIFIED1节点→ROLLBACK2节点，三次exit0；资料“陶艺”仍待核实，person.key仍为空，来源对象不变，重复查询幂等。回滚恢复770份父版文件的全部SHA及精确文件集合，新增文件全部移除；累计补丁重建782份当前文件逐字一致，再次应用后仍1节点。累计角色包含继承的并行dev改动，未把其称为本轮新增修复。第一次probe未处理空主播档案导致exit1，已保留原探针与错误，修正仅影响验收脚本。
+- 补充预检错误：默认及Homebrew Python可选numpy/sklearn导入缺包exit1，核实数据模型仅用标准库，无需安装，按已验证PATH启动全测；zsh的command -v -a语法exit127、未匹配glob exit1均保留并纠正。一次内联Python脚本UTF-8语法错误exit1发生在执行前，改用ASCII脚本后成功；全测未以这些无关预检替代。
+- 已把验收通过的dist产物同步到原项目dist目录：核验59份文件，原子替换13份差异文件，旧字节备份为lucy-origin/DIST_BEFORE.tar，原项目源码未改。用户当前人物编辑草稿未关闭，未重载扩展或刷新直播页，实际直播图谱尚待重新加载后核验。确认无打开句柄后清理本次两份可重建旧副本，保留源归档、历史角色、固定输入与字面证据。最终提交和dev普通push回执随后追加。
