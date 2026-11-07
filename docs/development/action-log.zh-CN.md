@@ -3471,3 +3471,19 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 
 - 实施30f9986d97a23ecede7da8c5c6c479718e02179b已普通推送dev并核实完整远端SHA。精确CI42344564914 completed/success：JavaScript1834/1834、0失败/取消/跳过、529138.296543ms；原生138/138、19.951秒，依赖/index/build/check/package/upload全部通过。没有重启同SHA流水线。当前代码/永久测试、93文件修改归档及12组回滚证据已再次逐SHA核对；仅本条回执与说明措辞更正待提交。
 - 后续状态已保存到原证据目录 external-vision-stage/checkpoint.json，并把既有检查点指向本状态。读到的旧new-host-status.json是历史下载中记录，未作为当前已部署证据；下一单位先核对实际安装修订，再验收原后台调度和真实持久存储的入库/重启/检索/遗忘。参考标注准确率、长期实播和host.py:174仍未验收，目标active。crapper/dryer/mutator不可用未执行。下面仅提交并普通推送回执文档，不改变已通过CI的生产/测试字节；回执SHA与远端核对记录在VERIFICATION.txt和检查点中，新文档推送CI不预记通过。
+
+
+## 2026-11-07：当前生产后台的真实持久化、重启与遗忘续验
+
+- 续接 dev/61b4bc9f611987ab06540e1acd44a470f7131c5a 和原四角色，没有重新执行已完成的真实 ASR/视觉推理。该文档回执 CI 42345392874 已 completed/success；实施 30f9986d 的全量 JavaScript1834/1834、原生138/138和 CI42344564914成功仍是已有结果，本轮未重跑或扩大其准确率含义。
+- 安装审计：用户已注册 perception 宿主快照缺少当前媒体任务/租约/视觉卸载模块，data 宿主也缺媒体任务模块。保存两个注册清单 SHA；本轮没有替换或重载用户扩展/宿主，不能声称这些代码已安装到用户当前会话。
+- 实际验收：独立 Chrome MV3 service worker 执行逐 SHA 一致的当前 dist/chrome-extension/background.js，仅在前置诊断代码中将 data 宿名映射到唯一临时注册；未改生产权限校验。真实 Dexie/Chrome IndexedDB、真实 outbox、Chrome nativeMessaging 封包及当前 Python/SQLite 运行，room=1为离线夹具，直播页由 CDP Fetch 返回静态响应，无真实弹幕或平台请求。资料、AI/记忆配置和本机归档均显式启用；从无 tab 的诊断 offscreen 文档调用宿主原有 data-configure/data-flush，房间知识/记忆消息来自真实 room tab。
+- 真实证据复用：从先前已完成的音画 SQLite 备份复制唯一任务，仅重置复制品导入 cursor/complete。自动导入5段真实机器转录和3段真实关键帧描述；8条文本、kind、时间戳、unknown说话人逐项等于原数据库，全部保留 unverified 和媒体 SHA5db5a0a730539b8ac2f8907cf64ba7ece909d834de83a9c4e7c6fd5bc57931e2。原数据库 SHA未变化，没有启动新模型、重下视频或将机器描述当人物事实。
+- 持久化结果：原生导入 cursor=8/complete=1；outbox pending=0/bytes=0；native observations确认收到原知识快照，sequence=1，8条与浏览器原文一致。“整个夏天”“贝雷帽”各检索命中1条。关闭整个浏览器并以同一路径/配置重启，8条逐对象一致、sequence仍为1，无重复导入。
+- 遗忘与恢复：通过原 AudienceMemory.forget→房间 set→后台 mergeLiveMemory，列表/人物检索变0；额外等待真实原生 reconcile 后确认任务cancelled、媒体分段0。重放遗忘前记忆快照、再次完整重启后，列表和检索仍0。原生通用FTS人物来源始终不暴露，最终knowledge_sources为0。底层浏览器8条知识原文和native observations内8条审计原文仍保留，本次只证明检索隔离和原生媒体证据删除，不能称所有原文物理擦除。
+- 诊断错误及更正：首次6个相对导入多一级（exit1）；Runtime.evaluate顶层await语法错（exit1）；service worker延迟动态导入不受支持导致超时（exit1）；改为生产包前置映射并走原data-configure。tab内扩展页被原权限拒绝（exit1），改用只含runtime转发的诊断offscreen上下文，没有放宽产品权限。受保护Documents路径执行被macOS以Operation not permitted拒绝；独立封包CLI成功后，将原生副本和库移到临时目录，Chrome实际调用成功。缺少version/perception的诊断记忆被产品schema拒绝（exit1），使用原PerceptionMemory补全后通过。另一次run.py路径拼写错误exit2、缺失stderr文件读取exit1及误猜独立perception-memory.js路径均属诊断错误，不计产品红测或验收通过。原始回执/失败阶段和正确命令分别保留。
+- 最终验收命令 browser-valid-archive退出0（3.538秒）；verify-durable退出0，逐SHA确认93文件与原MODIFIED_FILE一致、原聚合BASELINE未变。继续原四角色和12组同输入历史证据；PublicMediaSession取消组BASELINE在卸载确认前已放锁/竞争者可进入→MODIFIED仍持锁/竞争者阻塞/工作者未完成，确认后放锁且nativePending=0→ROLLBACK恢复BASELINE。此次未改实现，不伪造新的行为差异或重复运行真实模型；原文回执追加同一VERIFICATION.txt。
+- 清理与边界：临时原生注册和运行目录已移除，运行数据库/源码归档到本次output阶段；用户两个注册清单SHA保持原值。独立Chrome已关闭，保存离线配置以备审计。没有UI/布局变更、版本/标签或其他工作树操作。crapper/dryer/mutator的CLI及工具目录均不可用，三项未执行，其他检查不替代；业务/测试源码未变，不重跑已有全量。
+- 持续目标active。已完成“当前代码在隔离真实浏览器中的存储/检索/重启/遗忘链路”；仍待独立事实性标注与阈值、用户实际安装与后台长期调度、长期实播、旧host.py:174新鲜度根因。尤其模型结果含未核实描述，不能宣称商业准确率或心理画像成立。下一可执行单元从既有三张验证帧和真实转录建立有出处的事实性评估，保留unknown/不确定性；实施本轮仅为验收文档，check、提交与dev推送回执随后补记。
+
+- 最终本机回执：npm run check退出0（36.948秒，包含索引新鲜度和生成JavaScript语法），git diff --check通过。业务源码、测试、生成索引与61b4bc9保持一致；本轮只提交该行动日志。原四角色在追加验收回执后重新打开，原MODIFIED_FILE/DIFF/ROLLBACK字节未变，VERIFICATION扩展新证据；新的事实性续验checkpoint已记录。
