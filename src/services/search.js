@@ -1,5 +1,6 @@
 import {parseCompletionStream} from './completion-stream.js';
 import {parseHTML} from 'linkedom/worker';
+import {isResponsesEndpoint,responsesRequest,responsesResult} from './ai-wire.js';
 
 function sourceText(values,limit){
  let text=values.find(value=>typeof value==='string' && value.trim()) || '';
@@ -11,7 +12,7 @@ function sourceText(values,limit){
 }
 
 export const SEARCH_PROVIDERS = {bocha:{label:'博查',endpoint:'https://api.bochaai.com/v1/web-search'},tavily:{label:'Tavily',endpoint:'https://api.tavily.com/search'},searxng:{label:'SearXNG（自建）',endpoint:'http://localhost:8080/search'}};
-export const SEARCH_DEFAULTS = {enabled:false,rememberKnowledge:true,provider:'bocha',endpoint:SEARCH_PROVIDERS.bocha.endpoint,maxResults:3,maxPerHour:60};
+export const SEARCH_DEFAULTS = {enabled:false,rememberKnowledge:true,provider:'bocha',endpoint:SEARCH_PROVIDERS.bocha.endpoint,maxResults:10,maxPerHour:0};
 
 export function validateSearchEndpoint(value, provider) {
   let url; try {url=new URL(value);} catch {throw new Error('搜索接口地址无效');}
@@ -31,7 +32,7 @@ export function validateSearchBody(body,provider='tavily') {
   }
   const bocha=provider==='bocha',count=bocha ? body.count : body.max_results;
   const keys=bocha ? ['query','count','summary','freshness'] : ['query','max_results','search_depth','include_answer','include_raw_content'];
-  if (!['bocha','tavily'].includes(provider) || !Number.isInteger(count) || count<1 || count>5
+  if (!['bocha','tavily'].includes(provider) || !Number.isInteger(count) || count<1 || count>50
     || (bocha ? body.summary!==true || body.freshness!=='noLimit' : body.search_depth!=='basic' || body.include_answer!==false || body.include_raw_content!==false)
     || Object.keys(body).some(key=>!keys.includes(key))) throw new Error('搜索请求无效');
   return body;
@@ -60,24 +61,26 @@ function parseResponse(response,url,operation,stream=false) {
     if(finalURL.origin!==new URL(url).origin)throw new Error('服务跳转到了其他域名，请改用直接接口地址');
   }
   if(stream)return parseCompletionStream(response.responseText);
-  try {return JSON.parse(response.responseText);} catch {throw new Error('服务响应不是有效 JSON');}
+  let data;try {data=JSON.parse(response.responseText);} catch {throw new Error('服务响应不是有效 JSON');}
+  return operation==='ai' && isResponsesEndpoint(url) ? responsesResult(data) : data;
 }
 
 export function requestJSON(request, {url,key,body,method='POST',timeout=25000,operation='ai',provider,form=false,stream=false,signal}) {
+  if(operation==='ai' && isResponsesEndpoint(url)){body=responsesRequest(body);stream=false;}
   return new Promise((resolve,reject)=>{
     let settled=false,handle,timer;
     const abort=()=>{if(settled)return;finish(new Error('请求已取消'));try{handle?.abort?.();}catch{}};
     const finish=(error,value)=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',abort);if(error)reject(error);else resolve(value);};
     if(signal?.aborted){abort();return;}
     signal?.addEventListener('abort',abort,{once:true});
-    timer=setTimeout(()=>{finish(new Error(operation==='search' ? '联网搜索超时' : 'AI 请求超时'));try {handle?.abort?.();} catch {}},timeout);
+    if(timeout>0)timer=setTimeout(()=>{finish(new Error(operation==='search' ? '联网搜索超时' : 'AI 请求超时'));try {handle?.abort?.();} catch {}},Math.min(timeout,2147483647));
     try {
       handle=request({method,url,operation,searchProvider:provider,anonymous:true,timeout,responseType:'text',
         headers:{...(method==='GET' ? {} : {'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json'}),...(key ? {Authorization:`Bearer ${key}`} : {})},data:method==='GET' ? undefined : form ? new URLSearchParams(body).toString() : JSON.stringify(body),
         onload:response=>{
           try {finish(null,parseResponse(response,url,operation,stream));} catch(error) {finish(error);}
         },
-        ontimeout:()=>finish(new Error('请求超时（25 秒内）')),onerror:()=>finish(new Error('网络失败或未授权服务域名')),onabort:()=>finish(new Error('请求已取消'))
+        ontimeout:()=>finish(new Error('请求超时')),onerror:()=>finish(new Error('网络失败或未授权服务域名')),onabort:()=>finish(new Error('请求已取消'))
       });
       if(signal?.aborted){try{handle?.abort?.();}catch{}}
     } catch(error) {finish(error);}
@@ -93,8 +96,8 @@ export function createSearchClient({request,getKey,now=Date.now}) {
     const body=validateSearchBody(provider==='searxng' ? {q:String(query).trim(),format:'json',pageno:1} : provider==='bocha' ? {query:String(query).trim(),count:config.maxResults,summary:true,freshness:'noLimit'}
       : {query:String(query).trim(),max_results:config.maxResults,search_depth:'basic',include_answer:false,include_raw_content:false},provider);
     calls=calls.filter(at=>now()-at<3600000);
-    if(calls.length>=config.maxPerHour)throw new Error('联网搜索每小时额度已用完');
-    calls.push(now());
+    if(config.maxPerHour>0 && calls.length>=config.maxPerHour)throw new Error('联网搜索每小时额度已用完');
+    if(config.maxPerHour>0)calls.push(now());
     const data=await requestJSON(request,{url:endpoint,key,body,timeout,operation:'search',provider,form:provider==='searxng',signal});
     if(!data || typeof data!=='object' || Array.isArray(data))throw new Error('搜索服务未返回有效结果');
     if(provider==='bocha' && data.code!==undefined && data.code!==200)throw new Error(`博查搜索失败（${String(data.code).slice(0,12)}）`);

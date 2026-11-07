@@ -26,7 +26,7 @@ test('后台由真实等级决定深度，读取已配对主页，个人原文�
  const host=createBackgroundAI({...f.options,collectAccount:async(_room,url)=>{collected.push(url);return [{title:'茶友',text:'公开主页描述：分享陶瓷茶杯清洗方法'}];},fetch:async(url,opts)=>{
   if(url.includes('search.test')){searches++;return new Response(JSON.stringify({results:[{url:`https://example.org/${searches}`,title:'陶瓷茶杯',content:`陶瓷茶杯第${searches}项清洗说明，限用冷水。`}]}));}
   models++;const target=JSON.parse(JSON.parse(opts.body).messages[1].content).target;
-  assert.equal(target.profile.key,'uid:2');assert.equal(target.profile.platform.honor.value,50);assert.equal(target.agent_state.budget.modelCalls,8);
+  assert.equal(target.profile.key,'uid:2');assert.equal(target.profile.platform.honor.value,50);assert.equal(target.agent_state.budget.modelCalls,0);
   return response(models===6 ? {action:'finish',answer:'使用冷水清洗。',citations:[2]} : models>6 ? {action:'finish',answer:'主页已有采样资料。',citations:[1]} : {action:'search',query:`陶瓷茶杯第${models}项清洗说明`});
  }});
  try{

@@ -63,10 +63,11 @@ function forecastContent(data,place,plan,date,now){
 }
 export function createWeatherClient({request}){
  return async(input,{now=Date.now(),signal,timeout=8000}={})=>{
-  const plan=weatherPlanSchema.parse(input),deadline=Date.now()+timeout;
+  const plan=weatherPlanSchema.parse(input),deadline=timeout>0 ? Date.now()+timeout : Infinity;
   const get=async(url,budget=Infinity)=>{
    const remaining=deadline-Date.now();if(remaining<=0)throw new Error('天气查询超时');
-   return requestJSON(request,{url:validateWeatherURL(url),method:'GET',operation:'weather',timeout:Math.min(remaining,budget),signal});
+   const wait=Math.min(remaining,budget);
+   return requestJSON(request,{url:validateWeatherURL(url),method:'GET',operation:'weather',timeout:Number.isFinite(wait) ? wait : 0,signal});
   };
   const geo=new URL(GEO);geo.search=new URLSearchParams({name:plan.location,count:20,language:'zh',format:'json'}).toString();
   const location=locate(await get(geo.href),plan);if(location.clarification)return location;

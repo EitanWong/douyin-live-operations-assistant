@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {applyContextBudget,liveFactFingerprint} from '../../src/services/ai-context.js';
+import {AI_REQUEST_LIMIT} from '../../src/services/ai-wire.js';
 
 test('人物图谱超预算时整块省略并披露，不能留下缺失实体的关系或路径',()=>{
  const graph={entities:[{id:'p1',name:'阿明',evidence:[{text:'原话'.repeat(1000)}]},{id:'p2',name:'小雨'}],relations:[{id:'r1',from:'p1',to:'p2',predicate:'师傅'}],paths:[['r1']]};
@@ -28,7 +29,7 @@ test('上下文经过 JSON 二次转义后仍在扩展后台整包上限以内',
   const {makeAIRequest}=await import('../../src/services/ai.js');const {mergeConfig}=await import('../../src/core/engine.js');
   const c=mergeConfig();c.ai.pipeline.contextBudgetChars=70000;
   const request=makeAIRequest({knowledge:'"'.repeat(12000),context:Array.from({length:100},()=>({text:'"'.repeat(500)})),target:{text:'资料是什么'},maxLength:30},c.ai);
-  assert.ok(JSON.stringify(request).length<=100000);assert.equal(JSON.parse(request.messages[1].content).target.text,'资料是什么');
+  assert.ok(JSON.stringify(request).length<=AI_REQUEST_LIMIT);assert.equal(JSON.parse(request.messages[1].content).target.text,'资料是什么');
 });
 test('过期账本不以当前总额进入模型，零仍为零，原始账本保持不变',async()=>{
  const {applyPromptSources}=await import('../../src/services/ai-context.js');

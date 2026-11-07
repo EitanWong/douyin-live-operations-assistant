@@ -35,7 +35,7 @@ export class FoundationSettings {
   bind('[data-account-search]',async()=>{if(!collector?.search)throw new Error('抖音原生搜索需要 Chrome 扩展版');await collector.search(root.querySelector('[data-account-query]').value.trim());});
   bind('[data-account-targets]',()=>this.showTargets());
   root.querySelector('[data-account-target]').addEventListener('change',event=>{if(event.target.value)root.querySelector('[data-account-url]').value=event.target.value;});
-  bind('[data-account-watch]',()=>{const url=accountSource(root.querySelector('[data-account-url]').value.trim()).url,field=root.querySelector('[data-field="ai.accountCollection.urls"]'),urls=[...new Set(field.value.split('\n').map(s=>s.trim()).filter(Boolean).concat(url))];if(urls.length>10)throw new Error('自动更新最多10个明确来源');field.value=urls.join('\n');dirty();this.accountStatus('已加入自动更新草稿，保存后生效');});
+  bind('[data-account-watch]',()=>{const url=accountSource(root.querySelector('[data-account-url]').value.trim()).url,field=root.querySelector('[data-field="ai.accountCollection.urls"]'),urls=[...new Set(field.value.split('\n').map(s=>s.trim()).filter(Boolean).concat(url))];if(urls.length>1000)throw new Error('自动更新最多1000个明确来源');field.value=urls.join('\n');dirty();this.accountStatus('已加入自动更新草稿，保存后生效');});
   bind('[data-context-refresh]',()=>this.showContext());this.showContext();
   void this.detect().catch(error=>{if(!this.closed)this.deviceStatus(error.message);});
   this.unsubscribe=edge?.subscribe?.(state=>this.progress(state));

@@ -1,4 +1,5 @@
 import {circuitBreaker,handleWhen,ConsecutiveBreaker} from 'cockatiel';
+import {researchTimeoutMs} from '../ai/research-settings.js';
 
 export const LATENCY_DEFAULTS=Object.freeze({cloudMs:8000,totalMs:16000,edgeDelayMs:1500});
 export const RESEARCH_TIMEOUT_MS=120000;
@@ -12,6 +13,7 @@ export function withDeadline(run,{signal,timeout=16000}={}){
   signal?.addEventListener('abort',listener,{once:true});
   const schedule=()=>{
    const remaining=(typeof timeout==='function' ? timeout() : timeout)-(Date.now()-started);
+   if(remaining===Infinity)return;
    if(remaining>0){timer=setTimeout(schedule,remaining);return;}
    reject(Object.assign(new Error('AI 请求超时'),{code:'TIMEOUT'}));controller.abort();
   };
@@ -42,7 +44,7 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
   const provider=JSON.stringify([config.pipeline?.mode,config.pipeline?.workspaceId,config.pipeline?.region,config.endpoint,config.model,config.pipeline?.replyModel]);
   const cloudWork=async()=>{
    if(prompt.cloudAllowed===false || config.edge?.localOnly || (quotaPauses.get(provider) || 0)>now())throw new Error('云端额度暂停或使用本地模式，需要已准备的端侧模型');
-   try{return await breaker(config).execute(()=>withDeadline(signal=>cloud({...prompt,signal,onLookup},config,{signal}),{signal:cloudSignal.signal,timeout:()=>researching ? RESEARCH_TIMEOUT_MS : config.edge?.enabled ? limits.cloudMs : limits.totalMs}));}
+   try{return await breaker(config).execute(()=>withDeadline(signal=>cloud({...prompt,signal,onLookup},config,{signal}),{signal:cloudSignal.signal,timeout:()=>researching ? researchTimeoutMs(config) : config.edge?.enabled ? limits.cloudMs : limits.totalMs}));}
    catch(error){if(error.aiQuota || error.status===402){if(quotaPauses.size>=8)quotaPauses.delete(quotaPauses.keys().next().value);quotaPauses.set(provider,now()+300000);}throw error;}
   };
   try{
@@ -57,7 +59,7 @@ export function createResilientAI({cloud,edge,onTrace=()=>{},now=Date.now}){
     if(prompt.reserveLocal && !prompt.reserveLocal())throw new Error('本地推理调用额度已达上限');
     const beforeLocal=now()-started,remaining=limits.totalMs-beforeLocal;
     if(remaining<=0)throw new Error('AI 请求超时');
-    const output=await withDeadline(signal=>edge.reply({...prompt,signal,onLookup},config),{signal:edgeSignal.signal,timeout:()=> (researching ? RESEARCH_TIMEOUT_MS : limits.totalMs)-beforeLocal});
+    const output=await withDeadline(signal=>edge.reply({...prompt,signal,onLookup},config),{signal:edgeSignal.signal,timeout:()=> (researching ? researchTimeoutMs(config) : limits.totalMs)-beforeLocal});
     result={output,provider:'edge'};
    }
    if(!current())throw cancelled();

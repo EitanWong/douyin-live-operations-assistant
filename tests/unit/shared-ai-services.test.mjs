@@ -14,7 +14,7 @@ test('已有共享服务可增量迁移任务连接，任务开关与模型一�
  const upgraded=fixture(f.values),base=await upgraded.service.config('1'),edit=structuredClone(base);
  edit.ai.taskModels.research={enabled:true,endpoint:'https://deep.example/chat/completions',model:'deep'};
  await upgraded.service.save('1',edit,base);
- assert.deepEqual((await upgraded.service.config('2')).ai.taskModels.research,edit.ai.taskModels.research);
+ assert.deepEqual((await upgraded.service.config('2')).ai.taskModels.research,{...edit.ai.taskModels.research,reasoningEffort:'high'});
  await upgraded.service.save('2',base,base);
  assert.equal((await upgraded.service.config('1')).ai.taskModels.research.model,'deep');
 });

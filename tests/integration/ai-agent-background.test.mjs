@@ -12,7 +12,7 @@ test('Dexie任务和额度跨宿主重启持久保存，原子额度不能并发
  try {
   await store.put({id:'test-task',scope:'1:10',createdAt:now,status:'queued',question:'测试',input:{},trace:[]});store.close();
   const reopened=createAgentTaskStore(options);assert.equal((await reopened.all())[0].question,'测试');
-  const reservations=await Promise.allSettled(Array.from({length:25},()=>reopened.reserve('1:10')));assert.equal(reservations.filter(r=>r.status==='fulfilled').length,20);
+  const reservations=await Promise.allSettled(Array.from({length:25},()=>reopened.reserve('1:10',20)));assert.equal(reservations.filter(r=>r.status==='fulfilled').length,20);
   await reopened.reserve('2:10');reopened.close();
  }finally{store.close();}
 });

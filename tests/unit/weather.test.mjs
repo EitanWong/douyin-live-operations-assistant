@@ -21,6 +21,11 @@ test('当前气温和明日预报分开取值，0度/0降水概率是有效数�
  assert.match((await fixture().weather({...plan,date:'tomorrow'},{now:at})).results[0].content,/2026-11-06.*阴.*0%/u);
  const data=structuredClone(forecast);data.current.temperature_2m=0;assert.match((await fixture({data}).weather({...plan,period:'current'},{now:at})).results[0].content,/0℃/u);
 });
+test('研究显式不设超时时，定位与天气请求均不立即过期',async()=>{
+ const f=fixture();
+ assert.match((await f.weather(plan,{now:at,timeout:0})).results[0].content,/15至21℃/u);
+ assert.equal(f.calls.length,2);assert.ok(f.calls.every(call=>call.timeout===0));
+});
 test('同名行政地无法区分就澄清，不回退到错误地点、村庄或第一条模糊结果',async()=>{
  const f=fixture({places:[{...place,admin1:'湖北'},place]});assert.match((await f.weather({...plan,region:''},{now:at})).clarification,/湖北.*浙江/u);assert.equal(f.calls.length,1);
  await assert.rejects(fixture({places:[{...place,name:'横峰'}]}).weather(plan,{now:at}),/匹配地点/u);

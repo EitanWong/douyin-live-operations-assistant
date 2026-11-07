@@ -2,6 +2,18 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createContinuousResearch,researchEvidenceIsCurrent} from '../../src/ai/continuous-research.js';
 
+test('长任务等待后的资料全部接续，超过100条或一天也不丢失待研究项和去重记录',async()=>{
+ let now=1800000000000,pending=true,saved;const jobs=[];
+ const config={anchorId:'10',ai:{enabled:true,assistant:{research:{enabled:true}}}};
+ const memory={anchor:'10',audience:{unattributed:Array.from({length:120},(_,i)=>({id:'backlog-'+i,text:`第${i}条陶瓷资料需要核实`,at:now-600000+i}))}};
+ const deps={now:()=>now,configs:async()=>({'live-assistant:config:1':config}),read:async()=>memory,store:{readLoop:async()=>saved,writeLoop:async r=>saved=r},submit:async j=>jobs.push(j),cancelDisabled:async()=>{},hasPending:()=>pending};
+ await createContinuousResearch(deps).tick();assert.equal(jobs.length,0);pending=false;
+ for(let i=0;i<22;i++)await createContinuousResearch(deps).tick();
+ assert.equal(new Set(jobs.flatMap(j=>j.input.context.context.map(r=>r.id))).size,120,'不能因研究超过五分钟或采样窗口而遗漏积压资料');
+ assert.equal(saved.seen.length,120);const completed=jobs.length;now+=2*86400000;
+ await createContinuousResearch(deps).tick();assert.equal(jobs.length,completed,'重启和跨天不会重复已收集资料');
+});
+
 test('画面、语音、音画与未归属弹幕进入同一研究队列并保留原始证据边界',async()=>{
  const now=1800000000000,jobs=[];let saved;
  const config={anchorId:'10',ai:{enabled:true,assistant:{research:{enabled:true,intervalSec:60,maxPerHour:3}}}};

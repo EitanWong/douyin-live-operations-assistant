@@ -4,13 +4,13 @@ import {createProfileInsightUpdater,validProfileInsights} from '../../src/ai/pro
 import {AudienceMemory} from '../../src/ai/audience-memory.js';
 import {mergeConfig} from '../../src/core/engine.js';
 
-test('自动画像有原话依据、独立模型、幂等更新，遗忘或原文删除立即失效',async()=>{
+test('自动画像有原话依据、沿用后台模型、幂等更新，遗忘或原文删除立即失效',async()=>{
  const memory=new AudienceMemory({anchor:'10'}),at=Date.now();
  memory.observe({type:'chat',source:'socket',id:'chat-1',text:'我喜欢陶瓷，阿明是我的朋友。',receivedAt:at,user:{id:'2',name:'小雨'}});
  const archive=()=>({anchor:'10',audience:memory.snapshot()});let saved,calls=0;
- const ai=mergeConfig({ai:{assistant:{research:{profileEnabled:true}},taskModels:{profile:{enabled:true,endpoint:'https://profile.example/chat/completions',model:'profile'}}}}).ai;
+ const ai=mergeConfig({ai:{assistant:{research:{profileEnabled:true}},taskModels:{research:{enabled:true,endpoint:'https://research.example/chat/completions',model:'research'}}}}).ai;
  const update=createProfileInsightUpdater({read:async key=>key.includes('profile-insights') ? saved : archive(),write:async(_key,value)=>saved=value,reserve:async()=>{},client:async(prompt,config)=>{
-  calls++;assert.equal(config.model,'profile');assert.equal(prompt.profileConversation.turns[0].text,'我喜欢陶瓷，阿明是我的朋友。');
+  calls++;assert.equal(config.model,'research');assert.equal(prompt.profileConversation.turns[0].text,'我喜欢陶瓷，阿明是我的朋友。');
   return JSON.stringify({facts:[{field:'interests',value:'陶瓷',evidence:[{turn:1,quote:'我喜欢陶瓷'}]}],relationships:[{name:'阿明',predicate:'朋友',negative:false,evidence:[{turn:1,quote:'阿明是我的朋友'}]}],analysis:[{text:'可能愿意交流陶瓷话题',limitations:'仅依据这一句原话，不能确定心理状态。',evidence:[{turn:1,quote:'我喜欢陶瓷'}]}],knowledge:[],reply:'已整理原话。'});
  }});
  const input={room:'1',anchor:'10',subject:'uid:2',ai,guard:async()=>{}};

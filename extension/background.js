@@ -1,3 +1,4 @@
+import {AI_REQUEST_LIMIT,AI_RESPONSE_LIMIT} from '../src/services/ai-wire.js';
 import {createKnowledgeCorpus} from '../src/ai/knowledge-corpus.js';
 import {createAutomaticKnowledge} from '../src/services/automatic-knowledge.js';
 import {validateMemory} from '../src/services/knowledge.js';
@@ -163,7 +164,7 @@ async function writeStorage(key, value) {
 let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake'){void getAIBackground().wake().catch(()=>{});void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});}});
-chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
+chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:0.5});
 void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
   if(['edge-offscreen','edge-background'].includes(message?.target))return;
@@ -406,17 +407,18 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const provider=message.provider || (String(message.url).endsWith('/web-search') ? 'bocha' : 'tavily');
         const url = weather ? message.type==='weather' ? validateWeatherURL(message.url) : validatePublicDataURL(message.url) : searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
         if (!await chrome.permissions.contains({origins:[`${new URL(url).protocol}//${new URL(url).hostname}/*`]})) throw new Error(`请点击扩展图标，授权当前${searching ? '搜索' : ' AI '}服务域名后重试`);
-        if (!weather && (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : 100000))) throw new Error('AI请求过大');
+        if (!weather && (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : AI_REQUEST_LIMIT))) throw new Error('AI请求过大');
         const form=searching && provider==='searxng';
         const body = weather ? null : form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
-        if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!weather && (!Array.isArray(body.messages) || typeof body.model !== 'string')) throw new Error('AI请求无效');
-        const controller = new AbortController(), timeout = setTimeout(()=>controller.abort(),searching ? 30000 : 25000);
+        if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!weather && (!Array.isArray(new URL(url).pathname.endsWith('/responses') ? body.input : body.messages) || typeof body.model !== 'string')) throw new Error('AI请求无效');
+        const wait=Number.isSafeInteger(message.timeout) && message.timeout>=0 ? message.timeout : searching ? 30000 : 25000;
+        const controller = new AbortController(), timeout = wait>0 ? setTimeout(()=>controller.abort(),Math.min(wait,2147483647)) : undefined;
         const requestKey=typeof message.requestId==='string' && /^[a-z\d-]{16,80}$/iu.test(message.requestId) ? `${sender.tab.id}:${message.requestId}` : null;
         if(requestKey){activeAIRequests.set(requestKey,controller);if(cancelledAIRequests.delete(requestKey))controller.abort();}
         try {
           const response = await fetch(url,{method:weather ? 'GET' : 'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:weather ? {} : {'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:weather ? undefined : message.data});
           const text = await response.text();
-          value={status:response.status,responseText:text.slice(0,200000),finalUrl:response.url};
+          value={status:response.status,responseText:text.slice(0,AI_RESPONSE_LIMIT),finalUrl:response.url};
         } finally { clearTimeout(timeout);if(requestKey)activeAIRequests.delete(requestKey); }
       } else throw new Error('不支持的请求');
       reply({ok:true,value});
@@ -431,6 +433,7 @@ async function notifyChanges(changes) {
     else if(/^live-assistant:live-memory:\d+:\d+$/u.test(key)){
       const [, ,room,anchor]=key.split(':');
       await getAIBackground().pruneProfiles(room,anchor);
+      void getAIBackground().wake().catch(()=>{});
       const value=change.newValue?.audience,signature=JSON.stringify([value?.forgetBefore || 0,value?.forgotten || []]);
       if(publicMediaPrivacy.get(key)!==signature){mediaChanged=true;publicMediaPrivacy.delete(key);publicMediaPrivacy.set(key,signature);while(publicMediaPrivacy.size>64)publicMediaPrivacy.delete(publicMediaPrivacy.keys().next().value);}
     }

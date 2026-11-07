@@ -4,7 +4,7 @@ export const subjectKeySchema=z.string().regex(/^(?:uid:\d{1,30}|sec:[\w-]{8,160
 const level=z.object({value:z.number().int().min(0).max(200),at:z.number().finite()});
 export const platformSchema=z.object({honor:level.nullable().default(null),fan:level.nullable().default(null)});
 export const PROFILE_POLICY=Object.freeze({honor:40,fan:15,diamonds:1000,giftCount:100,levelAge:day,giftAge:30*day});
-export const RESEARCH_BUDGETS=Object.freeze({standard:Object.freeze({modelCalls:4,searches:3,reads:3,sources:8}),deep:Object.freeze({modelCalls:8,searches:5,reads:4,sources:10})});
+export const RESEARCH_BUDGETS=Object.freeze({standard:Object.freeze({modelCalls:0,searches:0,reads:0,sources:0}),deep:Object.freeze({modelCalls:0,searches:0,reads:0,sources:0})});
 const recent=(at,now,age)=>Number.isFinite(at) && at<=now && now-at<=age;
 export function observePlatform(previous,user,anchor,at){
  const next={honor:previous?.honor ?? null,fan:previous?.fan ?? null};

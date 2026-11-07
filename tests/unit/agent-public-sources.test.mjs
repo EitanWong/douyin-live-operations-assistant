@@ -14,6 +14,6 @@ test('公开资料读取只用已授权HTTPS域名，不带Cookie，重定向和
 test('纯文本公开资料保留字面内容，过大流被取消，父级取消贯通读取',async()=>{
  const plain='公开介绍：我喜欢<白瓷>，不喜欢骤冷骤热。';
  const result=await readPublicPage('https://example.com/about',{authorized:async()=>true,fetch:async()=>new Response(plain,{headers:{'Content-Type':'text/plain'}})});assert.equal(result.text,plain);
- let cancelled=false;await assert.rejects(readPublicPage('https://example.com/large',{authorized:async()=>true,fetch:async()=>new Response(new ReadableStream({start(controller){controller.enqueue(new Uint8Array(262145));},cancel(){cancelled=true;}}),{headers:{'Content-Type':'text/html'}})}),/256KiB/);assert.equal(cancelled,true);
+ let cancelled=false;await assert.rejects(readPublicPage('https://example.com/large',{authorized:async()=>true,fetch:async()=>new Response(new ReadableStream({start(controller){controller.enqueue(new Uint8Array(2097153));},cancel(){cancelled=true;}}),{headers:{'Content-Type':'text/html'}})}),/2MiB/);assert.equal(cancelled,true);
  const controller=new AbortController();controller.abort();await assert.rejects(readPublicPage('https://example.com/about',{authorized:async()=>true,signal:controller.signal,fetch:async(_url,options)=>{assert.equal(options.signal.aborted,true);throw Error('cancelled');}}),/cancelled/);
 });

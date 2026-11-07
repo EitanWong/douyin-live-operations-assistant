@@ -36,6 +36,12 @@ test('公共数据拒绝未知工具、额外参数、任意URL、端口、认�
  for(const data of [{base:'USD',quote:'CNY',date:'2026-11-04',rate:7},{base:'CNY',quote:'USD',date:'2026-01-01',rate:0.14},{base:'CNY',quote:'USD',date:'2026-11-04',rate:null}])await assert.rejects(run(rate,data));
  await assert.rejects(run({tool:'holidays',countryCode:'CN',year:2026,date:''},{year:2025,days:responses[1].days}),/年份/u);
 });
+test('研究显式不设超时时，公共数据请求正常返回且不附加计时器',async()=>{
+ const calls=[];
+ const client=createPublicDataClient({request:d=>{calls.push(d);d.onload({status:200,responseText:JSON.stringify(responses[0])});}});
+ const found=await client({tool:'exchange-rate',base:'CNY',quote:'USD',date:'latest',amount:100},{now:at,timeout:0});
+ assert.match(found.results[0].content,/14 USD/u);assert.equal(calls.length,1);assert.equal(calls[0].timeout,0);
+});
 test('节假日区分放假与补班，无条目不推断上班，全球数据保留地区和节日类别',async()=>{
  const run=(call,data)=>createPublicDataClient({request:d=>d.onload({status:200,responseText:JSON.stringify(data)})})(call,{now:at});
  const call={tool:'holidays',countryCode:'CN',year:2026,date:'2026-10-10'};

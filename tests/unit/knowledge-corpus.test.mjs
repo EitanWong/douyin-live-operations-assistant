@@ -52,3 +52,14 @@ test('完整音轨原文保留媒体种类和覆盖声明，重启后仍可复�
  const restarted=createKnowledgeCorpus({read:async k=>values[k],write:async(k,v)=>values[k]=v,now:()=>now});
  const [row]=await restarted.list('1','2');assert.equal(row.evidenceKind,'public-media');assert.match(row.coverage,/说话人未确认/);
 });
+
+test('长原文拆为可持久记录并分批同步，末尾条件仍可检索',async()=>{
+ const {retrieveSourceRecords}=await import('../../src/services/automatic-knowledge.js');
+ const values={},archived=[],corpus=createKnowledgeCorpus({read:async k=>values[k],write:async(k,v)=>{values[k]=structuredClone(v);},now:()=>now,archive:async batch=>archived.push(batch)});
+ const text=['一','二','三'].map(n=>`段落${n}。`.repeat(3000)).join('')+'岚叶试验只在20℃成立，不能加热。';
+ await corpus.remember('1','2',Array.from({length:4},(_,i)=>({url:`https://example.org/report-${i}`,text,at:now,evidenceKind:'public-page',coverage:'公开报告原文'})));
+ const rows=await corpus.list('1','2');assert.equal(rows.length,16);assert.ok(archived.length>=2);assert.ok(archived.every(batch=>batch.rows.length<=10));
+ const saved=rows.filter(row=>row.source.endsWith('report-0')).map(row=>row.text);
+ assert.equal(saved.reduce((sum,part)=>sum+part.length,0),text.length);assert.ok(saved.every(part=>text.includes(part)));
+ const found=retrieveSourceRecords(rows,'岚叶试验20℃',now);assert.ok(JSON.stringify(found).includes('不能加热'));
+});

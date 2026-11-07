@@ -20,14 +20,14 @@ test('同域独立密钥贯通持续研究、人物整理和关系图谱，重�
  let knowledgeWritten=false;
  const options={chrome:{permissions:{contains:async()=>true}},readRecord,writeRecord:async(k,v)=>values[k]=structuredClone(v),readConfigs:async()=>({'live-assistant:config:1':config}),knowledge:{handle:async(_room,action)=>{if(action==='version')return 0;if(action==='remember'){knowledgeWritten=true;return true;}return [];}},relationships:async(room,q)=>({...await library.query(room,q),...(knowledgeWritten ? {sources:{newResearchSource:true}} : {})}),fetch:async(url,opts)=>{
   const body=JSON.parse(opts.body);requests.push({url,model:body.model,key:opts.headers.Authorization});
-  const output=body.model==='deep' ? {action:'finish',answer:'已有原话，关系和爱好仍待核实。',citations:[]} : {facts:[{field:'interests',value:'陶瓷',evidence:[{turn:1,quote:'我喜欢陶瓷'}]}],relationships:[{name:'阿明',predicate:'朋友',negative:false,evidence:[{turn:1,quote:'阿明是我的朋友'}]}],analysis:[{text:'可能乐于交流陶瓷',limitations:'仅依据一次发言，不能判断心理状态。',evidence:[{turn:1,quote:'我喜欢陶瓷'}]}],knowledge:[],reply:'已整理原话。'};
+  const output=requests.length===1 ? {action:'finish',answer:'已有原话，关系和爱好仍待核实。',citations:[]} : {facts:[{field:'interests',value:'陶瓷',evidence:[{turn:1,quote:'我喜欢陶瓷'}]}],relationships:[{name:'阿明',predicate:'朋友',negative:false,evidence:[{turn:1,quote:'阿明是我的朋友'}]}],analysis:[{text:'可能乐于交流陶瓷',limitations:'仅依据一次发言，不能判断心理状态。',evidence:[{turn:1,quote:'我喜欢陶瓷'}]}],knowledge:[],reply:'已整理原话。'};
   return new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(output)}}]}));
  }};
  let host=createBackgroundAI({...options,store:createAgentTaskStore(storeOptions)});
  try{
   await host.wake();const task=await until(async()=>{const row=(await host.handle({type:'agent-list'},'1'))[0];return ['succeeded','failed'].includes(row?.status) && row;});
   assert.equal(task.status,'succeeded',task.error);assert.equal(task.result.profileUpdated,true,task.result.profileError);
-  assert.deepEqual(requests.map(r=>[r.model,r.key]),[['deep','Bearer deep-secret'],['profile','Bearer profile-secret']]);
+  assert.deepEqual(requests.map(r=>[r.model,r.key]),[['deep','Bearer deep-secret'],['deep','Bearer deep-secret']]);
   const graph=await library.query('1','小雨的爱好和朋友'),person=graph.entities.find(n=>n.name==='小雨');
   assert.ok(person.dossier.facets.some(r=>r.category==='interests' && r.text==='陶瓷'));
   assert.ok(person.dossier.analysis.some(r=>r.text.includes('可能') && r.limitations && r.evidence[0].quote==='我喜欢陶瓷'));

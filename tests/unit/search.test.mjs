@@ -36,7 +36,7 @@ test('博查按官方Web Search契约提交，统一输出标题、摘要、时�
   }});
   const result=await search('上海明天天气',{...SEARCH_DEFAULTS,enabled:true});
   assert.equal(details.url,'https://api.bochaai.com/v1/web-search');assert.equal(details.headers.Authorization,'Bearer bocha-key');
-  assert.deepEqual(JSON.parse(details.data),{query:'上海明天天气',count:3,summary:true,freshness:'noLimit'});
+  assert.deepEqual(JSON.parse(details.data),{query:'上海明天天气',count:10,summary:true,freshness:'noLimit'});
   assert.equal(result.provider,'bocha');assert.deepEqual(result.results[0],{index:1,title:'天气预报',url:'https://weather.test/',content:'上海明天晴',publishedAt:'2026-10-26'});
   await assert.rejects(search('天气',{...SEARCH_DEFAULTS,enabled:true,endpoint:'https://api.tavily.com/search'}),/web-search/);
 });

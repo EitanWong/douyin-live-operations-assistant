@@ -7,7 +7,7 @@ function profileURL(secUid){
  return accountSource(`https://www.douyin.com/user/${secUid}`).url;
 }
 // Priority describes observed interaction, never wealth, purchasing power or biography.
-export function rankAccountTargets({anchor,profiles=[],audience=[],publicRecords=[],now=Date.now(),limit=10,minDiamonds=100,minChats=3}={}){
+export function rankAccountTargets({anchor,profiles=[],audience=[],publicRecords=[],now=Date.now(),limit=0,minDiamonds=100,minChats=3}={}){
  const urls=new Map(),aliases=new Map();
  const observedProfiles=[...profiles,...audience.flatMap(r=>(r.secUids || []).map(secUid=>({secUid,id:r.key.startsWith('uid:') ? r.key.slice(4) : undefined}))),...publicRecords.flatMap(r=>[r.actor,r.target].filter(Boolean).map(a=>({...a,id:a.uid})))];
  const owners=new Map();
@@ -38,5 +38,6 @@ export function rankAccountTargets({anchor,profiles=[],audience=[],publicRecords
   }
  }
  const host=profileURL(anchor?.secUid);if(host)urls.set(host,{url:host,role:'anchor',reason:'current-anchor',chatCount:0,observedDiamonds:null});
- return [...urls.values()].sort((a,b)=>Number(b.role==='anchor')-Number(a.role==='anchor') || (b.priority || 0)-(a.priority || 0) || (b.observedDiamonds || 0)-(a.observedDiamonds || 0) || b.chatCount-a.chatCount || a.url.localeCompare(b.url)).slice(0,Math.max(1,Math.min(20,limit)));
+ const ranked=[...urls.values()].sort((a,b)=>Number(b.role==='anchor')-Number(a.role==='anchor') || (b.priority || 0)-(a.priority || 0) || (b.observedDiamonds || 0)-(a.observedDiamonds || 0) || b.chatCount-a.chatCount || a.url.localeCompare(b.url));
+ return limit>0 ? ranked.slice(0,limit) : ranked;
 }

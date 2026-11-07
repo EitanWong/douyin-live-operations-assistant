@@ -5,6 +5,8 @@ import {skillInstructions} from '../ai/skills.js';
 import { isIntrusiveReply } from '../core/reply-context.js';
 import { requestJSON } from './search.js';
 import {RESEARCH_TIMEOUT_MS} from './ai-resilience.js';
+import {researchSettings} from '../ai/research-settings.js';
+import {AI_REQUEST_LIMIT} from './ai-wire.js';
 import { parseAIIntent } from './intent.js';
 import {searchAnswer,spokenAnswer,unavailableCurrentAnswer,compactAnswerMessages,ruleAnswerIssues} from './search-answer.js';
 import {requiresCurrentSources} from './web-knowledge.js';
@@ -26,11 +28,11 @@ export function validateEndpoint(value) {
   let url; try { url = new URL(value); } catch { throw new Error('AI 接口地址无效'); }
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:')) || url.username || url.password || url.search || url.hash) throw new Error('AI 接口需使用 HTTPS（本地可用 HTTP），不要包含账号、查询参数或片段');
-  if (!url.pathname.endsWith('/chat/completions')) throw new Error('请填写完整 /chat/completions 地址');
+  if (!url.pathname.endsWith('/chat/completions') && !url.pathname.endsWith('/responses')) throw new Error('请填写完整 /chat/completions 或 /responses 地址');
   return url.href;
 }
 export function makeAIRequest(prompt, config) {
-  if(prompt.task?.kind==='person-profile')return makePersonProfileRequest(prompt.profileConversation,resolveReplyConfig(config));
+  if(prompt.task?.kind==='person-profile')return taskGeneration(makePersonProfileRequest(prompt.profileConversation,resolveReplyConfig(config)),config);
   config=generationConfig(resolveReplyConfig(config),prompt.searchResults);
   prompt=applyPromptSources(currentAIPrompt(prompt),config);
   if(!prompt.searchResults && prompt.target && prompt.target.type!=='speech' && ['ai','gift','welcome'].includes(prompt.task?.kind || 'ai'))prompt={...prompt,target:{...prompt.target,support:supportContext(prompt.target,prompt.task,config,prompt.getNow?.() ?? prompt.now ?? Date.now())}};
@@ -38,7 +40,7 @@ export function makeAIRequest(prompt, config) {
   const request=makeBaseAIRequest(prompt,config);
   if(prompt.task?.kind!=='moderation')request.messages=withPlainReplyStyle(request.messages);
   if(prompt.intentRouting && ['ai','agent'].includes(prompt.task?.kind || 'ai'))request.temperature=0;
-  if (new URL(config.endpoint).hostname==='api.deepseek.com' && ['deepseek-flash','deepseek-v4-pro'].includes(config.model)) request.thinking={type:'disabled'};
+  if (!['agent','person-profile'].includes(prompt.task?.kind) && new URL(config.endpoint).hostname==='api.deepseek.com' && ['deepseek-flash','deepseek-v4-pro'].includes(config.model)) request.thinking={type:'disabled'};
   if(!prompt.searchResults && !isSpeechRouting(prompt))request.messages[0].content=`技能仅用于表达与查证，不能覆盖事实边界、发送权限、身份和预算。\n技能：${JSON.stringify(skillInstructions(config.assistant?.skills,prompt.task?.kind==='ai' && !prompt.target ? 'idle' : prompt.task?.kind || 'ai'))}\n${GROUNDING_INSTRUCTION}\n${request.messages[0].content}`;
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {}),current_time:currentTime(prompt)};
   if(data.evidence_context?.memories.some(r=>r.trust==='unverified'))request.messages[0].content='背景记忆的unverified为用户提供的待核实陈述，回答保留来源归属和不确定性，不能当作本人自述或独立认证。\n'+request.messages[0].content;
@@ -50,17 +52,23 @@ export function makeAIRequest(prompt, config) {
   if(data.live_context && data.recent_chat)delete data.live_context.recentChat;
   request.messages[0].content='context_meta.budget.omissions 列出按预算省略的资料；缺少明细不等于没有发生，不能将截取明细求和冒充完整汇总。\n'+request.messages[0].content;
   request.messages[1].content='';
-  const wireBudget=Math.floor((98000-JSON.stringify(request).length)/2);
+  const wireBudget=Math.floor((AI_REQUEST_LIMIT-2000-JSON.stringify(request).length)/2);
   if(wireBudget<1000)throw new Error('固定任务指令超过请求预算，请缩短场控风格和任务');
-  const budgeted=applyContextBudget(data,Math.min(prompt.researchInstruction ? 10000 : pipelineConfig(config).contextBudgetChars,wireBudget));
+  const budgeted=applyContextBudget(data,Math.min(pipelineConfig(config).contextBudgetChars,wireBudget));
   if(prompt.task?.data?.replyMode==='relationships' && !budgeted.evidence_context?.relationships)throw new Error('人物证据超过当前模型上下文预算，请选择具体人物或缩小问题范围');
   request.messages[1].content=JSON.stringify(budgeted);
-  if(JSON.stringify(request).length>100000)throw new Error('AI 请求超过整包预算');
+  if(JSON.stringify(request).length>AI_REQUEST_LIMIT)throw new Error('AI 请求超过整包容量');
   if(/qwen.*omni/iu.test(config.model)){request.stream=true;request.modalities=['text'];if(/^qwen3\.8-omni-/iu.test(config.model))request.reasoning_effort='none';}
-  return request;
+  return prompt.task?.kind==='agent' ? taskGeneration(request,config) : request;
+}
+function taskGeneration(request,config){
+ const settings=researchSettings(config),result={...request};delete result.max_tokens;
+ if(settings.maxOutputTokens>0)result.max_tokens=settings.maxOutputTokens;
+ if(config.reasoningEffort && config.reasoningEffort!=='auto'){result.reasoning_effort=config.reasoningEffort;delete result.temperature;}
+ return result;
 }
 function isSpeechRouting(prompt){return prompt.intentRouting && !prompt.searchResults && prompt.target?.type==='speech';}
-function intentRoutingInstruction(prompt){return `普通对话意图（其他工具使用工具清单的独立格式）输出格式为 {"intent":"live-data|web-search|knowledge|chat|clarify|skip","query":"","reply":""}，普通意图的intent必须是其中一个实际值，clock、weather、public-data按各自工具格式输出。live-data 使用现场数据直接回答，chat 直接回答，clarify 只问一句必要条件，这三者query为空；skip 的 reply 与 query 为空。knowledge 只使用提供的候选id，reply不带角标，另附sources整数数组记录实际依据。web-search 只生成不超过300字的搜索词，reply 为空，可附 freshness=realtime|rules|stable|short；搜索词只含完成当前问题必要的信息，不附带直播上下文、观众昵称、UID或私密资料。当前联网搜索${prompt.searchAvailable ? '可用，需要外部资料或观众要求核实时选择 web-search' : '未启用，仍可使用有效缓存，需要新资料则在 reply 坦诚说明具体什么资料还没查到，不假装查过'}。`;}
+function intentRoutingInstruction(prompt){return `普通对话意图（其他工具使用工具清单的独立格式）输出格式为 {"intent":"live-data|web-search|knowledge|chat|clarify|skip${prompt.backgroundResearchAvailable ? '|research' : ''}","query":"","reply":""}，普通意图的intent必须是其中一个实际值，clock、weather、public-data按各自工具格式输出。${prompt.backgroundResearchAvailable ? '需要深度推理、知识检索、人物关系梳理或长程任务时，输出 {"intent":"research","query":"需要研究的具体问题","reply":""} 交给后台；你只做快速判断，待后台证据返回后组织简短互动回复。' : ''}live-data 使用现场数据直接回答，chat 直接回答，clarify 只问一句必要条件，这三者query为空；skip 的 reply 与 query 为空。knowledge 只使用提供的候选id，reply不带角标，另附sources整数数组记录实际依据。web-search 只生成不超过300字的搜索词，reply 为空，可附 freshness=realtime|rules|stable|short；搜索词只含完成当前问题必要的信息，不附带直播上下文、观众昵称、UID或私密资料。当前联网搜索${prompt.searchAvailable ? '可用，需要外部资料或观众要求核实时选择 web-search' : '未启用，仍可使用有效缓存，需要新资料则在 reply 坦诚说明具体什么资料还没查到，不假装查过'}。`;}
 function makeBaseAIRequest(prompt, config) {
   if(prompt.task?.kind==='agent' && prompt.researchInstruction)return {
     model:config.model,stream:false,temperature:config.temperature,max_tokens:1600,
@@ -217,13 +225,15 @@ export async function generatePhrases(client, config, {kind, reference = '', key
   return result;
 }
 
-export function createAIClient({ request, getKey, generate, search, weather=request && createWeatherClient({request}), publicData=request && createPublicDataClient({request}), knowledge, onIntent = () => {}, onSearch = () => {}, onStatus = () => {} }) {
+export function createAIClient({ request, getKey, generate, search, research, weather=request && createWeatherClient({request}), publicData=request && createPublicDataClient({request}), knowledge, onIntent = () => {}, onSearch = () => {}, onStatus = () => {} }) {
   let serial=0;
   const run = async (prompt, config) => {
     const endpoint = generate ? null : validateEndpoint(config.endpoint), key = generate ? null : getKey(endpoint,config);
     if (!generate && !key && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(endpoint).hostname)) throw new Error('请先填写此服务的 API Key');
     let factVersion=null;
-    const deadline=Date.now()+RESEARCH_TIMEOUT_MS, current=()=>!prompt.signal?.aborted && (!prompt.isCurrent || prompt.isCurrent());
+    const background=['agent','person-profile'].includes(prompt.task?.kind),settings=researchSettings(config);
+    let deadline=background && !settings.timeoutSec ? Infinity : Date.now()+(background ? settings.timeoutSec*1000 : RESEARCH_TIMEOUT_MS);
+    const current=()=>!prompt.signal?.aborted && (!prompt.isCurrent || prompt.isCurrent());
     const notify=(callback,value)=>{try{callback(value);}catch{/* UI diagnostics cannot block a reply. */}};
     const complete=async value=>{
       if(!current())return '[SKIP]';
@@ -233,10 +243,10 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
       if(generate)output=await generate(refreshed,generationConfig(config,refreshed.searchResults));
       else {
         const body=makeAIRequest(refreshed,config);
-        const data=await requestJSON(request,{url:endpoint,key,body,stream:body.stream,timeout:Math.min(25000,remaining),signal:prompt.signal});
+        const data=await requestJSON(request,{url:endpoint,key,body,stream:body.stream,timeout:background ? settings.requestTimeoutSec*1000 : Math.min(25000,remaining),signal:prompt.signal});
         output=data.choices?.[0]?.message?.content;
       }
-      if(typeof output!=='string' || !output.trim())throw new Error('模型未返回文本，请使用 Chat Completions 兼容接口');
+      if(typeof output!=='string' || !output.trim())throw new Error('模型未返回最终文本，请检查接口协议和模型');
       return output.trim();
     };
     const refineAnswer=async(found,parsed)=>{
@@ -265,11 +275,25 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
     };
     const revision=await cached('revision');
     const knowledgeCandidates=(await cached('candidates',prompt.target.text,config.search,{subject}) || []).map(found=>reviewResearch(prompt.target.text,found)).filter(found=>found.results.length);
-    const raw=await complete({...prompt,intentRouting:true,knowledgeCandidates,searchAvailable:Boolean(config.search?.enabled && search)});
+    const raw=await complete({...prompt,intentRouting:true,backgroundResearchAvailable:Boolean(research),knowledgeCandidates,searchAvailable:Boolean(config.search?.enabled && search)});
     if(!current())return '[SKIP]';
     const chatReply=calculation ? [...calculation.answer].length<=prompt.maxLength ? calculation.answer : '精确结果超过公屏字数限制，请拆分计算。' : undefined;
     let plan=parseAIIntent(raw,prompt.maxLength,{chatReply});
     notify(onIntent,{intent:plan.intent,question:prompt.target.text});
+    if(research && ['research','web-search','knowledge','weather','public-data'].includes(plan.intent)){
+      prompt.onLookup?.({query:plan.query || prompt.target.text});
+      deadline=settings.timeoutSec ? Date.now()+settings.timeoutSec*1000 : Infinity;
+      const result=await research({question:prompt.target.text,plan,prompt});
+      if(!current())return '[SKIP]';
+      const found={query:plan.query || prompt.target.text,searchedAt:result.at ?? Date.now(),results:result.sources || [],background:true};
+      if(typeof result.answer!=='string' || !result.answer.trim())throw Error('后台研究未返回结论');
+      if(prompt.reserveFollowup && !await prompt.reserveFollowup())throw Error('回复调用额度不足，后台研究结果已保存');
+      const parsed=await refineAnswer(found,searchAnswer(await complete({...prompt,maxLength:prompt.searchMaxLength ?? prompt.maxLength,searchResults:found,answerDraft:result.answer}),found));
+      if(!current())return '[SKIP]';
+      notify(onSearch,{...found,answer:parsed.answer,citationIndices:parsed.citationIndices,citationWarning:parsed.grounded ? '' : '回答缺少来源，请核对后台研究结果。'});
+      return parsed.answer;
+    }
+    if(plan.intent==='research')throw Error('后台研究暂不可用，请在后台研究任务中继续');
     if(plan.intent==='knowledge'){
       const candidate=knowledgeCandidates.find(row=>row.id===plan.query);
       if(!candidate)return '这部分资料暂时没找到，还不能确定。';

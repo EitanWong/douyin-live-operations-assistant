@@ -1,9 +1,10 @@
+import {AI_REQUEST_LIMIT,AI_RESPONSE_LIMIT} from '../src/services/ai-wire.js';
 import {knowledgeLifetime,canReuseSource} from '../src/services/web-knowledge.js';
 import {relationshipEvidenceVersion,relationshipResearchOptions,scopedRelationshipContext} from '../src/services/relationship-query.js';
 import {AgentHarness} from '../src/ai/harness.js';
 import {createAgentTaskStore} from '../src/ai/task-store.js';
 import {createResearchAgent,validateAgentInput} from '../src/ai/agent.js';
-import {RESEARCH_BUDGETS,subjectEpoch} from '../src/ai/audience-profile.js';
+import {subjectEpoch} from '../src/ai/audience-profile.js';
 import {resolveResearchProfile,checkResearchProfile} from '../src/ai/research-profile.js';
 import {readPublicPage,validatePublicURL} from '../src/ai/public-sources.js';
 import {createAIClient,validateEndpoint} from '../src/services/ai.js';
@@ -15,6 +16,7 @@ import {validatePublicDataURL} from '../src/services/public-data.js';
 import {retrieveSourceRecords} from '../src/services/automatic-knowledge.js';
 import {formatAccountEvidence} from '../src/ai/account-evidence.js';
 import {continuousEnabled,createContinuousResearch,researchEvidenceIsCurrent} from '../src/ai/continuous-research.js';
+import {researchLimits,researchSettings} from '../src/ai/research-settings.js';
 export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
  const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
  const request=details=>{
@@ -24,15 +26,15 @@ export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=as
    const url=weather ? details.operation==='weather' ? validateWeatherURL(details.url) : validatePublicDataURL(details.url) : searching ? validateSearchEndpoint(details.url,provider) : validateEndpoint(details.url);
    if(!await authorized(new URL(url).origin))throw new Error('请先在扩展图标中授权模型或搜索域名');
    if(controller.signal.aborted)throw new Error('请求已取消');
-   if(!weather && (typeof details.data!=='string' || details.data.length>100000))throw new Error('后台请求超过容量');
+   if(!weather && (typeof details.data!=='string' || details.data.length>AI_REQUEST_LIMIT))throw new Error('后台请求超过容量');
    if(searching)validateSearchBody(provider==='searxng' ? Object.fromEntries(new URLSearchParams(details.data)) : JSON.parse(details.data),provider);
-   timeout=setTimeout(()=>controller.abort(),Math.min(details.timeout || 25000,searching ? 30000 : 25000));
+   if(details.timeout>0)timeout=setTimeout(()=>controller.abort(),Math.min(details.timeout,2147483647));
    const response=await fetcher(url,{method:weather ? 'GET' : 'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:weather ? {} : details.headers,body:weather ? undefined : details.data});
-   const text=await response.text();if(text.length>200000)throw new Error('后台模型响应超过容量');details.onload({status:response.status,responseText:text,finalUrl:response.url});
+   const text=await response.text();if(text.length>AI_RESPONSE_LIMIT)throw new Error('后台模型响应超过容量');details.onload({status:response.status,responseText:text,finalUrl:response.url});
   }catch(error){details.onerror?.(error);}finally{clearTimeout(timeout);}})();
   return {abort(){controller.abort();details.onabort?.();}};
  };
- const profiles=writeRecord && createProfileInsightUpdater({read:readRecord,write:writeRecord,reserve:scope=>store.reserve(scope),client:async(prompt,ai)=>{
+ const profiles=writeRecord && createProfileInsightUpdater({read:readRecord,write:writeRecord,reserve:async scope=>{const config=await readRecord(`live-assistant:config:${scope.split(':')[0]}`);return store.reserve(scope,researchSettings(config?.ai).modelCallsPerHour);},client:async(prompt,ai)=>{
   const origin=new URL(ai.endpoint).origin,secret=taskModelSecret(ai,'profile'),key=(secret && await readRecord(secret)) || await readRecord(`live-assistant:api-key:${origin}`) || await readRecord(`live-assistant:media-key:${origin}`) || '';
   return createAIClient({request,getKey:()=>key})(prompt,ai);
  }});
@@ -40,7 +42,7 @@ export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=as
   const config=await readRecord(`live-assistant:config:${job.scope.split(':')[0]}`);
   if(!config?.ai?.enabled || String(config.anchorId)!==job.input.anchor)throw new Error('AI已关闭或主播已变化，请核对后重新提交');
   const ai=resolveAITaskConfig(config.ai,'research');job.input.ai=ai;
-  const room=job.scope.split(':')[0],subject=await resolveResearchProfile({room,anchor:job.input.anchor,subject:job.input.subject,epoch:job.input.subjectEpoch,ai,question:job.question,read:readRecord}),tier=subject?.tier || 'standard',limits=RESEARCH_BUDGETS[tier],relationshipContext=job.input.context?.relationshipContext,graphOptions=relationshipResearchOptions(relationshipContext),graph=relationships ? await relationships(room,job.question,graphOptions) : null;
+  const room=job.scope.split(':')[0],subject=await resolveResearchProfile({room,anchor:job.input.anchor,subject:job.input.subject,epoch:job.input.subjectEpoch,ai,question:job.question,read:readRecord}),tier=subject?.tier || 'standard',limits=researchLimits(ai),settings=researchSettings(ai),relationshipContext=job.input.context?.relationshipContext,graphOptions=relationshipResearchOptions(relationshipContext),graph=relationships ? await relationships(room,job.question,graphOptions) : null;
   if(subject && config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false)job.input.sources=[...new Set([...subject.sources,...job.input.sources])].slice(0,3);
   if(relationships){job.input.context ||= {};job.input.context.relationshipContext=scopedRelationshipContext(graph,relationshipContext);}
   const keys=new Map();for(const [kind,endpoint] of [['ai',ai.endpoint],['search',ai.search?.enabled ? ai.search.endpoint : null]])if(endpoint){const origin=new URL(endpoint).origin;keys.set(`${kind}:${endpoint}`,(kind==='ai' && taskModelSecret(config.ai,'research') && await readRecord(taskModelSecret(config.ai,'research'))) || await readRecord(`live-assistant:${kind==='ai'?'api-key':'search-key'}:${origin}`) || (kind==='ai' ? await readRecord(`live-assistant:media-key:${origin}`) : '') || '');}
@@ -67,10 +69,10 @@ export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=as
     const rows=await collectAccount(room,url,{signal}),at=Math.min(Date.now(),...rows.map(r=>r.observedAt).filter(Number.isFinite));
     return {url,title:rows[0]?.title || '抖音公开资料',...formatAccountEvidence(rows,job.question),at,expiresAt:Math.min(at+86400000,...rows.map(r=>r.expiresAt).filter(Number.isFinite))};
    }
-   return readPublicPage(url,{authorized,fetch:fetcher,signal});
+   return readPublicPage(url,{authorized,fetch:fetcher,signal,timeout:settings.requestTimeoutSec*1000});
   };
   const agent=createResearchAgent({tier,profile:subject?.profile,request,getKey:(kind,url)=>keys.get(`${kind}:${url}`) || '',readPublicPage:read,checkpointer:store.checkpointer,guard,
-   reserve:async scope=>{await store.reserve(`task:${scope}:${job.id}`,limits.modelCalls,{lifetime:true});return store.reserve(scope);},reserveSearch:async scope=>{await store.reserve(`task-search:${scope}:${job.id}`,limits.searches,{lifetime:true});return store.reserve(`search:${scope}`,20);},
+   reserve:async scope=>{await store.reserve(`task:${scope}:${job.id}`,limits.modelCalls,{lifetime:true});return store.reserve(scope,settings.modelCallsPerHour);},reserveSearch:async scope=>{await store.reserve(`task-search:${scope}:${job.id}`,limits.searches,{lifetime:true});return store.reserve(`search:${scope}`,settings.searchesPerHour);},
    knowledge:async query=>ai.assistant?.memoryEnabled===false || !knowledge ? [] : retrieveSourceRecords(await knowledge.handle(room,'list',{anchor:job.input.anchor}),query,Date.now(),{subject:job.input.subject,anchor:job.input.anchor}).flatMap(r=>r.results),
    relationships:(query,options)=>ai.assistant?.memoryEnabled===false ? null : relationships?.(room,query,options)});
   const result=await agent(job,options);
@@ -84,14 +86,14 @@ export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=as
   // corpus here would invalidate the evidence snapshot of their own answer.
   if(knowledge && !relationshipContext?.focus && ai.search?.rememberKnowledge!==false && ai.assistant?.memoryEnabled!==false){
    const sources=subject ? result.sources : result.sources.filter(r=>new URL(r.url).hostname!=='www.douyin.com');
-   try{result.knowledgeStored=await knowledge.handle(room,'remember',{anchor:job.input.anchor,...(subject ? {subject:job.input.subject,subjectEpoch:subject.epoch} : {}),sources,version:knowledgeVersion,lifetime:knowledgeLifetime(job.question,'stable')});}
+   try{result.knowledgeStored=false;for(let offset=0;offset<sources.length;offset+=10){const stored=await knowledge.handle(room,'remember',{anchor:job.input.anchor,...(subject ? {subject:job.input.subject,subjectEpoch:subject.epoch} : {}),sources:sources.slice(offset,offset+10),version:knowledgeVersion,lifetime:knowledgeLifetime(job.question,'stable')});result.knowledgeStored=stored || result.knowledgeStored;}}
    catch(error){result.knowledgeError=error.message;}
   }
   return result;
  };
- const harness=new AgentHarness({store,execute,resumable:Boolean(store.checkpointer)});
+ const harness=new AgentHarness({store,execute,resumable:Boolean(store.checkpointer),onSettled:()=>{queueMicrotask(()=>{void loop.tick().catch(()=>{});});}});
  const loop=createContinuousResearch({configs:readConfigs,read:readRecord,store,submit:job=>harness.submit({...job,input:validateAgentInput(job.input)}),
-  hasPending:scope=>harness.list(scope).some(j=>['queued','running'].includes(j.status)),
+  hasPending:scope=>[...harness.jobs.values()].some(j=>j.scope===scope && ['queued','running'].includes(j.status)),
   cancelDisabled:async configs=>{for(const job of harness.jobs.values())if(['queued','running'].includes(job.status)){
    const [room,anchor]=job.scope.split(':'),config=configs[`live-assistant:config:${room}`];
    if(!config?.ai?.enabled || String(config.anchorId)!==anchor || job.id.startsWith('auto-') && !continuousEnabled(config))await harness.cancel(job.id,job.scope);

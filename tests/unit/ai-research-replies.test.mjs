@@ -90,8 +90,9 @@ test('刷新中断未完成查询时保留明确反馈，不静默遗忘或重�
  }finally{f.engine.stop();g.engine.stop();}
 });
 
-test('长查询到期会反馈失败并清理任务，不永久等待',async t=>{
+test('手动设置长查询时限后，到期反馈失败并清理任务',async t=>{
  t.mock.timers.enable({apis:['setTimeout','Date']});const f=fixture();try{
+  f.engine.config.ai.assistant.research.timeoutSec=120;
   await f.chat('@助手 查询天气');f.advance(120001);t.mock.timers.tick(120001);await flush();await f.engine.tick();
   assert.ok(f.spoken.some(text=>text.includes('查询未成功')));assert.equal(f.engine.researchAI.size,0);
  }finally{f.engine.stop();}

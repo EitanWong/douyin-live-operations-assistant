@@ -121,11 +121,11 @@ test('质量汇总将内容检查失败计为待改进，重新运行和清空�
 });
 test('应用内入口贯通当前密钥、搜索、模型与预览，暂停场控也能测且没有发送',async()=>{
  const dom=page(),values=new Map([['live-assistant:config:demo',{ai:{search:{enabled:true},edge:{enabled:false}},automation:{autoStart:false}}],['live-assistant:api-key:https://api.deepseek.com','model-key'],['live-assistant:search-key:https://api.bochaai.com','search-key']]);
- let api,searches=0,calls=0;const sent=[];
+ let api,searches=0,calls=0,plans=0;const sent=[];
  boot({demo:true,get:(key,fallback)=>structuredClone(values.get(key)??fallback),set:async(key,value)=>values.set(key,structuredClone(value)),del:key=>values.delete(key),all:()=>Object.fromEntries(values),
   request:d=>{
    let output;if(d.operation==='search'){searches++;assert.equal(d.headers.Authorization,'Bearer search-key');output={code:200,data:{webPages:{value:[{name:'测量资料',url:'https://source.example/',summary:'赤鹤星周期73天。'}]}}};}
-   else{calls++;assert.equal(d.headers.Authorization,'Bearer model-key');const input=JSON.parse(JSON.parse(d.data).messages[1].content);output={choices:[{message:{content:input.web_search ? '赤鹤星周期73天。[1]' : '{"intent":"web-search","query":"赤鹤星周期","reply":""}'}}]};}
+   else{calls++;assert.equal(d.headers.Authorization,'Bearer model-key');const input=JSON.parse(JSON.parse(d.data).messages[1].content);output={choices:[{message:{content:input.task==='agent' ? JSON.stringify(++plans===1 ? {action:'search',query:'赤鹤星周期'} : {action:'finish',answer:'赤鹤星周期73天。',citations:[1]}) : input.web_search ? '赤鹤星周期73天。[1]' : '{"intent":"web-search","query":"赤鹤星周期","reply":""}'}}]};}
    d.onload({status:200,responseText:JSON.stringify(output)});
   },send:text=>sent.push(text),adapterFactory:()=>({status:{},sync(){},observeDOM(){},stopDOM(){},healthy:()=>true}),onReady:value=>api=value});
  try{
@@ -133,7 +133,8 @@ test('应用内入口贯通当前密钥、搜索、模型与预览，暂停场�
   api.panel.node('[data-playground-question]').value='赤鹤星周期是多少？';api.panel.node('[data-playground-run]').click();
   for(let i=0;i<100 && !api.panel.node('[data-playground-results]').textContent.includes('73天');i++)await flush();
   assert.equal(api.panel.node('[data-playground-answer]').textContent,'赤鹤星周期73天。');
-  assert.equal(calls,2);assert.equal(searches,1);assert.equal(api.engine.running,false);assert.equal(api.engine.queue.length,0);assert.deepEqual(sent,[]);
+  assert.equal(calls,4);assert.equal(plans,2);assert.equal(searches,1);assert.equal(api.engine.running,false);assert.equal(api.engine.queue.length,0);assert.deepEqual(sent,[]);
+  assert.equal([...values.keys()].some(key=>/ai-tasks|profile-insights|web-knowledge/.test(key)),false,'测试研究不写入真实任务或知识');
   assert.equal(api.engine.calls.length,0);assert.equal(api.engine.config.ai.enabled,false);
  }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 });

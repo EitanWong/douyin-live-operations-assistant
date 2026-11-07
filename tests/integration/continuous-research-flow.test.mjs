@@ -8,6 +8,7 @@ import {createAutomaticKnowledge,createKnowledgeMemory} from '../../src/services
 import {createWebKnowledge} from '../../src/services/web-knowledge.js';
 import {createAIClient} from '../../src/services/ai.js';
 import {mergeConfig} from '../../src/core/engine.js';
+import {AudienceMemory} from '../../src/ai/audience-memory.js';
 
 const until=async check=>{for(let i=0;i<200;i++){const result=await check();if(result)return result;await new Promise(r=>setTimeout(r,5));}assert.fail('研究流程未到达预期状态');};
 function fixture(){
@@ -29,7 +30,7 @@ test('网页研究入库使用原始采集时间，不被冗余公开来源副�
  }});
  try{
   await host.handle({type:'agent-submit',id:'original-source-date',question:'陶瓷茶具怎么清洗',input:{context:{},sources:['https://example.org/report']}},'1');
-  await until(async()=>{const row=(await host.handle({type:'agent-list'},'1'))[0];return row?.status==='succeeded';});
+  await until(async()=>{const row=(await host.handle({type:'agent-list'},'1')).find(row=>row.id==='original-source-date');return row?.status==='succeeded';});
   const rows=await f.corpus.list('1','10');assert.equal(rows.length,1);assert.equal(rows[0].at,start);
  }finally{await host.close();}
 });
@@ -48,6 +49,18 @@ test('新近对话→持久后台多步研究→原文知识→前台单次模�
   }});
   assert.equal(await reply({task:{kind:'ai'},target:{text:'赤鹤星周期'},maxLength:100},f.config.ai),'周期73天。');assert.equal(frontCalls,1);cache.close();
   await host.close();host=createBackgroundAI({...f.options,store:createAgentTaskStore(f.storeOptions),fetch:fetcher});await host.wake();assert.equal(models,2);assert.equal((await host.handle({type:'agent-list'},'1')).length,1);
+ }finally{await host.close();}
+});
+
+test('默认不限间隔的后台研究完成后立即接续新候选，无需等待alarm',async()=>{
+ const f=fixture();Object.assign(f.config.ai.assistant.research,{intervalSec:0,maxPerHour:0});
+ const memory=new AudienceMemory({anchor:'10'});
+ for(const id of [2,3,4])memory.observe({source:'socket',type:'chat',id:'q-'+id,text:'陶瓷茶杯问题'+id,user:{id:String(id),name:'观众'+id},receivedAt:Date.now()});
+ f.values['live-assistant:live-memory:1:10'].audience=memory.snapshot();
+ let models=0;const host=createBackgroundAI({...f.options,store:createAgentTaskStore(f.storeOptions),fetch:async()=>{models++;return response({action:'finish',answer:'现有信息尚不足，需要更多原文。',citations:[]});}});
+ try{
+  await host.wake();await until(async()=>{const rows=await host.handle({type:'agent-list'},'1');return rows.filter(row=>row.status==='succeeded').length===3;});
+  assert.equal(models,3);await host.wake();assert.equal(models,3,'同一原始对话不重复研究');
  }finally{await host.close();}
 });
 

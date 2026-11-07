@@ -2,11 +2,19 @@ import {REPLY_FREQUENCIES,REPLY_FREQUENCY_HELP} from '../ai/turn-taking.js';
 import {validateSkillPack} from '../ai/skills.js';
 import {aliEndpoints} from '../services/ai-pipeline.js';
 import {AI_SETTINGS_SECTIONS} from './ai-settings-template.js';
+import {parseAIConnection} from '../services/ai-connection-import.js';
 
 export class AISettings {
   constructor(root,{dirty,start,stop,clear,forget,error,checkNative,diagnose}) {
     this.root=root;this.dirty=dirty;this.error=error;this.skills=[];
     root.querySelector('[data-skill-install]').addEventListener('click',()=>{try{const skill=validateSkillPack(JSON.parse(root.querySelector('[data-skill-json]').value));if(this.skills.length>=8 && !this.skills.some(s=>s.id===skill.id))throw new Error('自定义技能最多8个');this.skills=this.skills.filter(s=>s.id!==skill.id).concat(skill);this.showSkills();dirty();}catch(reason){error(reason);}});
+    root.querySelector('[data-connection-apply]').addEventListener('click',()=>{try{this.importConnection();}catch(reason){error(reason);}});
+    root.querySelector('[data-research-unlimited]').addEventListener('click',()=>{
+      for(const field of root.querySelectorAll('[data-field^="ai.assistant.research."][type="number"]'))field.value='0';
+      for(const path of ['ai.search.maxPerHour','ai.accountCollection.maxPerHour','ai.accountCollection.intervalMinutes','ai.accountCollection.researchLimit'])root.querySelector(`[data-field="${path}"]`).value='0';
+      dirty();
+    });
+    root.querySelector('[data-connection-file]').addEventListener('change',async event=>{try{const file=event.target.files?.[0];if(!file)return;if(file.size>64000)throw Error('连接文件最多64000字节');root.querySelector('[data-connection-import]').value=await file.text();this.importConnection();}catch(reason){error(reason);}finally{event.target.value='';}});
     const slider=root.querySelector('[data-reply-slider]');
     const changeFrequency=()=>{root.querySelector('[data-field="ai.replyFrequency"]').value=REPLY_FREQUENCIES[Number(slider.value)][0];this.syncReplyFrequency();dirty();};
     slider.addEventListener('input',changeFrequency);slider.addEventListener('change',changeFrequency);
@@ -39,7 +47,17 @@ export class AISettings {
     root.querySelector('[data-media-clear]').addEventListener('click',()=>clear());
     for(const button of root.querySelectorAll('[data-media-forget]'))button.addEventListener('click',()=>{void Promise.resolve(forget(button.dataset.mediaForget)).catch(error);});
     for(const kind of ['vision','audio'])root.querySelector(`[data-field="ai.media.${kind}Endpoint"]`).addEventListener('input',()=>{root.querySelector(`[data-media-key="${kind}"]`).value='';});
-    for(const kind of ['research','profile'])root.querySelector(`[data-field="ai.taskModels.${kind}.endpoint"]`).addEventListener('input',()=>{root.querySelector(`[data-media-key="${kind}"]`).value='';});
+    root.querySelector('[data-field="ai.taskModels.research.endpoint"]').addEventListener('input',()=>{root.querySelector('[data-media-key="research"]').value='';});
+  }
+  importConnection(){
+    const root=this.root,value=parseAIConnection(root.querySelector('[data-connection-import]').value);
+    const set=(path,value)=>{const field=root.querySelector(`[data-field="${path}"]`);if(field.type==='checkbox')field.checked=value;else field.value=value;};
+    set('ai.taskModels.research.enabled',true);
+    for(const key of ['endpoint','model','reasoningEffort'])set('ai.taskModels.research.'+key,value[key]);
+    root.querySelector('[data-media-key="research"]').value=value.key;
+    root.querySelector('[data-connection-import]').value='';
+    root.querySelector('[data-connection-status]').textContent='连接已导入草稿；请核对模型、推理深度与密钥记住选项后保存。';
+    this.syncTaskModels();this.dirty();
   }
   syncReplyFrequency(){
     const value=this.root.querySelector('[data-field="ai.replyFrequency"]').value;
@@ -113,14 +131,14 @@ export class AISettings {
     this.root.querySelector('[data-searxng-help]').hidden=!local;
     this.root.querySelector('[data-search-endpoint]').open=local;
   }
-  syncTaskModels(){for(const kind of ['research','profile'])this.root.querySelector(`[data-task-connection="${kind}"]`).hidden=!this.root.querySelector(`[data-field="ai.taskModels.${kind}.enabled"]`).checked;}
+  syncTaskModels(){this.root.querySelector('[data-task-connection="research"]').hidden=!this.root.querySelector('[data-field="ai.taskModels.research.enabled"]').checked;}
   pipelineEndpoint(){
     const ai={pipeline:{mode:this.root.querySelector('[data-field="ai.pipeline.mode"]').value,region:this.root.querySelector('[data-field="ai.pipeline.region"]').value,workspaceId:this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim()}};
     return aliEndpoints(ai).chat;
   }
   showSkills(){const target=this.root.querySelector('[data-skill-list]');target.replaceChildren();for(const skill of this.skills){const row=target.ownerDocument.createElement('p');row.textContent=skill.name+' · '+skill.scenes.join('、');const button=target.ownerDocument.createElement('button');button.type='button';button.textContent='移除技能';button.addEventListener('click',()=>{this.skills=this.skills.filter(s=>s.id!==skill.id);this.showSkills();this.dirty();});row.append(button);target.append(row);}}
   populate(assistant){this.syncReplyFrequency();this.skills=structuredClone(assistant?.skills || []);this.showSkills();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.syncTaskModels();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
-  credentials(){return Object.fromEntries(['vision','audio','pipeline','research','profile'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
+  credentials(){return Object.fromEntries(['vision','audio','pipeline','research'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
   state({state,skipped=0,errors=0,totalTokens,lastFinalAt,phase}){
     this.mediaState=state;this.syncPerception();
     this.mediaPhase=state==='idle' ? undefined : phase || this.mediaPhase;phase=this.mediaPhase;

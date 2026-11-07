@@ -4,7 +4,8 @@ import {AI_SERVICE_GROUPS,selectAIServices,projectSharedAIServices} from './serv
 import {updatePersonProfile} from './services/person-profile.js';
 import {createRelationshipLibrary} from './ai/relationship-library.js';
 import {withRelationshipEvidence} from './services/relationship-query.js';
-import {createRelationshipResearch} from './services/relationship-research.js';
+import {createRelationshipResearch,createBackgroundResearch} from './services/relationship-research.js';
+import {subjectKeySchema} from './ai/audience-profile.js';
 import {createSpeechRecognizer} from './services/speech-routing.js';
 import {createAccountRefresh} from './services/account-refresh.js';
 import {rankAccountTargets} from './services/account-targets.js';
@@ -21,6 +22,8 @@ import {aiDiagnostics} from './ai/diagnostics.js';
 import {AIWorkbench} from './ui/ai-workbench.js';
 import {AIPlayground} from './ui/ai-playground.js';
 import {createAIPlayground} from './services/ai-playground.js';
+import {createPreviewResearch} from './services/preview-research.js';
+import {readPublicPage} from './ai/public-sources.js';
 import {createDirectStreamSource} from './browser/live-stream.js';
 import {resolveMediaConfig,resolveReplyConfig,aliEndpoints,pipelineConfig} from './services/ai-pipeline.js';
 import {createRealtimeCapture,createSDPExchange} from './browser/omni-realtime.js';
@@ -327,12 +330,19 @@ export function boot(options = {}) {
   const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
   const recordSearch=record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `${record.cached ? '知识缓存' : '联网搜索'}：${record.query} · ${record.results.length} 条来源`);};
   let aiStatusSequence=0;
+  let backgroundResearch;
+  const research=async({question,prompt})=>{
+    if(!backgroundResearch)throw Error('后台研究尚未就绪');
+    const memory=prompt.target?.memory,subject=subjectKeySchema.safeParse(memory?.key).success ? memory.key : null;
+    return backgroundResearch.run({question,context:prompt,...(subject ? {subject,subjectEpoch:memory.epoch || 0} : {}),signal:prompt.signal});
+  };
   const cloudClient = createAIClient({ request, getKey: (endpoint,ai) => ai.taskKind && taskModelSecret(ai,ai.taskKind) ? sessionKeys.get(taskModelSecret(ai,ai.taskKind)) ?? get(taskModelSecret(ai,ai.taskKind),'') : pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,knowledge:webKnowledge,
+    research,
     onStatus:status=>{if (engine && resolveReplyConfig(engine.config.ai).endpoint===status.endpoint && resolveReplyConfig(engine.config.ai).model===status.model && status.sequence>aiStatusSequence) {aiStatusSequence=status.sequence;panel?.setAIServiceStatus(status.error);}},
-    onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',weather:'天气查询',clock:'当前时间','public-data':'公共数据工具',knowledge:'复用知识',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
+    onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',research:'后台研究',weather:'天气查询',clock:'当前时间','public-data':'公共数据工具',knowledge:'复用知识',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:recordSearch
   });
-  const resilientClient=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,request,search:searchClient,knowledge:webKnowledge,onSearch:recordSearch})},onTrace:r=>{
+  const resilientClient=createResilientAI({cloud:cloudClient,edge:{...edge,reply:createLocalReply({edge,request,search:searchClient,research,knowledge:webKnowledge,onSearch:recordSearch})},onTrace:r=>{
     foundationSettings?.trace(r);if(r.provider==='edge'){panel?.setAIServiceStatus('');log('ai',`端侧兜底完成 · ${r.elapsedMs}ms`);}
   }});
   const relationshipLibrary=createRelationshipLibrary({all:options.all || (()=>Object.fromEntries((typeof GM_listValues==='function' ? GM_listValues() : []).filter(key=>/^live-assistant:(?:config|runtime|profile|live-memory):/u.test(key)).map(key=>[key,get(key,null)])))});
@@ -576,7 +586,7 @@ export function boot(options = {}) {
       if(keys.has(name) && (keys.get(name).key!==value.key || keys.get(name).remember!==value.remember))throw new Error('同域音视频服务请使用相同密钥和记住选项，或仅在一处填写');
       keys.set(name,value);
     }
-    for(const kind of ['research','profile']){const value=credentials[kind];if(value?.key && c.ai.taskModels[kind].enabled)keys.set(taskSecretKey(kind,c.ai.taskModels[kind].endpoint),value);}
+    const value=credentials.research;if(value?.key && c.ai.taskModels.research.enabled)keys.set(taskSecretKey('research',c.ai.taskModels.research.endpoint),value);
     for(const [name,value] of keys)sessionKeys.set(name,value.key);
     return async()=>{for(const [name,value] of keys)if(value.remember){await set(name,value.key);sessionKeys.delete(name);}else await del(name);};
   }
@@ -722,7 +732,7 @@ export function boot(options = {}) {
       webKnowledge,
       relationships:queryRelationships,
       profileTurn:async(input,c,key,remember,credentials)=>{
-        if(c.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveAITaskConfig(c.ai,'profile').endpoint).hostname))throw Error('仅本地模式下，请将人物整理模型配置为本机兼容接口');
+        if(c.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveAITaskConfig(c.ai,'profile').endpoint).hostname))throw Error('仅本地模式下，请将后台研究模型配置为本机兼容接口');
         await keepKey(c,key,remember);await prepareMediaKeys(c,credentials)();
         return updatePersonProfile(input,c.ai,cloudClient);
       },
@@ -903,10 +913,11 @@ export function boot(options = {}) {
       refresh(); refreshGifts(); void loadIncome({profiles:true});
     });
     void drainIncome();
+    const researchKey=(kind,endpoint)=>kind==='search' ? sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'') : taskModelSecret(engine.config.ai,'research') ? sessionKeys.get(taskModelSecret(engine.config.ai,'research')) ?? get(taskModelSecret(engine.config.ai,'research'),'') : pipelineConfig(engine.config.ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),'');
     const taskTransport=async()=>{
       if(options.agentTasks)return options.agentTasks;
       localAgentReady ||= import('./ai/local-agent.js').then(({createLocalAgentTasks})=>{
-        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:(kind,endpoint)=>kind==='search' ? sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'') : taskModelSecret(engine.config.ai,'research') ? sessionKeys.get(taskModelSecret(engine.config.ai,'research')) ?? get(taskModelSecret(engine.config.ai,'research'),'') : pipelineConfig(engine.config.ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''),get,set,relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results)});
+        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:researchKey,get,set,relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results)});
         return localAgentTasks;
       });
       return localAgentReady;
@@ -924,7 +935,11 @@ export function boot(options = {}) {
     },collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
       changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
     syncLocalModels();
-    const previewService=createAIPlayground({request,search:searchClient,knowledge:webKnowledge,edge,getConfig:()=>engine.config,getContext:c=>engine.aiContext(c),
+    backgroundResearch=createBackgroundResearch({tasks:taskTransport,getConfig:()=>engine.config,getContext:()=>engine.aiContext(),isCurrent:()=>!closed && !suspended && roomContext.current()});
+    const previewResearch=createPreviewResearch({request,getKey:researchKey,getConfig:()=>engine.config,
+      knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results),relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),
+      readPublicPage:(url,signal)=>readPublicPage(url,{authorized:async origin=>origin===location.origin,signal})});
+    const previewService=createAIPlayground({request,search:searchClient,research:previewResearch,knowledge:webKnowledge,edge,getConfig:()=>engine.config,getContext:c=>engine.aiContext(c),
         isCurrent:()=>!closed && !suspended && roomContext.current(),
         getKey:(endpoint,ai)=>pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),'')});
     panel.relationshipWorkspace.service=createRelationshipResearch({tasks:taskTransport,getConfig:()=>engine.config,

@@ -570,7 +570,8 @@ test('音视频后台接收有界媒体包，拒绝网页伪造、远程图片�
   assert.equal((await w.send(message,{frameId:1,tab:{url:'https://live.douyin.com/1'}})).ok,false);
   const remote=structuredClone(body);remote.messages[1].content[1].image_url.url='https://private.test/img.jpg';
   assert.equal((await w.send({...message,data:JSON.stringify(remote)})).ok,false);
-  assert.equal((await w.send({...message,type:'ai'})).ok,false,'普通文字AI仍保留原请求大小上限');
+  const oversized=JSON.stringify({model:'text-test',messages:[{role:'user',content:'x'.repeat(1000000)}]});
+  assert.equal((await w.send({...message,type:'ai',data:oversized})).ok,false,'文字AI容量放宽后仍拒绝超出整包容量的请求');
   const key='live-assistant:media-key:https://vision.test';
   assert.equal((await w.send({type:'set',key,value:'media-key'})).ok,true);
   const restarted=await worker(w.values,w.indexedDB);assert.equal((await restarted.send({type:'init'})).value[key],'media-key');

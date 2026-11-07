@@ -3,6 +3,7 @@ import {hostSpeechInstruction,EVERY_TURN_INSTRUCTION,DIRECT_TURN_INSTRUCTION} fr
 import {freshObservations,liveMoment,awaitingVisual,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
 import {speechTurn,conversationAtmosphere} from '../ai/interaction-context.js';
 import {ASSISTANT_DEFAULTS,validateAssistant} from '../ai/assistant-config.js';
+import {researchTimeoutMs} from '../ai/research-settings.js';
 import {liveFactFingerprint} from '../services/ai-context.js';
 import {offlineReply} from '../ai/offline-reply.js';
 import { IDIOM_GAME_DEFAULTS } from './idiom-game.js';
@@ -189,7 +190,7 @@ export function validateConfig(c) {
   if (typeof c.ai.search.enabled!=='boolean') throw new Error('联网搜索开关无效');
   if (typeof c.ai.search.rememberKnowledge!=='boolean') throw new Error('联网知识缓存开关无效');
   choice(c.ai.search.provider,['bocha','tavily','searxng'],'搜索服务');
-  for(const [key,min,max] of [['maxResults',1,5],['maxPerHour',1,3600]]) {
+  for(const [key,min,max] of [['maxResults',1,50],['maxPerHour',0,Number.MAX_SAFE_INTEGER]]) {
     range(c.ai.search[key],min,max,'联网搜索设置');
     if(!Number.isInteger(c.ai.search[key]))throw new Error('联网搜索设置必须为整数');
   }
@@ -1228,7 +1229,7 @@ export class Engine {
       this.log('ai','联网查询已接收，完成后自动回复');this.changed();queueMicrotask(()=>this.drainChatAI());
     };
     try {
-      const rawOutput=await withDeadline(signal=>this.ai({...prompt,signal},a),{signal:active.controller.signal,timeout:()=>active.lookup ? RESEARCH_TIMEOUT_MS : task.timeoutMs || (a.edge.autoTune ? LATENCY_DEFAULTS.totalMs : a.latency.totalMs)});
+      const rawOutput=await withDeadline(signal=>this.ai({...prompt,signal},a),{signal:active.controller.signal,timeout:()=>active.lookup ? researchTimeoutMs(a) : task.timeoutMs || (a.edge.autoTune ? LATENCY_DEFAULTS.totalMs : a.latency.totalMs)});
       if(!prompt.isCurrent())return;
       const output = task.transform ? task.transform(rawOutput) : rawOutput;
       // 拒绝明确的代主持和留存分析用语；昵称自身不参与措辞判断。
@@ -1236,7 +1237,7 @@ export class Engine {
       for (const name of [audienceAddress(event?.user,now),event?.user?.name].filter(Boolean)) wording = wording.split(name).join('');
       if (task.kind !== 'bot' && isIntrusiveReply(wording)) { if(active.lookup)active.notice('查询结果暂时无法发送，请稍后再试。');else fallback('AI 回复主动代主持或劝留'); return; }
       if (['gift','like','welcome'].includes(task.kind) && !validAudienceAI(output,event?.user,now)) { fallback('AI 称呼与公开资料不符'); return; }
-      if (this.running && epoch === this.epoch && this.now() - now < (active.lookup ? RESEARCH_TIMEOUT_MS : 45000) && proactiveCurrent()) {
+      if (this.running && epoch === this.epoch && this.now() - now < (active.lookup ? researchTimeoutMs(a) : 45000) && proactiveCurrent()) {
         if (chatContext!==null && (chatContext!==this.chatContextKey() || replyFacts && replyFacts!==liveFactFingerprint(this.aiContext().liveContext))) return;
         if (task.kind === 'ai' && task.data?.replyMode && (!this.config.ai.enabled || (task.data.replyMode === 'direct' ? !(this.config.ai.chatEnabled || this.config.bot.enabled) : !this.config.ai.chatEnabled))) return;
         if (task.targetJob) {

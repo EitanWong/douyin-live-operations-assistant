@@ -7,8 +7,7 @@ export const isAISecretKey=key=>AI_SECRET_PREFIXES.some(prefix=>key.startsWith(p
 // sampling, budgets and context preferences remain owned by each room.
 export const AI_SERVICE_GROUPS={
  reply:['endpoint','model'],
- research:['taskModels.research.enabled','taskModels.research.endpoint','taskModels.research.model'],
- profile:['taskModels.profile.enabled','taskModels.profile.endpoint','taskModels.profile.model'],
+ research:['taskModels.research.enabled','taskModels.research.endpoint','taskModels.research.model','taskModels.research.reasoningEffort'],
  pipeline:['pipeline.region','pipeline.workspaceId','pipeline.realtimeModel','pipeline.replyModel','pipeline.visionModel','pipeline.audioModel','pipeline.localVisionEndpoint','pipeline.localVisionModel'],
  vision:['media.visionEndpoint','media.visionModel'],
  audio:['media.audioEndpoint','media.audioModel'],
@@ -30,7 +29,7 @@ export function migrateAIServices(configs){
 export function projectSharedAIServices(config,services){
  const result=clone(config);if(!services)return result;
  result.ai ||= {};
- for(const values of Object.values(services))for(const [path,value] of Object.entries(values)){
+ for(const [name,values] of Object.entries(services))if(Object.hasOwn(AI_SERVICE_GROUPS,name))for(const [path,value] of Object.entries(values)){
   const keys=path.split('.'),key=keys.pop();let target=result.ai;
   for(const part of keys)target=target[part] ||= {};
   target[key]=clone(value);

@@ -1,6 +1,7 @@
 import {z} from 'zod';
 
 export const CORPUS_REFERENCE_LIMIT=3;
+export const SOURCE_TEXT_LIMIT=48000;
 const corpusPart='[a-f0-9]{64}:\\d{1,5}-\\d{1,5}';
 export const corpusReferenceSchema=z.string().regex(new RegExp(`^corpus:${corpusPart}(?:,${corpusPart}){0,${CORPUS_REFERENCE_LIMIT-1}}$`,'u'));
 
@@ -30,7 +31,7 @@ export function mergeSourcePassage(old,incoming,reading=false){
  const kept=reading ? parts.filter(p=>!['search-snippet','public-page'].includes(p.evidenceKind)) : parts;
  const contentParts=[],passages=[];let content='';
  for(const part of [...kept,incoming]){
-  const start=content.length+(content ? 1 : 0),remaining=6000-start;if(remaining<=0)break;
+  const start=content.length+(content ? 1 : 0),remaining=SOURCE_TEXT_LIMIT-start;if(remaining<=0)break;
   const text=part.content.slice(0,evidenceOffset(part.content,Math.min(part.content.length,remaining)));if(!text)continue;
   content+=(content ? '\n' : '')+text;passages.push({...metadata.parse(part),start,end:content.length});contentParts.push(part);
  }

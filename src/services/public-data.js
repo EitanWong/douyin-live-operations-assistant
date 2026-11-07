@@ -80,10 +80,10 @@ function airContent(data,place,now){
 }
 export function createPublicDataClient({request}){
  return async(input,{now=Date.now(),signal,timeout=8000}={})=>{
-  const call=publicCallSchema.parse(input),deadline=Date.now()+timeout,searches=[];
+  const call=publicCallSchema.parse(input),deadline=timeout>0 ? Date.now()+timeout : Infinity,searches=[];
   const get=async inputURL=>{
    const url=validatePublicDataURL(inputURL),remaining=deadline-Date.now();if(remaining<=0)throw new Error('公共数据查询超时');
-   const data=await requestJSON(request,{url,method:'GET',operation:'public-data',timeout:remaining,signal});searches.push({query:call.tool,count:1,url});return data;
+   const data=await requestJSON(request,{url,method:'GET',operation:'public-data',timeout:Number.isFinite(remaining) ? remaining : 0,signal});searches.push({query:call.tool,count:1,url});return data;
   };
   let url,content;
   if(call.tool==='exchange-rate'){

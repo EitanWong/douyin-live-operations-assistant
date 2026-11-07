@@ -288,7 +288,7 @@ if (room) {
       try {
         await storageMirror.writes;
         if(aborted)return;
-        const response = await message({requestId,type:['weather','public-data'].includes(details.operation) ? details.operation : details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data});
+        const response = await message({requestId,type:['weather','public-data'].includes(details.operation) ? details.operation : details.operation==='media-sdp' ? 'media-sdp' : details.operation==='search' ? 'search' : details.operation==='media' ? 'media' : 'ai',provider:details.searchProvider,url:details.url,headers:details.headers,data:details.data,timeout:details.timeout});
         if(!aborted)details.onload(response);
       } catch (e) { if(!aborted)details.onload({status:0,responseText:'',error:e.message}); }
     })();

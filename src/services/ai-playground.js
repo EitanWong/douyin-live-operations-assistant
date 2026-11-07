@@ -6,6 +6,8 @@ import {cleanMessage} from '../core/engine.js';
 import {isIntrusiveReply} from '../core/reply-context.js';
 import {DIRECT_TURN_INSTRUCTION,TURN_TAKING_INSTRUCTION} from '../ai/conversation-policy.js';
 import {evaluateReply} from '../ai/reply-evaluation.js';
+import {researchSettings,budgetReached} from '../ai/research-settings.js';
+import {resolveAITaskConfig} from './ai-task-config.js';
 export {AI_TEST_CASES} from '../ai/reply-evaluation.js';
 
 const fingerprint=c=>JSON.stringify([c.anchorId,c.ai,c.sending]);
@@ -29,11 +31,11 @@ function replyChecks(result,config,testCase){
 
 // A private preview client: shares reply/routing/search code, never the sender.
 // Its counters, conversation and diagnostics are separate from live operations.
-export function createAIPlayground({request,getKey,search,knowledge,edge,getConfig,getContext,isCurrent=()=>true,now=Date.now}){
- let busy=false,configVersion='',contextRevision=0;const calls={cloud:[],local:[]};
+export function createAIPlayground({request,getKey,search,research,knowledge,edge,getConfig,getContext,isCurrent=()=>true,now=Date.now}){
+ let busy=false,configVersion='',contextRevision=0;const calls={cloud:[],local:[],background:[]};
  const reserve=(kind,limit)=>{
   calls[kind]=calls[kind].filter(at=>now()-at<3600000);
-  if(calls[kind].length>=limit)throw new Error(`${kind==='cloud' ? '云端' : '本地'}测试每小时额度已用完`);
+  if(budgetReached(calls[kind].length,limit))throw new Error(`${kind==='background' ? '后台' : kind==='cloud' ? '云端' : '本地'}测试每小时额度已用完`);
   calls[kind].push(now());
  };
  return {async run({question,mode='direct',fresh=false,turns=[],signal,onProgress=()=>{},testCase,relationshipContext}={}){
@@ -71,11 +73,19 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
    try{return sources(controlled ? {query:args[0],searchedAt:now(),results:structuredClone(controlled.sources)} : await search(...args));}
    catch(error){record('sources','搜索未完成',error.message,'warning');throw error;}
   } : undefined;
-  const cloud=createAIClient({getKey,search:lookup,knowledge:readOnlyKnowledge,onIntent,onSearch,request:details=>{
+  const previewResearch=controlled || !research ? undefined : args=>research({...args,request:details=>{
+   if(!current())throw cancelled();
+   if(!['search','weather','public-data'].includes(details.operation)){
+    reserve('background',researchSettings(config.ai).modelCallsPerHour);result.calls.cloud++;result.calls.background=(result.calls.background || 0)+1;
+    record('model','调用后台研究模型',resolveAITaskConfig(config.ai,'research').model,'running');
+   }
+   return request(details);
+  }});
+  const cloud=createAIClient({getKey,search:lookup,research:previewResearch,knowledge:readOnlyKnowledge,onIntent,onSearch,request:details=>{
    if(['weather','public-data'].includes(details.operation))return request(details);
    if(!current())throw cancelled();reserve('cloud',config.ai.maxPerHour);result.calls.cloud++;record('model',result.intent ? '根据资料整理答案' : '调用回复模型',reply.model,'running');return request(details);
   }});
-  const local=edge && {...edge,reply:createLocalReply({edge,request,search:lookup,knowledge:readOnlyKnowledge,onSearch,onIntent})};
+  const local=edge && {...edge,reply:createLocalReply({edge,request,search:lookup,research:previewResearch,knowledge:readOnlyKnowledge,onSearch,onIntent})};
   const client=createResilientAI({cloud,edge:local,now,onTrace:row=>{result.provider=row.provider;if(row.provider==='edge')result.model=`本地 · ${config.ai.edge.textModel}`;record('provider','模型执行结果',`${row.provider==='edge' ? '本地' : '云端'} · ${{ok:'已完成',timeout:'超时',unavailable:'不可用'}[row.status] || row.status}`,row.status==='ok' ? 'succeeded' : 'warning');}});
   try{
    if(!current())throw cancelled();

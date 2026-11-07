@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {subjectKeySchema} from './audience-profile.js';
 import {validatePublicURL} from './public-sources.js';
-import {evidenceProvenance as provenance,sourcePassages} from './source-evidence.js';
+import {evidenceProvenance as provenance,sourcePassages,SOURCE_TEXT_LIMIT,evidenceOffset} from './source-evidence.js';
 const DAY=86400000;
 export const KNOWLEDGE_CORPUS_LIMITS=Object.freeze({rows:1000,chars:400000,sourceChars:12000});
 function bounded(rows){let size=0;return rows.toSorted((a,b)=>b.at-a.at || b.id.localeCompare(a.id)).filter(r=>{if(size+r.text.length>KNOWLEDGE_CORPUS_LIMITS.chars)return false;size+=r.text.length;return true;}).slice(0,KNOWLEDGE_CORPUS_LIMITS.rows).reverse();}
@@ -15,10 +15,15 @@ export function parseKnowledgeCorpus(value,now=Date.now()){
 }
 function originalPassages(input){
  return input.flatMap(source=>{
-  if(!source || source.passages===undefined)return [source];
+  if(!source)return [];
   const text=source.content ?? source.text;
-  if(typeof text!=='string' || text.length>6000)throw Error('来源片段原文无效');
-  return sourcePassages(source).map(({start,end,...metadata})=>({url:source.url,title:source.title,...metadata,text:text.slice(start,end)}));
+  if(source.passages===undefined && (typeof text!=='string' || !source.url))return [];
+  if(typeof text!=='string' || text.length>SOURCE_TEXT_LIMIT)throw Error('来源片段原文无效');
+  return sourcePassages({...source,content:text}).flatMap(({start,end,...metadata})=>{
+   const result=[];
+   while(start<end){const next=evidenceOffset(text,Math.min(end,start+KNOWLEDGE_CORPUS_LIMITS.sourceChars));result.push({url:source.url,title:source.title,...metadata,text:text.slice(start,next)});start=next;}
+   return result;
+  });
  });
 }
 // One background writer owns revisions. Raw public sources are stored, never

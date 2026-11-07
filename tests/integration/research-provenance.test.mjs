@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {IDBFactory,IDBKeyRange} from 'fake-indexeddb';
 import {createResearchGraph} from '../../src/ai/research-graph.js';
-import {compactResearchState} from '../../src/ai/research-context.js';
+import {compactResearchState,RESEARCH_CONTEXT_LIMITS} from '../../src/ai/research-context.js';
 import {createKnowledgeCorpus,corpusKey} from '../../src/ai/knowledge-corpus.js';
 import {createAgentTaskStore} from '../../src/ai/task-store.js';
 import {retrieveSourceRecords} from '../../src/services/automatic-knowledge.js';
@@ -21,7 +21,7 @@ async function merged(sources=[audio,visual]){
  return createResearchGraph({tier:'deep',knowledge:async query=>[sources[Number(query)]],plan:async()=>++calls<=sources.length ? JSON.stringify({action:'knowledge',query:String(calls-1)}) : complete()}).run({id:'merge'});
 }
 function assertDisclosed(view,source){
- assert.ok(JSON.stringify(view).length<=6500);assert.ok(view.evidence.length<=3);
+ assert.ok(JSON.stringify(view).length<=RESEARCH_CONTEXT_LIMITS.workingChars);assert.ok(view.evidence.length<=RESEARCH_CONTEXT_LIMITS.passages);
  for(const row of view.evidence){
   const passage=source.passages.find(p=>p.start<=row.start && p.end>=row.end);assert.ok(passage,'窗口不能跨过证据边界');
   assert.equal(row.content,source.content.slice(row.start,row.end));assert.equal(row.coverage,passage.coverage);assert.equal(row.evidenceKind,passage.evidenceKind);
@@ -113,11 +113,11 @@ test('混合范围在长目录和转义字符压力下仍与片段一起披露�
  const sources=Array.from({length:10},(_,i)=>({...source,index:i+1,url:`https://example.org/${i}`,title:'\u0000'.repeat(160)}));
  const view=compactResearchState({sources,observations:[],focus:{source:10,offset:source.passages[1].start}},'贝雷帽');assertDisclosed(view,source);
  assert.ok(view.evidence.some(r=>r.index===10 && r.coverage.endsWith('未验证身份')));
- const long=await merged([{...audio,text:'甲'.repeat(5999)+'😀完整结尾'}]);
- assert.equal(long.sources[0].content.length,5999);assert.ok(long.sources[0].content.endsWith('甲'));
- assert.equal(long.sources[0].passages[0].end,5999);
- const page=await createResearchGraph({initialSources:[url],read:async()=>({url,text:'甲'.repeat(5999)+'😀完整结尾'}),plan:async()=>complete()}).run({id:'unicode-page'});
- assert.equal(page.sources[0].content.length,5999);assert.equal(page.publicSources[0].text.length,5999);
+ const long=await merged([{...audio,text:'甲'.repeat(47999)+'😀完整结尾'}]);
+ assert.equal(long.sources[0].content.length,47999);assert.ok(long.sources[0].content.endsWith('甲'));
+ assert.equal(long.sources[0].passages[0].end,47999);
+ const page=await createResearchGraph({initialSources:[url],read:async()=>({url,text:'甲'.repeat(47999)+'😀完整结尾'}),plan:async()=>complete()}).run({id:'unicode-page'});
+ assert.equal(page.sources[0].content.length,47999);assert.equal(page.publicSources[0].text.length,47999);
 });
 
 test('第二批归档失败后删除待确认片段，其他原文仍可自动续传',async()=>{

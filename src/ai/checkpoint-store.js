@@ -44,8 +44,8 @@ export class BrowserCheckpointSaver extends BaseCheckpointSaver {
    await this.db.checkpoints.where('thread').equals(thread).delete();await this.db.checkpointWrites.where('thread').equals(thread).delete();
   });
  }
- async prune(before){
+ async prune(before,retained=new Set()){
   await this.db.open();const expired=await this.db.checkpoints.where('at').below(before).toArray();
-  for(const thread of new Set(expired.map(r=>r.thread)))await this.deleteThread(thread);
+  for(const thread of new Set(expired.map(r=>r.thread)))if(!retained.has(thread))await this.deleteThread(thread);
  }
 }

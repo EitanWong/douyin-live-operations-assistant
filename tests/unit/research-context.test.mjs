@@ -31,36 +31,36 @@ test('Agent可按来源编号展开未选中的原文窗口，不再联网，不
 });
 
 test('每轮压缩旧轨迹为执行摘要，完整证据保留且重复压缩幂等',async()=>{
- const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const {compactResearchState,RESEARCH_CONTEXT_LIMITS}=await import('../../src/ai/research-context.js');
  const source={index:1,url:'https://example.org/tea',title:'陶瓷茶具',content:'陶瓷茶具只限冷水，不可加热。',at:Date.now()};
  const state={modelCalls:2,sources:[source],observations:[],executed:[],focus:null};
  for(let i=0;i<60;i++){
   state.observations.push({action:'search',query:`线索${i}`,output:{error:'暂未找到'.repeat(300)}});
-  const view=compactResearchState(state,'陶瓷茶具如何清洗');assert.ok(JSON.stringify(view).length<=6500);
+  const view=compactResearchState(state,'陶瓷茶具如何清洗');assert.ok(JSON.stringify(view).length<=RESEARCH_CONTEXT_LIMITS.workingChars);
   assert.equal(view.progress.completedTools,i+1);assert.match(view.evidence[0].content,/只限冷水，不可加热/);
  }
  const original=JSON.stringify(state);assert.deepEqual(compactResearchState(state,'陶瓷茶具如何清洗'),compactResearchState(state,'陶瓷茶具如何清洗'));assert.equal(JSON.stringify(state),original);
 });
 
 test('异常长标题与转义字符也受工作集硬预算约束，仍可按编号找回证据',async()=>{
- const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const {compactResearchState,RESEARCH_CONTEXT_LIMITS}=await import('../../src/ai/research-context.js');
  const state={sources:Array.from({length:8},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'\u0000'.repeat(160),content:'陶瓷茶具不可加热。',at:Date.now()})),observations:[],focus:{source:8,offset:0}};
- const view=compactResearchState(state,'陶瓷茶具');assert.ok(JSON.stringify(view).length<=6500);assert.equal(view.catalog.length,8);assert.ok(view.evidence.some(r=>r.index===8 && r.content.includes('不可加热')));
+ const view=compactResearchState(state,'陶瓷茶具');assert.ok(JSON.stringify(view).length<=RESEARCH_CONTEXT_LIMITS.workingChars);assert.equal(view.catalog.length,8);assert.ok(view.evidence.some(r=>r.index===8 && r.content.includes('不可加热')));
 });
 
 test('完整来源的长覆盖声明和异常发布日期不会挤掉原文或突破工作集预算',async()=>{
- const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const {compactResearchState,RESEARCH_CONTEXT_LIMITS}=await import('../../src/ai/research-context.js');
  const state={sources:Array.from({length:10},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'\u0000'.repeat(160),content:'陶瓷茶具不可加热。',at:Date.now(),evidenceKind:'public-page',publishedAt:'\u0000'.repeat(80),coverage:'\u0000'.repeat(500)})),observations:[]};
- const view=compactResearchState(state,'陶瓷茶具');assert.ok(JSON.stringify(view).length<=6500);
+ const view=compactResearchState(state,'陶瓷茶具');assert.ok(JSON.stringify(view).length<=RESEARCH_CONTEXT_LIMITS.workingChars);
  assert.equal(view.catalog.length,10);assert.ok(view.evidence.some(r=>r.content.includes('不可加热')));
 });
 
 test('研究工作集将完整证据范围与原文一起披露，目录压缩不能丢掉单帧和未知说话人限制',async()=>{
- const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const {compactResearchState,RESEARCH_CONTEXT_LIMITS}=await import('../../src/ai/research-context.js');
  const coverage='单张关键帧，图片内三个拼接画格无独立时间戳；机器观察待核实；'+'采样限制。'.repeat(45)+'说话人未知，不证明身份、心理或连续动作。';
  const state={sources:Array.from({length:10},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'\u0000'.repeat(160),content:'深色帽子；三帧画面内容一致，无变化。',at:1000,evidenceKind:'public-media',coverage})),observations:[],focus:{source:8,offset:0}};
  const before=structuredClone(state),view=compactResearchState(state,'帽子和动作变化');
- assert.ok(JSON.stringify(view).length<=6500);
+ assert.ok(JSON.stringify(view).length<=RESEARCH_CONTEXT_LIMITS.workingChars);
  const evidence=view.evidence.find(row=>row.index===8);assert.ok(evidence);
  assert.equal(evidence.evidenceKind,'public-media');assert.equal(evidence.coverage,coverage);
  assert.equal(evidence.content,state.sources[7].content.slice(evidence.start,evidence.end));
@@ -70,11 +70,35 @@ test('研究工作集将完整证据范围与原文一起披露，目录压缩�
 });
 
 test('覆盖说明的转义字符过长时省略整条证据，不截掉范围说明后单独发送原文',async()=>{
- const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const {compactResearchState,RESEARCH_CONTEXT_LIMITS}=await import('../../src/ai/research-context.js');
  const coverage='\u0000'.repeat(490)+'说话人未知';
  const sources=Array.from({length:10},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'帽子',content:'深色帽子可见。',at:1000,evidenceKind:'public-media',coverage}));
  const view=compactResearchState({sources,observations:[],focus:{source:10,offset:0}},'帽子');
- assert.ok(JSON.stringify(view).length<=6500);assert.equal(view.catalog.length,10);
- assert.ok(view.evidence.some(row=>row.index===10));assert.ok(view.evidence.length<3);
+ assert.ok(JSON.stringify(view).length<=RESEARCH_CONTEXT_LIMITS.workingChars);assert.equal(view.catalog.length,10);
+ assert.ok(view.evidence.some(row=>row.index===10));assert.ok(view.evidence.length<=RESEARCH_CONTEXT_LIMITS.passages);
  for(const row of view.evidence){assert.equal(row.coverage,coverage);assert.equal(row.evidenceKind,'public-media');}
+});
+
+test('不限来源的研究将目录分页，所有原文保持可按编号展开，工作集不随总来源数膨胀',async()=>{
+ const {compactResearchState,RESEARCH_CONTEXT_LIMITS}=await import('../../src/ai/research-context.js');
+ const sources=Array.from({length:1200},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'来源'+i,content:'陶瓷茶具不可加热。',at:1000}));
+ const state={sources,observations:[],focus:{source:1200,offset:0}},view=compactResearchState(state,'陶瓷茶具');
+ assert.ok(JSON.stringify(view).length<=RESEARCH_CONTEXT_LIMITS.workingChars);
+ assert.equal(view.catalogPage.total,1200);assert.ok(view.catalogPage.shown<1200);assert.ok(view.catalog.some(row=>row.index===1200));
+ assert.ok(view.evidence.some(row=>row.index===1200));
+ const first=compactResearchState({...state,catalogOffset:0},'陶瓷茶具');assert.equal(first.catalog[0].index,1);assert.ok(first.catalogPage.nextOffset>0);
+ assert.equal(sources.length,1200);assert.equal(sources[1199].content,'陶瓷茶具不可加热。');
+});
+
+test('研究可通过目录工具翻回旧来源，再按编号展开证据',async()=>{
+ const sources=Array.from({length:600},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'来源'+i,content:i ? '其他资料' : '陶瓷茶具不可加热。',at:Date.now()}));let calls=0;
+ const graph=createResearchGraph({question:'陶瓷茶具',plan:async state=>{
+  calls++;
+  if(calls===1){assert.ok(state.workingContext.catalogPage.offset>0);return JSON.stringify({action:'catalog',offset:0});}
+  assert.equal(state.workingContext.catalog[0].index,1);
+  if(calls===2)return JSON.stringify({action:'inspect',source:1,offset:0});
+  assert.ok(state.workingContext.evidence.some(row=>row.index===1 && row.content.includes('不可加热')));
+  return JSON.stringify({action:'finish',answer:'不可加热。',citations:[1]});
+ }});
+ const result=await graph.run({id:'catalog-browse',seed:{sources}});assert.equal(result.sources.length,600);assert.equal(calls,3);assert.equal(result.answer,'不可加热。');
 });
