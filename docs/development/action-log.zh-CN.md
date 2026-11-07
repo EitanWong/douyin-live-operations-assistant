@@ -3832,3 +3832,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 
 - 最终完整JavaScript回归：以现有Homebrew Python环境执行 node --test --test-concurrency=2 tests，**1964/1964通过**，0失败/取消/跳过，410245.212625ms，exit0。源码冻结后未再改产品逻辑；构建、索引/语法check和差异空白检查通过。未把本地通过称为远端CI通过。
 - 同一固定probe输入：BASELINE三组昵称各2个节点、三条关系、有同名提示、补全名仍为神秘人；MODIFIED各1个节点、三条关系、歧义清除、补全名为Lucy小露；独立副本ROLLBACK完全恢复BASELINE，三次均exit0。回滚恢复764份父提交文件SHA并移除新增文件，补丁重建逐文件一致，再次应用修改后输出与MODIFIED完全一致。角色逐项重开、tar/UTF-8解析通过；探针与UID均为合成夹具，没有核验或改写用户实际直播库。
+
+- 实际提交与推送：功能提交 **8dda9880cf72459b3715d249125c27f415f1bcad** 已普通push至origin/dev（bf53254→8dda988，exit0），git ls-remote精确一致；未修改main、版本或标签。本轮只完成功能与本地验收，未重载用户现有Chrome扩展、未声称远端CI通过。随后仅追加交付回执并普通推送dev，精确最终文档SHA及角色哈希写同一VERIFICATION/roles.json。
