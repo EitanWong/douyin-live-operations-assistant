@@ -167,10 +167,12 @@ class PublicMediaWorker:
             if job['analysisVersion'].endswith('+keyframes-v1'):
                 if self.visual is None:
                     raise ValueError('MEDIA_VISUAL_FAILED')
+                await finish_thread(self.asr.unload)
                 state = await self.db('configure_visual', job['id'], job['lease'], duration)
                 for position in state['positionsMs'][state['completed']:]:
                     await self.db('fenced', job['id'], job['lease'])
                     frame = await extract_keyframe(self.ffmpeg, path, position)
+                    self.asr.check_priority()
                     observation = await self.visual(job, frame)
                     await self.db('checkpoint_visual', job['id'], job['lease'], position, frame.at_ms, observation['text'], observation['model'])
             await self.db('complete', job['id'], job['lease'], duration_ms=duration)

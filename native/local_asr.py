@@ -95,12 +95,17 @@ class LocalASR:
         if self.lease and self.lease.preempted():
             raise ValueError('LOCAL_ASR_PREEMPTED')
 
-    def close(self, phase='unprepared'):
+    def unload(self, phase='unprepared'):
+        # Drop speech weights without opening the shared lease during visual work.
         with self.operation_lock:
             self.recognizer = None
+            self.status['phase'] = phase
+
+    def close(self, phase='unprepared'):
+        with self.operation_lock:
+            self.unload(phase)
             if self.lease:
                 self.lease.close()
-            self.status['phase'] = phase
 
     def reserve(self, priority='live'):
         if priority not in ('live', 'background'):

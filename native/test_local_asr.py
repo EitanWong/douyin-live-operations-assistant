@@ -2,6 +2,7 @@ import base64
 import io
 from pathlib import Path
 import tempfile
+import threading
 import types
 import unittest
 import wave
@@ -11,6 +12,53 @@ from local_asr import pcm16, clean_transcript, performance_phase, LocalASR
 from model_lease import ModelLease
 
 class LocalASRContracts(unittest.TestCase):
+    def test_unload_releases_weights_but_holds_model_lease_and_requires_prepare_again(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runtime = LocalASR(folder)
+            runtime.reserve('background')
+            runtime.recognizer = types.SimpleNamespace()
+            runtime.status['phase'] = 'ready'
+            descriptor = runtime.lease.fd
+            try:
+                runtime.unload()
+                runtime.unload()
+                self.assertIsNone(runtime.recognizer)
+                self.assertEqual(runtime.status['phase'], 'unprepared')
+                self.assertEqual(runtime.lease.fd, descriptor)
+                other = ModelLease(folder)
+                try:
+                    with self.assertRaisesRegex(ValueError, 'ASR_BUSY'):
+                        other.acquire('background')
+                finally:
+                    other.close()
+                with self.assertRaisesRegex(ValueError, 'LOCAL_ASR_NOT_READY'):
+                    runtime.infer('not decoded')
+            finally:
+                runtime.close()
+            self.assertIsNone(runtime.lease.fd)
+
+    def test_unload_waits_for_the_current_model_operation_before_releasing_weights(self):
+        runtime = LocalASR(None)
+        runtime.recognizer = types.SimpleNamespace()
+        entered, finished = threading.Event(), threading.Event()
+        def unload():
+            entered.set()
+            runtime.unload()
+            finished.set()
+        thread = threading.Thread(target=unload)
+        try:
+            with runtime.operation_lock:
+                thread.start()
+                self.assertTrue(entered.wait(1))
+                self.assertFalse(finished.wait(.02))
+                self.assertIsNotNone(runtime.recognizer)
+            thread.join(1)
+            self.assertTrue(finished.is_set())
+            self.assertIsNone(runtime.recognizer)
+        finally:
+            thread.join(1)
+            runtime.close()
+
     def test_uninstalled_model_is_unavailable_without_loading_weights(self):
         runtime = LocalASR(None)
         self.assertFalse(runtime.status['available'])

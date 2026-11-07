@@ -42,6 +42,9 @@ class FakeASR:
     def close(self):
         self.closed = True
 
+    def unload(self):
+        pass
+
 
 @unittest.skipUnless(shutil.which('ffmpeg'), 'real FFmpeg required')
 class PublicMediaWorkerContracts(unittest.IsolatedAsyncioTestCase):
