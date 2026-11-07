@@ -3684,3 +3684,10 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 清理：确认本任务独立 venv 无运行任务后删除，回收 57622513 字节；安装、原生与全测原始日志保留 output/relationship-dev-push-2026-11-07。其他工作树、原生安装和用户数据保持原状。最后仅提交验收文档和本回执，同步 dev 与原功能分支；最终远端 SHA 见完成报告。未修改 main、版本或标签；crapper/dryer/mutator 不可用，三项未执行。
 
 - 最终合并推送：功能集成c906bce及验收文档合并d1392dcf05621e915f43560ad35ad199362a1171已普通push成功（exit0，cfae3ae→d1392dc），git ls-remote精确一致。文档合并后的冻结断言曾将远端验收JSON也计为源码，因预期文档变化退出1；按路径复核唯一变化是docs/reviews/relationship-workbench-2026-11-07.json，45份实际源码/测试/配置/索引不变。该诊断错误与更正回执保留，不声称全部46份不变；未更改或放宽功能验证。此后只补提交/推送回执，最终精确HEAD和CI结论记录到本机checkpoint及同一VERIFICATION。
+
+## 2026-11-07 · Chrome 现有扩展更新核对
+
+- 用户授权更新 Chrome。读取本任务工作树和既有扩展构建入口；首个带不存在通配符的 rg 在 zsh 展开阶段退出 1，随后改用实际文件列表，未触发文件修改。通过 Chrome 的本机扩展元数据仅提取本应用的安装目录与 ID，未输出其他扩展或配置内容。目标为 Default 配置中的 ochlmfoecapadlllbeodlpnnlpehjdla，目录为主项目 dist/chrome-extension。
+- 原生 Chrome UI 快捷键未打开新标签而显示查找框；后续关闭查找并读取状态的调用超时，未据此宣称完成导航。改用浏览器工具打开扩展管理页时，URL 安全策略明确拒绝 chrome://extensions（只允许 http/https）；停止该访问路径，没有通过原生界面、CDP 或脚本绕过。已请求用户手动点击重新加载并刷新直播页，尚待确认。
+- 检查后发现主项目已是后续 dev 5e8fea1，包含原关系图谱和新增有来源人物对话；本任务分支快进到同一提交后正式构建成功。按文件 SHA-256 核对 Chrome 目录 **41/41 与最新构建完全一致**，版本 0.1.3，permissions、host_permissions、optional_host_permissions、CSP 和扩展 key 均一致。已有两个未被 manifest 引用的开发文件保留，未覆盖正在使用的文件或删除用户配置。主目录开发锁 PID 已失效、没有活动 dev 写入者。
+- 证据：output/chrome-relationship-update-2026-11-07/verification.json；构建日志 /tmp/relationship-chrome-build-2026-11-07.log。本轮没有运行源码变更，未重跑完整测试或重建索引；crapper/dryer/mutator 不可用，未执行。不把文件相同当作 Chrome 运行实例已重载；最终是否加载新图谱仍待用户手动操作后检查。日志提交和 dev 推送回执由最终报告注明。
