@@ -3309,3 +3309,6 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 原生往返补验：实际 createPublicMediaVisualAnalyzer → native framing → PublicMediaJobs → SQLite → native framing 往返准确保留 1200 字符/3601 UTF-8 字节、末尾 emoji；上游孤立代理项转为 U+FFFD 后 3 字符/9 字节往返一致。输入脚本、命令和字面输出扩展同一账本，不建立替代角色。
 - CI 失败与修正：42326384275 原生 101 通过/1 失败，位置是新增断点测试 self.assertEqual(resumed,[1000])，实际为 [1100]，不是前述旧直播 DECODE_FAILED。硬编码的寻址/时长假设与真实 PTS 不兼容。将音频夹具改为 2.1 秒、视频仍 2 秒，在本机先原样复现 [1100] != [1000]；再以中断时已经实际解码的那一帧作为恢复目标，仍严格核对只恢复一帧、首帧不重跑、持久时间/正文/模型标识、完整覆盖和空结果行为。只改测试，未改生产抽帧或放宽时间阈值；随后原生全量 102/102，ResourceWarning 升格错误。
 - 本次诊断命令更正：gh api 误用了不存在的 --allow-ansi（退出 1），改为 CLI 支持的 --allow-escape-sequences 后取得真实已结束 job 日志；原错误回执保留。agent:impact 对 native/test_public_media_visual.py 退出 1，原因是当前索引只收录 JS 模块；已直接核对 Python 源码与运行完整原生测试，不把该查询算作通过。JS 源码与打包产物自 Unicode 修正后未再改变，原 CI 的 JavaScript 全量仍在运行，最终结果后续补记。
+
+- 修正推送与最终 CI：a0bfa585a0d4eeba769e2dc084326ff92323dcd7 已普通推送 origin/dev、完整远端 SHA 一致。CI 42326790987 completed/success，最终源码 JavaScript 1808/1808、原生 102/102，0 失败/取消/跳过；索引核对、build/check、Chrome 扩展打包与产物上传通过。JavaScript 自报 437020.289074ms，保留字面时间，不作为产品性能基准。首轮原生失败、本机红测与最终通过分开留存，未隐藏重试。
+- 本次回执仅更新已核实实施/修正 SHA、CI 和下一动作；85 个实现文件与四角色哈希保持一致，未部署、重载宿主、加载真实模型或发送弹幕。下一单位为无音轨公开视频；已部署详情捕获、真实模型事实性、长期实播及商业准确率仍未完成，目标 active。crapper/dryer/mutator 不可用，三项未执行。最终回执提交及普通推送 SHA 在完成报告给出。

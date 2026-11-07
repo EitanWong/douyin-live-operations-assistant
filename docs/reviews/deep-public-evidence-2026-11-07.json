@@ -4,8 +4,8 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "Visual implementation 0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded pushed to origin/dev. CI native has 1 fixture failure (expected 1000ms, actual 1100ms); corrected actual-PTS test reproduces red locally and native full 102/102 passes. Production JS unchanged after prior Unicode fix; original CI JS still running. 85-file rollback and native Unicode storage round trips verified; correction commit/CI pending.",
-  "nextExecutableAction": "先完成当前视觉时间轴实施的 dev 提交、推送与对应 CI 回执；随后复用同一媒体队列和 FFmpeg，为没有音轨的公开视频补充可核验的纯视觉路径，先写真实无音轨文件的失败测试，不把无音轨错误当作完整音频覆盖；保持已有取消/遗忘、身份和知识库边界。实际部署采集、真实模型准确率与长期实播仍需独立验收。",
+  "lastConfirmedResult": "Visual keyframe evidence implementation 0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded and native fixture correction a0bfa585a0d4eeba769e2dc084326ff92323dcd7 pushed to origin/dev. CI 42326790987 passed: JS 1808/1808, native 102/102, build/check/index/package. Real source decoded at PTS 0/9400/18767ms; model providers remain controlled fixtures. 85-file reconstruction/rollback and native Unicode storage round trips verified. Not deployed; no real ASR/vision accuracy or long-stream acceptance claim.",
+  "nextExecutableAction": "复用同一媒体队列、FFmpeg 和现有视觉协议，为无音轨的公开视频补齐可核验的纯视觉路径：先用真实 FFmpeg 生成无音轨文件，写失败行为测试，再做最小实现；分别标明音轨不存在与解码失败，维持实际时长/PTS、取消/遗忘、身份与知识库版本边界，不加载第二份真实模型。已部署详情采集、真实模型事实性与长期实播仍需独立验收。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
     "native/public_media_jobs.py",
@@ -43,45 +43,57 @@
   "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
   "validation": {
     "javascript": {
-      "passed": 1801,
+      "passed": 1808,
       "failed": 0,
       "skipped": 0,
       "cancelled": 0,
+      "scope": "final corrected implementation in CI",
+      "headSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
       "command": [
-        "node",
-        "--test",
-        "--test-concurrency=1",
-        "tests"
+        "npm",
+        "test"
       ],
-      "outerElapsedSeconds": 582.888,
-      "runnerReportedDurationMs": 582808.152792,
-      "timingBasis": "Literal outer and test-runner values kept separately.",
-      "logs": "output/deep-research-2026-11-07/source-stage/javascript-final.*"
+      "runnerReportedDurationMs": 437020.289074,
+      "logs": "output/deep-research-2026-11-07/visual-stage/ci-corrected-javascript-log.*"
     },
     "harness": {
       "thisStage": "Harness tests included in full 1801; standalone eval:harness not rerun"
     },
     "native": {
-      "passed": 94,
-      "runtime": "installed Python 3.12 virtual environment",
-      "resourceWarnings": "elevated to errors; post-review frozen run passed",
-      "logs": "output/deep-research-2026-11-07/source-stage/native-final-after-review.*"
+      "passed": 102,
+      "scope": "final corrected source in CI Python 3.14.10 and installed local venv",
+      "logs": "output/deep-research-2026-11-07/visual-stage/ci-corrected-native-log.*"
     },
     "npmCi": "passed; audit 0 vulnerabilities",
     "build": "passed",
     "check": "passed",
     "index": {
-      "modules": 526,
-      "symbols": 2967
+      "modules": 530,
+      "symbols": 2979
     },
     "diffCheck": "passed",
     "javascriptThisStage": {
-      "full": "1801/1801 serial passed before final native-only boundary correction",
-      "postReview": "6/6 source/parser/real native integration passed after native-only correction",
-      "productionJSChangedAfterFullRun": false,
-      "logs": "output/deep-research-2026-11-07/source-stage/"
+      "beforeUnicodeCorrection": "1807/1807 local",
+      "afterUnicodeCorrection": "19/19 targeted local; 1808/1808 final CI",
+      "productionJSChangedAfterFinalCI": false
     },
-    "visualStage": "Native 102/102; JS 1807/1807 before Unicode-boundary fix, corrected-source targeted 19/19; final build/check/index and 85-file transaction passed; implementation CI pending."
+    "visualStage": {
+      "runId": "42326790987",
+      "headSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 102,
+      "javascriptTests": 1808,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 437020.289074,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42326790987"
+    }
   },
   "benchmark": {
     "runtime": "v26.12.1",
@@ -135,6 +147,13 @@
       "implementation": "pushed origin/dev",
       "verifiedRemoteSHA": "e25376fdd485646127572252b4941155290c62ee",
       "receiptDocumentation": "separate following documentation commit; final SHA in completion report; no implementation changes"
+    },
+    "visualStage": {
+      "implementation": "0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded",
+      "correction": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "verifiedRemoteSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "ci": "42326790987 completed/success",
+      "receiptDocumentation": "separate following documentation commit; final SHA in completion report"
     }
   },
   "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
@@ -279,7 +298,7 @@
     }
   },
   "visualStage": {
-    "status": "implemented and pushed; CI native fixture assertion corrected locally, awaiting correction push and final CI; not deployed",
+    "status": "implemented, fully regression-tested and pushed to origin/dev; not deployed",
     "baselineCommit": "e11a0e8c44aee08309571ff58d36162e7e9e6744",
     "capabilities": {
       "publicMedia": 3,
@@ -311,7 +330,7 @@
       "targetedPassed": 19,
       "failed": 0,
       "logs": "output/deep-research-2026-11-07/visual-stage/unicode-frozen-targeted.*",
-      "fullCI": "pending"
+      "fullCI": "1808/1808 passed on final corrected source"
     },
     "realFrameDecode": {
       "command": "public_media_frames.extract_keyframe; installed FFmpeg 7.1",
@@ -365,8 +384,9 @@
       "runId": "42326384275",
       "headSHA": "0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded",
       "native": "101 passed / 1 failed: resume test hardcoded 1000ms, actual 1100ms",
-      "javascript": "still running when correction was prepared",
-      "correction": "Use actual interrupted frame PTS, retain exact remaining-frame count and persisted evidence/model assertions; 2.1s audio vs 2s video fixture locally reproduces failure before assertion correction."
+      "javascript": "1808/1808 passed; build/check/index/package passed, overall failure solely native fixture assertion",
+      "correction": "Use actual interrupted frame PTS, retain exact remaining-frame count and persisted evidence/model assertions; 2.1s audio vs 2s video fixture locally reproduces failure before assertion correction.",
+      "conclusion": "failure"
     },
     "nativeAfterPTSFixtureCorrection": {
       "passed": 102,
@@ -380,6 +400,24 @@
       "boundaryLastCharacter": "😀",
       "upstreamMalformed": "normalized U+FFFD; native SQLite round trip exact",
       "logs": "output/deep-research-2026-11-07/visual-stage/unicode-native-roundtrip.*"
+    },
+    "correctionCommit": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+    "ci": {
+      "runId": "42326790987",
+      "headSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 102,
+      "javascriptTests": 1808,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 437020.289074,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42326790987"
     }
   }
 }
