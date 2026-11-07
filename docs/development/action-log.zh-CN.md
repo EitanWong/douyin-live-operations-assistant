@@ -3879,3 +3879,16 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 构建产物已在本工作树dist生成；实际Chrome直播标签由另一任务占用，本轮未重载扩展或将合成6→3称为真实直播图谱已更新。三位真实账号不硬编码进产品。提交与普通push到dev的精确SHA、远端一致性和角色哈希在同一VERIFICATION/roles.json记录，随后补交付回执。
 
 - 本轮功能提交 **1b9d7d27b1bdd44f69ca5ffdb17399323843e37e** 已普通push至origin/dev（c826493→1b9d7d2，exit0），git ls-remote精确核对一致；本地工作树干净。未推main、调整版本或重载正在使用的扩展，未将本地通过称为远端CI通过。此段只补交付日志，随后文档提交与最终角色哈希继续写同一VERIFICATION/roles.json；原始归档、两份固定输入及所有字面结果保留，只清理本聊天可重建验收副本。
+
+
+## 2026-11-07：处理页面进入往返缓存时的扩展端口错误
+
+- 用户报错 `Unchecked runtime.lastError: The page keeping the extension port is moved into back/forward cache, so the message channel is closed.`；目标始终为当前仓库的端口生命周期。确认干净 dev 后普通快进 c826493→e2b606c，保留并行任务的关系身份修复。先执行 agent:find/agent:impact 并核实源码，冻结本轮7份父源码、SHA和整树归档；原四角色及历史证据逐字备份到同目录 bfcache/previous-*。
+- 根因：页面及后台多个 Port.onDisconnect 处理器未在回调内读取 Chrome.runtime.lastError；Chrome 的 BFCache 关闭错误只在同步回调期间可取，过期端口的提前返回也会留下 unchecked 诊断。新增共享 onPortDisconnect，先读取该错误再执行原清理，接入端侧、本地ASR、感知状态/探测/采集及后台客户端、公开视频宿主。原有错误返回、在途拒绝、端口身份保护和模型/房间所有权继续由原控制器管理。
+- TDD：新增10个真实客户端/后台行为用例，使用仅在断开回调期间有效的 lastError getter，先观察10/10按预期因未读取错误失败，清理与恢复断言均先通过；最小修复后专项33/33通过。覆盖在途结算、新连接、旧端口迟到断开、感知启动/运行中失败、推理取消但准备继续、ASR释放、房间后台感知保留及恢复观测。无界面或布局改动，无新增依赖。
+- 同一固定 probe 输入：BASELINE10失败exit1→MODIFIED10通过exit0→独立副本ROLLBACK10失败exit1，回滚的7份源码SHA与父版逐字相同，新增文件删除；重新应用累计补丁10通过exit0。首次重建审计失败exit1：嵌套ignored目录中的 git apply 虽exit0却跳过仓库相对路径；保留错误，改为从外部临时目录以明确绝对 --directory 应用后逐成员验真，不把首次退出0算重建成功。随后现工作区与旧角色比对发现3份继承源码已有后续dev演进，不回写旧源码；保留旧角色原件并追加旧角色→当前父版差异，累计成员与当前工作区逐字匹配。
+- 已执行 agent:index（570模块/3173符号）、build、check与git diff --check，均exit0；dist/chrome-extension已重建。crapper、dryer、mutator的CLI及启用工具目录均不可用，三项未执行，其他检查不替代。仅以可控端口夹具验证BFCache回调契约；未接管由其他聊天占用的用户直播页，未声称已在真实直播页重载验证。完整回归、最终提交与普通push回执随后追加。
+- 四角色沿用 output/cytoscape-browser-errors-2026-11-07 下 MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、可执行ROLLBACK.sh；新证据在同目录 bfcache/，包括命令、固定输入、字面stdout/stderr/exit、父/改后SHA和重建纠正记录。
+
+- 最终有界完整JavaScript回归 **1985/1985通过**，0失败/取消/跳过，637106.728875ms，exit0；本轮9份产品/测试文件SHA在回归前后保持一致。完整累计补丁已再次从独立回滚副本重建全部13个归档成员，逐字等于当前源码，重建后10/10通过。两个生成扩展包也保留同步lastError读取。历史ECharts诊断原样保留，不把通过断言称为控制台全无告警。
+- 本轮只修正端口错误处理，未修改用户直播数据、场控开关或原生组件，未重载占用中的直播标签；需要在浏览器重新加载当前dist扩展并刷新直播页才能应用到现有页面。最终提交与dev普通push精确回执写入同一证据目录。
