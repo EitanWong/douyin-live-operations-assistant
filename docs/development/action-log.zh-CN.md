@@ -3731,3 +3731,12 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 工具诊断：首轮shell误用zsh只读变量status退出1，改为result_code后重新保留红测退出1；浏览器等待下载事件超时，但实际JSON已落盘，恢复会话后直接读回并解析验证。真实直播页被另一任务占用，本轮不抢占或重载；诊断导出范围是本项目真实Chrome复现和完整本地工作台，未声称导出 chrome://extensions 全部历史或其他扩展错误。修复已重新构建到 dist/chrome-extension，运行实例需重新加载扩展及刷新直播页后生效。
 - 无新增工作树，其他工作树均未清理；只清理本任务可重建验收副本与本地演示服务，保留四角色及原件、证据。未改main、版本或标签。功能提交与dev普通推送回执随后补记，最终精确SHA记入同一VERIFICATION/checkpoint。
 - 实际提交与推送：功能提交 **da153fb5feff3bc0f7025f0996f3025cadc10363** 已普通 push 到 origin/dev（f2dabbf→da153fb，exit0），git ls-remote 精确一致；全量1932/1932与本地浏览器2/0/2是已观察结果，未将其等同远端CI通过。仅追加本验收回执；最终文档提交与远端确认记录同一VERIFICATION/checkpoint。本任务四角色、原件及浏览器报告仍在原路径，已关闭本地4197服务，未重载用户直播页。
+
+## 2026-11-07：采集连接待确认时手动开始场控被错误拦截
+
+- 延续同一仓库 dev 与 `output/cytoscape-browser-errors-2026-11-07` 原四角色。先定位用户原文，`agent:find` 无文本命中后直接确认 `src/app.js:start()`，运行 agent:impact，保存 app.js/既有浏览器测试的父检查点与 SHA。根因是手动启动把 `adapter.healthy()` 当作硬前提，与运行期已有的断线等待/恢复调度重复；未观察到连接并不应锁死手动启动。仅删除该启动前提，仍由发送调度根据真实健康状态暂停/恢复，不伪造 connected；自动开始继续等待开播及健康连接，房间互斥锁、切房与扩展失效检查保留。
+- TDD新增两项行为测试，修改前分别抛出原文和在房间锁检查前错误抛出同一原文（2项预期红测）；修复后验证手动开始成功，连接未确认时消息留在队列且不发送，恢复后仅处理一次；竞争标签页仍被房间锁拒绝、切房后不启动。相关5/5通过。最终完整 `node --test --test-concurrency=2 tests` **1934/1934通过**，0失败/取消/跳过，401557.824792ms；agent:index/agent:check、build、check与git diff --check通过。源码仅启动门槛与测试，无界面尺寸改动，无依赖或native改动；未重复原生测试。
+- 真实Chrome使用同一非demo boot/Panel控制器、本地数字房间和可控适配器，所有测试消息仅写本地数组。原版界面准确显示“尚未连接直播数据，请刷新直播页，先用仅预览检查事件”；修复版显示“运行中 · 自动发送 · 等待直播数据”，此时queue1/sent0，恢复后queue0/sent1且日志无warn/error。人工暂停再启动、390窄屏验证通过，面板clientWidth=scrollWidth=370。用户真实直播页仍由另一任务占用，不抢占、不启动真实自动弹幕、不声称已验证该页的采集连接；最新dist/chrome-extension已重新构建，需要重载扩展及刷新直播页应用。
+- 验收仍使用原 `MODIFIED_FILE.tar`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行`ROLLBACK.sh`，按本轮app.js/测试扩展，前版角色字节存于live-start/previous-*，原BASELINE.tar不变。本轮相同输入实际BASELINE启动报原错误exit1 → MODIFIED成功启动/待连接保留/恢复后发送exit0 → 执行扩展ROLLBACK脚本的独立修改副本重现原错误exit1；四文件原始SHA恢复，补丁逐字重建修改档，工作区保留修改版。前轮Cytoscape浏览器2/0/2证据保留，本轮未重做该浏览器场景；完整测试包含其回归。
+- 工具问题如实保留：初次rg猜测不存在live-mode/engine/shell-status路径，改查实际browser测试与panel源码；独立探针首次缺vendor导致模块缺失exit1，补全后因navigator缺userAgent在zrender导入失败exit1，改为真实JSDOM navigator后同输入1/0/1通过。最初浏览器验证间隔过长，被房间自动监控刷新而重置夹具；补充直播身份并及时完整重跑，只有最终观测到sent数组的一轮计为恢复发送。没有为探针错误修改产品或放宽断言。
+- crapper/dryer/mutator CLI和工具目录仍不可用，三项未执行。保留原件、角色、探针、字面输出、报告与截图；本任务独立副本和4197本地服务验证后清理，不动其他工作树与直播页。功能提交和dev普通推送结果随后补记；未改main、版本或标签。
