@@ -1,15 +1,16 @@
 import {z} from 'zod';
 const stable=z.string().regex(/^[A-Za-z0-9_.=-]{1,160}$/u);
-export const accountActor=z.object({uid:z.string().regex(/^\d{1,30}$/u).optional(),secUid:stable.optional(),name:z.string().max(80)}).refine(a=>a.uid || a.secUid);
+export const accountActor=z.object({uid:z.string().regex(/^\d{1,30}$/u).optional(),secUid:stable.optional(),room:z.string().regex(/^[1-9]\d{0,39}$/u).optional(),name:z.string().max(80)}).refine(a=>a.uid || a.secUid);
 const clean=(value,max)=>typeof value==='string' ? value.replace(/[\u0000-\u001f]/gu,' ').trim().slice(0,max) : '';
 export function publicActor(user){
  if(!user || user.secret || user.is_private)return undefined;
  const value=typeof user.uid==='string' ? user.uid : Number.isSafeInteger(user.uid) ? String(user.uid) : '';
- const uid=/^\d{1,30}$/u.test(value) ? value : undefined;
- const parsed=accountActor.safeParse({uid,secUid:typeof user.sec_uid==='string' ? user.sec_uid : undefined,name:clean(user.nickname,80)});
+ const uid=/^[1-9]\d{0,29}$/u.test(value) ? value : undefined;
+ const room=typeof user.web_rid==='string' && /^[1-9]\d{0,39}$/u.test(user.web_rid) ? user.web_rid : undefined;
+ const parsed=accountActor.safeParse({uid,secUid:typeof user.sec_uid==='string' ? user.sec_uid : undefined,room,name:clean(user.nickname,80)});
  return parsed.success ? parsed.data : undefined;
 }
-export const actorKey=actor=>actor?.uid ? `uid:${actor.uid}` : actor?.secUid ? `sec:${actor.secUid}` : undefined;
+export const actorKey=actor=>/^[1-9]\d{0,29}$/u.test(actor?.uid || '') ? `uid:${actor.uid}` : actor?.secUid ? `sec:${actor.secUid}` : undefined;
 
 export function publicInteractions(payload,source,at,{work}={}){
  if(source.kind!=='work' || !work || source.id!==work.id || !stable.safeParse(work.subject).success)return [];
