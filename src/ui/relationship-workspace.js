@@ -4,7 +4,7 @@ const abortError=error=>error?.name==='AbortError';
 export class RelationshipWorkspace {
  constructor(root,{retrieve,readMemory,now=Date.now}){
   Object.assign(this,{root,retrieve,readMemory,now});this.host=root.querySelector('[data-relationship-workspace]');this.revision=0;this.questionRevision=0;this.lastAt=0;
-  this.state={graph:emptyGraph(),query:'',loadedQuery:'',status:'all',predicate:'all',depth:0,layout:'concentric',dimension:'role',inspectorTab:'overview',questionScope:'single',people:[],selected:null,pathTo:'',question:'',trace:[],answer:null,answering:false,loading:false,error:'',questionStatus:'选择人物后提问，或选择多人、全局问答。',original:null};
+  this.state={graph:emptyGraph(),query:'',loadedQuery:'',status:'all',predicate:'all',depth:0,layout:'concentric',dimension:'role',inspectorTab:'overview',inspectorOpen:false,questionScope:'single',people:[],selected:null,pathTo:'',question:'',trace:[],answer:null,answering:false,loading:false,error:'',questionStatus:'选择人物后提问，或选择多人、全局问答。',original:null};
   this.onAction=e=>{void this.dispatch(e.detail);};this.host.addEventListener('network-action',this.onAction);this.publish({});
  }
  publish(patch){if(this.closed)return;this.state={...this.state,...patch};this.host.networkView=this.state;this.host.dispatchEvent(new this.root.ownerDocument.defaultView.Event('network-update',{bubbles:true}));}
@@ -25,7 +25,7 @@ export class RelationshipWorkspace {
  select(selection){
   const rows=selection?.kind==='entity' ? this.state.graph.entities : selection?.kind==='relation' ? this.state.graph.relations : [];
   if(selection && !rows.some(r=>r.id===selection.id))return;
-  this.cancel();this.publish({selected:selection,inspectorTab:selection?.kind==='relation' ? 'relations' : this.state.inspectorTab,pathTo:'',original:null,answer:null,trace:[]});
+  this.cancel();this.publish({selected:selection,inspectorOpen:selection?.kind==='relation',inspectorTab:selection?.kind==='relation' ? 'relations' : this.state.inspectorTab,pathTo:'',original:null,answer:null,trace:[]});
  }
  async original(recordId){
   const revision=this.revision,selection=this.state.selected;
@@ -60,12 +60,13 @@ export class RelationshipWorkspace {
   if(this.closed || !action || typeof action.type!=='string')return;
   if(action.type==='query' && typeof action.value==='string'){this.revision++;this.publish({query:action.value.slice(0,300),loading:false});}
   if(action.type==='question' && typeof action.value==='string')this.publish({question:action.value.slice(0,1000)});
-  if(action.type==='inspectorTab' && ['overview','relations','dossier','questions'].includes(action.value))this.publish({inspectorTab:action.value});
+  if(action.type==='inspectorTab' && ['overview','relations','dossier','questions'].includes(action.value))this.publish({inspectorTab:action.value,inspectorOpen:true});
+  if(action.type==='closeInspector')this.publish({inspectorOpen:false});
   if(action.type==='dimension' && ['role','evidence','activity'].includes(action.value))this.publish({dimension:action.value});
-  if(action.type==='questionScope' && ['single','group','global'].includes(action.value)){this.cancel();this.publish({questionScope:action.value,answer:null,trace:[]});}
+  if(action.type==='questionScope' && ['single','group','global'].includes(action.value) && action.value!==this.state.questionScope){this.cancel();this.publish({questionScope:action.value,answer:null,trace:[]});}
   if(action.type==='people' && Array.isArray(action.value)){this.cancel();this.publish({people:[...new Set(action.value)].filter(id=>this.state.graph.entities.some(n=>n.id===id)).slice(0,6),answer:null,trace:[]});}
   if(action.type==='search')return this.refresh();
-  if(action.type==='overview'){this.publish({query:'',status:'all',predicate:'all',depth:0,selected:null,pathTo:''});return this.refresh();}
+  if(action.type==='overview'){this.publish({query:'',status:'all',predicate:'all',depth:0,selected:null,inspectorOpen:false,pathTo:''});return this.refresh();}
   if(action.type==='select')this.select(action.selection);
   if(action.type==='status' && ['all','verified','observed','unverified','conflicted'].includes(action.value))this.publish({status:action.value});
   if(action.type==='predicate' && (action.value==='all' || this.state.graph.relations.some(r=>r.predicate===action.value)))this.publish({predicate:action.value});

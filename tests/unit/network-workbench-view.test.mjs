@@ -4,6 +4,11 @@ import {createElement as h} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {MantineProvider} from '@mantine/core';
 import {NetworkWorkbench,Dossier} from '../../src/ui/product/network-workbench.js';
+test('默认把整幅图谱留给探索，人物定位和按需详情都在画布内，没有常驻侧栏',()=>{
+ const view={graph:{entities:[{id:'a',name:'阿明'}],relations:[],ambiguities:[]},query:'',status:'all',predicate:'all',depth:0,layout:'concentric',selected:null,question:'',people:[],questionStatus:''};
+ const html=renderToStaticMarkup(h(MantineProvider,null,h(NetworkWorkbench,{node:{id:'network',view},bridge:{networkAction(){}}})));
+ assert.ok(!html.includes('<aside'),'默认不分配侧栏');assert.ok(!html.includes('人物导航'));assert.match(html,/定位图中人物/);assert.match(html,/全局问答/);assert.ok(!html.includes('人物与关系详情'));
+});
 test('关系工作台明确提示同名歧义与展示上限，不将不可信原话渲染为HTML',()=>{
  const view={graph:{entities:[{id:'a',name:'小雨',role:'观众'},{id:'b',name:'小雨',role:'观众'}],relations:[{id:'r',from:'a',to:'b',predicate:'提及',status:'unverified',evidence:[{text:'<img src=x onerror=bad()>原话',source:'弹幕',at:1800000000000,trust:'unverified'}]}],ambiguities:[{name:'小雨',candidates:['a','b']}],stats:{entities:200,relations:400,truncated:true}},query:'',status:'all',predicate:'all',depth:0,layout:'concentric',selected:{kind:'relation',id:'r'},pathTo:'',question:'',questionStatus:'',error:'',original:null};
  const html=renderToStaticMarkup(h(MantineProvider,null,h(NetworkWorkbench,{node:{id:'network',view},bridge:{networkAction(){}}})));

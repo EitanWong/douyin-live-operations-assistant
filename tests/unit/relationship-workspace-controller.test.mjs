@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {RelationshipWorkspace} from '../../src/ui/relationship-workspace.js';
 const graph=()=>({entities:[{id:'a',name:'阿明',role:'主播',evidence:[]}],relations:[],ambiguities:[],sources:{chunks:[]}});
+test('图内详情按需开启，关闭保留人物、草稿与回答，换人回到速览',async()=>{
+ const f=fixture();try{
+  const c=f.controller;await c.refresh();assert.equal(c.state.inspectorOpen,false);
+  c.select({kind:'entity',id:'a'});assert.equal(c.state.inspectorOpen,false);
+  c.dispatch({type:'question',value:'保留这个问题'});c.dispatch({type:'inspectorTab',value:'questions'});assert.equal(c.state.inspectorOpen,true);
+  c.publish({answer:{answer:'已有回答'}});c.dispatch({type:'closeInspector'});
+  assert.equal(c.state.inspectorOpen,false);assert.equal(c.state.selected.id,'a');assert.equal(c.state.question,'保留这个问题');assert.equal(c.state.answer.answer,'已有回答');
+  c.dispatch({type:'questionScope',value:'single'});assert.equal(c.state.answer.answer,'已有回答');
+  c.dispatch({type:'inspectorTab',value:'dossier'});c.select({kind:'entity',id:'a'});assert.equal(c.state.inspectorOpen,false);
+ }finally{f.close();}
+});
 function fixture(retrieve=async()=>graph()){
  const dom=new JSDOM('<div id="host"><div data-relationship-workspace></div></div>'),root=dom.window.document.querySelector('#host');
  let now=10000;const memory={enabled:true,entries:[]},controller=new RelationshipWorkspace(root,{retrieve,readMemory:()=>memory,now:()=>now});

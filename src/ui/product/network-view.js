@@ -13,7 +13,12 @@ export function createNetworkView(element,{onSelect,create=cytoscape,headless=fa
  const view=element.ownerDocument.defaultView;
  const cy=create({container:headless ? undefined : element,headless,styleEnabled:true,style,layout:{name:'preset'},minZoom:.15,maxZoom:4,pixelRatio:Math.min(view.devicePixelRatio || 1,2),boxSelectionEnabled:false,autounselectify:true,textureOnViewport:true});
  let topology='',layoutName='',focusId='',frame=0,touched=false,closed=false;
- const fit=()=>{if(cy.elements().length)cy.fit(cy.elements(),24);};
+ const fit=()=>{
+  if(!cy.elements().length)return;
+  const toolbar=element.parentElement?.querySelector('.network-map-toolbar'),tools=element.parentElement?.querySelector('.network-stage-bottom');
+  cy.fit(cy.elements(),Math.max(24,(toolbar?.offsetHeight || 0)+12,(tools?.offsetHeight || 0)+12));
+  if(cy.zoom()>1.2){cy.zoom(1.2);cy.center();}
+ };
  const touch=()=>{touched=true;};
  element.addEventListener('pointerdown',touch);element.addEventListener('wheel',touch,{passive:true});
  const layout=name=>{touched=false;cy.layout({name,animate:false,fit:false,randomize:false,numIter:180,nodeRepulsion:()=>8000,idealEdgeLength:()=>85,minNodeSpacing:18,spacingFactor:1.05,concentric:n=>focusId ? Number(n.data('recordId')===focusId) : n.degree(),levelWidth:()=>focusId ? 1 : 2}).run();fit();};

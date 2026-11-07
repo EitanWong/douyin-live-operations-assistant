@@ -71,5 +71,75 @@
     "Finite synthetic browser states do not prove every device/content combination or all-day RSS/FPS.",
     "Public and local research remain bounded by available evidence, domain permissions and existing host budgets."
   ],
-  "localEvidenceDirectory": "/Users/eitan/.codex/worktrees/relationship-intelligence/douyin-live-operations-assistant/output/relationship-intelligence-2026-11-07"
+  "localEvidenceDirectory": "/Users/eitan/.codex/worktrees/relationship-intelligence/douyin-live-operations-assistant/output/relationship-intelligence-2026-11-07",
+  "graphFirstFollowup": {
+    "fields": [
+      "RelationshipWorkspace.inspectorOpen",
+      "NetworkWorkbench",
+      "NetworkCanvas"
+    ],
+    "permanentSidebar": false,
+    "inCanvas": [
+      "search",
+      "person locator",
+      "filters",
+      "dossier",
+      "relation evidence",
+      "single/group/global questions"
+    ],
+    "browserStates": 22,
+    "allPageStates": 120,
+    "runtimeErrors": 0,
+    "motionDevelopmentReducedMotionNotice": 1,
+    "canvasDesktop": {
+      "before": [
+        523.328125,
+        292
+      ],
+      "after": [
+        889,
+        418.6875
+      ]
+    },
+    "transaction": {
+      "fields": [
+        "inspectorOpen",
+        "NetworkWorkbench",
+        "NetworkCanvas"
+      ],
+      "baseline": {
+        "permanentSidebar": true,
+        "canvasPersonLocator": false,
+        "detailsInCanvas": false
+      },
+      "modified": {
+        "permanentSidebar": false,
+        "canvasPersonLocator": true,
+        "detailsInCanvas": true
+      },
+      "rollback": "baseline restored; all source hashes exact",
+      "relationshipCounts": [
+        2,
+        1,
+        2
+      ],
+      "allExitStatuses": 0
+    },
+    "fullTests": {
+      "passed": 1943,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "durationMs": 395799.126958
+    },
+    "crapper": "unavailable",
+    "dryer": "unavailable",
+    "mutator": "unavailable",
+    "expandedView": {
+      "oneControllerDraft": true,
+      "escapeClosesInnerOnly": true,
+      "returnFocus": true,
+      "nodeFitAvoidsToolbar": true
+    }
+  }
 }
