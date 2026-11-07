@@ -2,9 +2,10 @@ import {z} from 'zod';
 import {audienceProfile,observePlatform,platformSchema,subjectKeySchema} from './audience-profile.js';
 import {retrieveKnowledge} from '../services/retrieval.js';
 import {relationshipEvent,observedRelationships} from './relationship-events.js';
+import {preferAccountName} from './account-names.js';
 const day=86400000;
 export const AUDIENCE_MEMORY_LIMITS=Object.freeze({days:30,statements:3,gifts:3});
-const keyOf=user=>/^\d{1,30}$/u.test(String(user?.id || '')) ? `uid:${user.id}` : typeof user?.secUid==='string' && /^[\w-]{8,160}$/u.test(user.secUid) ? `sec:${user.secUid}` : '';
+const keyOf=user=>/^[1-9]\d{0,29}$/u.test(String(user?.id || '')) ? `uid:${user.id}` : typeof user?.secUid==='string' && /^[\w-]{8,160}$/u.test(user.secUid) ? `sec:${user.secUid}` : '';
 const statement=z.object({id:z.string().max(200),text:z.string().max(12000),at:z.number().finite()});
 const roomStatement=statement.extend({id:z.string().max(500),name:z.string().max(80),source:z.enum(['socket','demo']),type:z.enum(['chat','emoji-chat','screen-chat'])});
 const chatTypes=new Set(['chat','emoji-chat','screen-chat']);
@@ -40,7 +41,9 @@ export class AudienceMemory {
   const row=this.viewers.get(key) || {key,name:'',firstAt:at,lastAt:at,statements:[],gifts:[],notes:[]};
   row.secUids=[...new Set([...(row.secUids || []),...(/^[\w-]{8,160}$/u.test(event.user.secUid || '') ? [event.user.secUid] : [])])];
   row.platform=observePlatform(row.platform,event.user,this.anchor,at);
-  row.name=String(event.user.name || row.name).slice(0,80);row.firstAt=Math.min(at,row.firstAt);row.lastAt=Math.max(at,row.lastAt);
+  const name=String(event.user.name || '').slice(0,80);
+  if((at>=row.lastAt || !row.name) && preferAccountName(row.name,name))row.name=name;
+  row.firstAt=Math.min(at,row.firstAt);row.lastAt=Math.max(at,row.lastAt);
   if(chatTypes.has(event.type) && typeof event.id==='string' && event.id && typeof event.text==='string' && event.text.trim()){
    if(event.text.length>12000)return false;
    if(!row.statements.some(s=>s.id===event.id.slice(0,200)))row.statements.push({id:event.id.slice(0,200),text:event.text.trim(),at});

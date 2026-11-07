@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import {AudienceMemory,audienceStateSchema,selectMemoryPassages} from './audience-memory.js';
 import {createRelationshipRetriever} from './relationship-memory.js';
+import {preferAccountName} from './account-names.js';
 
 const observation=z.object({id:z.string().max(300),kind:z.enum(['audio','video','omni']),text:z.string().min(1).max(12000),at:z.number().finite(),endedAt:z.number().finite(),inputSource:z.string().max(80).default('')});
 const perceptionState=z.object({observations:z.array(observation),forgetBefore:z.number().finite().default(0)});
@@ -36,7 +37,8 @@ function mergeViewer(rows,watermark){
   const old=gifts.get(gift.key);gifts.set(gift.key,{...gift,count:Math.max(old?.count || 0,gift.count),unitDiamonds:gift.unitDiamonds ?? old?.unitDiamonds ?? null});
  }
  const platform=Object.fromEntries(['honor','fan'].map(key=>[key,active.map(r=>r.platform?.[key]).filter(r=>r && r.at>watermark).sort((a,b)=>b.at-a.at)[0] ?? null]));
- return {...latest,platform,secUids:[...new Set(active.flatMap(row=>row.secUids || []))],firstAt:Math.min(...active.map(row=>row.firstAt>watermark ? row.firstAt : row.lastAt)),statements,gifts:[...gifts.values()],notes:[...new Set(active.filter(row=>row.firstAt>watermark).flatMap(row=>row.notes))]};
+ const name=active.reduce((name,row)=>preferAccountName(name,row.name) ? row.name : name,'');
+ return {...latest,name,platform,secUids:[...new Set(active.flatMap(row=>row.secUids || []))],firstAt:Math.min(...active.map(row=>row.firstAt>watermark ? row.firstAt : row.lastAt)),statements,gifts:[...gifts.values()],notes:[...new Set(active.filter(row=>row.firstAt>watermark).flatMap(row=>row.notes))]};
 }
 export function mergeLiveMemory(previous,incoming){
  const next=archiveSchema.parse(incoming);if(!previous)return next;
