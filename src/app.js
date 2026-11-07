@@ -640,12 +640,8 @@ export function boot(options = {}) {
     if (engine.running || starting || closed || suspended) return;
     if (!automatic) { manualPause = false; tools.notify('resume'); autoStartArmed = true; autoStartError = ''; }
     adapter.sync?.();
-    if (!demo && engine.config.mode !== 'preview') {
-      if (!adapter.healthy()) {
-        if (automatic) return false;
-        throw new Error('尚未连接直播数据，请刷新直播页，先用仅预览检查事件');
-      }
-    }
+    // 手动开始只武装场控；采集连接未确认时，由发送调度保留队列并等待恢复。
+    // 自动开始仍由 tryAutoStart 等待开播及健康连接，不能把采集状态当作启动锁。
     starting = true; const startEpoch = engine.epoch;
     try {
       const acquired = await lock.acquire();

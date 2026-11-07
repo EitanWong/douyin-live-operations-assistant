@@ -1477,6 +1477,34 @@ test('直接发送暂不可用时仍可开始场控等待恢复，不要求定�
   finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api.panel.destroy();dom.window.close();await lock.drained;}
 });
 
+test('采集连接尚待确认也能手动开始场控，等待时保留队列，连接恢复后才发送',async()=>{
+  const dom=setup(),values=new Map([['live-assistant:config:1234567890',{mode:'auto'}]]),sent=[];
+  const lock=new RoomLock({room:'1234567890'});let api,connected=false,onStatus;
+  const adapter={status:{connected:false,frames:0},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>connected,send:async text=>{sent.push(text);return {submitted:true};}};
+  boot({page:dom.window,lock,get:(k,f)=>values.get(k)??f,set:(k,v)=>values.set(k,v),del:k=>values.delete(k),request:()=>{},adapterFactory:options=>{onStatus=options.onStatus;return adapter;},identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
+  try{
+    assert.equal(await api.panel.callbacks.start(),true);assert.equal(api.engine.running,true);assert.equal(lock.held,true);
+    api.engine.enqueue('keyword','场控启动回归消息');await new Promise(resolve=>setTimeout(resolve,300));
+    assert.deepEqual(sent,[]);assert.equal(api.engine.queue.length,1);assert.equal(api.engine.running,true);
+    connected=true;adapter.status={connected:true,frames:1};onStatus(adapter.status);
+    const deadline=Date.now()+1500;while(!sent.length && Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+    assert.deepEqual(sent,['场控启动回归消息']);assert.equal(api.engine.queue.length,0);assert.equal(api.engine.running,true);
+  }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();await lock.drained;}
+});
+
+test('采集连接尚待确认时手动启动仍遵守房间锁，切房后不会启动',async()=>{
+  const dom=setup(),values=new Map([['live-assistant:config:1234567890',{mode:'auto'}]]);
+  const owner=new RoomLock({room:'1234567890'}),lock=new RoomLock({room:'1234567890'});let api;
+  const adapter={status:{},hook(){},observeDOM(){},stopDOM(){},sync(){},healthy:()=>false};
+  boot({page:dom.window,lock,get:(k,f)=>values.get(k)??f,set:(k,v)=>values.set(k,v),del:k=>values.delete(k),request:()=>{},adapterFactory:()=>adapter,identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
+  try{
+    assert.equal(await owner.acquire(),true);
+    await assert.rejects(api.panel.callbacks.start(),/已有另一个标签页/);assert.equal(api.engine.running,false);assert.equal(lock.held,false);
+    owner.release();await owner.drained;dom.reconfigure({url:'https://live.douyin.com/9999999999'});
+    await assert.rejects(api.panel.callbacks.start(),/直播间已切换/);assert.equal(api.engine.running,false);assert.equal(lock.held,false);
+  }finally{owner.release();dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();await Promise.all([owner.drained,lock.drained]);}
+});
+
 test('自动发送恢复原有面板焦点，用户中途切换焦点时不夺回；断线发生在输入后也不点击', async () => {
   const dom=setup('<textarea id="chat"></textarea><button id="send">发送</button><input id="other"><div id="host"></div>');
   const shadow=document.querySelector('#host').attachShadow({mode:'open'});shadow.innerHTML='<input id="setting">';const setting=shadow.querySelector('input');
