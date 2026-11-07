@@ -15,16 +15,18 @@ import {CONTEXT_DEFAULTS} from './context-policy.js';
 import {resolveAITaskConfig} from '../services/ai-task-config.js';
 import {researchLimits,researchSettings} from './research-settings.js';
 import {snapshotResearchContext} from './research-context.js';
-const schema=z.strictObject({subject:subjectKeySchema.optional(),subjectEpoch:z.number().int().nonnegative().optional(),anchor:z.string().regex(/^\d{1,30}$/u),ai:z.record(z.string(),z.unknown()),context:z.record(z.string(),z.unknown()),sources:z.array(z.string().url().max(2000)).max(3).default([])});
+import {supplementInputSchema,SUPPLEMENT_INSTRUCTION,buildSupplementEntries} from './knowledge-supplement.js';
+const schema=z.strictObject({supplement:supplementInputSchema.optional(),subject:subjectKeySchema.optional(),subjectEpoch:z.number().int().nonnegative().optional(),anchor:z.string().regex(/^\d{1,30}$/u),ai:z.record(z.string(),z.unknown()),context:z.record(z.string(),z.unknown()),sources:z.array(z.string().url().max(2000)).max(3).default([])});
 export function validateAgentInput(input){
  const data=schema.parse(input),raw=resolveAITaskConfig(data.ai,'research');const endpoint=validateEndpoint(raw.endpoint);if(typeof raw.model!=='string' || !raw.model.trim() || raw.model.length>200)throw new Error('后台模型无效');
  let search={enabled:false};if(raw.search?.enabled){const value=raw.search;if(!Number.isInteger(value.maxResults) || value.maxResults<1 || value.maxResults>50)throw new Error('搜索来源数无效');search={enabled:true,provider:value.provider,endpoint:validateSearchEndpoint(value.endpoint,value.provider),maxResults:value.maxResults,maxPerHour:researchSettings(raw).searchesPerHour};}
  const context=snapshotResearchContext(data.context);
- return {anchor:data.anchor,...(data.subject ? {subject:data.subject,subjectEpoch:data.subjectEpoch} : {}),context,sources:data.sources,ai:{endpoint,model:raw.model,reasoningEffort:raw.reasoningEffort || 'auto',temperature:0.2,search,contextSources:z.object(Object.fromEntries(Object.keys(CONTEXT_DEFAULTS).map(key=>[key,z.boolean()]))).parse({...CONTEXT_DEFAULTS,...raw.contextSources}),memory:validateMemory(raw.memory || MEMORY_DEFAULTS),assistant:validateAssistant(raw.assistant || ASSISTANT_DEFAULTS),pipeline:{mode:'text',contextBudgetChars:48000}}};
+ return {anchor:data.anchor,...(data.supplement ? {supplement:data.supplement} : {}),...(data.subject ? {subject:data.subject,subjectEpoch:data.subjectEpoch} : {}),context,sources:data.sources,ai:{endpoint,model:raw.model,reasoningEffort:raw.reasoningEffort || 'auto',temperature:0.2,search,contextSources:z.object(Object.fromEntries(Object.keys(CONTEXT_DEFAULTS).map(key=>[key,z.boolean()]))).parse({...CONTEXT_DEFAULTS,...raw.contextSources}),memory:validateMemory(raw.memory || MEMORY_DEFAULTS),assistant:validateAssistant(raw.assistant || ASSISTANT_DEFAULTS),pipeline:{mode:'text',contextBudgetChars:48000}}};
 }
 export function createResearchAgent({tier='standard',profile,request,getKey,readPublicPage,reserve=async()=>{},reserveSearch=async()=>{},knowledge,relationships,checkpointer,guard=async()=>{}}){
  return async(job,{signal,checkpoint})=>{
   const data=validateAgentInput(job.input),limits=researchLimits(data.ai),settings=researchSettings(data.ai);if(!RESEARCH_BUDGETS[tier])throw Error('研究深度无效');
+  if(data.supplement?.entryId && !data.ai.memory.entries.some(row=>row.id===data.supplement.entryId))throw Error('要继续补充的知识条目已删除，请重新打开知识库');
   const scopedLookup=relationships && (async query=>scopedRelationshipContext(await relationships(query,relationshipResearchOptions(data.context.relationshipContext)),data.context.relationshipContext));
   const current=async state=>{
    if(signal.aborted)throw Error('任务已取消');await guard();
@@ -41,14 +43,17 @@ export function createResearchAgent({tier='standard',profile,request,getKey,read
    weather:async({action,...plan})=>dated(await createWeatherClient({request})({...plan,intent:'weather'},{signal,now:Date.now(),timeout:settings.requestTimeoutSec*1000}),'realtime'),
    plan:async state=>{
     await reserve(job.scope);await current();
-    const body=makeAIRequest({...data.context,task:{kind:'agent'},researchInstruction:RESEARCH_INSTRUCTION,target:{text:job.question,...(profile ? {profile} : {}),...((data.context.relationshipContext?.focus) ? {relationshipEvidence:relationshipResearchSeed(data.context.relationshipContext)} : {}),
+    const body=makeAIRequest({...data.context,task:{kind:'agent'},researchInstruction:RESEARCH_INSTRUCTION+(data.supplement ? '\n'+SUPPLEMENT_INSTRUCTION : ''),target:{text:job.question,...(data.supplement ? {supplement:data.supplement,supplementEntries:data.ai.memory.entries.map(({id,title,content})=>({id,title,content}))} : {}),...(profile ? {profile} : {}),...((data.context.relationshipContext?.focus) ? {relationshipEvidence:relationshipResearchSeed(data.context.relationshipContext)} : {}),
      agent_state:{...state.workingContext,remainingModelCalls:limits.modelCalls ? limits.modelCalls-state.modelCalls : null,budget:limits}},maxLength:1000},data.ai);
     const result=await requestJSON(request,{url:data.ai.endpoint,key:getKey('ai',data.ai.endpoint),body,stream:body.stream,timeout:settings.requestTimeoutSec*1000,signal});
     const raw=result.choices?.[0]?.message?.content;if(typeof raw!=='string')throw Error('研究模型没有返回文本');return raw;
    }});
   const id=`research-v1:${job.scope}:${job.id || crypto.randomUUID()}`;
   const result=await runtime.run({id,signal});await current(result);await checkpoint('result','研究结果与原始来源已保存，前台可按问题检索原文');
+  const entries=data.supplement && buildSupplementEntries({text:data.supplement.text,updates:result.updates,sources:result.sources,existing:data.ai.memory.entries,taskId:job.id,at:job.createdAt || Date.now()});
+  if(data.supplement?.entryId && !entries.some(row=>row.id===data.supplement.entryId))throw Error('Agent未更新指定知识条目，原资料已保留，请重新提交');
   return {answer:result.answer,citationIndices:result.citationIndices,sources:result.sources,publicSources:result.publicSources,observations:result.observations,
+   ...(entries ? {entries} : {}),
    at:Date.now(),contextAt:data.context.now || null,modelCalls:result.modelCalls,stopReason:result.stopReason,runtime:'langgraph',researchTier:tier,coverage:'bounded public evidence; no automatic public posting; only source text may enter factual memory'};
  };
 }

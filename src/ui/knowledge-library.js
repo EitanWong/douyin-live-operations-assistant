@@ -1,6 +1,5 @@
 import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate,memoryEntrySize} from '../services/knowledge.js';
 import {PersonProfileEditor} from './person-profile-editor.js';
-import {profileMemoryEntry} from '../services/person-profile.js';
 
 const fields=[['title','资料标题','text',80],['content','背景正文','textarea',MEMORY_LIMITS.content],['source','资料来源 / 确认人','text',200],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 const time=at=>new Date(at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
@@ -9,14 +8,14 @@ const statusOf=row=>!row.enabled ? 'disabled' : row.expiresOn && row.expiresOn<b
 const statusLabel={active:'可用',disabled:'已停用',expired:'已过期'};
 
 export class KnowledgeLibrary {
- constructor(root,{dirty,error,reveal,webKnowledge,profileTurn}){
+ constructor(root,{dirty,error,reveal,webKnowledge,knowledgeSupplement}){
   this.root=root;this.document=root.ownerDocument;this.dirty=dirty;this.error=error;this.reveal=reveal;this.webKnowledge=webKnowledge;this.serial=0;
   this.list=root.querySelector('[data-memory-list]');this.webList=root.querySelector('[data-web-knowledge-list]');
   const on=(selector,event,fn)=>root.querySelector(selector).addEventListener(event,fn);
   this.dialog=root.querySelector('[data-knowledge-dialog]');this.buildEditor();
-  this.personEditor=new PersonProfileEditor(this,profileTurn);
+  this.personEditor=new PersonProfileEditor(this,knowledgeSupplement);
   on('[data-memory-add]','click',()=>this.createDraft());
-  on('[data-person-add]','click',()=>{if(this.createDraft()){this.personEditor.open(this.editing.record,true);this.returnFocus=this.root.querySelector('[data-person-add]');this.root.querySelector('[data-person-name]').focus();}});
+  on('[data-person-add]','click',()=>{this.openEditor({title:'',content:'',source:'',enabled:true,expiresOn:''});this.personEditor.open(this.editing.record,true);this.returnFocus=this.root.querySelector('[data-person-add]');this.root.querySelector('[data-person-message]').focus();});
   on('[data-memory-confirm]','click',()=>this.confirmEditor());
   for(const selector of ['[data-memory-cancel]','[data-memory-close]'])on(selector,'click',()=>this.closeEditor());
   this.dialog.addEventListener('keydown',event=>this.editorKey(event));
@@ -57,11 +56,10 @@ export class KnowledgeLibrary {
   this.dialog.hidden=false;this.editorCount();this.dialog.querySelector('[data-memory-field="title"]').focus();
   this.personEditor?.open(record);
  }
- applyPersonProfile(profile){
-  const record=this.editing.record,value=profileMemoryEntry(profile,{...record,source:record.person ? record.source : '用户补充 · AI整理，待核实'});
-  this.editing.record={...this.editing.record,...value};
-  for(const field of ['title','content','source'])this.dialog.querySelector(`[data-memory-field="${field}"]`).value=value[field];
-  this.editorCount();
+ applySupplement(entries){
+  const merged=[...this.list.children].map(row=>row.record).filter(row=>!entries.some(value=>value.id===row.id)).concat(entries);validateMemory({enabled:true,entries:merged});
+  for(const value of entries){const row=[...this.list.children].find(row=>row.record.id===value.id);if(row){row.record=structuredClone(value);this.renderRow(row);}else this.add(value);}
+  this.metrics();this.filter();
  }
  editorValue(){const record={...this.editing.record};for(const input of this.dialog.querySelectorAll('[data-memory-field]'))record[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();return record;}
  editorCount(){const content=this.dialog.querySelector('[data-memory-field="content"]');if(content)this.root.querySelector('[data-memory-dialog-count]').textContent=`正文 ${content.value.length} / ${MEMORY_LIMITS.content} 字`;}
@@ -94,7 +92,7 @@ export class KnowledgeLibrary {
   paragraph(record.content);paragraph(`资料来源：${record.source || '未填写来源'}`);paragraph(`核对时间：${time(record.updatedAt)} · 到期日期：${record.expiresOn || '长期有效'}`);
   const validity=this.document.createElement('small');validity.dataset.memoryValidity='';body.append(validity);
   const actions=this.document.createElement('div');actions.className='actions';body.append(actions);
-  const edit=this.document.createElement('button');edit.type='button';edit.dataset.memoryEdit='';edit.textContent=record.person ? '继续补充人物' : '编辑知识';edit.addEventListener('click',()=>this.openEditor(row.record,row));actions.append(edit);
+  const edit=this.document.createElement('button');edit.type='button';edit.dataset.memoryEdit='';edit.textContent=record.person || record.supplement ? '继续补充知识' : '编辑知识';edit.addEventListener('click',()=>this.openEditor(row.record,row));actions.append(edit);
   const remove=this.document.createElement('button');remove.type='button';remove.dataset.memoryRemove='';remove.textContent='删除这条记忆';remove.className='danger';remove.addEventListener('click',()=>this.remove(row));actions.append(remove);this.summary(row);
  }
  remove(row){

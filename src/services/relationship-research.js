@@ -10,17 +10,17 @@ function pause(signal){
 }
 // Reuse the host's durable LangGraph queue; the page only observes one receipt.
 export function createRelationshipResearch({tasks,getConfig,getContext,isCurrent=()=>true}){
- return {async run({question,relationshipContext,context={},subject,subjectEpoch,sources=[],signal,onProgress=()=>{}}){
-  const config=getConfig(),version=JSON.stringify([config.anchorId,config.ai]);
+ return {async run({question,supplement,relationshipContext,context={},subject,subjectEpoch,sources=[],signal,onProgress=()=>{}}){
+  const config=getConfig(),revision=value=>JSON.stringify([value.anchorId,supplement ? {...value.ai,memory:{...value.ai.memory,entries:undefined}} : value.ai]),version=revision(config);
   if(!config.ai.enabled)throw Error('请先启用并保存 AI 设置。');
-  const current=()=>!signal?.aborted && isCurrent() && version===JSON.stringify([getConfig().anchorId,getConfig().ai]);
+  const current=()=>!signal?.aborted && isCurrent() && version===revision(getConfig());
   const transport=await tasks();if(!current())throw cancelled();
   const prompt=question,focus=relationshipContext?.focus;
   let id;
   const abort=()=>{if(id)void transport.cancel(id).catch(()=>{});};
   signal?.addEventListener('abort',abort,{once:true});
   try{
-   const receipt=await transport.submit({id:crypto.randomUUID(),question:prompt,input:{anchor:config.anchorId,ai:resolveAITaskConfig(config.ai,'research'),...(subject ? {subject,subjectEpoch} : {}),context:snapshotResearchContext({...getContext(),...context,...(focus ? {relationshipContext:{focus}} : {})}),sources}});id=receipt.id;
+   const receipt=await transport.submit({id:crypto.randomUUID(),question:prompt,input:{anchor:config.anchorId,ai:resolveAITaskConfig(config.ai,'research'),...(supplement ? {supplement} : {}),...(subject ? {subject,subjectEpoch} : {}),context:snapshotResearchContext({...getContext(),...context,...(focus ? {relationshipContext:{focus}} : {})}),sources}});id=receipt.id;
    if(!current()){await transport.cancel(id);throw cancelled();}
    for(;;){
     const rows=await transport.list();if(!current())throw cancelled();

@@ -11,6 +11,16 @@ const stripped=config=>{
  if(result.ai?.memory?.entries)result.ai.memory.entries=[];
  return result;
 };
+export function mergeSupplementEntries(current,before,incoming){
+ const next=clone(current);
+ for(const value of incoming){
+  const old=before.find(row=>row.id===value.id),present=next.find(row=>row.id===value.id);
+  if(!same(old,present) && !same(value,present))throw Error('其他窗口已更正或删除同一条共享资料，请重新提交');
+  const index=next.findIndex(row=>row.id===value.id);
+  if(index<0)next.push(value);else next[index]=value;
+ }
+ return next;
+}
 export function projectSharedKnowledge(config,state){
  const result=projectSharedAIServices(config,state.services);
  return {...result,ai:{...result.ai,knowledge:state.knowledge,memory:{enabled:config?.ai?.memory?.enabled!==false,entries:clone(state.entries)}}};
@@ -49,6 +59,12 @@ export function createSharedKnowledge({read,all,commit}){
  return {
   ensure:()=>serial(ensure),
   config:room=>serial(async()=>projectSharedKnowledge(await read(`live-assistant:config:${room}`) || {},await ensure())),
+  supplement:(room,entries,before,{anchor,signal}={})=>serial(async()=>{
+   const current=await ensure(),config=await read(`live-assistant:config:${room}`);
+   signal?.throwIfAborted();if(anchor!==undefined && (!config?.ai?.enabled || String(config.anchorId)!==anchor))throw Error('AI已关闭或主播已变化，补充未保存');
+   const next={...current,entries:mergeSupplementEntries(current.entries,before,entries.map(row=>({...row,origin:row.origin || {room,anchor:String(config?.anchorId || '')}})))};
+   validate(next);await commit([[SHARED_KNOWLEDGE_KEY,next]]);return entries.map(row=>next.entries.find(saved=>saved.id===row.id));
+  }),
   save:(room,config,base)=>serial(async()=>{
    const current=await ensure(),next=clone(current),before=shared(base),incoming=shared(config);
    for(const id of new Set([...before.entries,...incoming.entries].map(r=>r.id))){

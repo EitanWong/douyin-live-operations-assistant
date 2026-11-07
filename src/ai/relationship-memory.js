@@ -66,7 +66,11 @@ function sourceDocuments(input){
    const person=parsed.data,key=person.key || `manual:${input.room || 'current'}:${input.anchor}:${row.id}`;
    entities.push({key,name:person.name,role:person.key ? '已指定账号' : '资料人物（未绑定账号）'});
    documents.push({id:`memory:${row.id}`,text:row.content,at:row.updatedAt,source:row.source || '用户补充',trust:'unverified',person,personKey:key,origin:row.origin});
-  }else {add(`memory:${row.id}`,row.content,row.updatedAt,row.source || '运营背景知识',row.trust || 'verified');documents.at(-1).origin=row.origin;}
+  }else {
+   add(`memory:${row.id}`,row.content,row.updatedAt,row.source || '运营背景知识',row.trust || 'verified');const doc=documents.at(-1);doc.origin=row.origin;doc.supplement=row.supplement;
+   const name=row.supplement && row.content.match(/(?:^|[。\n])人物[：:]\s*([^；;。\n]{1,40})/u)?.[1]?.trim();
+   if(name && validName(name)){const key=row.supplement.personKey || `supplement:${row.id}`;entities.push({key,name,role:'补充人物'});doc.supplementPerson=key;}
+  }
  }
  if(input.knowledge)add('session',input.knowledge,input.now,'运营本场资料','verified');
  for(const row of activeAccounts(input)){
@@ -132,6 +136,7 @@ function createGraph({documents,entities},parsed){
  }
  for(const doc of documents){
   scope=doc.scope || '';
+  if(doc.supplementPerson){const node=nodes.get(canonical(doc.supplementPerson));if(node)recordPersonEvidence(node,doc,{supplement:true});}
   if(doc.person){const node=nodes.get(canonical(doc.personKey));if(node)recordPersonEvidence(node,doc,{operator:doc.kind!=='profile-insight',self:doc.kind==='profile-insight'});}
   if(doc.researchSubject){const node=nodes.get(canonical(doc.researchSubject));if(node)recordPersonEvidence(node,doc,{lead:true});continue;}
   if(doc.speaker){const node=nodes.get(canonical(doc.speaker));if(node)recordPersonEvidence(node,doc,{self:doc.trust==='unverified',operator:doc.trust==='verified'});}

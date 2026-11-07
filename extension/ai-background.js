@@ -17,7 +17,7 @@ import {retrieveSourceRecords} from '../src/services/automatic-knowledge.js';
 import {formatAccountEvidence} from '../src/ai/account-evidence.js';
 import {continuousEnabled,createContinuousResearch,researchEvidenceIsCurrent} from '../src/ai/continuous-research.js';
 import {researchLimits,researchSettings} from '../src/ai/research-settings.js';
-export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
+export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,saveSupplement,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
  const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
  const request=details=>{
   const controller=new AbortController();let timeout;
@@ -77,6 +77,12 @@ export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=as
    relationships:(query,options)=>ai.assistant?.memoryEnabled===false ? null : relationships?.(room,query,options)});
   const result=await agent(job,options);
   await guard();
+  if(job.input.supplement){
+   if(!saveSupplement)throw Error('当前宿主不支持保存补充知识');
+   await options.checkpoint('knowledge:save','保存补充知识，更新人物索引与关系证据');options.signal.throwIfAborted();
+   result.entries=await saveSupplement(room,result.entries,config.ai.memory.entries,{anchor:job.input.anchor,signal:options.signal});
+   return {...result,knowledgeStored:true};
+  }
   if(profiles && subject && config.ai.assistant?.research?.profileEnabled){
    await options.checkpoint('profile','按稳定账号原话更新人物资料，保留引用和推测边界');
    try{result.profileUpdated=Boolean(await profiles({room,anchor:job.input.anchor,subject:job.input.subject,ai:config.ai,signal:options.signal,guard}));}

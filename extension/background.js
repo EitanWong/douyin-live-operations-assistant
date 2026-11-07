@@ -161,7 +161,7 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),saveSupplement:(...args)=>sharedKnowledge.supplement(...args),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake'){void getAIBackground().wake().catch(()=>{});void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});}});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:0.5});

@@ -7,6 +7,7 @@ import {weatherPlanSchema} from '../services/weather.js';
 import {compactResearchState} from './research-context.js';
 import {mergeSourcePassage,evidenceOffset} from './source-evidence.js';
 import {budgetReached} from './research-settings.js';
+import {supplementUpdatesSchema} from './knowledge-supplement.js';
 
 export const RESEARCH_LIMITS=RESEARCH_BUDGETS.standard;
 const query=z.string().trim().min(1).max(300);
@@ -19,7 +20,7 @@ const decisionSchema=z.discriminatedUnion('action',[
  z.strictObject({action:z.literal('relationships'),query}),
  z.strictObject({action:z.literal('public-data'),call:publicCallSchema}),
  weatherPlanSchema.omit({intent:true}).extend({action:z.literal('weather')}),
- z.strictObject({action:z.literal('finish'),answer:z.string().trim().min(1).max(12000),citations:z.array(z.number().int().positive()).max(1000)})
+ z.strictObject({action:z.literal('finish'),answer:z.string().trim().min(1).max(12000),citations:z.array(z.number().int().positive()).max(1000),updates:supplementUpdatesSchema.optional()})
 ]);
 export function parseResearchDecision(raw){
  let value;try{value=JSON.parse(raw.replace(/^```(?:json)?\s*|\s*```$/gu,''));}catch{throw Error('研究规划不是有效JSON');}
@@ -43,7 +44,7 @@ agent_state每轮自动压缩：catalog是来源目录，evidence是按当前问
 人物档案dossier按来源整理明确自述、运营记录、事件和说话样本；leads仅为研究线索，不能认证作者或归属。优先核对已配对公开主页、明确提及的公开作品和事件，保留否定、条件、时间及冲突；不把一次表达推成稳定性格，不调查非公开隐私，不编造消费能力、未来送礼概率或完整关系网。资料不足时明确具体缺口。
 不能发公屏、执行代码或访问未发现的链接。不要输出API密钥。搜索不可用时说明缺口。`;
 
-const State=Annotation.Root(Object.fromEntries(['decision','prepared','bootstrapping','modelCalls','searches','reads','sources','publicSources','observations','executed','answer','citationIndices','stopReason','focus','catalogOffset','workingContext'].map(key=>[key,Annotation()])));
+const State=Annotation.Root(Object.fromEntries(['decision','prepared','bootstrapping','modelCalls','searches','reads','sources','publicSources','observations','executed','answer','citationIndices','updates','stopReason','focus','catalogOffset','workingContext'].map(key=>[key,Annotation()])));
 const initial=()=>({prepared:0,bootstrapping:false,modelCalls:0,searches:0,reads:0,sources:[],publicSources:[],observations:[],executed:[],answer:'',citationIndices:[],stopReason:''});
 const evidenceCoverage={'public-page':'公开页面文字；不代表完整视频、评论或已核实身份','stored-passage':'保存的公开原文片段；内容和身份仍待核实','search-snippet':'搜索摘要；尚未核对原页面','public-data':'公共接口返回的数据；仅覆盖已查询对象、时间和字段','public-media':'机器音画识别待核实；间隔采样不是连续视频，说话人和画面人物身份未知，不证明心理或帧外事件'};
 function sourceRows(rows,existing,limits,reading=false,kind='search-snippet'){
@@ -69,7 +70,7 @@ function finish(state){
  const {answer,citations}=state.decision;
  if(citations.some(id=>!state.sources.some(row=>row.index===id)))throw Error('研究引用了不存在的来源编号');
  if(state.sources.length && !citations.length)throw Error('研究结果缺少可核对的来源引用');
- return {answer,citationIndices:[...new Set(citations)],stopReason:'complete'};
+ return {answer,citationIndices:[...new Set(citations)],updates:state.decision.updates,stopReason:'complete'};
 }
 function toolKey(decision){return JSON.stringify([decision.action,decision.query ? decision.query.normalize('NFKC').trim().toLowerCase() : decision.url || decision.call || decision]);}
 

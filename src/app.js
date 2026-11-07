@@ -1,7 +1,8 @@
 import {resolveAITaskConfig,taskSecretKey,taskModelSecret} from './services/ai-task-config.js';
 import {createKnowledgeMemory} from './services/automatic-knowledge.js';
 import {AI_SERVICE_GROUPS,selectAIServices,projectSharedAIServices} from './services/shared-ai-services.js';
-import {updatePersonProfile} from './services/person-profile.js';
+import {supplementInputSchema} from './ai/knowledge-supplement.js';
+import {mergeSupplementEntries} from './services/shared-knowledge.js';
 import {createRelationshipLibrary} from './ai/relationship-library.js';
 import {withRelationshipEvidence} from './services/relationship-query.js';
 import {createRelationshipResearch,createBackgroundResearch} from './services/relationship-research.js';
@@ -731,10 +732,12 @@ export function boot(options = {}) {
       },
       webKnowledge,
       relationships:queryRelationships,
-      profileTurn:async(input,c,key,remember,credentials)=>{
-        if(c.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveAITaskConfig(c.ai,'profile').endpoint).hostname))throw Error('仅本地模式下，请将后台研究模型配置为本机兼容接口');
-        await keepKey(c,key,remember);await prepareMediaKeys(c,credentials)();
-        return updatePersonProfile(input,c.ai,cloudClient);
+      knowledgeSupplement:async({message,entryId,signal,onProgress})=>{
+        const supplement=supplementInputSchema.parse({text:message,...(entryId ? {entryId} : {})});
+        if(engine.config.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveAITaskConfig(engine.config.ai,'research').endpoint).hostname))throw Error('仅本地模式下，请将后台研究模型配置为本机兼容接口');
+        if(JSON.stringify(panel.read().ai.memory.entries)!==JSON.stringify(engine.config.ai.memory.entries))throw Error('请先保存或撤销已有知识草稿，再提交补充');
+        const result=await backgroundResearch.run({question:`补充知识并更新人物关系：${message.slice(0,300)}`,supplement,signal,onProgress});
+        if(!result.knowledgeStored)throw Error('补充知识尚未保存，请重试');return result;
       },
       startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
@@ -917,7 +920,11 @@ export function boot(options = {}) {
     const taskTransport=async()=>{
       if(options.agentTasks)return options.agentTasks;
       localAgentReady ||= import('./ai/local-agent.js').then(({createLocalAgentTasks})=>{
-        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:researchKey,get,set,relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results)});
+        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:researchKey,get,set,relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results),saveSupplement:async(entries,before,signal)=>{
+          signal.throwIfAborted();if(!engine.config.ai.enabled || engine.config.anchorId!==before.anchorId)throw Error('AI已关闭或主播已变化');
+          const next=copy(engine.config);next.ai.memory.entries=mergeSupplementEntries(next.ai.memory.entries,before.ai.memory.entries,entries);validateConfig(next);
+          await set(configKey,next);sharedBaseConfig=copy(next);engine.update(next);
+        }});
         return localAgentTasks;
       });
       return localAgentReady;
