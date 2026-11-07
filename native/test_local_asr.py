@@ -1,9 +1,15 @@
 import base64
 import io
+from pathlib import Path
+import tempfile
+import types
 import unittest
 import wave
+import weakref
+import numpy as np
 from unittest.mock import patch
 from local_asr import pcm16, clean_transcript, performance_phase, LocalASR
+from model_lease import ModelLease
 
 class LocalASRContracts(unittest.TestCase):
     def test_uninstalled_model_is_unavailable_without_loading_weights(self):
@@ -54,3 +60,96 @@ class LocalASRContracts(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'LOCAL_ASR_SLOW'):
                 runtime.infer('sample')
             self.assertEqual(runtime.status['phase'], 'slow')
+
+
+class PreparationOwnershipContracts(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.folder = Path(temporary.name)
+        (self.folder / 'test_wavs').mkdir()
+        (self.folder / 'model.int8.onnx').write_bytes(b'controlled factory; no model weights')
+        (self.folder / 'tokens.txt').write_text('fixture')
+        with wave.open(str(self.folder / 'test_wavs/zh.wav'), 'wb') as audio:
+            audio.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
+            audio.writeframes(np.full(64000, 8191, dtype='<i2').tobytes())
+        self.runtime = LocalASR(None)
+        self.runtime.folder = self.folder
+        self.runtime.lease = ModelLease(self.folder)
+        self.addCleanup(self.runtime.close)
+        self.live = weakref.WeakSet()
+        self.loads = []
+        self.overlaps = []
+        self.on_load = lambda _threads: None
+        self.text = lambda threads: 'threads:' + str(threads)
+        owner = self
+
+        class Recognizer:
+            def __init__(self, threads):
+                self.threads = threads
+
+            def create_stream(self):
+                return types.SimpleNamespace(accept_waveform=lambda *_: None,
+                                             result=types.SimpleNamespace(text=owner.text(self.threads)))
+
+            def decode_stream(self, _stream):
+                pass
+
+        def load(**options):
+            self.overlaps.append(len(self.live))
+            threads = options['num_threads']
+            self.loads.append(threads)
+            self.on_load(threads)
+            model = Recognizer(threads)
+            self.live.add(model)
+            return model
+
+        factory = types.SimpleNamespace(OfflineRecognizer=types.SimpleNamespace(from_sense_voice=load))
+        self.enterContext(patch.dict('sys.modules', {'sherpa_onnx': factory}))
+        self.enterContext(patch('local_asr.os.cpu_count', return_value=8))
+        # One thread is fastest; the winning configuration must survive later candidates.
+        self.enterContext(patch('local_asr.time.perf_counter', side_effect=lambda: next(self.clock)))
+        self.clock = iter([value for delay in [.1, .2, .3] * 2
+                           for start in [0, 1, 2] for value in [start, start + delay]])
+
+    def test_prepare_and_reprepare_load_one_model_at_a_time_and_keep_fastest_configuration(self):
+        for _ in range(2):
+            status = self.runtime.prepare(priority='background')
+            self.assertEqual(status['phase'], 'ready')
+            self.assertTrue(status['selfTestPassed'])
+            self.assertEqual(status['threads'], 1)
+            self.assertEqual([row['threads'] for row in status['benchmarks']], [1, 2, 4])
+            self.assertEqual(self.runtime.decode(b'\xff\x1f' * 16000), 'threads:1')
+            self.assertEqual(len(self.live), 1)
+        self.assertEqual(set(self.loads), {1, 2, 4})
+        self.assertEqual(self.overlaps, [0] * len(self.overlaps))
+        self.runtime.close()
+        self.assertEqual(len(self.live), 0)
+        self.assertIsNone(self.runtime.lease.fd)
+
+    def test_failed_later_allocation_releases_model_and_lease(self):
+        def fail(threads):
+            if threads == 2:
+                raise RuntimeError('controlled allocation failure')
+        self.on_load = fail
+        with self.assertRaisesRegex(RuntimeError, 'controlled allocation failure'):
+            self.runtime.prepare(priority='background')
+        self.assertEqual(self.overlaps, [0, 0])
+        self.assertEqual(len(self.live), 0)
+        self.assertIsNone(self.runtime.lease.fd)
+        self.assertEqual(self.runtime.status['phase'], 'unprepared')
+
+    def test_empty_transcript_does_not_pass_preparation_or_retain_resources(self):
+        self.text = lambda _threads: ''
+        with self.assertRaisesRegex(ValueError, 'LOCAL_ASR_SELF_TEST'):
+            self.runtime.prepare(priority='background')
+        self.assertEqual(len(self.live), 0)
+        self.assertIsNone(self.runtime.lease.fd)
+
+    def test_live_preemption_stops_before_allocating_another_candidate(self):
+        self.text = lambda _threads: self.runtime.lease.request_live() or 'hello'
+        with self.assertRaisesRegex(ValueError, 'LOCAL_ASR_PREEMPTED'):
+            self.runtime.prepare(priority='background')
+        self.assertEqual(self.loads, [1])
+        self.assertEqual(len(self.live), 0)
+        self.assertIsNone(self.runtime.lease.fd)

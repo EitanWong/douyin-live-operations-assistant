@@ -135,8 +135,18 @@ class LocalASR:
                 self.close()
                 raise
 
-    def _prepare(self):
+    def _load_recognizer(self, threads, frames):
         import sherpa_onnx
+        # Release the previous owner before the factory allocates new weights.
+        self.recognizer = None
+        self.check_priority()
+        self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+            model=str(self.folder / 'model.int8.onnx'), tokens=str(self.folder / 'tokens.txt'),
+            num_threads=threads, provider='cpu', language='zh', use_itn=True, debug=False)
+        if not self.decode(frames):
+            raise ValueError('LOCAL_ASR_SELF_TEST')
+
+    def _prepare(self):
         if not self.folder or not all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav']):
             raise ValueError('LOCAL_ASR_INSTALL')
         frames = benchmark_frames(pcm16(base64.b64encode((self.folder / 'test_wavs/zh.wav').read_bytes()).decode()))
@@ -147,11 +157,7 @@ class LocalASR:
         best = None
         benchmarks = []
         for threads in candidates:
-            self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-                model=str(self.folder / 'model.int8.onnx'), tokens=str(self.folder / 'tokens.txt'),
-                num_threads=threads, provider='cpu', language='zh', use_itn=True, debug=False)
-            if not self.decode(frames):
-                raise ValueError('LOCAL_ASR_SELF_TEST')
+            self._load_recognizer(threads, frames)
             timings = []
             for _ in range(3):
                 started = time.perf_counter()
@@ -161,10 +167,12 @@ class LocalASR:
             elapsed = statistics.median(timings)
             benchmarks.append({'threads': threads, 'medianMs': round(elapsed), 'maxMs': round(max(timings))})
             if best is None or elapsed < best[0]:
-                best = (elapsed, threads, self.recognizer)
-        elapsed, threads, self.recognizer = best
+                best = (elapsed, threads)
+        elapsed, selected_threads = best
+        if selected_threads != threads:
+            self._load_recognizer(selected_threads, frames)
         self.status = {**self.status, 'phase': performance_phase(elapsed, audio_ms),
-                       'elapsedMs': round(elapsed), 'realTimeFactor': elapsed / audio_ms, 'threads': threads,
+                       'elapsedMs': round(elapsed), 'realTimeFactor': elapsed / audio_ms, 'threads': selected_threads,
                        'sampleMs': audio_ms, 'benchmarks': benchmarks, 'selfTestPassed': True, 'consecutiveOverruns': 0}
         return self.status
 

@@ -3391,3 +3391,19 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 浏览器自动加载尝试：隔离harness只复制生产account-page.js及原document_start/MAIN声明，无background/nativeMessaging，未碰用户配置或数据宿主。独立Chrome实际公开页返回正常详情，但window观察器API未出现；脚本退出0仅表示诊断执行，不是扩展验收通过。加载失败原因尚待确认，继续保留实际自动观察器/已部署采集缺口，不以JSDOM或静态脚本哈希替代。
 - 诊断更正：首次原生测试误用系统python3，因缺httpx退出1；改用既有安装虚拟环境后观察真实MEDIA_SOURCE红测。实际回放脚本的正则在u模式未转义右大括号，Node语法错误退出1、未执行产品；修正后得到预期来源断言失败，再修改生产并转绿。两次只读cat猜测actual-download.py/public-media-host.mjs不存在，相关管道最后命令仍为0，不能记成检查通过；随后用rg --files找到real-download.py和public-media-worker.py。事务生成器在执行前复核纠正了字符串替换范围，没有用失败掩盖产物。所有原文和更正保留。
 - 工具/边界：crapper/dryer/mutator在CLI与现有工具目录均不可用，三项未执行，其他检查不替代。没有UI/布局变更、真实弹幕发送、用户扩展/宿主重载或真实模型加载。旧直播host.py:174新鲜度错误根因仍未确认，未修改。持续目标active；实际自动页面观察器、完整已部署调度、真实模型事实性、长期实播和商业准确率仍未验收。实施提交、推送与精确SHA CI随后补记。
+
+
+## 2026-11-07：真实页面自动观察器续验与单实例 ASR 准备
+
+- 续接 dev/a461aa69eea1210446fcbc570a9fe8003f755366 和原四角色，先修正上一轮未完成的 allocation 探针，未重做已经完成的来源修复。该提交 CI 42335915146 已 completed/success：JavaScript1827/1827、0失败/取消/跳过、358551.103081ms；原生120/120、18.116秒，index/build/check/package/upload通过，无需重启 workflow。
+- 自动观察器续验：前次命令行加载失败的历史保留。读取官方 CDP Extensions.loadUnpacked schema 后，以允许扩展调试的独立 Chrome 加载原 account-page.js 和原 document_start/MAIN 声明；真实公开页出现观察器API、正确作品6961737553342991651/UID110403406559和真实详情原始下载描述，没有补造__vid。用该浏览器实际生成的描述走生产原生身份边界、HTTPX及完整音画解码，取得6,281,768字节、SHA5db5a0a730539b8ac2f8907cf64ba7ece909d834de83a9c4e7c6fd5bc57931e2，视频显示时长19,734ms、退出0。harness不含background/nativeMessaging，不属于完整已部署闭环；短期原始地址只保留本机输入，不进日志/知识库。
+- 定位与原始保护：agent:find/impact已执行，Python不在JS索引覆盖内，随后直接确认native/local_asr.py字面_prepare。保存两个修改文件的本轮父字节和SHA，并保留原聚合pristine。读源码发现best元组持有recognizer；真实受控工厂探针观察到峰值2，永久回归在两处观察到旧模型尚未释放。此为对象生命周期证据，不是实际RSS、性能或识别准确率证明。
+- 最小修正：LocalASR._prepare只保留最佳耗时/线程数；共享_load_recognizer先释放原识别器、检查直播抢占，再构造和自检候选。若最佳配置不是最后候选，先释放最后一个再重建并自检最佳配置。保留原1/2/4线程测量、性能门槛和共享ModelLease，不加第二套模型或调度器。覆盖重复准备、最快非末候选仍可解码、后续构造失败、空转录自检及直播抢占后的资源释放。
+- TDD与错误更正：探针bytes literal含非ASCII破折号退出1，修正后模拟模块缺__spec__再次退出1；改为构造runtime后再替换工厂。永久测试首次因patch.dict恢复sys.modules后NumPy本机模块重复导入而错误，改为模拟前加载并用于生成PCM，随后10项中2项按预期所有权断言失败，再改生产转绿。早期探针持有status引用在close后误显示unprepared，最终探针复制准备时状态，显示ready。原始回执均保留，不把测试环境错误当产品红测。只读猜测public_media_audio.py及src/ai/public-media-knowledge.js不存在、一次zsh通配符未匹配均非验证通过；已用rg --files定位实际文件，未据此改源码。
+- 真实模型执行：进程检查未发现已知直播/媒体工作者，并由生产工作者实际取得同一模型目录的background租约。复用浏览器实际下载并逐SHA确认的19.782秒公开视频文件，以隔离SQLite（room=1为测试槽位）运行原PublicMediaWorker、FFmpeg和真实SenseVoiceSmall-int8。准备6.130秒，原自检ready，1/2/4线程中位314/258/232ms，选4线程；工作者7.332秒成功，完整音轨19,735ms、5段带时间戳转录，speaker全部unknown，结束后模型及租约均释放。Darwin进程峰值RSS1,017,544,704字节，只是本次单次值，没有运行真实旧代码作内存对照。未修改模型、自检、cpu_count或性能阈值来使真实运行通过。
+- 事实性范围：五段是真实未复核模型输出，不等于主播本人发言、准确字幕、人物经历或心理特征；没有准确率参考集，不宣称WER/CER或商业准确率通过。本次使用已有文件，未把过期来源回放当新鲜下载；没有真实视觉模型推理、用户资料库写入或已部署后台采集验收。
+- 本机冻结：ASR专项10/10；原生全量124/124、12.035秒，ResourceWarning升格错误；build/check、agent:index/check（530模块/2984符号、索引无差异）通过。JavaScript全量正在收齐回执，冻结后生产/测试不再改动。依赖未变化，沿用本轮既有npm ci审计0；不把之前提交的CI当新修正CI。
+- 四角色扩展到88文件，原八组同输入探针重跑，并新增第九组受控对象生命周期：BASELINE峰值3/选1线程/保留1份→MODIFIED峰值1/选1线程/关闭后0份和租约释放→ROLLBACK恢复峰值3。该组固定候选时钟，与初次未固定时钟峰值2分开说明。补丁重建、独立副本回滚、全部原始SHA恢复和当前修改版SHA通过，未把聚合pristine重置到本轮父提交。
+- 工具与未完成项：crapper/dryer/mutator已核实CLI及工具目录均不可用，三项未执行，其他检查不替代。无UI或共享布局变更、用户扩展/宿主重载、真实弹幕发送、版本/标签变更或其他工作树删除。旧host.py:174新鲜度故障根因未确认；真实视觉、转录人工事实性、部署后的完整调度/知识检索及长期实播仍待验收，目标active。最终全量/提交/推送/新CI回执随后补记。
+
+- 最终本机冻结：JavaScript1827/1827、0失败/取消/跳过，174386.279583ms/外层174.593秒；原生124/124、12.035秒，build/check/index/diff-check均通过。冻结期间生产与测试未再修改。原四角色88文件/九组探针已重新打开并核对当前SHA；接下来普通提交和推送dev，实施SHA与远端CI回执随后补记。

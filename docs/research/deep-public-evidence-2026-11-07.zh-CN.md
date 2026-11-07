@@ -153,3 +153,14 @@ publicMedia:3/modelLease:1/keyframes:1 协议把帧交给原 createMediaClient �
 生产观察器/采样到队列/SQLite/FFmpeg/原文检索及遗忘的集成5/5；本机全量JavaScript1827/1827、原生120/120，build/check/index通过；受控ASR/视觉语义仍不代表真实模型准确率。原四角色87文件、八组BASELINE/MODIFIED/ROLLBACK和逐哈希恢复通过。
 
 另用原生产脚本与声明组成无background/nativeMessaging的独立浏览器harness测试自动注入，普通公开详情正常返回但观察器API未出现；原因尚未确认，不算自动采集通过。下一阶段继续诊断实际document_start加载与已部署调度，再做真实模型事实性和长期实播验收。持续目标保持active。
+
+
+## CDP 自动观察器续验与真实 ASR
+
+前述命令行加载未出现API的历史仍保留；后续用官方CDP Extensions.loadUnpacked在独立调试Chrome加载原生产脚本及document_start/MAIN声明，真实页面实际出现API、正确稳定作者和原始详情下载描述。该描述经生产身份校验、HTTPX和完整FFmpeg解码，取得同一6,281,768字节媒体（SHA5db5a0a730539b8ac2f8907cf64ba7ece909d834de83a9c4e7c6fd5bc57931e2）。这是实际自动观察器证据；harness没有background/nativeMessaging，仍不构成部署闭环。a461aa69的CI42335915146已通过JavaScript1827/1827和原生120/120。
+
+真实模型前的受控对象生命周期检查确认：旧_prepare的best元组和self.recognizer可能同时持有多份识别器。修正为仅保留最佳线程数和耗时，并在下一次构造前释放旧模型，最后必要时重建和自检最佳配置；继续使用同一ModelLease和直播优先边界。永久测试先出现两项预期所有权失败，修正后10/10；原生全量124/124。原聚合pristine/修改/回滚三方在同一受控时钟和PCM下，峰值为3→1→3；这不是RSS或真实模型准确率测试。
+
+随后用已核验文件、真实SenseVoiceSmall-int8及生产PublicMediaWorker完成隔离SQLite音轨任务。没有旁路自检或修改CPU数量；真实共享租约被取得并释放，原自检选4线程（4秒样本中位232ms），模型准备6.130秒，任务7.332秒完成19,735ms音轨，5段时间戳转录全部speaker=unknown。此为已有公开媒体的本机真实音轨推理，不是新的网络采集或真实视觉分析。五段是未复核模型输出，不能据此认定谁说过什么或生成心理属性；尚无参考转录和WER/CER，不宣称商业准确率。Darwin本次进程峰值RSS1,017,544,704字节不作旧新版内存对比。
+
+四角色已扩展至88文件、九组同输入探针，补丁重建与逐原始SHA回滚通过。行动日志记录错误、命令回执和工具限制；真实视觉、人工事实性、部署完整链路、长期实播和旧host.py:174故障仍待继续。
