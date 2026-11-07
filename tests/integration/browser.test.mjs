@@ -1357,35 +1357,48 @@ test('发送异常和重连不主动暂停；页面缓存返回后仍可继续�
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api.panel.destroy();dom.window.close();await lock.drained;}
 });
 
-test('运行中事件先写入日志；状态快照成功后确认日志，重启记录按序回放', async () => {
+test('运行中事件先写入日志；状态快照成功后确认日志，重启记录按序回放', async t => {
+  // Storage and lock completion may be slow; advance the batch clock explicitly.
+  t.mock.timers.enable({apis:['setTimeout','setInterval','Date'],now:1800000000000});
+  const advance=async ms=>{t.mock.timers.tick(ms);await new Promise(setImmediate);};
   const dom=setup(),values=new Map([['live-assistant:config:1234567890',{mode:'preview'}]]),order=[];
-  let api,onEvent,allowReplay=false,failSnapshot=false,newEventId=0;const pending=[{key:'live-assistant:event:1234567890:replay-000000000000',event:{type:'chat',id:'replay-chat',user:{id:'viewer-r',name:'回放观众'},text:'接龙'}}];
+  let api,onEvent,allowReplay=false,failSnapshot=false,holdSnapshot=false,completeSnapshot,newEventId=0;const pending=[{key:'live-assistant:event:1234567890:replay-000000000000',event:{type:'chat',id:'replay-chat',user:{id:'viewer-r',name:'回放观众'},text:'接龙'}}];
   const journal={
     append:async event=>{order.push('append');const key=`live-assistant:event:1234567890:new-${++newEventId}00000000000`;pending.push({key,event});return {key};},
     pending:async()=>pending,
     ack:async key=>{order.push('ack');const index=pending.findIndex(record=>record.key===key);if(index>=0)pending.splice(index,1);},
     ackMany:async keys=>{order.push('ack');for(const key of keys){const index=pending.findIndex(record=>record.key===key);if(index>=0)pending.splice(index,1);}}
   };
-  const engine=boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:async(key,value)=>{if(key.includes(':runtime:')){order.push('snapshot');if(failSnapshot)throw new Error('测试快照失败');}values.set(key,value);},del:key=>values.delete(key),journal,request:()=>{},adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>true,sync(){},replayJournal:async()=>{if(allowReplay)for(const record of [...pending])await onEvent({...record.event,_journalKey:record.key});}};},identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>{api=value;}});
+  const engine=boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:async(key,value)=>{if(key.includes(':runtime:')){order.push('snapshot');if(failSnapshot)throw new Error('测试快照失败');if(holdSnapshot)await new Promise(resolve=>{completeSnapshot=resolve;});}values.set(key,structuredClone(value));},del:key=>values.delete(key),journal,request:()=>{},adapterFactory:options=>{onEvent=options.onEvent;return {status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>true,sync(){},replayJournal:async()=>{if(allowReplay)for(const record of [...pending])await onEvent({...record.event,_journalKey:record.key});}};},identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>{api=value;}});
   try {
-    api.panel.node('[data-action=start]').click();await new Promise(resolve=>setTimeout(resolve,30));
+    api.panel.node('[data-action=start]').click();for(let i=0;i<20 && !engine.running;i++)await advance(0);assert.equal(engine.running,true);await advance(250);
     order.length=0;await onEvent(Object.freeze({type:'chat',id:'live-chat',user:{id:'viewer-1',name:'实时观众'},text:'你好'}));
     await onEvent({type:'chat',id:'live-chat-2',user:{id:'viewer-2',name:'实时观众2'},text:'你好2'});
-    const liveDeadline=Date.now()+1000;while(Date.now()<liveDeadline&&!order.includes('ack'))await new Promise(resolve=>setTimeout(resolve,5));
-    assert.equal(order.filter(item=>item==='snapshot').length,1,'相邻事件应合并为一次运行快照');
-    assert.equal(order.filter(item=>item==='ack').length,1,'相邻事件应合并为一次批量确认');
+    holdSnapshot=true;await advance(99);assert.deepEqual(order,['append','append']);await advance(1);
+    assert.deepEqual(order,['append','append','snapshot']);assert.equal(pending.length,3,'写入未完成前保留所有日志');
+    assert.ok(!values.get('live-assistant:runtime:1234567890').history.some(row=>row.text==='你好2'));
+    holdSnapshot=false;completeSnapshot();await advance(0);
+    assert.equal(values.get('live-assistant:runtime:1234567890').history.at(-1).text,'你好2');
+    assert.equal(order.filter(item=>item==='snapshot').length,1,'同一100ms窗口内的事件应合并为一次运行快照');
+    assert.equal(order.filter(item=>item==='ack').length,1,'同一窗口内的事件应合并为一次批量确认');
     assert.deepEqual(order,['append','append','snapshot','ack']);assert.equal(engine.history.at(-1).text,'你好2');
+    order.length=0;
+    await onEvent({type:'chat',id:'later-1',user:{id:'viewer-4',name:'跨窗观众'},text:'第一个窗口'});await advance(100);
+    assert.deepEqual(order,['append','snapshot','ack']);await advance(150);
+    await onEvent({type:'chat',id:'later-2',user:{id:'viewer-5',name:'跨窗观众2'},text:'第二个窗口'});await advance(100);
+    assert.deepEqual(order,['append','snapshot','ack','append','snapshot','ack']);assert.equal(pending.length,1);
     order.length=0;failSnapshot=true;await onEvent({type:'chat',id:'live-fail',user:{id:'viewer-3',name:'仍保留'},text:'失败也要保留'});
-    const failureDeadline=Date.now()+1000;while(Date.now()<failureDeadline&&!order.some(item=>item==='snapshot'))await new Promise(resolve=>setTimeout(resolve,5));
-    assert.equal(pending.length,2,'运行快照失败时事件日志不得删除');
+    await advance(100);
+    assert.equal(pending.length,2,'运行快照失败时事件日志不得删除');assert.ok(!order.includes('ack'));
     failSnapshot=false;
-    const retryDeadline=Date.now()+2500;while(Date.now()<retryDeadline&&pending.length>1)await new Promise(resolve=>setTimeout(resolve,10));
+    await advance(1000);
     assert.equal(pending.length,1,'重试成功后只确认已持久化的事件');
+    assert.equal(values.get('live-assistant:runtime:1234567890').history.at(-1).text,'失败也要保留');
     order.length=0;allowReplay=true;await api.adapter.replayJournal();
-    const replayDeadline=Date.now()+1000;while(Date.now()<replayDeadline&&pending.length)await new Promise(resolve=>setTimeout(resolve,5));
+    await advance(100);
     assert.ok(order.indexOf('snapshot')<order.lastIndexOf('ack'));
     assert.equal(pending.length,0);
-  } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+  } finally {holdSnapshot=false;completeSnapshot?.();dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
 });
 
 test('礼物入账失败时待写记录随快照恢复，重建后继续入账', async () => {

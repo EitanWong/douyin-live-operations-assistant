@@ -3545,3 +3545,18 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 
 
 - 提交/推送回执：缓存读取修正6382345a5bf4596e4977b337926d191c9f28401d已普通推送origin/dev，git ls-remote完整SHA一致。其精确CI42350617452当前in_progress，已启动原run观察，不宣称通过；上一个实施8f013b6的CI42349737037已success，JavaScript1846/1846、538366.227419ms，native138/138、19.514秒，index/build/check/package/upload成功。最新本机JavaScript1847/1847、174.933秒；四角色95文件/15组、补丁重建和回滚通过，原聚合pristine保持。短SHA首次CI查询返回空数组，改用完整SHA找到实际run，未误判未运行。该提交不包含新的原生改动，原生回执为本轮已验证的同一实现。
+
+
+## 2026-11-07：直播记忆快照回归按实际时间窗口验证
+
+- 续接dev/9e332dd2eb5b90d2a934f86f5324b8edf4d29655及原四角色95文件/15组。上一目标轮完成两项溯源修复和推送，属于实际进展。先读checkpoint并轮询既有watch97170，不重启CI；精确实施6382345a5bf4596e4977b337926d191c9f28401d的CI42350617452最终success，JavaScript1847/1847、457757.570752ms，原生138/138、17.432秒，索引/构建/check/打包上传成功。原始元数据和两个job日志已保存。
+- 新单元定位原browser.test.mjs:1375快照合并断言，先agent:find/impact和源码确认、保存父测试/索引字节及SHA。前提为“依次await的两个事件必然属于同一100ms批处理窗口”；实际还存在250ms普通保存定时器，事件处理/锁/存储包含异步等待，原断言却使用真实30/5/10ms等待和固定完整顺序。原CI42346718280的确切第二次快照触发时间没有记录，保留该限制，不伪称已还原其完整时间线。
+- 可重复反例：同一原集成测试和生产boot/JournalCommitter/RuntimeWriter，只在隔离副本两事件之间插入捕获的原生150ms等待。旧测试child exit1，固定append/append/snapshot/ack断言失败；受控时钟版本同输入child exit0。探针wrapper exit0仅表示诊断完成，分别记录子命令/输入/字面stdout/stderr/exit；不把旧断言失败说成数据丢失或产品原生产定时器错误。未放宽100ms/250ms生产参数。
+- 正式修改只在同一集成测试：Node内置MockTimers统一控制setTimeout/setInterval/Date，按真实启动完成状态推进0ms任务，启动保存完成后再检查99ms无快照、100ms开始一个批次；人工暂扣存储完成，确认日志仍全部保留、持久值尚无新消息，释放后才出现批量ack和正确保存的文本。另验证两个明确分开的窗口各自snapshot/ack、失败不ack、1000ms重试保留原文、最后回放清空日志。内存存储适配器使用structuredClone，匹配浏览器写入边界。整个测试调用真实控制器，不是对私有状态的无效镜像测试。
+- 开发诊断：初版只推进一次0ms，锁请求是在后续微任务才登记，engine.running仍false，已保留失败并改为有界等待真实启动状态；最初拟用history.id检查未持久化，确认history仅含name/text/at后，在正式落地前改为原文本及成功持久化值双向断言。两次猜测不存在的runtime-state/runtime-snapshot路径exit2已改为实际engine.js确认，未计作检查成功。原controlled探针、150ms输入和红/绿回执均保留。
+- 专项10/10、索引532模块/2998符号、build/check/diff-check通过；完整JavaScript冻结运行结果随后补记。src/app.js及src/runtime/journal.js逐字节等于父9e332dd，生产与native源码、协议和依赖未改，本轮不重复执行已通过的原生138项或模型任务。crapper/dryer/mutator的CLI与工具目录不可用、未执行，其他检查不替代。
+- 同一四角色扩展为96文件/16组。原95文件聚合BASELINE.tar保持原字节，新增覆盖的browser测试父字节置于ORIGINAL_SUPPLEMENTS.tar，manifest的baselineArchive记录其来源；补丁重建和默认ROLLBACK共同使用这两个pristine档案，不重置旧基线。新增journal-timing父检查点模式，原默认/旧检查点保持。BASELINE同一150ms停顿触发原固定顺序断言→MODIFIED使用受控时钟、持久化门和分窗/重试/回放断言通过→ROLLBACK恢复原失败；原15组保留不伪称重跑。首次事务副本缺少既有vendor/liquid-glass-react/displacement.js，三方均在加载阶段退出1，质量断言拒绝通过；保存完整失败回执，补入同一未改vendor依赖后重跑，不修改产品加载行为。
+- 该单元修正检验方式并增强耐久性证据，不宣称给AI增加了心理推断能力，也不据内存适配器测试宣称长期实播/全部磁盘故障通过。没有UI/共享布局实现变化、用户安装或真实公屏发送，没有新模型/视频任务、main/版本/标签修改或其他工作树清理。目标active；独立人工ASR/视觉参考及CER/WER、用户实际安装、长期实播/持续调度、host.py:174新鲜度根因仍未完成。最终完整JavaScript、事务、提交与推送回执随后补记。
+
+
+- 最终冻结验证：完整JavaScript1847/1847、0失败/取消/跳过，215327.46625ms/外层215.520秒；专项10/10，build/check/index/diff-check通过。事务更正后退出0（13.079秒），96文件/16组，补丁重建、父/聚合回滚逐SHA、原BASELINE.tar字节不变和工作区保持修改版均通过。生产与native源码/依赖未变，原生依据为精确6382345 CI的138/138，未重复跑或重复加载模型。下面普通提交推送dev并核对本次测试修改的CI。
