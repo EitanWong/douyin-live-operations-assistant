@@ -58,6 +58,18 @@ test('其他观众原话与主播叙事跨恢复检索并进入云端和本地�
  saved.forget('uid:1');assert.equal(saved.conversation('白瓷').records.length,0);
 });
 
+test('协议@身份仅用于本机图谱归并，原话进入云端和本地回复时不携带被@账号标识',()=>{
+ const audience=new AudienceMemory({anchor:'10',now:()=>start});
+ audience.observe({id:'mention',type:'chat',source:'socket',receivedAt:start,user:{id:'900',name:'记录者'},text:'@Lucy小露 白瓷茶具很好看',atUser:{id:'1234567891011',secUid:'internal-mention-account',name:'Lucy小露'}});
+ const restored=new AudienceMemory({anchor:'10',state:audience.snapshot(),now:()=>start});
+ assert.equal(restored.snapshot().viewers[0].statements[0].mentions[0].key,'uid:1234567891011');
+ const prompt={now:start,target:{type:'speech',text:'白瓷茶具'},task:{kind:'ai'},getConversationMemory:q=>restored.conversation(q),maxLength:50};
+ for(const context of [restored.conversation('白瓷茶具'),makeAIRequest(prompt,mergeConfig().ai),makeEdgeMessages(prompt,mergeConfig().ai)]){
+  assert.match(JSON.stringify(context),/Lucy小露/);
+  assert.doesNotMatch(JSON.stringify(context),/mentions|1234567891011|internal-mention-account/);
+ }
+});
+
 test('近期作品按发布时间提供兜底，相关旧作品仍可检索，不能把采集时间当发布时间',()=>{
  const store=new AccountContext({now:()=>start}),source=accountSource('https://www.douyin.com/user/MS4wLjAB-test');
  const rows=normalizeAccountPayload({aweme_list:[

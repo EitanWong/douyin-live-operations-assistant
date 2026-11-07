@@ -3,12 +3,111 @@ import assert from 'node:assert/strict';
 import {AudienceMemory} from '../../src/ai/audience-memory.js';
 import {createRelationshipLibrary} from '../../src/ai/relationship-library.js';
 import {createRelationshipRetriever} from '../../src/ai/relationship-memory.js';
+import {mergeLiveMemory} from '../../src/ai/live-memory.js';
 
 const at=1800000000000;
 const entry=(id,content,trust='verified')=>({id,content,trust,enabled:true,updatedAt:at});
 const memory=entries=>({enabled:true,entries});
 const chat=(id,user,text)=>({id,type:'chat',source:'socket',receivedAt:at,user,text});
 const archive=audience=>({version:1,anchor:audience.anchor,audience:audience.snapshot(),perception:{observations:[],forgetBefore:0}});
+
+test('三位人物各自的主播、用户和协议@记录合为三个账号节点，重启后不会按角色重复展示',()=>{
+ const names=['Lucy小露','一只开心🎀','张二要自律'];
+ const host=new AudienceMemory({anchor:'10',now:()=>at}),viewer=new AudienceMemory({anchor:'20',now:()=>at});
+ for(const [i,name] of names.entries()){
+  const id=String(101+i),secUid=`person-account-${i}`;
+  host.observe({id:`link-${i}`,type:'link-state',source:'socket',receivedAt:at,channelId:`channel-${i}`,linkedUsers:[{id,name,secUid}]});
+  viewer.observe(chat(`viewer-${i}`,{secUid,name},'我喜欢陶艺。'));
+  viewer.observe({...chat(`mention-${i}`,{id:'900',name:'记录者'},`@${name} 今天好早`),atUser:{id,name,secUid}});
+ }
+ const restored=new AudienceMemory({anchor:'20',state:JSON.parse(JSON.stringify(viewer.snapshot())),now:()=>at});
+ const input={now:at,scopes:[{room:'1001',anchor:'10',audience:host},{room:'1002',anchor:'20',audience:restored}]};
+ const graph=createRelationshipRetriever()(input,names.join('、'),{browse:true});
+ const people=graph.entities.filter(n=>names.includes(n.name));
+ assert.equal(people.length,3,'三个不同的人，各自只留一个节点');
+ assert.deepEqual(new Set(people.map(n=>n.id)),new Set(['101','102','103'].map(id=>`person:uid%3A${id}`)));
+ assert.ok(!graph.ambiguities.some(row=>names.includes(row.name)));
+ for(const person of people){
+  assert.ok(graph.relations.some(r=>r.predicate==='同场连麦' && (r.from===person.id || r.to===person.id)));
+  assert.ok(graph.relations.some(r=>r.predicate==='提及' && r.to===person.id));
+  assert.ok(person.dossier.facets.some(f=>f.category==='interests' && f.text==='陶艺'));
+ }
+});
+
+test('已存在两个同名UID时按每条弹幕被@的账号分别归档，不用昵称选第一个',()=>{
+ const audience=new AudienceMemory({anchor:'10',now:()=>at});
+ for(const id of ['101','102'])audience.observe({...chat(`mention-${id}`,{id:'900',name:'记录者'},'@Lucy小露 今天好早'),atUser:{id,secUid:`person-account-${id}`,name:'Lucy小露'}});
+ const graph=createRelationshipRetriever()({anchor:'10',audience,now:at},'Lucy小露',{browse:true});
+ assert.equal(graph.entities.filter(n=>n.name==='Lucy小露').length,2);
+ assert.deepEqual(new Set(graph.relations.filter(r=>r.predicate==='提及').map(r=>r.to)),new Set(['person:uid%3A101','person:uid%3A102']));
+ assert.ok(!graph.entities.some(n=>n.id.includes('mention')));
+});
+
+test('被@账号的遗忘水位阻止旧身份重放，删除原话后身份线索不独立复活',()=>{
+ const audience=new AudienceMemory({anchor:'10',now:()=>at});
+ const event={...chat('mention',{id:'900',name:'记录者'},'@Lucy小露 今天好早'),atUser:{id:'101',name:'Lucy小露'}};
+ audience.observe(event);audience.forget('uid:101');audience.observe(event);
+ const retrieve=createRelationshipRetriever(),input={anchor:'10',audience,now:at};
+ assert.ok(!retrieve(input,'Lucy小露',{browse:true}).entities.some(n=>n.id==='person:uid%3A101'));
+ audience.forget('uid:900');
+ assert.equal(retrieve(input,'Lucy小露',{browse:true}).relations.length,0);
+});
+
+test('同一弹幕后补协议身份后，旧页面写回不丢失线索；遗忘secUID后旧存档不能复活配对',()=>{
+ let now=at;
+ const audience=new AudienceMemory({anchor:'10',now:()=>now});
+ const event=chat('mention',{id:'900',name:'记录者'},'@Lucy小露 今天好早');
+ audience.observe(chat('viewer',{secUid:'person-account-101',name:'Lucy小露'},'我喜欢陶艺。'));
+ audience.observe(event);const stale=archive(audience);
+ audience.observe({...event,atUser:{id:'101',name:'Lucy小露',secUid:'person-account-101'}});const enriched=archive(audience);
+ for(const [a,b] of [[stale,enriched],[enriched,stale]]){
+  const merged=mergeLiveMemory(a,b),restored=new AudienceMemory({anchor:'10',state:merged.audience,now:()=>now});
+  const graph=createRelationshipRetriever()({anchor:'10',audience:restored,now},'Lucy小露',{browse:true});
+  assert.deepEqual(graph.entities.filter(n=>n.name==='Lucy小露').map(n=>n.id),['person:uid%3A101']);
+  now++;restored.forget('sec:person-account-101');
+  const forgotten=mergeLiveMemory(archive(restored),enriched);
+  assert.equal(forgotten.audience.viewers.find(row=>row.key==='uid:900').statements[0].mentions?.length || 0,0);
+  const after=new AudienceMemory({anchor:'10',state:forgotten.audience,now:()=>now});
+  assert.ok(!createRelationshipRetriever()({anchor:'10',audience:after,now},'Lucy小露',{browse:true}).entities.some(n=>n.id==='person:uid%3A101'));
+ }
+});
+
+test('同名连麦重放与旧页合并保留新补充secUID，PK双方也保留协议配对',()=>{
+ const audience=new AudienceMemory({anchor:'10',now:()=>at});
+ const link={id:'link',type:'link-state',source:'socket',receivedAt:at,channelId:'channel',linkedUsers:[{id:'101',name:'Lucy小露'}]};
+ audience.observe(link);const stale=archive(audience);
+ assert.equal(audience.observe({...link,linkedUsers:[{...link.linkedUsers[0],secUid:'person-account-101'}]}),true);
+ const enriched=archive(audience);
+ for(const [a,b] of [[stale,enriched],[enriched,stale]]){
+  const restored=new AudienceMemory({anchor:'10',state:mergeLiveMemory(a,b).audience,now:()=>at});
+  restored.observe(chat('viewer',{secUid:'person-account-101',name:'Lucy小露'},'我喜欢陶艺。'));
+  assert.equal(createRelationshipRetriever()({anchor:'10',audience:restored,now:at},'Lucy小露',{browse:true}).entities.filter(n=>n.name==='Lucy小露').length,1);
+ }
+ const pk=new AudienceMemory({anchor:'101',now:()=>at});
+ pk.observe({id:'pk',type:'pk-start',battleId:'battle',source:'socket',receivedAt:at,participants:[{anchorId:'101',name:'Lucy小露',secUid:'person-account-101'},{anchorId:'102',name:'一只开心🎀',secUid:'person-account-102'}]});
+ for(const [id,name] of [['101','Lucy小露'],['102','一只开心🎀']])pk.observe(chat(id,{secUid:`person-account-${id}`,name},'我喜欢陶艺。'));
+ const graph=createRelationshipRetriever()({anchor:'101',audience:pk,now:at},'Lucy小露 一只开心🎀',{browse:true});
+ assert.equal(graph.entities.filter(n=>['Lucy小露','一只开心🎀'].includes(n.name)).length,2);
+});
+
+test('被@昵称隐藏或缺失仍保存UID/secUID配对，后续公开账号资料恢复其归档',()=>{
+ for(const name of ['神秘人','']){
+ const audience=new AudienceMemory({anchor:'10',now:()=>at});
+ audience.observe(chat('viewer',{secUid:'person-account-101',name:'Lucy小露'},'我喜欢陶艺。'));
+ audience.observe({...chat('mention',{id:'900',name:'记录者'},'@Lucy小露 今天好早'),atUser:{id:'101',secUid:'person-account-101',name}});
+ const restored=new AudienceMemory({anchor:'10',state:audience.snapshot(),now:()=>at});
+ const graph=createRelationshipRetriever()({anchor:'10',audience:restored,now:at},'Lucy小露',{browse:true});
+ assert.deepEqual(graph.entities.filter(n=>n.name==='Lucy小露').map(n=>n.id),['person:uid%3A101']);
+ assert.equal(restored.snapshot().viewers.find(row=>row.key==='uid:900').statements[0].mentions[0].key,'uid:101');
+ }
+});
+
+test('PK明确提供的主播房间归属连接旧房间资料，不把普通观众所在房间当身份',()=>{
+ const audience=new AudienceMemory({anchor:'101',now:()=>at});
+ audience.observe({id:'pk',type:'pk-start',battleId:'battle',source:'socket',receivedAt:at,participants:[{anchorId:'101',name:'Lucy小露',roomId:'1001'},{anchorId:'102',name:'一只开心🎀',roomId:'1002'}]});
+ const graph=createRelationshipRetriever()({anchor:'101',audience,now:at,memory:memory([entry('a','人物：Lucy小露；直播间号：1001。Lucy小露是阿明的朋友。'),entry('b','人物：一只开心🎀；直播间号：1002。一只开心🎀是阿明的朋友。')])},'Lucy小露 一只开心🎀',{browse:true});
+ assert.deepEqual(new Set(graph.entities.filter(n=>['Lucy小露','一只开心🎀'].includes(n.name)).map(n=>n.id)),new Set(['person:uid%3A101','person:uid%3A102']));
+});
 
 test('一个UID关联多个已采集secUID时仍自动归档为一人，保留旧名、原话和独立来源',()=>{
  const a=new AudienceMemory({anchor:'10',now:()=>at}),b=new AudienceMemory({anchor:'20',now:()=>at});

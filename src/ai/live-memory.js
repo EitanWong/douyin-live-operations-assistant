@@ -1,7 +1,8 @@
 import {z} from 'zod';
-import {AudienceMemory,audienceStateSchema,selectMemoryPassages} from './audience-memory.js';
+import {AudienceMemory,audienceStateSchema,selectMemoryPassages,mergeAudienceStatement} from './audience-memory.js';
 import {createRelationshipRetriever} from './relationship-memory.js';
 import {preferAccountName} from './account-names.js';
+import {relationshipActorKeys,mergeRelationshipEvent} from './relationship-events.js';
 
 const observation=z.object({id:z.string().max(300),kind:z.enum(['audio','video','omni']),text:z.string().min(1).max(12000),at:z.number().finite(),endedAt:z.number().finite(),inputSource:z.string().max(80).default('')});
 const perceptionState=z.object({observations:z.array(observation),forgetBefore:z.number().finite().default(0)});
@@ -29,10 +30,10 @@ export class PerceptionMemory {
 }
 
 const archiveSchema=z.object({version:z.literal(1),anchor:z.string().max(40),audience:audienceStateSchema,perception:perceptionState}).refine(row=>row.anchor===row.audience.anchor,{error:'直播记忆归属不一致'});
-const unique=(rows,key)=>[...new Map(rows.map(row=>[key(row),row])).values()];
-function mergeViewer(rows,watermark){
+const unique=(rows,key,merge=(_old,row)=>row)=>{const result=new Map();for(const row of rows)result.set(key(row),merge(result.get(key(row)),row));return [...result.values()];};
+function mergeViewer(rows,watermark,forgotten){
  const active=rows.filter(row=>row.lastAt>watermark).sort((a,b)=>a.lastAt-b.lastAt);if(!active.length)return null;
- const latest=active.at(-1),statements=unique(active.flatMap(row=>row.statements).filter(row=>row.at>watermark).sort((a,b)=>a.at-b.at),row=>row.id);
+ const latest=active.at(-1),statements=unique(active.flatMap(row=>row.statements).filter(row=>row.at>watermark).sort((a,b)=>a.at-b.at),row=>row.id,mergeAudienceStatement).map(row=>({...row,...(row.mentions ? {mentions:row.mentions.filter(actor=>relationshipActorKeys(actor).every(key=>row.at>(forgotten.get(key) || 0)))} : {})}));
  const gifts=new Map();for(const gift of active.flatMap(row=>row.gifts).filter(row=>row.at>watermark).sort((a,b)=>a.at-b.at)){
   const old=gifts.get(gift.key);gifts.set(gift.key,{...gift,count:Math.max(old?.count || 0,gift.count),unitDiamonds:gift.unitDiamonds ?? old?.unitDiamonds ?? null});
  }
@@ -47,8 +48,8 @@ export function mergeLiveMemory(previous,incoming){
  for(const row of [...old.audience.forgotten,...next.audience.forgotten])forgotten.set(row.key,Math.max(forgotten.get(row.key) || 0,row.at));
  const viewers=new Map();for(const row of [...old.audience.viewers,...next.audience.viewers]){const rows=viewers.get(row.key) || [];rows.push(row);viewers.set(row.key,rows);}
  const perceptionCutoff=Math.max(old.perception.forgetBefore,next.perception.forgetBefore);
- const interactions=unique([...old.audience.interactions,...next.audience.interactions].filter(row=>row.at>Math.max(forgetBefore,forgotten.get(row.from.key) || 0,forgotten.get(row.to.key) || 0)).sort((a,b)=>a.at-b.at),row=>row.id);
- return {version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0))).filter(Boolean),unattributed:unique([...old.audience.unattributed,...next.audience.unattributed].filter(row=>row.at>forgetBefore).sort((a,b)=>a.at-b.at),row=>row.id),interactions},
+ const interactions=unique([...old.audience.interactions,...next.audience.interactions].sort((a,b)=>a.at-b.at),row=>row.id,mergeRelationshipEvent).filter(row=>row.at>forgetBefore && [...relationshipActorKeys(row.from),...relationshipActorKeys(row.to)].every(key=>row.at>(forgotten.get(key) || 0)));
+ return {version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0),forgotten)).filter(Boolean),unattributed:unique([...old.audience.unattributed,...next.audience.unattributed].filter(row=>row.at>forgetBefore).sort((a,b)=>a.at-b.at),row=>row.id),interactions},
   perception:{forgetBefore:perceptionCutoff,observations:unique([...old.perception.observations,...next.perception.observations].filter(row=>row.at>perceptionCutoff).sort((a,b)=>a.at-b.at),identity)}};
 }
 
