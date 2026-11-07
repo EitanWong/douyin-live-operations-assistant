@@ -13,7 +13,7 @@ const HOST='com.douyin_live_assistant.perception';
 const MODEL='sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17';
 const MODEL_HASH='7d1efa2138a65b0b488df37f8b89e3d91a60676e416f515b952358d83dfd347e';
 const MODEL_FILES=['model.int8.onnx','tokens.txt','test_wavs/zh.wav'];
-export const NATIVE_FILES=['host.py','local_asr.py','protocol.py','resolver.py','stream_source.py','diagnose.py','requirements.txt','requirements.lock.txt'];
+export const NATIVE_FILES=['host.py','local_asr.py','model_lease.py','local_visual_resource.py','public_media_worker.py','public_media_source.py','public_media_frames.py','media_process.py','public_media_session.py','public_media_jobs.py','data_location.py','data_store.py','data_models.py','knowledge_index.py','protocol.py','resolver.py','stream_source.py','diagnose.py','requirements.txt','requirements.lock.txt'];
 const UV_HASHES={
   'aarch64-apple-darwin':'c021ce28988acbbfcb496e68cd9f2f6ba6401cc6d3292a5d25313873f825e002',
   'x86_64-apple-darwin':'10423293b0b11ed019551a0cd3e5d6d66e2799fab25dd2403e1d63cc883eb671',

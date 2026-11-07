@@ -16,8 +16,9 @@ import {createPublicDataClient,PUBLIC_DATA_INSTRUCTION,publicDataQuery} from './
 import { assembleAIContext,currentAIPrompt,applyPromptSources,applyContextBudget,liveFactFingerprint } from './ai-context.js';
 import {resolveReplyConfig,pipelineConfig} from './ai-pipeline.js';
 import { GROUNDING_INSTRUCTION } from '../data/douyin-rules.js';
-import { SOURCE_SCOPE_INSTRUCTION,RULES_EVIDENCE_INSTRUCTION,SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,CONVERSATION_INSTRUCTION,FACTUAL_LOOKUP_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,TURN_TAKING_INSTRUCTION,DIRECT_TURN_INSTRUCTION,EVERY_TURN_INSTRUCTION,NATURAL_STYLE_INSTRUCTION,SUPPORTER_INSTRUCTION,MEMORY_CONTEXT_INSTRUCTION } from '../ai/conversation-policy.js';
+import { SOURCE_SCOPE_INSTRUCTION,RULES_EVIDENCE_INSTRUCTION,SPOKEN_ANSWER_INSTRUCTION,ANSWER_QUALITY_INSTRUCTION,CONVERSATION_INSTRUCTION,FACTUAL_LOOKUP_INSTRUCTION,SEARCH_ANSWER_INSTRUCTION,TURN_TAKING_INSTRUCTION,DIRECT_TURN_INSTRUCTION,EVERY_TURN_INSTRUCTION,NATURAL_STYLE_INSTRUCTION,SUPPORTER_INSTRUCTION,MEMORY_CONTEXT_INSTRUCTION,KNOWLEDGE_REFRESH_INSTRUCTION } from '../ai/conversation-policy.js';
 const generationConfig=(config,searchResults)=>searchResults ? {...config,temperature:Math.min(config.temperature ?? 0.2,0.2)} : config;
+const sameKnowledge=(found,candidate)=>found?.id===candidate.id && JSON.stringify(found.results)===JSON.stringify(candidate.results);
 
 export function validateEndpoint(value) {
   let url; try { url = new URL(value); } catch { throw new Error('AI 接口地址无效'); }
@@ -39,6 +40,7 @@ export function makeAIRequest(prompt, config) {
   const data={...JSON.parse(request.messages[1].content),...(!prompt.searchResults ? assembleAIContext(prompt,config) : {}),current_time:currentTime(prompt)};
   if(data.evidence_context?.relationships)request.messages[0].content='人物问题先查 evidence_context.relationships 的实体、别名和原话证据。只把 verified 作为运营核实资料；unverified 要说明是谁的未核实陈述，observed 只描述确实采集的互动；conflicted 说明冲突，ambiguities 非空不能按重名认人。两跳路径不证明两端有直接关系。\n'+request.messages[0].content;
   if(prompt.intentRouting)request.messages[0].content=`${CURRENT_FACTS_INSTRUCTION}\n${PUBLIC_DATA_INSTRUCTION}\nclock和weather使用各自的工具JSON格式，不含query或reply。\n`+request.messages[0].content;
+  if(prompt.knowledgeRefresh)request.messages[0].content=KNOWLEDGE_REFRESH_INSTRUCTION+'\n'+request.messages[0].content;
   if(!prompt.searchResults)request.messages[0].content=`${VISUAL_ANSWER_INSTRUCTION}\n${AUDIO_ANSWER_INSTRUCTION}\n`+request.messages[0].content;
   if(prompt.mediaCorrection)request.messages[0].content='上次回答与已提供的有效音画证据矛盾。本次直接依据观察回答当前问题，不重复否认感知能力，不补造证据没有的细节；仍只输出原定意图JSON。\n'+request.messages[0].content;
   if(data.live_context && data.recent_chat)delete data.live_context.recentChat;
@@ -260,6 +262,37 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
     const chatReply=calculation ? [...calculation.answer].length<=prompt.maxLength ? calculation.answer : '精确结果超过公屏字数限制，请拆分计算。' : undefined;
     let plan=parseAIIntent(raw,prompt.maxLength,{chatReply});
     notify(onIntent,{intent:plan.intent,question:prompt.target.text});
+    if(plan.intent==='knowledge'){
+      const unavailable=()=>[...'这部分资料已变化，暂时还不能确定。'].slice(0,prompt.maxLength).join('');
+      const candidate=knowledgeCandidates.find(row=>row.id===plan.query);
+      if(!candidate)return '这部分资料暂时没找到，还不能确定。';
+      const read=async()=>{
+        const record=await cached('find',candidate.query,config.search,{question:prompt.target.text,subject});
+        return record && reviewResearch(prompt.target.text,record);
+      };
+      const found=await read();
+      if(!current())return '[SKIP]';
+      if(sameKnowledge(found,candidate)){
+        const {answer,grounded,citationIndices}=await refineAnswer(found,searchAnswer(plan.sources ? JSON.stringify({answer:plan.reply,sources:plan.sources}) : plan.reply,found));
+        // A valid citation number does not prove the source survived generation.
+        const latest=await read();
+        if(!current())return '[SKIP]';
+        if(!sameKnowledge(latest,found))return unavailable();
+        notify(onSearch,{...latest,question:prompt.target.text,answer,citationIndices,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});return answer;
+      }
+      if(candidate.query.startsWith('corpus:')){
+        // Canonical references are local addresses, never public search terms.
+        // Re-route once without the stale evidence, sharing the normal budget.
+        if(prompt.canFollowup && !prompt.canFollowup())return '这次暂时还答不了，晚点再问我吧。';
+        if(prompt.reserveFollowup && !await prompt.reserveFollowup())return '这次暂时还答不了，晚点再问我吧。';
+        if(!current())return '[SKIP]';
+        const rerouted=await complete({...prompt,intentRouting:true,knowledgeRefresh:true,knowledgeCandidates:[],searchAvailable:Boolean(config.search?.enabled && search)});
+        if(!current())return '[SKIP]';
+        plan=parseAIIntent(rerouted,prompt.maxLength,{chatReply});
+        notify(onIntent,{intent:plan.intent,question:prompt.target.text});
+        if(plan.intent==='knowledge')return unavailable();
+      }else plan={intent:'web-search',query:candidate.query,reply:'',freshness:candidate.freshness};
+    }
     if(plan.intent==='skip')return '[SKIP]';
     if(plan.intent==='clock'){
       const answer=clockAnswer(prompt,plan.timeZone);
@@ -278,20 +311,6 @@ export function createAIClient({ request, getKey, generate, search, weather=requ
       }catch(error){toolFound=null;toolError=error.message;}
       const fallbackQuery=query;
       plan={intent:'web-search',query:fallbackQuery,reply:'',freshness:'realtime',publicTool:true,...(isWeather ? {weather:{location:plan.location,region:plan.region,date:weatherDate(plan.date,at)}} : {})};
-    }
-    if(plan.intent==='knowledge'){
-      const candidate=knowledgeCandidates.find(row=>row.id===plan.query);
-      if(!candidate)return '这部分资料暂时没找到，还不能确定。';
-      const record=await cached('find',candidate.query,config.search,{question:prompt.target.text,subject});
-      const found=record && reviewResearch(prompt.target.text,record);
-      if(!current())return '[SKIP]';
-      if(found?.id===candidate.id){
-        const {answer,grounded,citationIndices}=await refineAnswer(found,searchAnswer(plan.sources ? JSON.stringify({answer:plan.reply,sources:plan.sources}) : plan.reply,found));
-        notify(onSearch,{...found,question:prompt.target.text,answer,citationIndices,citationWarning:grounded ? '' : '回答未附有效引用，请核对来源正文。'});return answer;
-      }
-      // Evidence may expire while the model runs. Refresh it through the normal
-      // lookup lifecycle, rather than delivering an answer based on stale data.
-      plan={intent:'web-search',query:candidate.query,reply:'',freshness:candidate.freshness};
     }
     if(plan.intent==='live-data')prompt.onLiveFacts?.(factVersion);
     if(plan.intent!=='web-search'){

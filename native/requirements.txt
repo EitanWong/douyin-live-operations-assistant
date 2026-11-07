@@ -1,2 +1,4 @@
 streamget==4.0.10
 websockets==17.4
+yt-dlp==2026.10.26
+httpx==0.28.1

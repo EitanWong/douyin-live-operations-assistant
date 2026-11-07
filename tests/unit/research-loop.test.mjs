@@ -24,9 +24,9 @@ function fixture(plans){
  return {run:()=>execute(structuredClone(job),{signal:new AbortController().signal,checkpoint:async step=>steps.push(step)}),calls,steps,reservations:()=>reservations};
 }
 test('研究Agent按新证据继续选择工具，完成多跳查证并返回可核对引用',async()=>{
- const f=fixture([{action:'search',query:'赤鹤星周期'},{action:'read',url:'https://example.org/period'},{action:'finish',answer:'周期73天，颜色为蓝色。',citations:[1,2]}]);
+ const f=fixture([{action:'search',query:'赤鹤星周期'},{action:'read',url:'https://example.org/period'},{action:'finish',answer:'周期73天，颜色为蓝色。',citations:[1]}]);
  const result=await f.run();assert.equal(result.answer,'周期73天，颜色为蓝色。');assert.equal(result.modelCalls,3);
- assert.equal(f.reservations(),3);assert.deepEqual(result.citationIndices,[1,2]);assert.equal(result.sources.length,2);
+ assert.equal(f.reservations(),3);assert.deepEqual(result.citationIndices,[1]);assert.equal(result.sources.length,1);
  assert.ok(f.steps.includes('tool:search'));assert.ok(f.steps.includes('tool:read'));assert.equal(result.runtime,'langgraph');
 });
 test('模型不能读取尚未发现的任意链接，工具失败反馈回循环而不执行',async()=>{

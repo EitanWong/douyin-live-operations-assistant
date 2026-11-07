@@ -56,3 +56,43 @@ test('客户端伪造深度无效；生成期间遗忘观众使旧任务失效�
   await until(async()=>(await host.handle({type:'agent-list'},'1')).find(r=>r.id==='forged-profile')?.status==='failed');assert.equal(calls,1);
  }finally{await host.close();}
 });
+
+test('作品评论和音画进入真实研究请求及记忆时保留发言人、时间和采样边界',async()=>{
+ const f=setup(),at=Date.now(),url='https://www.douyin.com/video/70';
+ const host=createBackgroundAI({...f.options,collectAccount:async()=>[
+  {kind:'comment',title:'评论者',text:'我喜欢陶瓷茶杯',actor:{uid:'3',name:'评论者'},subject:'viewer_2',workId:'70',url,observedAt:at,expiresAt:at+86400000,coverage:'仅加载到的评论'},
+  {kind:'transcript',title:'作品语音片段',text:'陶瓷茶杯只限冷水',subject:'viewer_2',workId:'70',url,positionMs:4200,observedAt:at,expiresAt:at+86400000,coverage:'约4秒音轨采样，不代表完整视频'}
+ ],fetch:async(_url,options)=>{
+  const target=JSON.parse(JSON.parse(options.body).messages[1].content).target;
+  const evidence=JSON.stringify(target.agent_state);
+  assert.match(evidence,/uid:3/);assert.match(evidence,/说话人未确认/);assert.match(evidence,/4200/);assert.match(evidence,/4秒/);
+  assert.match(evidence,/不等于发言人|不能当作本人自述/);
+  return response({action:'finish',answer:'公开片段提到陶瓷茶杯限用冷水，语音说话人未确认。',citations:[1]});
+ }});
+ try{
+  await host.handle({type:'agent-submit',id:'media-attribution',question:'陶瓷茶杯',input:{subject:'uid:2',context:{}}},'1');
+  const task=await until(async()=>{const row=(await host.handle({type:'agent-list'},'1'))[0];return ['succeeded','failed'].includes(row?.status) && row;});
+  assert.equal(task.status,'succeeded',task.error);
+  const rows=await f.corpus.list('1','10');assert.match(rows[0].text,/uid:3/);assert.match(rows[0].text,/说话人未确认/);
+  assert.match(rows[0].coverage,/不是完整/);
+ }finally{await host.close();}
+});
+
+test('后台读取同人缓存音轨保留原证据种类和引用，回存不将机器结果升级为网页或刷新原知识',async()=>{
+ const f=setup(),url='https://www.douyin.com/video/70',at=Date.now()-1000,coverage='音轨0–4000ms；机器转录待核实，说话人未确认；画面仅采样';
+ await f.corpus.remember('1','10',[{url,title:'作品音轨',text:'整个夏天的歌词片段',at,expiresAt:at+60000,evidenceKind:'public-media',coverage}],{subject:'uid:2'});
+ const [original]=await f.corpus.list('1','10');let collected=0,models=0,disclosed;
+ const host=createBackgroundAI({...f.options,collectAccount:async(_room,link)=>{collected++;assert.equal(link,'https://www.douyin.com/user/viewer_2');return [{kind:'profile',title:'茶友',text:'公开主页文字'}];},fetch:async(_url,options)=>{
+  models++;const state=JSON.parse(JSON.parse(options.body).messages[1].content).target.agent_state;
+  disclosed=state.evidence.find(r=>r.index===2);
+  return response({action:'finish',answer:'机器音轨有歌词片段，说话人未知。',citations:[2]});
+ }});
+ try{
+  await host.handle({type:'agent-submit',id:'cache-media-reference',question:'整个夏天音轨',input:{subject:'uid:2',context:{},sources:[url]}},'1');
+  const task=await until(async()=>{const row=(await host.handle({type:'agent-list'},'1'))[0];return ['succeeded','failed'].includes(row?.status) && row;});
+  assert.equal(task.status,'succeeded',task.error);assert.equal(models,1);assert.equal(collected,1);
+  assert.ok(disclosed);assert.equal(disclosed.evidenceKind,'public-media');assert.equal(disclosed.coverage,coverage);assert.equal(task.result.knowledgeError,undefined);
+  const source=task.result.sources.find(r=>r.url===url);assert.equal(source.evidenceKind,'public-media');assert.equal(source.passages[0].sourceId,original.id);
+  const rows=await f.corpus.list('1','10');assert.equal(rows.length,2);assert.deepEqual(rows.find(r=>r.id===original.id),original);
+ }finally{await host.close();}
+});

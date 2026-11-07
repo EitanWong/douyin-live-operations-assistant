@@ -8,6 +8,9 @@ import re
 import time
 import statistics
 import wave
+import threading
+
+from model_lease import ModelLease
 
 
 def pcm16(value):
@@ -67,12 +70,15 @@ def benchmark_frames(frames):
 class LocalASR:
     def __init__(self, folder):
         self.folder = Path(folder) if folder else None
+        self.lease = ModelLease(self.folder) if self.folder else None
+        self.operation_lock = threading.RLock()
         self.recognizer = None
         available = bool(self.folder and all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav'])
                          and importlib.util.find_spec('sherpa_onnx') and importlib.util.find_spec('numpy'))
-        self.status = {'phase': 'unprepared', 'available': available, 'model': 'SenseVoiceSmall-int8', 'device': 'cpu'}
+        self.status = {'phase': 'unprepared', 'available': available, 'model': 'SenseVoiceSmall-int8', 'device': 'cpu', 'modelLease': 1}
 
     def decode(self, frames):
+        self.check_priority()
         import numpy as np
         frames = trim_silence(frames)
         if not frames:
@@ -85,8 +91,67 @@ class LocalASR:
         self.recognizer.decode_stream(stream)
         return clean_transcript(stream.result.text)
 
-    def prepare(self):
+    def check_priority(self):
+        if self.lease and self.lease.preempted():
+            raise ValueError('LOCAL_ASR_PREEMPTED')
+
+    def unload(self, phase='unprepared'):
+        # Drop speech weights without opening the shared lease during visual work.
+        with self.operation_lock:
+            self.recognizer = None
+            self.status['phase'] = phase
+
+    def close(self, phase='unprepared'):
+        with self.operation_lock:
+            self.unload(phase)
+            if self.lease:
+                self.lease.close()
+
+    def reserve(self, priority='live'):
+        if priority not in ('live', 'background'):
+            raise ValueError('ASR_PRIORITY')
+        if priority == 'background' and self.lease is None:
+            raise ValueError('LOCAL_ASR_INSTALL')
+        with self.operation_lock:
+            try:
+                deadline = time.monotonic()+10
+                if self.lease:
+                    while True:
+                        try:
+                            self.lease.acquire(priority)
+                            break
+                        except ValueError as error:
+                            if str(error) != 'ASR_BUSY' or priority != 'live' or time.monotonic() >= deadline:
+                                raise
+                            time.sleep(.05)
+                self.check_priority()
+            except Exception:
+                self.close()
+                raise
+
+    def prepare(self, priority='live'):
+        with self.operation_lock:
+            try:
+                self.reserve(priority)
+                result = self._prepare()
+                self.check_priority()
+                return result
+            except Exception:
+                self.close()
+                raise
+
+    def _load_recognizer(self, threads, frames):
         import sherpa_onnx
+        # Release the previous owner before the factory allocates new weights.
+        self.recognizer = None
+        self.check_priority()
+        self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
+            model=str(self.folder / 'model.int8.onnx'), tokens=str(self.folder / 'tokens.txt'),
+            num_threads=threads, provider='cpu', language='zh', use_itn=True, debug=False)
+        if not self.decode(frames):
+            raise ValueError('LOCAL_ASR_SELF_TEST')
+
+    def _prepare(self):
         if not self.folder or not all((self.folder / name).is_file() for name in ['model.int8.onnx', 'tokens.txt', 'test_wavs/zh.wav']):
             raise ValueError('LOCAL_ASR_INSTALL')
         frames = benchmark_frames(pcm16(base64.b64encode((self.folder / 'test_wavs/zh.wav').read_bytes()).decode()))
@@ -97,11 +162,7 @@ class LocalASR:
         best = None
         benchmarks = []
         for threads in candidates:
-            self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
-                model=str(self.folder / 'model.int8.onnx'), tokens=str(self.folder / 'tokens.txt'),
-                num_threads=threads, provider='cpu', language='zh', use_itn=True, debug=False)
-            if not self.decode(frames):
-                raise ValueError('LOCAL_ASR_SELF_TEST')
+            self._load_recognizer(threads, frames)
             timings = []
             for _ in range(3):
                 started = time.perf_counter()
@@ -111,14 +172,26 @@ class LocalASR:
             elapsed = statistics.median(timings)
             benchmarks.append({'threads': threads, 'medianMs': round(elapsed), 'maxMs': round(max(timings))})
             if best is None or elapsed < best[0]:
-                best = (elapsed, threads, self.recognizer)
-        elapsed, threads, self.recognizer = best
+                best = (elapsed, threads)
+        elapsed, selected_threads = best
+        if selected_threads != threads:
+            self._load_recognizer(selected_threads, frames)
         self.status = {**self.status, 'phase': performance_phase(elapsed, audio_ms),
-                       'elapsedMs': round(elapsed), 'realTimeFactor': elapsed / audio_ms, 'threads': threads,
+                       'elapsedMs': round(elapsed), 'realTimeFactor': elapsed / audio_ms, 'threads': selected_threads,
                        'sampleMs': audio_ms, 'benchmarks': benchmarks, 'selfTestPassed': True, 'consecutiveOverruns': 0}
         return self.status
 
     def infer(self, data):
+        with self.operation_lock:
+            try:
+                self.check_priority()
+                return self._infer(data)
+            except ValueError as error:
+                if str(error) in ('LOCAL_ASR_PREEMPTED', 'LOCAL_ASR_SLOW'):
+                    self.close('slow' if str(error)=='LOCAL_ASR_SLOW' else 'unprepared')
+                raise
+
+    def _infer(self, data):
         if self.status['phase'] != 'ready':
             raise ValueError('LOCAL_ASR_NOT_READY')
         frames = pcm16(data)

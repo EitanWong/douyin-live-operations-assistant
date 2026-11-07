@@ -8,7 +8,7 @@ const check=signal=>{if(signal?.aborted)throw Error('作品音画采样已取消
 const enabled=ai=>ai?.assistant?.memoryEnabled!==false && ['local-audio','local-multimodal'].includes(ai?.pipeline?.mode);
 const signature=ai=>JSON.stringify([ai?.pipeline,ai?.edge,ai?.assistant?.memoryEnabled]);
 
-export function createAccountMediaAnalyzer({readAI,capture,transcribe,recognize,now=Date.now}){
+export function createAccountMediaAnalyzer({readAI,capture,transcribe,recognize,onMedia=()=>{},now=Date.now}){
  return async({source,records,tabId,signal})=>{
   check(signal);const ai=await readAI(),work=records.find(r=>r.kind==='work' && r.id===source.id);
   if(!enabled(ai) || !work)return [];
@@ -16,6 +16,7 @@ export function createAccountMediaAnalyzer({readAI,capture,transcribe,recognize,
   const media=resolveMediaConfig(ai),audio=ai.edge?.enabled && ai.edge?.audioEnabled;
   const sample=await capture({tabId,source,audio,video:media.localVision,signal});
   if(!await current())return [];
+  if(sample.mediaSource)onMedia(sample.mediaSource);
   const at=now(),add=(kind,value)=>{
    const position=kind==='transcript' ? sample.audioPositionMs ?? sample.positionMs : sample.positionMs;
    const text=typeof value==='string' ? value.trim().slice(0,1200) : '';if(!text || ['[UNKNOWN]','[SILENCE]'].includes(text))return;
@@ -39,10 +40,11 @@ export function createAccountMediaAnalyzer({readAI,capture,transcribe,recognize,
 // Runs only in a temporary tab owned by the collector. No microphone/display
 // capture, platform request signing, or cross-origin canvas bypass.
 export async function capturePublicWorkSample({audio,video,workId}){
+ const observed=workId && window.__liveAssistantPublicAccountV1?.mediaSource?.(),mediaSource=observed?.workId===workId ? observed : null;
  const element=[...document.querySelectorAll('video')].filter(v=>v.readyState>=2 && v.getBoundingClientRect().width>0 && (!workId || window.__liveAssistantPublicAccountV1?.mediaMatches(v.currentSrc))).sort((a,b)=>b.videoWidth*b.videoHeight-a.videoWidth*a.videoHeight)[0];
- if(!element)return {};
+ if(!element)return mediaSource ? {mediaSource} : {};
  const within=async(work,ms)=>{let timer;try{return await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('采样等待超时')),ms);})]);}finally{clearTimeout(timer);}};
- const result={positionMs:Math.max(0,Math.round(element.currentTime*1000))};let stream,context,processor,source,gain;
+ const result={positionMs:Math.max(0,Math.round(element.currentTime*1000)),mediaSource:mediaSource ?? window.__liveAssistantPublicAccountV1?.mediaSource(element.currentSrc) ?? null};let stream,context,processor,source,gain;
  try{
   element.muted=true;
   if(audio)try{await within(element.play(),1200);}catch{}
@@ -66,12 +68,18 @@ export async function capturePublicWorkSample({audio,video,workId}){
  return result;
 }
 
-function localRequest(chrome){
+export async function authorizeLocalMediaEndpoint(chrome,endpoint){
+ const url=new URL(endpoint);
+ if(!['http:','https:'].includes(url.protocol) || !['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.username || url.password || !await chrome.permissions.contains({origins:[`${url.protocol}//${url.hostname}/*`]}))throw Error('请授权本机视觉接口');
+ return url;
+}
+
+export function createLocalMediaRequest(chrome){
  return details=>{
   const controller=new AbortController();let timer=setTimeout(()=>{controller.abort();details.ontimeout();},10000);
   void (async()=>{
    try{
-    const url=new URL(details.url);if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname) || !await chrome.permissions.contains({origins:[`${url.protocol}//${url.hostname}/*`]}))throw Error('请授权本机视觉接口');
+    const url=await authorizeLocalMediaEndpoint(chrome,details.url);
     const response=await fetch(url.href,{method:'POST',headers:{'Content-Type':'application/json'},body:details.data,credentials:'omit',redirect:'error',signal:controller.signal});
     const responseText=await response.text();if(responseText.length>1000000)throw Error('本机视觉响应过大');
     details.onload({status:response.status,responseText,finalUrl:response.url});
@@ -81,16 +89,16 @@ function localRequest(chrome){
  };
 }
 
-export async function collectAccountWithMedia(chrome,url,{readAI,...options}){
+export async function collectAccountWithMedia(chrome,url,{readAI,onMedia,...options}){
  const native=createNativeASRClient({connect:()=>{const port=chrome.runtime.connectNative(NATIVE_HOST);return {onMessage:port.onMessage,onDisconnect:port.onDisconnect,disconnect:()=>port.disconnect(),postMessage:m=>port.postMessage({...m,type:'local-asr'})};}});
- const recognize=createMediaClient({request:localRequest(chrome),getKey:()=>''});
+ const recognize=createMediaClient({request:createLocalMediaRequest(chrome),getKey:()=>''});
  const transcribe=(sample,signal,ai)=>withDeadline(async active=>{
   if(ai.edge.audioBackend==='browser-whisper')throw Error('作品后台语音需要选择 SenseVoice 或自动后端');
   const abort=()=>native.close();active.addEventListener('abort',abort,{once:true});
   try{if(!await native.ready()){const status=await native.prepare();if(status.phase!=='ready' || !status.selfTestPassed)throw Error('SenseVoice 未通过本机测速');}return await native.transcribe(sample,active);}
   finally{active.removeEventListener('abort',abort);}
  },{signal,timeout:8000});
- const analyze=createAccountMediaAnalyzer({readAI,recognize,transcribe,capture:async({tabId,source,audio,video,signal})=>{
+ const analyze=createAccountMediaAnalyzer({readAI,recognize,transcribe,onMedia,capture:async({tabId,source,audio,video,signal})=>{
   check(signal);const [sample]=await withDeadline(()=>chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:capturePublicWorkSample,args:[{audio,video,workId:source.id}]}),{signal,timeout:7500});check(signal);return sample?.result || {};
  }});
  try{return await collectAccount(chrome,url,{...options,analyze});}finally{native.close();}

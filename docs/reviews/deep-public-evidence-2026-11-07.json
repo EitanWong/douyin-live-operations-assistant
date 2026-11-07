@@ -1,0 +1,622 @@
+{
+  "date": "2026-11-07",
+  "goalStatus": "active",
+  "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
+  "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
+  "integrationBranch": "dev",
+  "lastConfirmedResult": "Corrected implementation a5359b2338bd934f7c90d10a7cc3a90c7119989a pushed and exact SHA CI 42330718361 passed: JS 1810/1810, native 119/119, build/check/index/package/upload. 86-file reconstruction/rollback passed. No-audio coverage remains absent with cursor 0 and actual visual PTS; no ASR weights loaded. Not deployed; real-model and long-session acceptance incomplete.",
+  "nextExecutableAction": "在独立公开作品页只读取得实际 detail 网络响应，核对同次 workId/UID/secUID，沿 account-page 既有 document_start 入口定位详情与主体绑定缺口；确认可追溯来源后再推进真实模型事实性与长期资源竞争验收。",
+  "inputPaths": [
+    "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
+    "native/public_media_jobs.py",
+    "native/public_media_worker.py",
+    "native/model_lease.py",
+    "native/data_host.py",
+    "extension/account-media.js",
+    "extension/account-research.js",
+    "extension/background.js",
+    "extension/local-data.js",
+    "src/ai/knowledge-corpus.js",
+    "src/ai/harness.js",
+    "extension/public-media-research.js",
+    "extension/public-media-profile.js",
+    "extension/public-media-worker-client.js",
+    "extension/account-page.js",
+    "src/ai/audience-profile.js",
+    "src/ai/research-profile.js",
+    "src/services/automatic-knowledge.js",
+    "output/deep-research-2026-11-07/browser-stage/public-work-decode.json",
+    "native/public_media_source.py",
+    "src/services/public-media-source.js",
+    "native/test_public_media_source.py",
+    "output/deep-research-2026-11-07/source-stage/real-download-result.json",
+    "src/services/media.js",
+    "native/public_media_session.py",
+    "native/public_media_frames.py",
+    "native/media_process.py",
+    "native/test_public_media_visual.py",
+    "extension/public-media-visual.js",
+    "src/services/public-media-config.js",
+    "tests/integration/public-media-visual-flow.test.mjs",
+    "output/deep-research-2026-11-07/visual-stage/real-frames.json",
+    "native/test_public_media_noaudio.py",
+    "native/local_asr.py",
+    "output/deep-research-2026-11-07/noaudio-stage/derived-media.json",
+    "output/deep-research-2026-11-07/noaudio-stage/public-page-readonly.json",
+    "tests/unit/account-page.test.mjs"
+  ],
+  "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
+  "validation": {
+    "javascript": {
+      "passed": 1810,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "scope": "exact corrected implementation in CI",
+      "headSHA": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
+      "command": [
+        "npm",
+        "test"
+      ],
+      "runnerReportedDurationMs": 485682.443376,
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-javascript-log.*"
+    },
+    "harness": {
+      "thisStage": "Harness tests included in final CI 1810; standalone eval:harness not rerun"
+    },
+    "native": {
+      "passed": 119,
+      "scope": "corrected implementation in CI Python 3.14.10; local installed venv also passed with ResourceWarning as error",
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-final-native-log.*"
+    },
+    "npmCi": "passed; audit 0 vulnerabilities",
+    "build": "passed",
+    "check": "passed",
+    "index": {
+      "modules": 530,
+      "symbols": 2980
+    },
+    "diffCheck": "passed",
+    "javascriptThisStage": {
+      "beforeUnicodeCorrection": "1807/1807 local",
+      "afterUnicodeCorrection": "19/19 targeted local; 1808/1808 final CI",
+      "productionJSChangedAfterFinalCI": false
+    },
+    "visualStage": {
+      "runId": "42326790987",
+      "headSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 102,
+      "javascriptTests": 1808,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 437020.289074,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42326790987"
+    },
+    "noAudioStage": {
+      "runId": "42330718361",
+      "headSHA": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
+      "attempt": 2,
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 119,
+      "javascriptTests": 1810,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 485682.443376,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "upload": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42330718361",
+      "retry": "First test-build attempt failed during ONNX dependency download before tests; reran only failed job on the same SHA. Passed native job reused.",
+      "nativeLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-final-native-log.*",
+      "javascriptLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-javascript-log.*"
+    }
+  },
+  "benchmark": {
+    "runtime": "v26.12.1",
+    "platform": "darwin",
+    "records": 90,
+    "inputChars": 106824,
+    "outputChars": 4702,
+    "includedRecords": 4,
+    "coldMs": 33.57733400000001,
+    "warmMedianMs": 0.3624580000000037,
+    "warmP95Ms": 0.4481660000000005,
+    "samples": 100,
+    "basis": "Synthetic local CPU benchmark; no model, network, browser FPS or livestream acceptance claim."
+  },
+  "transaction": {
+    "filesVerified": 86,
+    "patchReconstructsModified": true,
+    "restoredAllOriginalHashes": true,
+    "newFilesRemoved": true,
+    "rollbackBehaviorMatchesBaseline": true,
+    "liveImplementationRemainsModified": true
+  },
+  "roles": {
+    "MODIFIED_FILE.tar": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/MODIFIED_FILE.tar",
+    "DIFF_FILE.patch": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/DIFF_FILE.patch",
+    "VERIFICATION.txt": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/VERIFICATION.txt",
+    "ROLLBACK.sh": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/ROLLBACK.sh"
+  },
+  "unavailableChecks": [
+    "crapper",
+    "dryer",
+    "mutator"
+  ],
+  "limitations": [
+    "Native production page-media download path fetched and decoded a real public video. Browser metadata-to-native step used a development probe; actual deployed extension auto-capture not verified.",
+    "Original yt-dlp metadata path still returns HTTP 403; page-media route does not export cookies or bypass challenges.",
+    "No long-duration livestream/resource acceptance or commercial accuracy conclusion.",
+    "Installed legacy native host still running; no deployment/reload or second real model load.",
+    "Public evidence does not establish sensitive psychological traits, private life or wealth.",
+    "Bounded full-duration keyframe sampling implemented, maximum 120 images; not continuous video understanding or real vision-model accuracy acceptance.",
+    "One unchanged live pipeline test intermittently returned DECODE_FAILED; isolated and same-code full rerun passed; root cause not confirmed or fixed.",
+    "No-audio path implemented and locally verified on synthetic and derived public media; untouched platform no-audio sample, deployed capture and real-model accuracy remain unverified."
+  ],
+  "commitPush": {
+    "implementation": "pushed origin/dev",
+    "verifiedRemoteImplementationSHA": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
+    "documentationReceipt": "separate following commit; final SHA in completion report",
+    "nativeStage": "pushed origin/dev; verified remote da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
+    "browserStage": "pushed origin/dev; verified remote e7c4b00643bd76b93098e9cea738617dbc4a87e0",
+    "pageSourceStage": {
+      "implementation": "pushed origin/dev",
+      "verifiedRemoteSHA": "e25376fdd485646127572252b4941155290c62ee",
+      "receiptDocumentation": "separate following documentation commit; final SHA in completion report; no implementation changes"
+    },
+    "visualStage": {
+      "implementation": "0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded",
+      "correction": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "verifiedRemoteSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "ci": "42326790987 completed/success",
+      "receiptDocumentation": "separate following documentation commit; final SHA in completion report"
+    }
+  },
+  "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
+  "nativeStage": {
+    "status": "implemented, not deployed or browser-connected",
+    "analysisVersion": "sensevoice-v1",
+    "downloader": "yt-dlp==2026.10.26",
+    "publicWorkAcceptance": {
+      "workId": "6961737553342991651",
+      "status": "failed",
+      "httpStatus": 403,
+      "reason": "Fresh cookies (not necessarily logged in) are needed"
+    },
+    "asrAccuracy": "not evaluated; installed legacy live host running, no second real model loaded",
+    "unitAsr": "controlled test double; real FFmpeg decoder",
+    "workerLimits": {
+      "pending": 32,
+      "durationMs": 10800000,
+      "leaseMs": 60000,
+      "evidencePage": 8
+    },
+    "nativeAPIOperations": [
+      "submit",
+      "list",
+      "get",
+      "cancel",
+      "forget",
+      "evidence"
+    ]
+  },
+  "previousCI": {
+    "runId": "42318795159",
+    "status": "completed",
+    "conclusion": "failure",
+    "headSHA": "d8efb73e5ed630027668bc631b0204fda3e98b26",
+    "nativeJob": "success",
+    "testBuild": "1793 passed / 2 failed in FFmpeg integration",
+    "reproduction": "Same tests fail identically with python3-only PATH; 2/2 pass when real FFmpeg is available",
+    "correction": "Install FFmpeg explicitly in test-build and release jobs; independent native job installations do not carry over",
+    "newRun": "42321632834 completed success; applies to implementation e25376f"
+  },
+  "nativeStageImplementationCommit": "da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
+  "browserStage": {
+    "status": "implemented, fully regression-tested and pushed to dev; not deployed",
+    "capabilities": {
+      "publicMedia": 1,
+      "modelLease": 1
+    },
+    "nativeAPIOperations": [
+      "submit",
+      "list",
+      "get",
+      "cancel",
+      "forget",
+      "evidence",
+      "scopes",
+      "sync",
+      "reconcile",
+      "ack"
+    ],
+    "anchorIdentity": "canonical saved room profile plus audience deletion clock; no fabricated chat",
+    "import": "8 segments/page, persisted ack, original corpus, retry de-duplication",
+    "manualPublicMedia": {
+      "workId": "6961737553342991651",
+      "bytes": 3676544,
+      "sha256": "af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881",
+      "durationSeconds": 19.735011,
+      "decodedFrames": 592,
+      "decodeExit": 0,
+      "cookiesExported": false,
+      "productFallback": false
+    },
+    "nativeTests": 86,
+    "javascriptTests": 1795
+  },
+  "browserStageImplementationCommit": "e7c4b00643bd76b93098e9cea738617dbc4a87e0",
+  "pageSourceStage": {
+    "status": "implemented, locally verified and pushed to origin/dev; implementation CI passed; not deployed",
+    "capabilities": {
+      "publicMedia": 2,
+      "modelLease": 1
+    },
+    "limits": {
+      "ttlMs": 300000,
+      "bytes": 268435456,
+      "totalSeconds": 180,
+      "networkSeconds": 15,
+      "redirects": 0
+    },
+    "downloader": "existing httpx==0.28.1, explicit requirement; yt-dlp retained when no valid page media",
+    "nativeTests": 94,
+    "targetedJSTests": 27,
+    "realDownload": {
+      "downloadFunction": "public_media_worker.download_public_video → HTTPX download_page_media",
+      "workId": "6961737553342991651",
+      "subject": "sec:MS4wLjABAAAAEKnfa654JAJ_N5lgZDQluwsxmY0lhfmEYNQBBkwGG98",
+      "downloadBytes": 3676544,
+      "sha256": "af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881",
+      "expectedDurationMs": 19735,
+      "decodeCommand": [
+        "/Users/eitan/.local/share/douyin-live-assistant/native/releases/30a0ff18-1856-4ee1-829f-40cf4baf52de/.venv/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v7.1",
+        "-nostdin",
+        "-hide_banner",
+        "-i",
+        "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
+        "-map",
+        "0:a:0",
+        "-map",
+        "0:v:0",
+        "-f",
+        "null",
+        "-"
+      ],
+      "decodeExit": 0,
+      "path": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
+      "noCookiesExported": true,
+      "noRealModelLoaded": true,
+      "browserStep": "ordinary public page currentSrc + visible author link, not deployed extension acceptance"
+    },
+    "browserCapture": "not deployed; real RENDER_DATA holds application shell only; product requires observed author/work detail response and exact currentSrc matching",
+    "javascriptTests": 1801,
+    "postReviewJSTests": 6,
+    "boundaryReview": "Blank duplicate __vid rejected with keep_blank_values=True after expected red test; browser and native agree",
+    "transactionFiles": 77,
+    "implementationCommit": "e25376fdd485646127572252b4941155290c62ee",
+    "ci": {
+      "runId": "42321632834",
+      "headSHA": "e25376fdd485646127572252b4941155290c62ee",
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 94,
+      "javascriptTests": 1801,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 633096.181726,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42321632834"
+    }
+  },
+  "visualStage": {
+    "status": "implemented, fully regression-tested and pushed to origin/dev; not deployed",
+    "baselineCommit": "e11a0e8c44aee08309571ff58d36162e7e9e6744",
+    "capabilities": {
+      "publicMedia": 3,
+      "modelLease": 1,
+      "keyframes": 1
+    },
+    "analysisVersion": "sensevoice-v1+keyframes-v1",
+    "limits": {
+      "maxFrames": 120,
+      "normalIntervalMs": 12000,
+      "jpegBytes": 36000,
+      "frameTimeoutSeconds": 30,
+      "modelTimeoutSeconds": 20
+    },
+    "nativeTests": 102,
+    "javascriptBeforeUnicodeBoundary": {
+      "passed": 1807,
+      "failed": 0,
+      "command": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "tests"
+      ],
+      "outerElapsedSeconds": 477.049,
+      "runnerReportedDurationMs": 476960.376458
+    },
+    "javascriptCorrectedSource": {
+      "targetedPassed": 19,
+      "failed": 0,
+      "logs": "output/deep-research-2026-11-07/visual-stage/unicode-frozen-targeted.*",
+      "fullCI": "1808/1808 passed on final corrected source"
+    },
+    "realFrameDecode": {
+      "command": "public_media_frames.extract_keyframe; installed FFmpeg 7.1",
+      "exitStatus": 0,
+      "source": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
+      "sourceHash": "af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881",
+      "durationMs": 19735,
+      "frames": [
+        {
+          "plannedMs": 0,
+          "actualPtsMs": 0,
+          "bytes": 6309,
+          "path": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/visual-stage/real-frame-0.jpg",
+          "sha256": "954a05573cb40fea87fbecf0da81be45a05fbec5bf6d0620feddc63b3b2ebe1a"
+        },
+        {
+          "plannedMs": 9367,
+          "actualPtsMs": 9400,
+          "bytes": 6054,
+          "path": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/visual-stage/real-frame-9400.jpg",
+          "sha256": "4d542a8b3969c04e7164a2d5bf95a2366f87d1a7761d2b5ace7d1a455a0852b9"
+        },
+        {
+          "plannedMs": 18735,
+          "actualPtsMs": 18767,
+          "bytes": 6957,
+          "path": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/visual-stage/real-frame-18767.jpg",
+          "sha256": "01d2ecc41c8cd2b222dc9733018a6d6091dee04b8fb8b60e67e088e01310fa34"
+        }
+      ],
+      "modelLoaded": false,
+      "coverage": "bounded keyframes only; not continuous visual analysis"
+    },
+    "transactionFiles": 85,
+    "retainedFailure": {
+      "test": "test_pipeline.Pipeline.test_real_websocket_accepts_both_tracks_and_silent_scene_returns_observation",
+      "site": "native/host.py:174",
+      "error": "DECODE_FAILED",
+      "isolated": "passed 1/1",
+      "sameCodeFullRerun": "passed 102/102",
+      "rootCause": "unconfirmed; no production live decode change"
+    },
+    "unavailableChecks": [
+      "crapper",
+      "dryer",
+      "mutator"
+    ],
+    "localCheck": "passed after Unicode correction",
+    "implementationCommit": "0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded",
+    "previousCI": {
+      "runId": "42326384275",
+      "headSHA": "0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded",
+      "native": "101 passed / 1 failed: resume test hardcoded 1000ms, actual 1100ms",
+      "javascript": "1808/1808 passed; build/check/index/package passed, overall failure solely native fixture assertion",
+      "correction": "Use actual interrupted frame PTS, retain exact remaining-frame count and persisted evidence/model assertions; 2.1s audio vs 2s video fixture locally reproduces failure before assertion correction.",
+      "conclusion": "failure"
+    },
+    "nativeAfterPTSFixtureCorrection": {
+      "passed": 102,
+      "failed": 0,
+      "resourceWarnings": "errors",
+      "logs": "output/deep-research-2026-11-07/visual-stage/native-after-pts.*"
+    },
+    "unicodeNativeRoundTrip": {
+      "boundaryCharacters": 1200,
+      "boundaryUTF8Bytes": 3601,
+      "boundaryLastCharacter": "😀",
+      "upstreamMalformed": "normalized U+FFFD; native SQLite round trip exact",
+      "logs": "output/deep-research-2026-11-07/visual-stage/unicode-native-roundtrip.*"
+    },
+    "correctionCommit": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+    "ci": {
+      "runId": "42326790987",
+      "headSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 102,
+      "javascriptTests": 1808,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 437020.289074,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42326790987"
+    }
+  },
+  "noAudioStage": {
+    "status": "corrected implementation pushed; exact SHA CI passed; not deployed",
+    "baselineCommit": "4ea37d75013940845607bb173d0f16e2f418a3b0",
+    "changedFields": [
+      "coverage.audio=absent",
+      "cursorMs=0 for no-audio"
+    ],
+    "changedSymbols": [
+      "LocalASR.reserve",
+      "AudioAbsent",
+      "decode_video_duration",
+      "mark_audio_absent",
+      "audio_coverage",
+      "completeCoverage",
+      "read_video_duration",
+      "run_capture(stdout_reader)"
+    ],
+    "nativeTests": 119,
+    "crossProcessFlows": 2,
+    "derivedMedia": {
+      "source": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
+      "sourceHash": "af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881",
+      "derived": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/noaudio-stage/public-derived-noaudio.mp4",
+      "derivedHash": "4c51f0d42d513d58dd09adad8dd3e74bc37c709cad5d918c48195b2c5464157e",
+      "derivedBytes": 3345241,
+      "operation": "video stream copy; audio removed for development fixture; not an original no-audio platform sample",
+      "decodedDurationMs": 19734,
+      "ffmpeg": "/Users/eitan/.local/share/douyin-live-assistant/native/releases/30a0ff18-1856-4ee1-829f-40cf4baf52de/.venv/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v7.1"
+    },
+    "transactionFiles": 86,
+    "index": {
+      "modules": 530,
+      "symbols": 2980
+    },
+    "fullDecodeBudget": {
+      "timeoutSeconds": 180,
+      "stdout": "framecrc folded one line at a time; max line 4096 bytes; no full output capture",
+      "stderrBytes": 131072,
+      "maximumDurationMs": 10800000
+    },
+    "unavailableChecks": [
+      "crapper",
+      "dryer",
+      "mutator"
+    ],
+    "limits": [
+      "No deployed detail-capture acceptance",
+      "No real-model factuality or long-livestream acceptance",
+      "Derived file is development fixture, not an untouched no-audio platform sample",
+      "Retained prior live DECODE_FAILED root cause remains unconfirmed"
+    ],
+    "resubmit": "completed→cancel→submit preserves absence/actual frame checkpoints; red reproduced, final 113/113 passed",
+    "javascript": {
+      "passed": 1810,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "command": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "tests"
+      ],
+      "outerElapsedSeconds": 435.043,
+      "runnerReportedDurationMs": 434969.549,
+      "nativeCorrectionDuringRun": "Only native coverage method and its Python regression changed during JS run; post-review media integration runs separately; final exact commit CI required."
+    },
+    "postReviewMediaJS": {
+      "passed": 24,
+      "failed": 0,
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/js-after-native-correction.*"
+    },
+    "implementationCommit": "ac5716fd421baeff35213e4bc06583916ee3e55f",
+    "ciFirstAttempt": {
+      "runId": "42329279145",
+      "headSHA": "ac5716fd421baeff35213e4bc06583916ee3e55f",
+      "status": "completed",
+      "conclusion": "failure",
+      "nativeTests": 113,
+      "nativeFailures": 2,
+      "javascriptTests": 1810,
+      "javascriptPassed": 1809,
+      "javascriptFailures": 1,
+      "rootCause": "FFmpeg 6.1.1 progress reports last DTS; 1900ms is not full 2000ms display coverage",
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-original-*-log.*"
+    },
+    "ciCorrectionLocal": {
+      "fullNative": 119,
+      "ffmpeg6_1_1NoAudioAndTimeline": 15,
+      "mediaJavaScript": 15,
+      "build": "passed",
+      "check": "passed",
+      "index": "unchanged current snapshot, 530/2980",
+      "transactionFiles": 86,
+      "source": "full null decode plus stream-copy framecrc; use max(PTS + duration) with exact rational timebase",
+      "newRegressions": [
+        "single frame display duration",
+        "variable frame intervals and B-frame order",
+        "fractional timebase",
+        "40000 packet stream",
+        "invalid or over-budget timeline",
+        "stream reader failure and timeout reap"
+      ],
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-fix-*",
+      "ffmpeg6_1_1CrossProcess": "Passed unchanged no-audio integration with actual Python worker 6.1.1 and installed decoder for controlled visual-model fixture; final full Ubuntu 6.1.1 CI also passed."
+    },
+    "publicPageReadOnly": {
+      "operation": "read-only CUA public-page inspection",
+      "url": "https://www.douyin.com/video/6961737553342991651",
+      "browser": "ChatGPT in-app browser, temporary hidden tab",
+      "visibleTitle": "#杨超越 小小水手带你去远航❤️ - 抖音",
+      "visibleEvidence": [
+        "video duration 19.735011 seconds; readyState 4; currentSrc exists",
+        "public author link matches known secUID",
+        "public comments visible without login"
+      ],
+      "renderData": {
+        "scriptId": "RENDER_DATA",
+        "rawLength": 210290,
+        "topLevelKeys": [
+          "app"
+        ],
+        "objectsScanned": 1011,
+        "matchingWorkIdObjects": 0
+      },
+      "conclusion": "Video playable; inline JSON does not supply author/work detail binding. Production needs actual observed detail response; no deployed-extension capture acceptance.",
+      "actionsNotPerformed": [
+        "no login",
+        "no comment or social interaction",
+        "no runtime or extension reload",
+        "no cookie/auth extraction",
+        "no page script injection"
+      ],
+      "diagnosticCorrection": "read-only evaluate sandbox lacks decodeURIComponent (TypeError); read script textContent using documented DOM locator, then decoded in CUA REPL; no page mutation",
+      "source": "Literal CUA outputs in this conversation; this JSON is a factual receipt, not a network trace or page export."
+    },
+    "correctionCommit": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
+    "ciCorrected": {
+      "runId": "42330718361",
+      "headSHA": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
+      "attempt": 2,
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 119,
+      "javascriptTests": 1810,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 485682.443376,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "upload": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42330718361",
+      "retry": "First test-build attempt failed during ONNX dependency download before tests; reran only failed job on the same SHA. Passed native job reused.",
+      "nativeLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-final-native-log.*",
+      "javascriptLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-javascript-log.*"
+    },
+    "retainedLiveFailure": {
+      "operation": "read existing failure and exact unchanged source",
+      "log": "output/deep-research-2026-11-07/visual-stage/native-frozen.stderr",
+      "test": "test_pipeline.Pipeline.test_real_websocket_accepts_both_tracks_and_silent_scene_returns_observation",
+      "literalError": "ValueError: DECODE_FAILED at native/host.py:174",
+      "literalBranch": "self.ready and (not self.image or now - self.image[1] > 5000)",
+      "excludedAsTraceLocation": "readexactly error at host.py:160 was not the recorded failing branch",
+      "originalRun": "102 tests in 3.580s, errors=1",
+      "currentNativeSourceHash": "c6427281835a13cd6bba1024157114f9a3074be91dda918ee0ff2c235489fce2",
+      "productChange": false,
+      "rootCause": "unconfirmed; no clock/scheduling cause asserted; no extra retry or test run"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import {test} from 'node:test';
+import {execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,mkdir,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -47,6 +48,7 @@ test('一条命令自动装运行时、FFmpeg和中文模型，自检成功后�
     assert.ok(calls.some(([,args])=>args.includes('venv') && args.includes('3.12')));
     assert.ok(calls.some(([,args])=>args.includes('imageio-ffmpeg==0.6.0')));
     assert.equal(models,1);
+    assert.match(execFileSync('python3',[join(first.release,'public_media_worker.py'),'--help'],{encoding:'utf8'}),/--once/,'发布快照必须包含可独立导入的视频任务及归档依赖');
     const before=await readFile(first.manifest,'utf8');
     healthy=false;
     await assert.rejects(installNative(options),/self-test failed/);

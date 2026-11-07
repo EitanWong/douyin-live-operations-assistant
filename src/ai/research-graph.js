@@ -5,6 +5,7 @@ import {validatePublicURL} from './public-sources.js';
 import {publicCallSchema,PUBLIC_DATA_TOOLS} from '../services/public-data.js';
 import {weatherPlanSchema} from '../services/weather.js';
 import {compactResearchState} from './research-context.js';
+import {mergeSourcePassage,evidenceOffset} from './source-evidence.js';
 
 export const RESEARCH_LIMITS=RESEARCH_BUDGETS.standard;
 const query=z.string().trim().min(1).max(300);
@@ -40,15 +41,23 @@ agent_state每轮自动压缩：catalog是来源目录，evidence是按当前问
 
 const State=Annotation.Root(Object.fromEntries(['decision','prepared','bootstrapping','modelCalls','searches','reads','sources','publicSources','observations','executed','answer','citationIndices','stopReason','focus','workingContext'].map(key=>[key,Annotation()])));
 const initial=()=>({prepared:0,bootstrapping:false,modelCalls:0,searches:0,reads:0,sources:[],publicSources:[],observations:[],executed:[],answer:'',citationIndices:[],stopReason:''});
-function sourceRows(rows,existing,limits,reading=false){
+const evidenceCoverage={'public-page':'公开页面文字；不代表完整视频、评论或已核实身份','stored-passage':'保存的公开原文片段；内容和身份仍待核实','search-snippet':'搜索摘要；尚未核对原页面','public-data':'公共接口返回的数据；仅覆盖已查询对象、时间和字段','public-media':'机器音画识别待核实；间隔采样不是连续视频，说话人和画面人物身份未知，不证明心理或帧外事件'};
+function sourceRows(rows,existing,limits,reading=false,kind='search-snippet'){
  const result=[...existing];
  for(const row of rows){
   let url;try{url=validatePublicURL(row.url || row.source);}catch{continue;}
-  const content=String(row.content || row.text || '').trim().slice(0,6000);if(!content)continue;
-  if(result.some(s=>s.url===url && s.content===content))continue;
-  const previous=reading && result.length>=limits.sources ? result.findIndex(s=>s.url===url) : -1;
+  const text=String(row.content || row.text || '').replace(/\u0000/gu,'').trim(),content=text.slice(0,evidenceOffset(text,Math.min(text.length,6000)));if(!content)continue;
+  const previous=result.findIndex(s=>s.url===url),old=result[previous];
   if(result.length>=limits.sources && previous<0)continue;
-  const source={index:previous>=0 ? result[previous].index : result.length+1,url,title:String(row.title || url).slice(0,160),content,at:row.at ?? row.readAt ?? Date.now(),...(row.expiresAt ? {expiresAt:row.expiresAt} : {})};
+  const at=row.at ?? row.readAt ?? Date.now();
+  const canonical=Boolean(row.sourceId && (reading || kind==='stored-passage'));
+  const evidenceKind=(kind==='stored-passage' || canonical) && Object.hasOwn(evidenceCoverage,row.evidenceKind) ? row.evidenceKind : reading ? 'public-page' : kind;
+  const source=mergeSourcePassage(old,{url,title:String(row.title || url).slice(0,160),content,at,...(Number.isFinite(row.expiresAt) ? {expiresAt:row.expiresAt} : {}),
+   ...(canonical ? {sourceId:row.sourceId} : {}),
+   evidenceKind,publishedAt:typeof row.publishedAt==='string' ? row.publishedAt.slice(0,80) : old?.publishedAt ?? null,
+   coverage:String(row.coverage || evidenceCoverage[evidenceKind]).slice(0,500)},reading && evidenceKind==='public-page');
+  if(source===old)continue;
+  source.index=old?.index ?? result.length+1;
   if(previous>=0)result[previous]=source;else result.push(source);
  }return result;
 }
@@ -78,16 +87,16 @@ export function createResearchGraph({tier='standard',plan,search,read,knowledge,
     if(![...initialSources,...state.sources.map(row=>row.url)].some(known=>validatePublicURL(known)===url))throw Error('链接未在已提供或已搜索到的来源中');
     if(state.reads>=limits.reads)throw Error('原文读取预算已用完');
     changes.reads=state.reads+1;
-    const page=await read(url),bounded={...page,text:String(page.text || '').slice(0,6000),truncated:String(page.text || '').length>6000};
-    changes.publicSources=[...state.publicSources,bounded];changes.sources=sourceRows([bounded],state.sources,limits,true);output={url,sourceIndex:changes.sources.find(s=>s.url===url && s.content===bounded.text)?.index,truncated:bounded.truncated};
+    const page=await read(url),text=String(page.text || ''),bounded={...page,text:text.slice(0,evidenceOffset(text,Math.min(text.length,6000))),truncated:text.length>6000};
+    changes.publicSources=[...state.publicSources,bounded];changes.sources=sourceRows([bounded],state.sources,limits,true);output={url,sourceIndex:changes.sources.find(s=>s.url===url)?.index,truncated:bounded.truncated};
    }else if(decision.action==='inspect'){
     const source=state.sources.find(r=>r.index===decision.source);if(!source || decision.offset>=source.content.length)throw Error('原文编号或偏移无效');
     changes.focus={source:decision.source,offset:decision.offset};output={sourceIndex:decision.source,offset:decision.offset};
    }else if(decision.action==='knowledge'){
-    const rows=await knowledge?.(decision.query) || [];changes.sources=sourceRows(rows,state.sources,limits);output={sourceIndices:changes.sources.map(s=>s.index)};
+    const rows=await knowledge?.(decision.query) || [];changes.sources=sourceRows(rows,state.sources,limits,false,'stored-passage');output={sourceIndices:changes.sources.map(s=>s.index)};
    }else if(['public-data','weather'].includes(decision.action)){
     const found=await (decision.action==='public-data' ? publicData(decision.call) : weather(decision));
-    changes.sources=sourceRows(found.results || [],state.sources,limits);output={query:found.query,sourceIndices:changes.sources.map(s=>s.index),clarification:found.clarification,error:found.error};
+    changes.sources=sourceRows(found.results || [],state.sources,limits,false,'public-data');output={query:found.query,sourceIndices:changes.sources.map(s=>s.index),clarification:found.clarification,error:found.error};
    }else output=await relationships?.(decision.query) || {unavailable:'人物关系资料不可用'};
   }catch(error){await guard(state);output={error:String(error.message).slice(0,300)};if(changes.reads)changes.publicSources=[...state.publicSources,{url:decision.url,error:output.error}];}
   await guard(state);

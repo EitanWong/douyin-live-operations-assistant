@@ -21,10 +21,13 @@ def self_test(root=None):
     if runtime.get('asrModelDir'):
         from local_asr import LocalASR, pcm16
         recognizer = LocalASR(runtime['asrModelDir'])
-        result['asr'] = recognizer.prepare()
-        sample = base64.b64encode((recognizer.folder / 'test_wavs/zh.wav').read_bytes()).decode()
-        if not recognizer.decode(pcm16(sample)):
-            raise ValueError('LOCAL_ASR_EMPTY')
+        try:
+            result['asr'] = dict(recognizer.prepare())
+            sample = base64.b64encode((recognizer.folder / 'test_wavs/zh.wav').read_bytes()).decode()
+            if not recognizer.decode(pcm16(sample)):
+                raise ValueError('LOCAL_ASR_EMPTY')
+        finally:
+            recognizer.close()
     return result
 
 

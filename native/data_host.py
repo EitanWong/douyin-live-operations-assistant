@@ -6,10 +6,45 @@ import sys
 
 from data_location import DataLocation, LocationError
 from protocol import read_message, write_message
+from public_media_jobs import PublicMediaJobs, scope
+
+
+def public_media(store, message):
+    jobs=PublicMediaJobs(store.db)
+    operation=message.get('operation')
+    public=lambda row:{k:v for k,v in row.items() if k not in ('lease','leaseUntil')}
+    if operation=='submit':
+        return public(jobs.submit(message.get('request')))
+    if operation=='scopes':
+        return jobs.scopes(message.get('after'))
+    room,anchor=message.get('room'),message.get('anchor')
+    scope(room,anchor)
+    if operation=='reconcile':
+        return jobs.reconcile(room,anchor,message.get('privacy'),message.get('allowed'))
+    if operation=='sync':
+        return {'epoch':jobs.sync_subject(room,anchor,message.get('subject'),message.get('epoch'),message.get('allowed'))}
+    if operation=='list':
+        return [public(row) for row in jobs.list(room,anchor)]
+    if operation=='forget':
+        return {'epoch':jobs.forget(room,anchor,message.get('subject'),message.get('epoch'))}
+    job=jobs.get(message.get('job'))
+    if job['room']!=room or job['anchor']!=anchor:
+        raise ValueError('MEDIA_SCOPE')
+    if operation=='get':
+        return public(job)
+    if operation=='cancel':
+        return public(jobs.cancel(job['id'],room,anchor))
+    if operation=='evidence':
+        return jobs.evidence(job['id'],message.get('offset',0),message.get('limit',8))
+    if operation=='ack':
+        return public(jobs.acknowledge_import(job['id'],message.get('cursor'),message.get('complete')))
+    raise ValueError('MEDIA_OPERATION')
 
 
 def handle(store, message):
     action = message.get('action')
+    if action == 'public-media':
+        return public_media(store,message)
     if action == 'append':
         return store.append(message.get('records'))
     if action == 'status':

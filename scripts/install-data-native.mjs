@@ -18,7 +18,7 @@ if(process.argv.includes('--uninstall')){
  const id=args['--extension-id'];if(!/^[a-p]{32}$/.test(id || ''))throw Error('请传入 --extension-id=chrome://extensions 中的扩展ID');
  const python=execFileSync(args['--python'] || 'python3',['-c','import sys,sqlite3; assert sys.version_info >= (3,11); print(sys.executable)'],{encoding:'utf8'}).trim();
  await mkdir(folder,{recursive:true,mode:0o700});
- for(const name of ['data_host.py','data_store.py','data_models.py','data_location.py','knowledge_index.py','protocol.py'])await copyFile(join(root,'native',name),join(folder,name));
+ for(const name of ['data_host.py','data_store.py','data_models.py','data_location.py','knowledge_index.py','public_media_jobs.py','public_media_source.py','public_media_frames.py','media_process.py','protocol.py'])await copyFile(join(root,'native',name),join(folder,name));
  const quote=value=>`'${value.replaceAll("'","'\\''")}'`;
  const launcher=join(folder,'launch');
  await writeFile(launcher,`#!/bin/sh\nexec ${quote(python)} ${quote(join(folder,'data_host.py'))}\n`,{mode:0o700});

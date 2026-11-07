@@ -43,3 +43,14 @@ export function profileSources(row,viewers){
  if(ids.length!==1 || viewers.some(r=>r.key!==row.key && (r.secUids || []).includes(ids[0])))return [];
  return [`https://www.douyin.com/user/${ids[0]}`];
 }
+// The room profile is the existing authority for an anchor who has never chatted.
+// It shares the audience deletion clock and must have been observed after it.
+export function researchSubject(state,subject,{room,anchor,profile}={}){
+ if(!subjectKeySchema.safeParse(subject).success)return null;
+ const epoch=subjectEpoch(state,subject),row=subjectRow(state,subject);
+ if(row)return {epoch,row,sources:profileSources(row,state.viewers)};
+ if(state?.anchor!==anchor || subject!==`uid:${anchor}` || String(profile?.room)!==room || String(profile?.anchorId)!==anchor ||
+  !subjectKeySchema.safeParse(`sec:${profile?.secUid}`).success || !Number.isFinite(profile?.updatedAt) || profile.updatedAt<=epoch ||
+  state.viewers.some(viewer=>viewer.key!==subject && (viewer.secUids || []).includes(profile.secUid)))return null;
+ return {epoch,name:profile.name || '',sources:[`https://www.douyin.com/user/${profile.secUid}`]};
+}
