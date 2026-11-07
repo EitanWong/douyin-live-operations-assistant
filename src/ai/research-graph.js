@@ -50,11 +50,12 @@ function sourceRows(rows,existing,limits,reading=false,kind='search-snippet'){
   const previous=result.findIndex(s=>s.url===url),old=result[previous];
   if(result.length>=limits.sources && previous<0)continue;
   const at=row.at ?? row.readAt ?? Date.now();
-  const evidenceKind=reading ? 'public-page' : kind==='stored-passage' && Object.hasOwn(evidenceCoverage,row.evidenceKind) ? row.evidenceKind : kind;
+  const canonical=Boolean(row.sourceId && (reading || kind==='stored-passage'));
+  const evidenceKind=(kind==='stored-passage' || canonical) && Object.hasOwn(evidenceCoverage,row.evidenceKind) ? row.evidenceKind : reading ? 'public-page' : kind;
   const source=mergeSourcePassage(old,{url,title:String(row.title || url).slice(0,160),content,at,...(Number.isFinite(row.expiresAt) ? {expiresAt:row.expiresAt} : {}),
-   ...(kind==='stored-passage' && row.sourceId ? {sourceId:row.sourceId} : {}),
+   ...(canonical ? {sourceId:row.sourceId} : {}),
    evidenceKind,publishedAt:typeof row.publishedAt==='string' ? row.publishedAt.slice(0,80) : old?.publishedAt ?? null,
-   coverage:String(row.coverage || evidenceCoverage[evidenceKind]).slice(0,500)},reading);
+   coverage:String(row.coverage || evidenceCoverage[evidenceKind]).slice(0,500)},reading && evidenceKind==='public-page');
   if(source===old)continue;
   source.index=old?.index ?? result.length+1;
   if(previous>=0)result[previous]=source;else result.push(source);

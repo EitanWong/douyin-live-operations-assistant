@@ -3527,3 +3527,18 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 补丁从原聚合档案重建当前95文件，独立修改版副本执行本轮父检查点回滚与全聚合回滚，逐SHA验证恢复、移除新增文件；工作区/修改版归档仍为修正后实现。ROLLBACK.sh增加mixed-provenance可选检查点，原默认及其他检查点保持。逐角色重开和字面stdout/stderr/退出状态/命令/输入/哈希追加原VERIFICATION.txt，绝不以探针exit0代替各布尔质量断言。
 - 文档补充来源片段术语。没有UI/布局变更、真实公屏发送、main/版本/标签修改、其他工作树删除。crapper/dryer/mutator在CLI、依赖及工具目录不可用，三项未执行，其他检查不替代。只读定位曾误猜两个不存在的测试路径和factuality-stage/native.json，已通过rg找到实际测试和full-native回执，原退出2/1不计检查成功。
 - 限制与后续：本轮证明范围/引用/存储和恢复正确，不能据此认定ASR/视觉内容、身份或心理推断准确。独立人工字幕/视觉参考和CER/WER、长期实播与调度、用户实际安装、旧host.py:174新鲜度根因，以及CI42346718280的快照合并时序失败仍待处理。后续从该快照故障的最小可复现行为继续；本轮提交/推送及精确实现CI回执随后补记。
+
+
+## 2026-11-07：后台缓存读取保留原知识引用
+
+- 上一单元实施8f013b6f6c6a24d3c5068c5f13adfb59e8fd4007已普通推送origin/dev并核实完整SHA。精确CI42349737037的native-perception成功；watch因api.github.com连接中断退出1，属于观察网络错误，未重启CI；同一run的后续API确认仍in_progress，重新连接watch。原生job日志第一次被gh终端转义保护拒绝exit1，显式allow-escape-sequences后保存原始日志，未将工具错误记作CI失败或成功。
+- 在等待CI时延伸实际后台链路，复用真实ASR文本、显式uid:2离线夹具和受控模型响应，无平台联网/真实推理。发现createBackgroundAI.read的同人同URL缓存只传text/coverage，丢evidenceKind和sourceId；sourceRows又把所有read标作public-page。实际任务succeeded，但机器音轨被改标网页、引用丢失，回存触发上一单元新增的范围冲突保护；原知识未被覆盖。这是另一条具体入口缺口，未用前一单元专项通过掩盖。
+- 先agent:find/impact并保存8f013b6的四个父文件字节/SHA，再增加实际后台回归，观察失败；初版在受控fetch内断言被产品包装成网络错误，调整为捕获真实请求、在完成后断言；父版本独立副本精确复现public-page/expected public-media。最小改动只在缓存返回时附带原id/种类/发布时间，sourceRows仅对宿主知识引用保留原kind，并只在真正public-page读取时升级摘要。联网搜索仍不能自称原文或媒体；没有第二套缓存、身份或研究状态。
+- 新回归通过实际createBackgroundAI→LangGraph→模型请求→唯一知识库，证明一次受控模型调用、只采集主页一次、音轨从缓存读取、完整覆盖声明/原引用/原知识时间保留且回存无冲突。相关32/32通过；生成索引532模块/2998符号。新增修正冻结后重跑完整JavaScript/build/check，结果随后补记。native源码和协议未变，上一单元本机138/138及其精确CI原生成功仍有效，不伪称本轮重复运行。
+- 原四角色延续95文件，增加第15组同输入：BASELINE缓存媒体变public-page/sourceId丢失/knowledgeError范围冲突→MODIFIED原public-media/sourceId和限定保留/原记录不变/无knowledgeError→ROLLBACK恢复BASELINE。三者均走同一实际后台控制器、任务库、原知识库和一条受控模型响应，不是真实模型准确率测试。补丁重建、父四文件SHA、全聚合原版SHA、原BASELINE.tar不变和修改版保持均已观察。原14组证据保留不伪称重跑；新增cache-provenance回滚模式，原模式继续可用。
+- 诊断记录修正：首个read-cache探针固定向旧阶段写出派生result，重跑一度覆盖该派生JSON；原字面stdout未变，已据其恢复原失败JSON，新阶段探针改用显式输入/目标路径且只输出stdout。原失败和修正结果各保留独立回执。不将诊断文件恢复当作新产品验证。
+- 另在隔离browser测试副本插入150ms事件间隔，观察原严格合并顺序断言失败；这只证明测试依赖同一时间窗口，未证明旧CI快照2/1的实际时间线，未调整生产100ms/250ms定时器或降低耐久后确认要求。该故障仍待确定性复现。只读定位中另有两次猜测不存在的search/knowledge文件路径，已停止路径猜测，未把退出2当检查通过。
+- 没有UI/布局、用户安装、真实弹幕发送、模型/视频重复采集、main/标签/版本修改或其他工作树删除。crapper/dryer/mutator仍不可用、未执行。事实性人工参考、CER/WER、长期实播/调度、用户安装和host.py:174仍未完成；持续目标active。本轮最终全量、提交/推送和精确CI随后补记。
+
+
+- 新增修正本机冻结回执：完整JavaScript1847/1847、0失败/取消/跳过、174756.786792ms；build/check/index/diff-check通过。第15组同输入、补丁重建和父/聚合两层回滚通过，95文件与当前修改版SHA一致。原生未变，沿用本轮已完成的138/138本机及CI原生证据。上一实施8f013b6的精确CI42349737037已success，网络重连watch退出0，原失败watch日志保留；最终补充修正将另行普通提交推送dev并核对其CI。

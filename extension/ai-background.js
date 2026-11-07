@@ -55,7 +55,7 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
    if(collectAccount && new URL(url).hostname==='www.douyin.com'){
     if(ai.contextSources?.accounts===false)throw Error('公开账号上下文已关闭');
     const cached=subject && knowledge && ai.search?.rememberKnowledge!==false ? (await knowledge.handle(room,'list',{anchor:job.input.anchor})).filter(r=>r.subject===job.input.subject && r.source===url && Date.now()-r.at<86400000 && canReuseSource(job.question,r)).sort((a,b)=>b.at-a.at)[0] : null;
-    if(cached)return {url,title:cached.title,text:cached.text,at:cached.at,expiresAt:cached.expiresAt,coverage:cached.coverage || '同一稳定账号的有效原文缓存；保留原采集时间'};
+    if(cached)return {url,title:cached.title,text:cached.text,at:cached.at,expiresAt:cached.expiresAt,sourceId:cached.id,evidenceKind:cached.evidenceKind || 'stored-passage',publishedAt:cached.publishedAt ?? null,coverage:cached.coverage || '同一稳定账号的有效原文缓存；保留原采集时间'};
     const rows=await collectAccount(room,url,{signal}),at=Math.min(Date.now(),...rows.map(r=>r.observedAt).filter(Number.isFinite));
     return {url,title:rows[0]?.title || '抖音公开资料',...formatAccountEvidence(rows,job.question),at,expiresAt:Math.min(at+86400000,...rows.map(r=>r.expiresAt).filter(Number.isFinite))};
    }
