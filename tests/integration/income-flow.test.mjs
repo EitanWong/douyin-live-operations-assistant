@@ -100,11 +100,14 @@ test('扩展后台断连时标明待入账；导出不依赖后台，恢复后�
   }
 });
 
-test('场控暂停时观众榜变动即时触发整榜校准，补回礼物和重复DOM刷新不重复',async()=>{
+test('空千票榜不虚增收入；场控暂停时明确贡献即时校准，补回礼物和刷新不重复',async()=>{
   const dom=new JSDOM(`<body><div id="chatroom"><div><div class="LyAdeVIF sBRqUw32"><div></div><div></div><div><div><div><div><div>
     <div class="LLkRvMAV"><div>1</div><div class="_QlQGbi1">LILAC</div><div class="Ql4e1dvM"><span>岁小孩</span>0</div></div>
-    <div class="LLkRvMAV"><div>2</div><div class="_QlQGbi1">用户甲</div><div class="Ql4e1dvM">1001</div></div>
+    <div class="LLkRvMAV"><div>2</div><div class="_QlQGbi1">用户甲</div><div class="Ql4e1dvM">800</div></div>
   </div></div></div></div></div></div></div></div></body>`,{url:`https://live.douyin.com/${room}`,pretendToBeVisual:true});
+  const emptyBoard=dom.window.document.createElement('div');
+  emptyBoard.innerHTML='<div class="Ypyh0f2S"><span>暂无上榜用户</span></div>';
+  dom.window.document.querySelector('.LLkRvMAV').parentElement.after(emptyBoard);
   for(const name of ['document','window','location','MutationObserver','HTMLElement'])globalThis[name]=dom.window[name];
   globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};
   const values=new Map(),get=(key,fallback)=>structuredClone(values.get(key)??fallback);
@@ -119,6 +122,13 @@ test('场控暂停时观众榜变动即时触发整榜校准，补回礼物和�
     await waitFor(()=>api);
     await onEvent({type:'start',roomId:'broadcast',at:Date.now(),source:'platform'});
     await onEvent({type:'room-audience',ranks:[{user:{id:'12345678',name:'用户甲'}}]});
+    await waitFor(()=>values.get(`live-assistant:income:${room}`)?.sessions?.[0]?.[1]?.contributionFloor?.score===800);
+    const belowThreshold=await store.report(room,giftDate().slice(0,7));
+    assert.equal(belowThreshold.currentSession.totalDiamonds,800);
+    assert.equal(belowThreshold.currentSession.estimatedIncome,40);
+    await waitFor(()=>api.panel.node('[data-gift-diamonds]').textContent==='800');
+    assert.match(api.panel.node('[data-gift-income]').textContent,/40\.00/);
+    dom.window.document.querySelectorAll('.Ql4e1dvM')[1].textContent='1001';
     await waitFor(()=>values.get(`live-assistant:income:${room}`)?.sessions?.[0]?.[1]?.contributionFloor?.score===1001);
     assert.equal(engine.running,false);
     const score=dom.window.document.querySelector('.Ql4e1dvM');

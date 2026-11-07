@@ -3879,3 +3879,14 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 构建产物已在本工作树dist生成；实际Chrome直播标签由另一任务占用，本轮未重载扩展或将合成6→3称为真实直播图谱已更新。三位真实账号不硬编码进产品。提交与普通push到dev的精确SHA、远端一致性和角色哈希在同一VERIFICATION/roles.json记录，随后补交付回执。
 
 - 本轮功能提交 **1b9d7d27b1bdd44f69ca5ffdb17399323843e37e** 已普通push至origin/dev（c826493→1b9d7d2，exit0），git ls-remote精确核对一致；本地工作树干净。未推main、调整版本或重载正在使用的扩展，未将本地通过称为远端CI通过。此段只补交付日志，随后文档提交与最终角色哈希继续写同一VERIFICATION/roles.json；原始归档、两份固定输入及所有字面结果保留，只清理本聊天可重建验收副本。
+
+## 2026-11-07：收入统计撤销无分值千票推算与旧榜单虚增
+
+- 用户反馈榜单没有千票用户却多出1000钻补差、收入偶发多50元。目标始终是本仓库，先执行agent:find/agent:impact并确认源码；从干净dev e2b606c建立income-explicit-contributions独立工作树，冻结source.tar与两个源码SHA，原工作区字节保留。
+- 根因是readAudienceContributions将特定DOM容器中的无分值昵称、空态或加载提示一律赋1000分；榜单累计最高值入账后不会随空榜下降。固定合成探针真实复现空榜1行/1000钻/50元，且旧推算1000会压住后来的明确800分。
+- 最小修复移除readAudienceContributions的无分值1000回退；contributionSnapshot和recordContribution/observeContribution统一拒绝scoreIsFloor推算记录。明确的低于1000贡献、真实1000和无UID数值整榜仍可按原比例补差，保留原有同UID去重、晚到礼物抵扣和分场边界。
+- 账本升至v7：读取旧存档时只移除带scoreIsFloor的逐用户推算与hasFloor的混合整榜，保留实际礼物、明确UID贡献、已结束场次和未标记推算的整榜；旧日榜推算不再计参考。旧混合整榜无法还原其中未具名的精确部分，保守撤销后由现有采样重新补齐，不凭旧推算继续抬高收入。读报告不原地修改持久数据，下一次账本有效写入保存迁移结果。
+- TDD先修改旧“无分值也按1000”预期并加入空态、入口拦截、旧账迁移和真实贡献保留回归，实际红测退出1；最小实现后专项50/50通过。补充真实boot→DOM变动→存储→面板链路：空千票区域与明确800分并存时只显示800钻/40元；再升1001、6297及晚到礼物，收入与补差不重复。含礼物与预测后台的最终专项63/63通过。
+- npm ci成功，audit 0漏洞；agent:index为568模块/3166符号，build通过。未改UI结构、样式、共享布局或原生代码。本轮验证使用合成输入，不声称已读取/改写用户真实直播账本或已重载正在使用的扩展。完整JavaScript回归、check、回滚及提交推送结果随后追加。
+- crapper、dryer、mutator已核实PATH及启用工具目录均不可用，三项未执行，其他检查不替代。初次系统Python不支持tarfile.extractall(filter=...)导致setup退出1，随后probe尚未生成的BASELINE尝试也退出1；改为兼容API从冻结可信git归档解包后正常复现。一次zsh未匹配glob、一次command -v -a不受支持及原工作区不存在venv路径的定位错误均保留，不计通过。为完整JS测试创建任务独立Python测试venv并安装httpx==0.28.1，未变更系统Python或项目依赖。
+- 四角色固定在 /Users/eitan/.codex/income-explicit-contributions-20261107-rqyp5j2g：MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、可执行ROLLBACK.sh；固定probe、原始归档、命令stdout/stderr/exit与哈希作为补充证据。无新增代理或其他聊天消息；不清理其他工作树、用户库或正在使用的扩展。

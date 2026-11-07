@@ -182,9 +182,10 @@ export function readAudienceContributions(doc = document) {
       const score = combinedCell?.score ?? numeric.at(-1)?.score;
       const hasScore = score !== undefined && !(numeric.length === 1 && numeric[0].index === 0 && nameCell);
       rowName = combinedCell?.name || nameCell?.text;
-      scoreIsFloor = !hasScore && Boolean(thousandVoteList && (row === thousandVoteList || thousandVoteList.contains(row)));
-      if (!rowName || (!hasScore && !scoreIsFloor)) continue;
-      rowScore = hasScore ? score : 1000;
+      // Layout, nicknames and empty-state text do not prove a contribution.
+      // Only a numeric score belonging to this row may reach the ledger.
+      if (!rowName || !hasScore) continue;
+      rowScore = score;
       orderNode = leafNodes[combinedCell?.index ?? nameCell?.index] || row;
     }
     const source = thousandVoteList && (thousandVoteList.contains(row) || row.contains(thousandVoteList)) ? 'thousand' : 'audience';
