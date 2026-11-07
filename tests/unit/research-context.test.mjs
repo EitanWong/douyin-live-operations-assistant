@@ -54,3 +54,27 @@ test('完整来源的长覆盖声明和异常发布日期不会挤掉原文或�
  const view=compactResearchState(state,'陶瓷茶具');assert.ok(JSON.stringify(view).length<=6500);
  assert.equal(view.catalog.length,10);assert.ok(view.evidence.some(r=>r.content.includes('不可加热')));
 });
+
+test('研究工作集将完整证据范围与原文一起披露，目录压缩不能丢掉单帧和未知说话人限制',async()=>{
+ const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const coverage='单张关键帧，图片内三个拼接画格无独立时间戳；机器观察待核实；'+'采样限制。'.repeat(45)+'说话人未知，不证明身份、心理或连续动作。';
+ const state={sources:Array.from({length:10},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'\u0000'.repeat(160),content:'深色帽子；三帧画面内容一致，无变化。',at:1000,evidenceKind:'public-media',coverage})),observations:[],focus:{source:8,offset:0}};
+ const before=structuredClone(state),view=compactResearchState(state,'帽子和动作变化');
+ assert.ok(JSON.stringify(view).length<=6500);
+ const evidence=view.evidence.find(row=>row.index===8);assert.ok(evidence);
+ assert.equal(evidence.evidenceKind,'public-media');assert.equal(evidence.coverage,coverage);
+ assert.equal(evidence.content,state.sources[7].content.slice(evidence.start,evidence.end));
+ for(const row of view.evidence)assert.equal(row.coverage,coverage);
+ assert.deepEqual(state,before);
+ assert.deepEqual(compactResearchState(state,'帽子和动作变化'),view);
+});
+
+test('覆盖说明的转义字符过长时省略整条证据，不截掉范围说明后单独发送原文',async()=>{
+ const {compactResearchState}=await import('../../src/ai/research-context.js');
+ const coverage='\u0000'.repeat(490)+'说话人未知';
+ const sources=Array.from({length:10},(_,i)=>({index:i+1,url:`https://example.org/${i}`,title:'帽子',content:'深色帽子可见。',at:1000,evidenceKind:'public-media',coverage}));
+ const view=compactResearchState({sources,observations:[],focus:{source:10,offset:0}},'帽子');
+ assert.ok(JSON.stringify(view).length<=6500);assert.equal(view.catalog.length,10);
+ assert.ok(view.evidence.some(row=>row.index===10));assert.ok(view.evidence.length<3);
+ for(const row of view.evidence){assert.equal(row.coverage,coverage);assert.equal(row.evidenceKind,'public-media');}
+});

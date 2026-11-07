@@ -21,7 +21,10 @@ export function compactResearchState(state,question){
  const add=(source,start,end)=>{
   start=offset(source.content,start);end=offset(source.content,end);
   if(view.evidence.some(r=>r.index===source.index && r.start<end && start<r.end))return;
-  const row={index:source.index,start,end,content:source.content.slice(start,end)};
+  // A passage and its scope are one piece of evidence. Optional catalog labels
+  // may disappear, but compaction must not turn a sample into an unqualified fact.
+  const row={index:source.index,start,end,content:source.content.slice(start,end),
+   ...(source.evidenceKind ? {evidenceKind:source.evidenceKind} : {}),...(source.coverage ? {coverage:source.coverage} : {})};
   view.evidence.push(row);
   while(size(view)>RESEARCH_CONTEXT_LIMITS.workingChars && row.end>row.start){row.end=offset(source.content,row.start+Math.floor((row.end-row.start)/2));row.content=source.content.slice(row.start,row.end);}
   if(!row.content)view.evidence.pop();

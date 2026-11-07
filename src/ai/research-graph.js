@@ -40,7 +40,7 @@ agent_state每轮自动压缩：catalog是来源目录，evidence是按当前问
 
 const State=Annotation.Root(Object.fromEntries(['decision','prepared','bootstrapping','modelCalls','searches','reads','sources','publicSources','observations','executed','answer','citationIndices','stopReason','focus','workingContext'].map(key=>[key,Annotation()])));
 const initial=()=>({prepared:0,bootstrapping:false,modelCalls:0,searches:0,reads:0,sources:[],publicSources:[],observations:[],executed:[],answer:'',citationIndices:[],stopReason:''});
-const evidenceCoverage={'public-page':'公开页面文字；不代表完整视频、评论或已核实身份','stored-passage':'保存的公开原文片段；内容和身份仍待核实','search-snippet':'搜索摘要；尚未核对原页面','public-data':'公共接口返回的数据；仅覆盖已查询对象、时间和字段'};
+const evidenceCoverage={'public-page':'公开页面文字；不代表完整视频、评论或已核实身份','stored-passage':'保存的公开原文片段；内容和身份仍待核实','search-snippet':'搜索摘要；尚未核对原页面','public-data':'公共接口返回的数据；仅覆盖已查询对象、时间和字段','public-media':'机器音画识别待核实；间隔采样不是连续视频，说话人和画面人物身份未知，不证明心理或帧外事件'};
 function sourceRows(rows,existing,limits,reading=false,kind='search-snippet'){
  const result=[...existing];
  for(const row of rows){
@@ -52,9 +52,10 @@ function sourceRows(rows,existing,limits,reading=false,kind='search-snippet'){
   if(old && (!reading && (old.evidenceKind==='public-page' || old.content.includes(content)) || old.content===content && old.evidenceKind==='public-page'))continue;
   if(result.length>=limits.sources && previous<0)continue;
   const merging=old && !reading,at=row.at ?? row.readAt ?? Date.now(),expiresAt=merging ? Math.min(old.expiresAt ?? Infinity,row.expiresAt ?? Infinity) : row.expiresAt;
+  const evidenceKind=reading ? 'public-page' : kind==='stored-passage' && Object.hasOwn(evidenceCoverage,row.evidenceKind) ? row.evidenceKind : kind;
   const source={index:old?.index ?? result.length+1,url,title:String(row.title || url).slice(0,160),content:merging ? `${old.content}\n${content}`.slice(0,6000) : content,at:merging ? Math.min(old.at,at) : at,...(Number.isFinite(expiresAt) ? {expiresAt} : {}),
-   evidenceKind:reading ? 'public-page' : kind,publishedAt:typeof row.publishedAt==='string' ? row.publishedAt.slice(0,80) : old?.publishedAt ?? null,
-   coverage:String(row.coverage || evidenceCoverage[reading ? 'public-page' : kind]).slice(0,500)};
+   evidenceKind,publishedAt:typeof row.publishedAt==='string' ? row.publishedAt.slice(0,80) : old?.publishedAt ?? null,
+   coverage:String(row.coverage || evidenceCoverage[evidenceKind]).slice(0,500)};
   if(previous>=0)result[previous]=source;else result.push(source);
  }return result;
 }

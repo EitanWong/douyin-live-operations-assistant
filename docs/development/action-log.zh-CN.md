@@ -3489,3 +3489,17 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终本机回执：npm run check退出0（36.948秒，包含索引新鲜度和生成JavaScript语法），git diff --check通过。业务源码、测试、生成索引与61b4bc9保持一致；本轮只提交该行动日志。原四角色在追加验收回执后重新打开，原MODIFIED_FILE/DIFF/ROLLBACK字节未变，VERIFICATION扩展新证据；新的事实性续验checkpoint已记录。
 
 - 提交/推送回执：本轮验收文档7cd7221411cbfa4091488e8f7ff93f3d6987dd3b已普通推送origin/dev（exit0），git ls-remote确认完整SHA一致。新文档CI42346658141当前in_progress，未当作成功；既有实现和上一文档CI成功结论保留。本条为结果补记，业务代码/测试/索引仍无差异，补记以普通文档提交推送，不改main/标签。
+
+
+## 2026-11-07：真实关键帧事实性复核与研究证据范围保留
+
+- 续接dev/ae3260340af94d58b93712edafcd0c5ae556a0bf和原四角色；上轮完成实际后台持久化验收，属于有效进展。先读续验checkpoint，再打开三张既有验证帧，逐SHA核对媒体5db5a0a730539b8ac2f8907cf64ba7ece909d834de83a9c4e7c6fd5bc57931e2及0/9400/18767ms图片，不重下视频、不重跑模型或重做已完成存储验收。
+- 事实性参考：Codex直接看图记录可见衣着、帽饰、水面、山体、遮挡及未知；首尾图片分别是三格/两格静态拼图。既有Qwen输出“右手遮挡面部”“三帧无变化”缺少对应证据，“石壁”材质不能确认。记录为缺依据/待核实，不将审查模型标签当人工真值，也不将未证实当作证伪。五段ASR无独立校对字幕，CER/WER保留null，不从熟悉的歌词补造参考。参考与原输出、图片/媒体SHA和阈值写入output的reference-review.json。
+- 定位与保护：执行agent:find/impact并确认实际源码。两个共享机制有可重现缺口：sourceRows将原知识库的public-media改标stored-passage；compactResearchState将coverage视为可删目录标签，披露原文时不保留范围，长目录下“单帧/待核实/身份未知”可能完全消失。先保存五个修改文件的父字节/SHA与原聚合BASELINE，再加三项行为回归；观察到期望的undefined种类/缺范围和stored-passage断言失败，12项中3项红，再改生产转12/12绿。
+- 最小共享修正：sourceRows只对原知识库入口保留已知evidenceKind，联网摘要不能自称public-media；为旧的无coverage媒体记录提供机器音画待核实/说话人未知默认范围。compactResearchState将完整coverage与evidenceKind绑在每个披露原文窗口上，目录仍可压缩；6500字符硬预算不足时缩小或省略整条证据，不删掉范围后孤立发送原文。保留MiniSearch抽取偏移、LangGraph状态/检查点、原文、时效、引用编号和现有预算；无新增依赖或第二套模型/画像状态。
+- 新回归覆盖：高压目录下尾部未知条件、完整范围/精确偏移、不修改原状态/幂等、转义字符膨胀时省略整条证据、原知识库→实际LangGraph规划上下文和联网摘要种类边界。原有网页读取升级/摘要不降级/同URL互补片段测试继续通过。专项12/12；agent:index生成530模块/2985符号，build通过，check通过（54.933秒），原生138/138（15.934秒，ResourceWarning升格错误）；JavaScript全量冻结运行中，结果随后补记。
+- 同输入事务：扩展同一四角色与93文件，增加factuality回滚检查点。使用原0ms真实视觉文本走实际LangGraph知识转换与MiniSearch压缩，规划器受控、无真实模型推理：BASELINE种类stored-passage、披露种类/范围缺失、高压范围丢失→MODIFIED种类public-media、原范围完整、高压6500内且原文偏移一致→ROLLBACK恢复BASELINE。此前12组结果和原聚合pristine保持，不伪称重跑；第13组本轮实际执行。补丁从原聚合字节重建当前修改版，独立副本回滚原始SHA和本轮父五文件SHA均核对，当前工作区保持修改版。
+- 事务脚本更正：初次抽取的93文件未含未修改public-data.js等运行依赖，Node退出1；补入同一当前源码的未修改依赖再覆盖相应档案。首次补丁重建误在已经填充新增源码的目录上应用新增文件patch，patch自动反向处理后逐SHA检查失败exit1；改为从空目录+原BASELINE应用补丁后通过。两次诊断错误回执/字面输出保留，不当作产品红测。只读定位还曾误猜research-tools.js、tests/fixtures目录不存在，已转实际文件，不计通过。
+- 工具/边界：crapper/dryer/mutator的CLI与工具接口均不可用，三项未执行，其他检查不替代。没有UI/共享布局修改或真实弹幕发送，没有用户扩展/宿主升级或安装清单写入。未声称此修正能识别并删除所有错误语义：它保证已知来源限制不被研究转换/压缩丢掉；人类校对、实际模型事实性、同URL混合来源限定完整性及长期实播仍需验收。持续目标active，提交/推送/全量回执随后补记。
+
+- 最终冻结全量：JavaScript1837/1837、0失败/取消/跳过，173323.018541ms/外层173.525秒；原生138/138、15.934秒；build/check/index/diff-check和第13组同输入/补丁重建/双层回滚通过。全量开始后生产/测试/索引未再修改；旧文档CI42346718280仍in_progress，未当作本次实现CI。接下来普通提交推送dev并读取其精确SHA的CI。

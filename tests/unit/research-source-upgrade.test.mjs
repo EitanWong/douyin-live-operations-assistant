@@ -52,3 +52,21 @@ test('同网址的互补检索片段共享引用且不丢旧条件，不刷新�
  }});
  await runtime.run({id:'complementary-excerpts'});
 });
+
+test('研究从原知识库读取机器音画结果时保留种类和待核实范围，联网摘要不能自称原文',async()=>{
+ for(const action of ['knowledge','search']){
+  const coverage='单张关键帧；拼图画格无独立时间；机器观察待核实，不证明连续动作或人物身份。';
+  let calls=0;
+  const rows=[{url:'https://example.org/work',title:'公开视频关键帧观察',content:'深色帽子，三帧画面内容一致，无变化。',evidenceKind:'public-media',coverage}];
+  const runtime=createResearchGraph({knowledge:async()=>rows,search:async()=>({results:rows}),question:'帽子与动作是否改变',plan:async state=>{
+   if(++calls===1)return JSON.stringify({action,query:'帽子与动作是否改变'});
+   const expected=action==='knowledge' ? 'public-media' : 'search-snippet';
+   assert.equal(state.sources[0].evidenceKind,expected);
+   assert.equal(state.workingContext.evidence[0].evidenceKind,expected);
+   assert.equal(state.workingContext.evidence[0].coverage,coverage);
+   return JSON.stringify({action:'finish',answer:'机器描述提到深色帽子；单张拼图不能证明动作有无变化。',citations:[1]});
+  }});
+  const result=await runtime.run({id:`preserve-media-${action}`});
+  assert.equal(calls,2);assert.deepEqual(result.citationIndices,[1]);
+ }
+});
