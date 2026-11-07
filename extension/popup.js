@@ -1,5 +1,7 @@
 import { installTheme } from './theme.js';
 import { validateSearchEndpoint } from './search.js';
+import { validateEndpoint } from './ai.js';
+import { servicePermissionPattern } from './service-permissions.js';
 let tab;
 const status=document.querySelector('#status'),open=document.querySelector('#open'),endpoint=document.querySelector('#endpoint');
 installTheme({ target:document.documentElement, select:document.querySelector('[data-theme-choice]'), paletteSelect:document.querySelector('[data-theme-palette]'), materialSelect:document.querySelector('[data-theme-material]'), onError:message=>{ status.textContent=message; status.classList.add('error'); } });
@@ -47,23 +49,22 @@ void(async()=>{
   try {
     const result=await chrome.tabs.sendMessage(tab.id,{type:'room-info'});
     if (!result?.ready) throw new Error();
-    endpoint.value=result.endpoint;if(result.mediaEndpoint)document.querySelector('#media-endpoint').value=result.mediaEndpoint;if(result.searchEndpoint)document.querySelector('#search-endpoint').value=result.searchEndpoint; status.textContent='直播间已就绪，点击下方打开面板。'; open.disabled=false;
+    endpoint.value=result.endpoint;document.querySelector('#research-endpoint').value=result.researchEndpoint || result.endpoint || '';if(result.mediaEndpoint)document.querySelector('#media-endpoint').value=result.mediaEndpoint;if(result.searchEndpoint)document.querySelector('#search-endpoint').value=result.searchEndpoint; status.textContent='直播间已就绪，点击下方打开面板。'; open.disabled=false;
   } catch {status.textContent='扩展已安装，请刷新直播页再打开面板。';}
 })();
 open.addEventListener('click',async()=>{try{await chrome.tabs.sendMessage(tab.id,{type:'open-panel'});window.close();}catch{status.textContent='请刷新直播页后重试。';status.classList.add('error');}});
-document.querySelector('#allow').addEventListener('click',async()=>{
-  let url;try{url=new URL(endpoint.value);if(!['https:','http:'].includes(url.protocol) || (url.protocol==='http:' && !['localhost','127.0.0.1'].includes(url.hostname)))throw new Error();if(url.username||url.password||url.search||url.hash || !url.pathname.endsWith('/chat/completions'))throw new Error();}catch{status.textContent='请填写完整的 /chat/completions 接口地址；本地服务可用 HTTP。';return;}
-  // 保持在用户点击的调用栈内申请可选权限。
+for(const [button,field,label] of [['allow','endpoint','AI 服务'],['allow-research','research-endpoint','后台研究服务']])document.querySelector(`#${button}`).addEventListener('click',async()=>{
   // 必须在用户点击的同步调用栈里发起权限申请；调用后再等待结果。
   try {
-    const allowed = await chrome.permissions.request({origins:[`${url.protocol}//${url.hostname}/*`]});
-    status.textContent=allowed?'已授权，返回直播间测试 AI 连接。':'未授权，AI 服务暂不可访问。';
-  } catch { status.textContent='授权失败，请检查接口地址。'; }
+    const url=validateEndpoint(document.querySelector(`#${field}`).value);
+    const allowed=await chrome.permissions.request({origins:[servicePermissionPattern(url)]});
+    status.textContent=allowed ? `${label}域名已授权，返回直播间重新提交 Agent 任务或测试连接。` : `未授权，${label}暂不可访问。`;
+  } catch(error) { status.textContent=error.message || '授权失败，请检查接口地址。'; }
 });
 document.querySelector('#allow-search').addEventListener('click',async()=>{
   try {
     const url=new URL(validateSearchEndpoint(document.querySelector('#search-endpoint').value));
-    const allowed=await chrome.permissions.request({origins:[`${url.protocol}//${url.hostname}/*`]});
+    const allowed=await chrome.permissions.request({origins:[servicePermissionPattern(url)]});
     status.textContent=allowed ? '搜索域名已授权，返回面板填写搜索密钥并测试。' : '未授权，联网搜索暂不可用。';
   } catch(error){status.textContent=error.message;}
 });
@@ -72,7 +73,7 @@ document.querySelector('#allow-media').addEventListener('click',async()=>{
   try{
     const url=new URL(document.querySelector('#media-endpoint').value);
     if(url.protocol!=='https:' || url.username || url.password || url.search || url.hash || !url.pathname.endsWith('/chat/completions'))throw new Error('请先在直播间配置百炼地域和业务空间，再重新打开扩展图标');
-    const allowed=await chrome.permissions.request({origins:[`${url.origin}/*`]});
+    const allowed=await chrome.permissions.request({origins:[servicePermissionPattern(url)]});
     status.textContent=allowed ? '音视频域名已授权，返回直播间选择共享标签页。' : '音视频域名尚未授权。';
   }catch(error){status.textContent=error.message;}
 });

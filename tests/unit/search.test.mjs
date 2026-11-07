@@ -191,3 +191,9 @@ test('网络失败、取消、平台错误及重复回调只结算一次且保�
     if(mode==='response')assert.equal(error.message,'服务权限不足');
   }
 });
+
+test('后台授权错误与真实网络错误保留具体原因，不统一误报网络或授权失败',async()=>{
+ for(const message of ['未授权后台研究模型域名 https://research.example，请点击扩展图标授权后台研究服务域名','连接被服务端重置']){
+  await assert.rejects(requestJSON(details=>details.onerror(Error(message)),{url:'https://research.example/v1/responses',body:{},timeout:0}),error=>error.message===message);
+ }
+});

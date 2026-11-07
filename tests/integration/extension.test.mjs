@@ -24,6 +24,7 @@ import { RequestBridgeClient } from '../../src/browser/request-sender.js';
 import { webLocks } from '../helpers/web-locks.mjs';
 import {createGiveaway,enterGiveaway,drawGiveaway} from '../../src/core/giveaway.js';
 import { buildFixture } from '../helpers/build.mjs';
+import {mergeConfig} from '../../src/core/engine.js';
 const {dist:testDist, cleanup} = await buildFixture();
 after(cleanup);
 const file=name=>join(testDist,'chrome-extension',name);
@@ -793,6 +794,26 @@ test('实际扩展content产物通过Chrome接口启动；保存失败显示且�
   const f=root.querySelector('[data-field="gift.minValue"]');f.value='200';f.dispatchEvent(new dom.window.Event('input',{bubbles:true}));root.querySelector('[data-action="save"]').click(); await new Promise(r=>setTimeout(r,30));
   assert.match(root.querySelector('.toast').textContent,/测试存储失败/); assert.match(root.querySelector('[data-save-state]').textContent,/未保存/);
   const info=await new Promise(resolve=>listeners.forEach(listener=>listener({type:'room-info'},{},resolve))); assert.equal(info.ready,true);dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();
+});
+
+test('实际扩展授权信息使用已保存的后台研究API，保留Responses并忽略未保存的模型草稿',async()=>{
+ const listeners=[],values={'live-assistant:config:1':mergeConfig({anchorId:'10',ai:{endpoint:'https://reply.example/v1/chat/completions',model:'reply',taskModels:{research:{enabled:true,endpoint:'https://research.example/v1/responses',model:'research'}}}})};
+ const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+ Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async m=>m.type==='init' ? {ok:true,value:structuredClone(values)} : {ok:true,value:[]}}}});
+ const info=()=>new Promise(resolve=>listeners.forEach(listener=>listener({type:'room-info'},{},resolve)));
+ try{
+  await evalContent(dom.window);let result;
+  for(let i=0;i<300;i++){if(listeners.length){result=await info();if(result.ready)break;}await new Promise(resolve=>setTimeout(resolve,10));}
+  assert.equal(result?.ready,true);assert.equal(result.researchEndpoint,'https://research.example/v1/responses');
+  const root=dom.window.document.querySelector('#douyin-live-assistant').shadowRoot,input=root.querySelector('[data-field="ai.taskModels.research.endpoint"]');
+  input.value='https://unfinished.example/v1/responses';input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));assert.equal((await info()).researchEndpoint,result.researchEndpoint);
+  const config=structuredClone(values['live-assistant:config:1']);config.ai.taskModels.research.endpoint='http://localhost:11434/v1/responses';
+  for(const listener of listeners)listener({type:'storage',sharedKnowledge:true,changes:{'live-assistant:config:1':{newValue:config}}},{},()=>{});
+  assert.equal((await info()).researchEndpoint,config.ai.taskModels.research.endpoint);assert.equal(input.value,'https://unfinished.example/v1/responses','授权信息刷新不覆盖用户草稿');
+  config.ai.taskModels.research.enabled=false;
+  for(const listener of listeners)listener({type:'storage',sharedKnowledge:true,changes:{'live-assistant:config:1':{newValue:config}}},{},()=>{});
+  assert.equal((await info()).researchEndpoint,config.ai.endpoint,'未启用独立模型时授权实际回退的回复接口');
+ }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 
 test('实际扩展 content 传递双方 PK 比分并在暂停面板显示，中途入场无需开始事件', async () => {

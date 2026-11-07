@@ -73,7 +73,7 @@ console.log('Built dist/douyin-live-assistant.user.js (standalone; no runtime de
 const destination = `${dist}/chrome-extension`;
 const ext = development ? `${dist}/.chrome-extension-next-${process.pid}` : destination;
 await mkdir(ext, { recursive:true });
-for (const name of ['manifest.json','popup.html','popup.css','popup.js','durable-storage.js','protocol-cache.js']) await writeFile(`${ext}/${name}`,await readFile(`${root}extension/${name}`));
+for (const name of ['manifest.json','popup.html','popup.css','popup.js','service-permissions.js','durable-storage.js','protocol-cache.js']) await writeFile(`${ext}/${name}`,await readFile(`${root}extension/${name}`));
 const glassLicense = await readFile(`${root}vendor/solid-glass/LICENSE`, 'utf8');
 const liquidGlassLicense = await readFile(`${root}vendor/liquid-glass-react/LICENSE`, 'utf8');
 await writeFile(`${ext}/solid-glass.css`, `/* Solid Glass · https://github.com/deeplethe/solid-glass\n${glassLicense}\nLiquid Glass React · https://github.com/rdev/liquid-glass-react\n${liquidGlassLicense}\n*/\n${SOLID_GLASS_CSS}`);

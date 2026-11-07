@@ -17,14 +17,16 @@ import {retrieveSourceRecords} from '../src/services/automatic-knowledge.js';
 import {formatAccountEvidence} from '../src/ai/account-evidence.js';
 import {continuousEnabled,createContinuousResearch,researchEvidenceIsCurrent} from '../src/ai/continuous-research.js';
 import {researchLimits,researchSettings} from '../src/ai/research-settings.js';
+import {servicePermissionPattern} from './service-permissions.js';
 export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,saveSupplement,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
- const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
+ const authorized=origin=>chrome.permissions.contains({origins:[servicePermissionPattern(origin)]});
  const request=details=>{
   const controller=new AbortController();let timeout;
   void (async()=>{try{
    const searching=details.operation==='search',weather=['weather','public-data'].includes(details.operation),provider=details.searchProvider;
    const url=weather ? details.operation==='weather' ? validateWeatherURL(details.url) : validatePublicDataURL(details.url) : searching ? validateSearchEndpoint(details.url,provider) : validateEndpoint(details.url);
-   if(!await authorized(new URL(url).origin))throw new Error('请先在扩展图标中授权模型或搜索域名');
+   const origin=new URL(url).origin;
+   if(!await authorized(origin))throw new Error(weather ? `公开数据服务域名 ${origin} 尚未授权，请在扩展详情中允许访问后重试` : `${searching ? '搜索服务' : '后台研究模型'}域名 ${origin} 尚未授权，请点击扩展图标，在“AI 服务访问权限”中点击“${searching ? '授权搜索服务域名' : '授权后台研究服务域名'}”后重试`);
    if(controller.signal.aborted)throw new Error('请求已取消');
    if(!weather && (typeof details.data!=='string' || details.data.length>AI_REQUEST_LIMIT))throw new Error('后台请求超过容量');
    if(searching)validateSearchBody(provider==='searxng' ? Object.fromEntries(new URLSearchParams(details.data)) : JSON.parse(details.data),provider);

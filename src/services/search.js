@@ -80,7 +80,7 @@ export function requestJSON(request, {url,key,body,method='POST',timeout=25000,o
         onload:response=>{
           try {finish(null,parseResponse(response,url,operation,stream));} catch(error) {finish(error);}
         },
-        ontimeout:()=>finish(new Error('请求超时')),onerror:()=>finish(new Error('网络失败或未授权服务域名')),onabort:()=>finish(new Error('请求已取消'))
+        ontimeout:()=>finish(new Error('请求超时')),onerror:error=>finish(new Error(typeof error?.message==='string' && error.message ? error.message : '网络失败或未授权服务域名')),onabort:()=>finish(new Error('请求已取消'))
       });
       if(signal?.aborted){try{handle?.abort?.();}catch{}}
     } catch(error) {finish(error);}

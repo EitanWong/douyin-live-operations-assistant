@@ -1,3 +1,4 @@
+import {servicePermissionPattern} from './service-permissions.js';
 import {AI_REQUEST_LIMIT,AI_RESPONSE_LIMIT} from '../src/services/ai-wire.js';
 import {createKnowledgeCorpus} from '../src/ai/knowledge-corpus.js';
 import {createAutomaticKnowledge} from '../src/services/automatic-knowledge.js';
@@ -394,7 +395,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       else if(message.type==='media-sdp' && isRoom(sender)){
         const url=validateRealtimeEndpoint(message.url);validateSDP(message.data);
         if(typeof message.headers?.Authorization!=='string' || !/^Bearer [^\s]{1,1000}$/u.test(message.headers.Authorization))throw new Error('百炼实时认证无效');
-        if(!await chrome.permissions.contains({origins:[`${new URL(url).origin}/*`]}))throw new Error('请点击扩展图标，授权音视频服务域名后重试');
+        if(!await chrome.permissions.contains({origins:[servicePermissionPattern(url)]}))throw new Error('请点击扩展图标，授权音视频服务域名后重试');
         const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),25000);
         try{
           const response=await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':'application/sdp',Authorization:message.headers.Authorization},body:message.data});
@@ -406,7 +407,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const searching=message.type==='search',weather=['weather','public-data'].includes(message.type);
         const provider=message.provider || (String(message.url).endsWith('/web-search') ? 'bocha' : 'tavily');
         const url = weather ? message.type==='weather' ? validateWeatherURL(message.url) : validatePublicDataURL(message.url) : searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
-        if (!await chrome.permissions.contains({origins:[`${new URL(url).protocol}//${new URL(url).hostname}/*`]})) throw new Error(`请点击扩展图标，授权当前${searching ? '搜索' : ' AI '}服务域名后重试`);
+        if (!await chrome.permissions.contains({origins:[servicePermissionPattern(url)]})) throw new Error(`请点击扩展图标，授权当前${searching ? '搜索' : ' AI '}服务域名后重试`);
         if (!weather && (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : AI_REQUEST_LIMIT))) throw new Error('AI请求过大');
         const form=searching && provider==='searxng';
         const body = weather ? null : form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);

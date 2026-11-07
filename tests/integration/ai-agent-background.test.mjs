@@ -30,6 +30,21 @@ test('后台使用已保存设置和密钥，提交不等模型，房间隔离�
  }finally{host.close();}
 });
 
+for(const local of [false,true])test(`独立后台API缺权限时指出实际域名，授权后可重新执行${local ? '（本地带端口）' : ''}`,async()=>{
+ const endpoint=local ? 'http://localhost:11434/v1/chat/completions' : 'https://research.example/v1/responses',pattern=local ? 'http://localhost/*' : 'https://research.example/*';
+ const config=mergeConfig({anchorId:'10',ai:{enabled:true,endpoint:'https://reply.example/v1/chat/completions',model:'reply',taskModels:{research:{enabled:true,endpoint,model:'research'}}}});
+ const store=createAgentTaskStore({indexedDB:new IDBFactory(),IDBKeyRange}),patterns=[];let allowed=false,calls=0;
+ const host=createBackgroundAI({store,chrome:{permissions:{contains:async value=>{patterns.push(value.origins[0]);return allowed && value.origins[0]===pattern;}}},readRecord:async key=>key==='live-assistant:config:1' ? config : 'fixture-key',fetch:async url=>{
+  calls++;assert.equal(url,endpoint);const text=JSON.stringify({action:'finish',answer:'现有资料不足。',citations:[]});
+  return {status:200,url,text:async()=>JSON.stringify(local ? {choices:[{message:{content:text}}]} : {output:[{type:'message',role:'assistant',content:[{type:'output_text',text}]}]})};
+ }});
+ const run=async id=>{await host.handle({type:'agent-submit',id,question:'整理已有知识',input:{context:{},sources:[]}},'1');return until(async()=>{const row=(await host.handle({type:'agent-list'},'1')).find(row=>row.id===id);return ['succeeded','failed'].includes(row?.status) && row;});};
+ try{
+  const denied=await run('denied');assert.equal(denied.status,'failed');assert.equal(calls,0);assert.match(denied.error,/后台研究/);assert.ok(denied.error.includes(new URL(endpoint).origin),denied.error);
+  allowed=true;const result=await run('allowed');assert.equal(result.status,'succeeded',result.error);assert.equal(calls,1);assert.ok(patterns.every(value=>value===pattern));
+ }finally{await host.close();}
+});
+
 test('Harness每个房间串行、跨房并发，有执行截止和幂等提交',async()=>{
  const rows=new Map(),store={all:async()=>[],put:async row=>rows.set(row.id,structuredClone(row))};let signals=[];
  const h=new AgentHarness({store,timeoutMs:40,execute:async(job,{signal})=>{signals.push({scope:job.scope,signal});return new Promise(()=>{});}});

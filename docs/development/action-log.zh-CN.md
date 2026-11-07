@@ -1,5 +1,19 @@
 # 行动日志
 
+## 2026-11-08：修复后台研究 API 授权入口与错误被泛化
+
+- 用户提交Agent任务遇到“网络失败或未授权服务域名”，并指出可能漏授权后台API。目标继续为knowledge-agent-input工作树和现有四角色；冻结fb779c0父版整树与8份目标原SHA。先运行agent:find与popup/content/search影响查询，再核实实际请求、后台队列、Chrome权限及弹窗源码，没有读取API密钥或改写用户知识库。
+- 确认三处根因：弹窗只回填回复API且拒绝Responses，独立后台研究API没有授权入口；后台按URL.origin拼权限模式包含本地端口，与Chrome授权时的hostname模式不同；requestJSON丢弃onerror实际原因，将缺权限和具体网络错误统一成同一句。新增共享servicePermissionPattern供弹窗、后台研究及通用请求共用，统一忽略端口；不扩大manifest权限，不代为授予真实站点访问权。
+- room-info新增researchEndpoint，复用resolveAITaskConfig从已保存配置解析实际后台模型和回退接口；不把未保存表单草稿当运行配置。弹窗自动展示该地址，提供“授权后台研究服务域名”，模型授权统一复用validateEndpoint支持Chat Completions/Responses；权限申请在点击同步调用栈中发起。拒绝授权和非法地址保留输入可重试。后台缺权限提示实际模型/搜索域名和对应入口，真实传输错误保留原原因。
+- TDD先观察4项红测：独立云端/本地后台缺权限错误被泛化、弹窗缺后台字段、底层具体错误丢失，exit1。最小修复后搜索、弹窗、后台共28/28通过。实际content构建产物的room-info测试先因夹具通知缺ai.memory.entries退出1，改为真实完整mergeConfig通知后1/1通过；覆盖独立Responses、未保存草稿、跨窗口配置变化和关闭独立模型时的真实回退，没有添加掩盖空字段的产品防护。
+- 同输入探针：BASELINE后台错误泛化，弹窗不能授权Responses；本地11434即使已授权仍failed且请求0次。MODIFIED弹窗自动读取research.example/v1/responses，申请仅https://research.example/*；未授权时明确后台域名，授权后云端与本地任务均succeeded、各请求1次。两态stderr为空、exit0。固定探针及本轮父版保存在原证据目录service-permission，回滚和最终四角色沿原路径扩展。
+- 使用实际构建popup在带醒目测试标识的Chrome模拟接口页面验收1440×1000桌面/430×820窄屏：主体宽/scrollWidth均360/360，高600且长内容局部滚动；144字符地址经过3轮折叠保持，Tab到达后台授权按钮，Enter实际触发域名请求并展示成功。控制台错误/警告0；这是浏览器接口夹具，不是用户真实域名已获授权。截图和测量存service-permission；临时页已关闭、视口已恢复。
+- 同步修正知识补充说明中上一版遗留的“先保存或撤销草稿”文字，说明后台API授权入口。未改变共享尺寸、布局组件或native源码。crapper/dryer/mutator经PATH和当前工具目录核实不可用，三项未执行，其他检查不替代。索引587模块/3219符号，build/check通过；643份源码已冻结，完整回归、回滚、原加载目录同步和dev提交推送继续追加。
+- 操作错误均保留：zsh测试通配符未匹配退出1，后用rg --files；不存在的ai-import.js定位退出2改读ai-settings.js；误读源目录extension/theme.js退出1改读src/ui/theme.js；一次functions.exec JavaScript字符串SyntaxError发生于工具执行前，拆分补丁后完成。浏览器原生summary在AX显示为button但DOM为generic，角色定位超时后改用实际可见文字，未用空结果作为通过。
+- 最终完整JavaScript回归2034/2034通过，0失败/取消/跳过，284159.786666ms、exit0；643份产品/测试/脚本/native源码SHA复核全部一致，build/check及空白差异检查通过。独立副本实际执行ROLLBACK.sh --service-permission-parent恢复786份本轮父文件SHA，同输入逐字复现旧版泛化错误和本地授权后仍failed；默认回滚恢复781份初始SHA，重新应用累计DIFF_FILE后787份成员逐字一致，云端/本地授权后均succeeded且各请求1次。两轮探针stdout、stderr和exit与冻结BASELINE/MODIFIED完全一致；实际工作树一直保留修复。
+- 已完整备份Chrome原加载目录43份构建文件，原子更新ai.js/background.js/content.js/popup.html/popup.js/search.js并新增service-permissions.js；42份新版构建SHA全部一致，两份旧开发辅助文件保留。部署回滚在独立副本恢复43份原SHA，重新应用后44份部署文件一致；原项目770份受跟踪源码未变，未重载真实扩展/直播页、未授予真实权限、未调用真实服务或写入用户知识库。用户重新加载扩展、刷新直播页后，点击扩展图标→AI 服务访问权限→授权后台研究服务域名，再重试Agent。
+- 浏览器临时页已关闭，4192预览服务主动Ctrl-C停止（exit130）；lsof逐份确认无打开句柄后仅删除本轮三个可重建验收副本，保留归档、构建、截图、逐字输出、哈希和所有四角色。最终提交、普通push到dev及远端SHA一致性记录继续写入原VERIFICATION和service-permission/delivery-receipt.json；不推main、不改版本或发布标签。
+
 ## 2026-11-08：修复知识补充误报已有草稿，直接提交 Agent
 
 - 用户在未编辑知识时提交补充，仍收到“请先保存或撤销已有知识草稿，再提交补充”。沿用knowledge-agent-input工作树和原四角色，从a89b501冻结本轮父归档与app.js原字节；agent:find未命中字面提示，agent:impact定位app.js关联测试后核实实际源码。初次rg误写tests/unit/person-profile-editor.test.mjs退出2，改查实际integration路径。

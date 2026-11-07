@@ -1,6 +1,8 @@
 import {createNativeASRClient} from '../src/browser/native-asr-client.js';
 import {createEdgeClient} from '../src/browser/edge-client.js';
 import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
+import {resolveAITaskConfig} from '../src/services/ai-task-config.js';
+import {mergeConfig} from '../src/core/engine.js';
 import { boot } from '../src/app.js';
 import { DouyinAdapter } from '../src/browser/adapter.js';
 import { RequestBridgeClient } from '../src/browser/request-sender.js';
@@ -145,7 +147,11 @@ if (room) {
     }
     if (request.type === 'income-updated') incomeChanged?.();
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
-    if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
+    if (request.type === 'room-info') {
+      let researchEndpoint='';
+      try{researchEndpoint=resolveAITaskConfig(mergeConfig(values.get(`live-assistant:config:${room}`) || {}).ai,'research').endpoint;}catch{}
+      reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', researchEndpoint, mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
+    }
   });
   let bridgeTimer,bridgeAck,bridgeDelivered,bridgePending=false,bridgeStopped=false;
   const archiveBatch=createDataCapture(message);
