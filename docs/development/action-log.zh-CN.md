@@ -3355,3 +3355,19 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 自建工具回收：两个本轮独占 FFmpeg 诊断源码/编译树回收共 243,279,625 字节，保留准确 tag 源码归档、二进制、SHA 与构建日志；二进制哈希回收前后一致。没有清理其他任务工作树或用户数据。
 - 历史直播失败只读复核：native-frozen 日志明确在 host.py:174 的图像新鲜度条件触发，区别于 host.py:160 的 PCM 读取失败；102 项历史轮次为 3.580s/1 error。仅缩小触发分支，未确认时钟/调度根因，未修改 host.py，未增加重复测试或掩盖失败。
 - 持续目标 active：本轮没有部署/重载宿主、发送弹幕或加载真实模型。下一动作是真实公开页面 detail 响应与作者/作品稳定绑定；真实模型事实性、长期实播和商业级验收仍未完成。crapper/dryer/mutator 仍不可用，三项未执行，其他检查不替代。
+
+## 2026-11-07：公开详情平台别名漏采与真实数据绑定
+
+- 续接同一项目/dev，父提交 d6cd6ee65d83de73892a8d91684dd161d3752755，工作区最初干净。保存入口/测试原字节与 SHA、原 86 文件 manifest/BASELINE/MODIFIED/patch；原四角色和历史 pristine 字节不变更为新的基线。先完成 agent:find/agent:impact，再确认 account-page、account-context、account-observations 与 public-media-source 源码，后续再次 impact 核对只有入口与对应测试受影响。
+- 真实现场：使用 reverse-engineer-anything 技能的运行时证据流程与普通独立 IAB 公开作品页，资源清单发现 5 条 www-hj 详情请求；旧 accepted() 的同源判断必拒绝。IAB 已结束操作并调用 completion_summary。REA 独立 Chrome 场景完成后自行终止，记录标准 www 来源 5 次 HTTP 200，8756ms/822 事件，DOM 1,435,992 字节/SHA 9e7b66ed839f6f2e93ba4b4882b23c0a58cdb9302b5e5500e541e1bac2985fab。REA 明确不保留正文；只提取端点/作品号/状态/资源类型/Evidence ID，未将查询签名写入本地记录。
+- REA 首三次参数校验错误（空 actions、错误 discriminator type、错误 timeout_ms）均未启动浏览器；改为 action=wait_for_timeout、step_id 与 duration_ms 后一次成功，不重复场景。前一压缩前输出误包含整个巨大返回，后续改为最小脱敏投影；不复制原查询参数到证据账本。functions.exec 解析阶段误用不存在的 URL 全局，产生 ReferenceError，无 shell 退出码；改为只切分字符串提取公开 endpoint 和作品号。
+- TDD：新增 fetch/XHR 文本/XHR JSON 三通道各三项行为回归。原代码 2 通过/9 失败，失败分别为别名详情/下载描述缺失，以及同源 URL 认证信息未拒绝；字面输出保留。最小生产修改只有 accepted() 一处，将同源比较改为两个准确 HTTPS origin 并拒绝 URL 用户名/密码。原路径、作品号、私有资料、稳定作者、错误路由和短期媒体约束保持。修正后 11/11；相关账号/互动/来源单元组合 21/21。没有引入新的采集框架或重复身份库。
+- 实际正文：工具不保留正文后，用本机 Chrome 自带 CDP pipe 在独立临时干净配置中观察同一正常公开页面的 Network 响应；不访问当前用户配置、不读取 Cookie/头值/存储、不注入页面脚本。取得 www 标准来源实际详情 JSON 38,246 字节，SHA 117ec925983e7fb5988b8146d874a02af311219f55327081d33c0af19071273d；只保留所需公开字段的未修改投影（13,789 字节，SHA 9868380490966f14657e23b58e5bbcb1acac21720946796103f0983ed8f989b9），短期媒体地址仅留 ignored 本地文件。浏览器关闭且临时配置清理完毕。
+- 真实回放：生产观察器三通道均获得作品 6961737553342991651、UID 110403406559 与和公开作者链接一致的 secUID。三个下载描述均为 false：实际详情 CDN 地址无 __vid，而现有共享来源协议强制该参数。已保存脱敏字段/查询键名和原始回放输出，未补造参数、放宽媒体校验或宣称自动下载已通过。下一动作是观察播放器实际地址/媒体请求与详情地址的绑定，再做最小来源修正；19,782ms 本次详情时长与旧文件 19,734ms 解码结果分别保留。
+- 事务：复用原四角色扩展第七组同输入探针。BASELINE 三通道别名漏采 → MODIFIED 捕获作品/UID/secUID/受控下载描述且地址不入资料 → ROLLBACK 三通道漏采；原六组行为仍一致。86 文件补丁重建、独立副本逐 SHA 恢复和新增文件移除通过，当前源码保留修改版。探针隔离准确入口字节，依赖统一解析到当前生产代码，与历史源探针约定一致；不作为部署验收。命令、输入、字面 stdout/stderr/状态与哈希继续追加同一 VERIFICATION.txt。
+- 诊断错误保留：zsh 对不存在 docs/development/*research* 展开报错（shell 最终退出1），改用 rg --files 的实际目录；查询不存在 .codex 退出2，后续使用已知项目路径。一次文档 apply_patch 使用被截断的上下文失败，无 shell 退出码；读取真实末尾后重做。专项命令包含不存在的 public-media-flow 文件而 Node 未报错，故不把该命令称为集成通过，改用实际三份 public-media-knowledge/visual/session-flow 文件另跑。
+- 工具与范围：CLI 和工具目录没有 crapper/dryer/mutator，三项未执行，其他检查不替代。没有 UI/共享布局变更、已安装扩展/宿主重载、真实弹幕发送或真实模型加载。旧直播 host.py:174 DECODE_FAILED 根因仍未确认，本轮未改 host.py。npm ci 审计0、索引已更新530模块/2983符号、build已通过；最终全量/check/推送/CI回执随后补记。真实模型事实性、完整自动采集和长期实播仍待验收，目标保持 active。
+
+- 本机最终冻结：npm test 1819/1819，0失败/取消/跳过，Node 181195.764292ms/外层181.415秒；build/check、530/2983索引、git diff --check 均通过。实际三份媒体集成5/5，覆盖真实 native framing/SQLite/FFmpeg/原文库/按人检索、重启去重和遗忘，ASR/视觉语义仍是受控服务。生产代码在全量运行中没有再改；Python 本轮未变，原生全量由精确实施 SHA 的 CI 复核，不把本机专项称作119项全测。
+- 下一门槛的实际观察：第二个独立干净 Chrome/CDP 场景针对播放器关系，正常关闭并清理临时配置。实际媒体请求206，包含目标 __vid，和详情中某地址 origin/path 相同，但除了 __vid 之外查询仍不同；DOM video 的 src 属性不能冒充 currentSrc getter。保留脱敏关系/SHA，不做“只删 __vid 就可匹配”的推断。下一单位需比较这些实际查询变化与播放器绑定证据，不能泛放行或猜参数。
+- 四角色已再次读取并核对86文件当前哈希；七组 BASELINE/MODIFIED/ROLLBACK 字面输出保留。只读盘点其他工作树缺少可确认废弃的依据，未回收其他任务的数据。下面提交并普通推送 dev，不改 main、版本或标签，实施 SHA/远端 CI 回执随后补记。

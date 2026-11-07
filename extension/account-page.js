@@ -32,7 +32,7 @@ if(source && !window[key]){
  };
  const accepted=value=>{try{
   const u=new URL(value,location.href);
-  if(u.origin!==location.origin || !/^\/aweme\/v1\/web\/(user\/profile\/other|aweme\/(post|detail)|comment\/list(?:\/reply)?|danmaku\/get(?:_v2)?)\/$/u.test(u.pathname))return false;
+  if(!['https://www.douyin.com','https://www-hj.douyin.com'].includes(u.origin) || u.username || u.password || !/^\/aweme\/v1\/web\/(user\/profile\/other|aweme\/(post|detail)|comment\/list(?:\/reply)?|danmaku\/get(?:_v2)?)\/$/u.test(u.pathname))return false;
   const workId=u.searchParams.get('aweme_id') || u.searchParams.get('item_id');
   return !workId || source.kind==='work' && workId===source.id;
  }catch{return false;}};
