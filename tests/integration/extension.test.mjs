@@ -928,7 +928,7 @@ test('扩展后台把在线榜单观测隔离到来源房间并允许同UID重�
   assert.equal(report.calibration.incomeEstimate,120);
   assert.equal((await w.send({type:'income-report',room:'2',month:'2026-10'})).value.calibration.users,0);
   await w.send({type:'set',key:'live-assistant:config:1',value:{incomeEnabled:false}});
-  assert.equal((await w.send({type:'contribution-record',date:'2026-10-15',userId:'uid:31',name:'未开启',score:1000})).value,false);
+  assert.equal((await w.send({type:'contribution-record',date:'2026-10-15',userId:'uid:31',name:'常驻采集',score:1000})).value,true);
 });
 
 test('场次后台接口绑定来源房间，支持零礼物场次和后台重启', async () => {
@@ -1036,7 +1036,7 @@ test('后台场次榜单校准与原始礼物共用持久事务，来源隔离�
   assert.equal((await restarted.send({type:'income-report',room:'2',month})).value.summary.estimatedIncome,0);
 });
 
-test('整榜快照通过后台原子去重，绑定来源房间并遵守收入关闭开关',async()=>{
+test('整榜快照通过后台原子去重，绑定来源房间且旧关闭配置不停止常驻采集',async()=>{
   const w=await worker(),capturedAt=Date.now(),month=new Date(capturedAt+8*3600000).toISOString().slice(0,7);
   await w.send({type:'income-session',boundaryType:'start',at:capturedAt,roomId:'live'});
   const snapshot={type:'contribution-snapshot',room:'2',roomId:'live',capturedAt,rows:[{name:'未知UID观众',score:6297}],rate:0.05};
@@ -1048,7 +1048,7 @@ test('整榜快照通过后台原子去重，绑定来源房间并遵守收入�
   assert.ok(Math.abs(report.currentSession.estimatedIncome-314.85)<1e-8);
   assert.equal((await restarted.send({type:'income-report',room:'2',month})).value.summary.estimatedIncome,0);
   await restarted.send({type:'set',key:'live-assistant:config:1',value:{incomeEnabled:false}});
-  assert.equal((await restarted.send({...snapshot,rows:[{name:'未知UID观众',score:9000}]})).value,false);
+  assert.equal((await restarted.send({...snapshot,rows:[{name:'未知UID观众',score:9000}]})).value,true);
 });
 
 test('MAIN 管理桥只提交当前房间白名单动作，票据重复投递不重复禁言',async()=>{
@@ -1272,7 +1272,7 @@ test('人物关系后台查询跨房间读取持续档案，只返回相关证�
  assert.doesNotMatch(JSON.stringify(response.value),/"(?:secUid|secUids|key)":/u,'不返回原始身份字段或整份存档');
  response=await w.send({type:'set',key:'live-assistant:live-memory:2:20',value:values['live-assistant:live-memory:2:20']});assert.equal(response.ok,false);
  await w.send({type:'set',key:'live-assistant:config:2',value:{...values['live-assistant:config:2'],ai:{assistant:{memoryEnabled:false}}}});
- response=await w.send({type:'relationship-query',query:'阿明'});assert.equal(response.value.relations.length,0);
+ response=await w.send({type:'relationship-query',query:'阿明'});assert.equal(response.value.relations.length,2,'旧关闭配置不隐藏持续档案和相邻关系');
  assert.equal((await w.send({type:'relationship-query',query:'x'.repeat(2001)})).ok,false);
 });
 

@@ -12,7 +12,7 @@ export function recordPersonEvidence(node,doc,{self=false,operator=false,lead=fa
  const records=node.person.records;
  if(records.has(doc.id))return;
  records.set(doc.id,{recordId:encodeURIComponent(doc.id),text:doc.person ? `${doc.text}\n\n补充原话：\n${doc.person.turns.map((t,i)=>`第${i+1}轮：${t.text}`).join('\n')}` : doc.text,at:doc.at,source:doc.source,trust:doc.trust,scope:doc.provenance,sample:doc.sample,
-  kind:lead ? 'research-lead' : operator ? 'operator-record' : doc.kind || 'statement',attribution:lead ? '研究任务线索，作者与身份待核实' : self ? '本人账号原话，内容未核实' : operator ? '运营记录' : '涉及此人的原始陈述，不能当作此人自述',self});
+  kind:doc.automated ? 'collection-analysis' : lead ? 'research-lead' : operator ? 'operator-record' : doc.kind || 'statement',attribution:doc.automated ? 'AI 基于原话整理，事实未独立核实，行为解读仅为假设' : lead ? '研究任务线索，作者与身份待核实' : self ? '本人账号原话，内容未核实' : operator ? '运营记录' : '涉及此人的原始陈述，不能当作此人自述',self});
  if(lead || !self && !operator)return;
  const add=(category,text)=>node.person.facets.push({category,text:text.trim(),recordId:encodeURIComponent(doc.id),at:doc.at,source:doc.source,trust:doc.trust,scope:doc.provenance});
  if(doc.person){

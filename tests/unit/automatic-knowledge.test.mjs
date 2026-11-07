@@ -34,8 +34,9 @@ test('真实搜索原文自动入持久库，重启后可检索和构图；过�
  assert.equal((await memory.list()).length,0);assert.equal((await library.query('1','阿明')).relations.length,0);
  await transport('remember',{sources:[{url:'https://example.org/b',text:'青哥是阿明的朋友'}],lifetime:60000});
  values['live-assistant:config:1'].ai.search.rememberKnowledge=false;
- assert.equal((await library.query('1','青哥')).relations.length,0);
- await assert.rejects(transport('remember',{sources:[{url:'https://example.org/b',text:'错误'}]}),/关闭/);
+ assert.equal((await library.query('1','青哥')).relations.length,1,'旧停用字段不关闭底层资料积累');
+ await transport('remember',{sources:[{url:'https://example.org/b',text:'更正后的原文'}]});
+ values['live-assistant:config:1'].ai.enabled=false;await assert.rejects(transport('remember',{sources:[{url:'https://example.org/b',text:'AI已关闭'}]}),/关闭/);
  await assert.rejects(service.handle('1','list',{anchor:'3'}),/主播/);
 });
 

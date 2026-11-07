@@ -39,11 +39,22 @@ test('持续研究从新对话生成独立任务，重启去重、冷却和每�
  now+=60001;question='蓝色釉料是什么？';await createContinuousResearch(deps).tick();assert.equal(submitted.length,2);
  now+=3600001;await createContinuousResearch(deps).tick();assert.equal(submitted.length,3);
 });
-test('无新数据、关闭AI或记忆、不匹配的主播档案不会启动后台调用',async()=>{
+test('无新数据、关闭AI、不匹配的主播档案不会启动后台调用',async()=>{
  let enabled=true,anchor='20',read=0,submitted=0,cancelled=0;
  const deps={configs:async()=>({'live-assistant:config:1':{anchorId:'10',ai:{enabled,assistant:{memoryEnabled:true,research:{enabled:true,intervalSec:60,maxPerHour:2}}}}}),read:async()=>{read++;return {anchor,audience:{viewers:[]},perception:{observations:[]}};},store:{readLoop:async()=>null,writeLoop:async()=>{}},submit:async()=>submitted++,cancelDisabled:async()=>cancelled++,hasPending:()=>false};
  await createContinuousResearch(deps).tick();anchor='10';await createContinuousResearch(deps).tick();enabled=false;await createContinuousResearch(deps).tick();
  assert.equal(submitted,0);assert.equal(read,2);assert.equal(cancelled,3);
+});
+test('整理失败重试在穿插公开研究和重启后仍有每日三次上限',async()=>{
+ let now=1800000000000,saved;const submitted=[],jobs=new Map();
+ const config={anchorId:'10',ai:{enabled:true,assistant:{research:{intervalSec:60,maxPerHour:10}}}};
+ const speechAt=now-600000;
+ const memory=()=>({anchor:'10',perception:{observations:[{id:'speech',kind:'audio',text:'阿明是小雨的师傅。',at:speechAt}]},audience:{viewers:[{key:'uid:2',name:'小雨',statements:[{id:'chat',text:`陶瓷茶杯怎么清洗？${now}`,at:now}]}]}});
+ const deps={collect:true,now:()=>now,configs:async()=>({'live-assistant:config:1':config}),read:async()=>memory(),store:{readLoop:async()=>structuredClone(saved),writeLoop:async r=>saved=r},jobStatus:id=>jobs.get(id),submit:async job=>{submitted.push(job);jobs.set(job.id,'failed');},cancelDisabled:async()=>{},hasPending:()=>false};
+ for(let i=0;i<7;i++){await createContinuousResearch(deps).tick();now+=60001;}
+ const attempts=submitted.filter(j=>j.input.collection).map(j=>j.id);
+ assert.equal(attempts.length,3);assert.equal(new Set(attempts).size,3);
+ assert.ok(submitted.some(j=>!j.input.collection),'失败的整理不阻止公开研究');
 });
 test('相同提问按稳定身份去重，优先研究主播与高等级观众，每三次给普通观众机会',async()=>{
  let now=1800000000000;const submitted=[],loops=new Map();

@@ -1,3 +1,4 @@
+import {collectionPolicy} from '../core/collection-policy.js';
 import {parseKnowledgeCorpus} from './knowledge-corpus.js';
 import {AudienceMemory} from './audience-memory.js';
 import {PerceptionMemory} from './live-memory.js';
@@ -11,7 +12,7 @@ export function createRelationshipLibrary({all,now=Date.now}){
  const retrieve=createRelationshipRetriever();
  return {async query(room,query,override={},options={}){
   if(typeof query!=='string' || !query.trim() && !options.browse || query.length>2000)throw Error('人物问题需为1–2000字');
-  const values=await all(),current=values[`live-assistant:config:${room}`],scopes=[],skipped=[];
+  const values=Object.fromEntries(Object.entries(await all()).map(([key,value])=>[key,key.startsWith('live-assistant:config:') ? collectionPolicy(value) : value])),current=values[`live-assistant:config:${room}`],scopes=[],skipped=[];
   if(current?.ai?.assistant?.memoryEnabled===false)return retrieve({scopes:[],now:now()},query);
   const shared=values[SHARED_KNOWLEDGE_KEY];
   if(shared)scopes.push({room:'global',anchor:'',memory:override.memory || {enabled:current?.ai?.memory?.enabled!==false,entries:shared.entries},knowledge:shared.knowledge});
@@ -31,12 +32,12 @@ export function createRelationshipLibrary({all,now=Date.now}){
    try{
     if(saved?.version!==1 || saved.anchor!==anchor || saved.audience?.anchor!==anchor)throw Error('scope');
     const selected=sourceRoom===String(room) && anchor===String(current?.anchorId),active=anchor===String(config?.anchorId);
-    const audience=current?.ai?.contextSources?.audience!==false && ai.contextSources?.audience!==false ? new AudienceMemory({anchor,state:saved.audience,now}) : undefined;
+    const audience=new AudienceMemory({anchor,state:saved.audience,now});
     const accounts=new AccountContext({snapshot:values[`live-assistant:runtime:${sourceRoom}`]?.accountSources,now});
     const profile=values[`live-assistant:profile:${sourceRoom}`];
     scopes.push({room:sourceRoom,anchor,audience,perception:new PerceptionMemory({state:saved.perception,now}),
-     anchorSecUid:active && String(profile?.anchorId)===anchor ? profile?.secUid : undefined,anchorName:active && String(profile?.anchorId)===anchor ? profile?.name : undefined,memory:active ? ai.memory : undefined,knowledge:active ? ai.knowledge : '',corpus:current?.ai?.search?.rememberKnowledge!==false && ai.search?.rememberKnowledge!==false ? parseKnowledgeCorpus(values[`live-assistant:knowledge:${sourceRoom}:${anchor}`],now()).rows : [],
-     accounts:current?.ai?.contextSources?.accounts!==false && ai.contextSources?.accounts!==false ? [...accounts.history(anchor),...accounts.list(anchor)] : [],includeAccountHistory:true,
+     analyses:saved.analyses,anchorSecUid:active && String(profile?.anchorId)===anchor ? profile?.secUid : undefined,anchorName:active && String(profile?.anchorId)===anchor ? profile?.name : undefined,memory:active ? ai.memory : undefined,knowledge:active ? ai.knowledge : '',corpus:parseKnowledgeCorpus(values[`live-assistant:knowledge:${sourceRoom}:${anchor}`],now()).rows,
+     accounts:[...accounts.history(anchor),...accounts.list(anchor)],includeAccountHistory:true,
      ...(selected && !shared ? override : {}),...(shared ? {memory:undefined,knowledge:''} : {})});
    }catch{skipped.push({room:sourceRoom,anchor});}
   }

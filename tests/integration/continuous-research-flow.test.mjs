@@ -51,10 +51,10 @@ test('新近对话→持久后台多步研究→原文知识→前台单次模�
  }finally{await host.close();}
 });
 
-test('持续研究关闭会取消真正的在途请求，已关闭模型不能由alarm恢复',async()=>{
+test('AI关闭会取消真正的在途请求，已关闭模型不能由alarm恢复',async()=>{
  const f=fixture();let signal;
  const host=createBackgroundAI({...f.options,store:createAgentTaskStore(f.storeOptions),fetch:async(_url,options)=>{signal=options.signal;return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('aborted')),{once:true}));}});
- try{await host.wake();await until(()=>signal);f.config.ai.assistant.research.enabled=false;await host.wake();assert.equal(signal.aborted,true);assert.equal((await host.handle({type:'agent-list'},'1'))[0].status,'cancelled');}finally{await host.close();}
+ try{await host.wake();await until(()=>signal);f.config.ai.enabled=false;await host.wake();assert.equal(signal.aborted,true);assert.equal((await host.handle({type:'agent-list'},'1'))[0].status,'cancelled');}finally{await host.close();}
 });
 
 test('生成期间删除知识使结果失效，不把旧检查点来源重新写回知识库',async()=>{

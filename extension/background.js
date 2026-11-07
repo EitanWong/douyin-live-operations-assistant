@@ -4,6 +4,7 @@ import {validateMemory} from '../src/services/knowledge.js';
 import {mergeConfig,validateConfig} from '../src/core/engine.js';
 import {createSharedKnowledge,SHARED_KNOWLEDGE_KEY,projectSharedKnowledge} from '../src/services/shared-knowledge.js';
 import {createRelationshipLibrary} from '../src/ai/relationship-library.js';
+import {validCollectionAnalyses} from '../src/ai/collection-analysis.js';
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
 import {requestNativeDeployment} from './native-deployment.js';
@@ -158,7 +159,12 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query)=>relationshipLibrary.query(room,query),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
+const saveCollectionAnalysis=(room,anchor,row)=>giftStore.transaction(async()=>{
+ const config=await readRecord(`live-assistant:config:${room}`),key=`live-assistant:live-memory:${room}:${anchor}`,memory=await readRecord(key);
+ if(!config?.ai?.enabled || String(config.anchorId)!==anchor || !validCollectionAnalyses({...memory,analyses:[row]}).length)throw Error('采集原文或主播已变化，未保存旧分析');
+ await writeRecord(key,mergeLiveMemory(memory,{...memory,analyses:[row]}));
+});
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query)=>relationshipLibrary.query(room,query),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options),saveAnalysis:saveCollectionAnalysis});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake'){void getAIBackground().wake().catch(()=>{});void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});}});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
@@ -369,13 +375,12 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         value = await giftStore.recordSession({...message, room, type:message.boundaryType});
       }
       else if (message.type === 'contribution-snapshot' && isRoom(sender)) {
-        const room = roomFromUrl(sender.tab.url), config = await readRecord(`live-assistant:config:${room}`);
-        value = config?.incomeEnabled === false ? false : await giftStore.recordContributionSnapshot({...message,room});
+        const room = roomFromUrl(sender.tab.url);
+        value = await giftStore.recordContributionSnapshot({...message,room});
       }
       else if (message.type === 'contribution-record' && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
-        const config = await readRecord(`live-assistant:config:${room}`);
-        value = config?.incomeEnabled === false ? false : await giftStore.recordContribution({...message, room});
+        value = await giftStore.recordContribution({...message, room});
       }
       else if (message.type === 'gift-record' && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
@@ -383,9 +388,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         let valid = validEvent(event, 4000);
         try { valid = valid && (event.unitValue == null || (Number.isFinite(event.unitValue) && event.unitValue >= 0 && event.unitValue <= 1e9)); } catch { valid = false; }
         if (!valid) throw Object.assign(new Error('礼物记录无效'),{code:'INVALID_EVENT'});
-        const config = await readRecord(`live-assistant:config:${room}`);
-        if (config?.incomeEnabled === false) value = false;
-        else value = await giftStore.record({ room, event, userKey: message.userKey, rate: message.rate, capturedAt:message.capturedAt });
+        value = await giftStore.record({ room, event, userKey: message.userKey, rate: message.rate, capturedAt:message.capturedAt });
       }
       else if(message.type==='media-sdp' && isRoom(sender)){
         const url=validateRealtimeEndpoint(message.url);validateSDP(message.data);

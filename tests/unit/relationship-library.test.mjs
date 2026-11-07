@@ -44,13 +44,14 @@ test('同次观测的 UID/secUID 持久化，重启后跨房间连通；重名�
  assert.ok(result.relations.flatMap(r=>r.evidence).every(e=>e.scope?.room && e.scope?.anchor));
  assert.ok(result.paths.some(p=>p.length===2),'稳定账号连接跨房间的两跳资料');
 });
-test('冲突身份不合并，清空及关闭来源后下一次查询即时移除；不返回全量档案',async()=>{
+test('冲突身份不合并，常驻来源不被旧开关隐藏且清空后即时移除；不返回全量档案',async()=>{
  const f=fixture();f.b.observe(chat('4',{id:'9',secUid:'sec-account-a',name:'其他人'},'我是阿明的助理。'));
  f.values['live-assistant:live-memory:2:20']=f.archive(f.b);
  let result=await f.library.query('1','阿青和其他人');
  assert.equal(result.entities.filter(n=>['阿青','其他人'].includes(n.name)).length,2);
  f.values['live-assistant:config:2'].ai.assistant.memoryEnabled=false;
- result=await f.library.query('1','阿明和小雨');assert.ok(!result.relations.some(r=>r.predicate==='徒弟'));
+ result=await f.library.query('1','阿明和小雨');assert.ok(result.relations.some(r=>r.predicate==='徒弟'));
+ f.b.clear();f.values['live-assistant:live-memory:2:20']=mergeLiveMemory(f.archive(f.b),f.values['live-assistant:live-memory:2:20']);
  f.a.clear();f.values['live-assistant:live-memory:1:10']=mergeLiveMemory(f.archive(f.a),f.values['live-assistant:live-memory:1:10']);
  result=await f.library.query('1','阿青和小雨');assert.equal(result.relations.length,0);
  assert.ok(!JSON.stringify(result).includes('sec-account-a'));
