@@ -3730,3 +3730,4 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 验证通过：专项12/12；完整 `node --test --test-concurrency=2 tests` **1932/1932**、0失败/取消/跳过，332581.026833ms；agent:index 554模块/3113符号；build、check（含索引与源码/产物语法）、git diff --check 均退出0。原生与依赖未修改，未重复原生测试；crapper/dryer/mutator 已检查CLI与当前工具目录，均不可用，三项未执行，不用其他检查冒充通过。
 - 工具诊断：首轮shell误用zsh只读变量status退出1，改为result_code后重新保留红测退出1；浏览器等待下载事件超时，但实际JSON已落盘，恢复会话后直接读回并解析验证。真实直播页被另一任务占用，本轮不抢占或重载；诊断导出范围是本项目真实Chrome复现和完整本地工作台，未声称导出 chrome://extensions 全部历史或其他扩展错误。修复已重新构建到 dist/chrome-extension，运行实例需重新加载扩展及刷新直播页后生效。
 - 无新增工作树，其他工作树均未清理；只清理本任务可重建验收副本与本地演示服务，保留四角色及原件、证据。未改main、版本或标签。功能提交与dev普通推送回执随后补记，最终精确SHA记入同一VERIFICATION/checkpoint。
+- 实际提交与推送：功能提交 **da153fb5feff3bc0f7025f0996f3025cadc10363** 已普通 push 到 origin/dev（f2dabbf→da153fb，exit0），git ls-remote 精确一致；全量1932/1932与本地浏览器2/0/2是已观察结果，未将其等同远端CI通过。仅追加本验收回执；最终文档提交与远端确认记录同一VERIFICATION/checkpoint。本任务四角色、原件及浏览器报告仍在原路径，已关闭本地4197服务，未重载用户直播页。
