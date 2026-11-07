@@ -3348,3 +3348,10 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - crapper/dryer/mutator CLI 和现有工具均不可用，三项未执行。没有 UI/布局变化；真实模型准确率、已部署 detail 捕获、长期资源竞争和商业级验收仍未完成，目标 active。修正提交/推送与同 SHA CI 回执随后补记。
 
 - 前提纠正：两次诊断补编均未通过同一跨进程门槛，前提是“最小 FFmpeg 构建能直接替代测试内所有调用者的完整 FFmpeg”。共享者为 2 个：Python 生产工作者、Node 受控视觉模型的像素解码器。补 image2pipe 后仍缺图像自动探测而报无视频流；解除共享 PATH 指派，仅 Python 子进程使用真实 6.1.1，受控像素夹具沿已安装完整解码器。未降低断言、未改生产代码，也不称该组合为全套系统 FFmpeg 6.1.1；最终 CI 在完整 Ubuntu 6.1.1 上核对。
+
+- 修正提交与推送：a5359b2338bd934f7c90d10a7cc3a90c7119989a 已普通推送 origin/dev（ac5716f→a5359b2），git ls-remote 核对远端完整 SHA 一致。没有改 main、版本或标签。
+- 最终远端回执：CI 42330718361 attempt 2 success；JavaScript 1810/1810，0 失败/跳过/取消，runner 485682.443376ms；原生 119/119、16.508s。build/check/index、扩展打包和分发物上传全部通过。修正首轮 test-build 在 npm ci 的 onnxruntime-node 安装发生 ETIMEDOUT/ENETUNREACH，尚未进入测试；保留日志后只重跑该失败 job，使用相同实施 SHA，已通过的原生 job 沿用。没有为网络故障更改生产代码或降低断言。
+- 交付复核：当前 86 文件 SHA 与 MODIFIED_FILE.tar/manifest 一致；原六组 BASELINE→MODIFIED→ROLLBACK 输出及逐哈希恢复均已验证，当前源码保留修改版。四角色路径不变，命令、字面 stdout/stderr、退出码、输入和哈希继续追加 VERIFICATION.txt。最终纯文档回执提交及推送 SHA 在完成报告中提供。
+- 自建工具回收：两个本轮独占 FFmpeg 诊断源码/编译树回收共 243,279,625 字节，保留准确 tag 源码归档、二进制、SHA 与构建日志；二进制哈希回收前后一致。没有清理其他任务工作树或用户数据。
+- 历史直播失败只读复核：native-frozen 日志明确在 host.py:174 的图像新鲜度条件触发，区别于 host.py:160 的 PCM 读取失败；102 项历史轮次为 3.580s/1 error。仅缩小触发分支，未确认时钟/调度根因，未修改 host.py，未增加重复测试或掩盖失败。
+- 持续目标 active：本轮没有部署/重载宿主、发送弹幕或加载真实模型。下一动作是真实公开页面 detail 响应与作者/作品稳定绑定；真实模型事实性、长期实播和商业级验收仍未完成。crapper/dryer/mutator 仍不可用，三项未执行，其他检查不替代。

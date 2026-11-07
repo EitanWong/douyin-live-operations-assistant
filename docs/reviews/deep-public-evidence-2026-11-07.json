@@ -4,8 +4,8 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "No-audio implementation ac5716fd421baeff35213e4bc06583916ee3e55f pushed dev; CI 42329279145 failed native 2/113 and JS 1/1810 on FFmpeg 6.1.1 last-DTS duration. Reproduced locally with exact upstream 6.1.1; corrected full decode plus packet timeline. Local full native 119/119, no-audio/timeline 15/15 on 6.1.1, media JS 15/15, build/check/index and 86-file patch/rollback passed; corrected commit/CI pending.",
-  "nextExecutableAction": "提交推送当前 FFmpeg 时长修正到 dev，验收同一实施 SHA 的完整远端原生与 JavaScript CI；通过后补记回执，继续真实页面作者/作品详情采集，再做真实模型事实性与长期资源竞争验收。",
+  "lastConfirmedResult": "Corrected implementation a5359b2338bd934f7c90d10a7cc3a90c7119989a pushed and exact SHA CI 42330718361 passed: JS 1810/1810, native 119/119, build/check/index/package/upload. 86-file reconstruction/rollback passed. No-audio coverage remains absent with cursor 0 and actual visual PTS; no ASR weights loaded. Not deployed; real-model and long-session acceptance incomplete.",
+  "nextExecutableAction": "在独立公开作品页只读取得实际 detail 网络响应，核对同次 workId/UID/secUID，沿 account-page 既有 document_start 入口定位详情与主体绑定缺口；确认可追溯来源后再推进真实模型事实性与长期资源竞争验收。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
     "native/public_media_jobs.py",
@@ -41,38 +41,40 @@
     "output/deep-research-2026-11-07/visual-stage/real-frames.json",
     "native/test_public_media_noaudio.py",
     "native/local_asr.py",
-    "output/deep-research-2026-11-07/noaudio-stage/derived-media.json"
+    "output/deep-research-2026-11-07/noaudio-stage/derived-media.json",
+    "output/deep-research-2026-11-07/noaudio-stage/public-page-readonly.json",
+    "tests/unit/account-page.test.mjs"
   ],
   "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
   "validation": {
     "javascript": {
-      "passed": 1808,
+      "passed": 1810,
       "failed": 0,
       "skipped": 0,
       "cancelled": 0,
-      "scope": "final corrected implementation in CI",
-      "headSHA": "a0bfa585a0d4eeba769e2dc084326ff92323dcd7",
+      "scope": "exact corrected implementation in CI",
+      "headSHA": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
       "command": [
         "npm",
         "test"
       ],
-      "runnerReportedDurationMs": 437020.289074,
-      "logs": "output/deep-research-2026-11-07/visual-stage/ci-corrected-javascript-log.*"
+      "runnerReportedDurationMs": 485682.443376,
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-javascript-log.*"
     },
     "harness": {
-      "thisStage": "Harness tests included in full 1801; standalone eval:harness not rerun"
+      "thisStage": "Harness tests included in final CI 1810; standalone eval:harness not rerun"
     },
     "native": {
-      "passed": 102,
-      "scope": "final corrected source in CI Python 3.14.10 and installed local venv",
-      "logs": "output/deep-research-2026-11-07/visual-stage/ci-corrected-native-log.*"
+      "passed": 119,
+      "scope": "corrected implementation in CI Python 3.14.10; local installed venv also passed with ResourceWarning as error",
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-final-native-log.*"
     },
     "npmCi": "passed; audit 0 vulnerabilities",
     "build": "passed",
     "check": "passed",
     "index": {
       "modules": 530,
-      "symbols": 2979
+      "symbols": 2980
     },
     "diffCheck": "passed",
     "javascriptThisStage": {
@@ -96,6 +98,28 @@
       "index": "passed",
       "package": "passed",
       "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42326790987"
+    },
+    "noAudioStage": {
+      "runId": "42330718361",
+      "headSHA": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
+      "attempt": 2,
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 119,
+      "javascriptTests": 1810,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 485682.443376,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "upload": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42330718361",
+      "retry": "First test-build attempt failed during ONNX dependency download before tests; reran only failed job on the same SHA. Passed native job reused.",
+      "nativeLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-final-native-log.*",
+      "javascriptLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-javascript-log.*"
     }
   },
   "benchmark": {
@@ -424,7 +448,7 @@
     }
   },
   "noAudioStage": {
-    "status": "implemented; first CI failed on FFmpeg 6.1.1 duration; correction locally verified; corrected commit/CI pending; not deployed",
+    "status": "corrected implementation pushed; exact SHA CI passed; not deployed",
     "baselineCommit": "4ea37d75013940845607bb173d0f16e2f418a3b0",
     "changedFields": [
       "coverage.audio=absent",
@@ -527,7 +551,7 @@
         "stream reader failure and timeout reap"
       ],
       "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-fix-*",
-      "ffmpeg6_1_1CrossProcess": "Actual Python worker 6.1.1 plus installed decoder for controlled visual-model fixture; assertions unchanged; completed result recorded in ci-fix-ffmpeg6-worker-js.*"
+      "ffmpeg6_1_1CrossProcess": "Passed unchanged no-audio integration with actual Python worker 6.1.1 and installed decoder for controlled visual-model fixture; final full Ubuntu 6.1.1 CI also passed."
     },
     "publicPageReadOnly": {
       "operation": "read-only CUA public-page inspection",
@@ -558,6 +582,41 @@
       ],
       "diagnosticCorrection": "read-only evaluate sandbox lacks decodeURIComponent (TypeError); read script textContent using documented DOM locator, then decoded in CUA REPL; no page mutation",
       "source": "Literal CUA outputs in this conversation; this JSON is a factual receipt, not a network trace or page export."
+    },
+    "correctionCommit": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
+    "ciCorrected": {
+      "runId": "42330718361",
+      "headSHA": "a5359b2338bd934f7c90d10a7cc3a90c7119989a",
+      "attempt": 2,
+      "status": "completed",
+      "conclusion": "success",
+      "nativeTests": 119,
+      "javascriptTests": 1810,
+      "failed": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "testRunnerDurationMs": 485682.443376,
+      "build": "passed",
+      "check": "passed",
+      "index": "passed",
+      "package": "passed",
+      "upload": "passed",
+      "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42330718361",
+      "retry": "First test-build attempt failed during ONNX dependency download before tests; reran only failed job on the same SHA. Passed native job reused.",
+      "nativeLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-final-native-log.*",
+      "javascriptLogs": "output/deep-research-2026-11-07/noaudio-stage/ci-corrected-javascript-log.*"
+    },
+    "retainedLiveFailure": {
+      "operation": "read existing failure and exact unchanged source",
+      "log": "output/deep-research-2026-11-07/visual-stage/native-frozen.stderr",
+      "test": "test_pipeline.Pipeline.test_real_websocket_accepts_both_tracks_and_silent_scene_returns_observation",
+      "literalError": "ValueError: DECODE_FAILED at native/host.py:174",
+      "literalBranch": "self.ready and (not self.image or now - self.image[1] > 5000)",
+      "excludedAsTraceLocation": "readexactly error at host.py:160 was not the recorded failing branch",
+      "originalRun": "102 tests in 3.580s, errors=1",
+      "currentNativeSourceHash": "c6427281835a13cd6bba1024157114f9a3074be91dda918ee0ff2c235489fce2",
+      "productChange": false,
+      "rootCause": "unconfirmed; no clock/scheduling cause asserted; no extra retry or test run"
     }
   }
 }
