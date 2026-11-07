@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -9,8 +10,43 @@ from unittest.mock import patch
 from data_location import DataLocation
 from local_asr import LocalASR
 from public_media_jobs import PublicMediaJobs
+from public_media_frames import decode_video_duration, read_video_duration
+from media_process import run_capture
 from public_media_worker import DownloadedMedia, PublicMediaWorker
 from model_lease import ModelLease
+
+
+class VideoTimelineContracts(unittest.IsolatedAsyncioTestCase):
+    async def duration(self, payload):
+        stream=asyncio.StreamReader();stream.feed_data(payload);stream.feed_eof()
+        return await read_video_duration(stream)
+
+    async def test_packet_pts_and_duration_use_exact_timebase_despite_decode_order(self):
+        self.assertEqual(await self.duration(b'#tb 0: 1/30000\n'
+                                            b'0, -1001, 0, 1001, 1, 0x00\n'
+                                            b'0, 0, 3003, 1001, 1, 0x00\n'
+                                            b'0, 1001, 1001, 1001, 1, 0x00\n'),134)
+
+    async def test_large_timeline_stream_does_not_require_capturing_all_output(self):
+        payload="print('#tb 0: 1/30000');\nfor i in range(40000): print(f'0, {i*1001}, {i*1001}, 1001, 1, 0x00')"
+        duration,stderr=await run_capture([sys.executable,'-c',payload],maximum=64,stdout_reader=read_video_duration)
+        self.assertEqual(duration,1334667);self.assertEqual(stderr,b'')
+
+    async def test_invalid_missing_or_over_budget_packet_timeline_is_rejected(self):
+        for payload in [b'',b'0,0,0,1,1,0x00\n',b'#tb 0: 0/1\n',
+                        b'#tb 0: 1/10\n0,0,0,0,1,0x00\n',b'#tb 0: 1/10\n1,0,0,1,1,0x00\n',
+                        b'#tb 0: 1/10\n0,0,NaN,1,1,0x00\n',
+                        b'#tb 0: 1/1\n0,0,10800,1,1,0x00\n',b'#'+b'x'*4096+b'\n']:
+            with self.subTest(payload=payload[:60]),self.assertRaises(ValueError):
+                await self.duration(payload)
+
+    async def test_streaming_reader_failure_and_timeout_reap_the_child(self):
+        with self.assertRaises(ValueError):
+            await asyncio.wait_for(run_capture([sys.executable,'-c',"import time; print('invalid',flush=True); time.sleep(60)"],
+                                               stdout_reader=read_video_duration),2)
+        with self.assertRaises(TimeoutError):
+            await run_capture([sys.executable,'-c','import time; time.sleep(60)'],timeout=.05,
+                              stdout_reader=read_video_duration)
 
 
 @unittest.skipUnless(shutil.which('ffmpeg'), 'real FFmpeg required')
@@ -88,6 +124,21 @@ class PublicMediaNoAudioContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['status'],'succeeded');self.assertEqual(self.observed,[])
         self.assertEqual(result['coverage']['audio'],'absent')
         self.assertEqual(len(self.call('evidence',self.job['id'])),2)
+
+    async def test_single_frame_video_keeps_the_final_frame_display_duration(self):
+        single=self.root/'single.mp4'
+        subprocess.run([shutil.which('ffmpeg'),'-nostdin','-hide_banner','-loglevel','error','-y',
+                        '-f','lavfi','-i','color=c=red:s=96x64:r=1:d=1',
+                        '-c:v','mpeg4','-threads','1',str(single)],check=True,capture_output=True)
+        self.assertEqual(await decode_video_duration(shutil.which('ffmpeg'),single),1000)
+
+    async def test_variable_frame_intervals_and_reordered_packets_keep_the_whole_timeline(self):
+        variable=self.root/'variable.mp4'
+        subprocess.run([shutil.which('ffmpeg'),'-nostdin','-hide_banner','-loglevel','error','-y',
+                        '-i',str(self.path),'-vf','select=eq(n\\,0)+eq(n\\,1)+eq(n\\,10)+eq(n\\,19)',
+                        '-fps_mode','passthrough','-c:v','mpeg4','-bf','2','-threads','1',str(variable)],
+                       check=True,capture_output=True)
+        self.assertEqual(await decode_video_duration(shutil.which('ffmpeg'),variable),2000)
 
     async def test_truncated_duration_and_corrupt_media_do_not_become_audio_absence_success(self):
         async def wrong_duration(job, folder):

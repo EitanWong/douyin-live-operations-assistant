@@ -4,8 +4,8 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "No-audio stage locally verified: JS 1810/1810, native 113/113, build/check/index, 86-file reconstruction/rollback. Same production worker decodes derived public media without audio, marks absent, stores only visual evidence and retains actual PTS. No ASR weights loaded; original model lease and forgetting preserved. Exact implementation commit/push/CI pending.",
-  "nextExecutableAction": "完成当前无音轨阶段的原会话 JavaScript 冻结全量回归、86 文件四角色证据账本与 dev 提交推送，跟进同一实施 SHA 的远端 CI；随后核对真实页面作者/作品详情采集缺口，沿既有页面入口取得可追溯详情证据，再做真实模型和长期资源验收。",
+  "lastConfirmedResult": "No-audio implementation ac5716fd421baeff35213e4bc06583916ee3e55f pushed dev; CI 42329279145 failed native 2/113 and JS 1/1810 on FFmpeg 6.1.1 last-DTS duration. Reproduced locally with exact upstream 6.1.1; corrected full decode plus packet timeline. Local full native 119/119, no-audio/timeline 15/15 on 6.1.1, media JS 15/15, build/check/index and 86-file patch/rollback passed; corrected commit/CI pending.",
+  "nextExecutableAction": "提交推送当前 FFmpeg 时长修正到 dev，验收同一实施 SHA 的完整远端原生与 JavaScript CI；通过后补记回执，继续真实页面作者/作品详情采集，再做真实模型事实性与长期资源竞争验收。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
     "native/public_media_jobs.py",
@@ -424,7 +424,7 @@
     }
   },
   "noAudioStage": {
-    "status": "implemented and locally verified; commit/push/CI pending; not deployed",
+    "status": "implemented; first CI failed on FFmpeg 6.1.1 duration; correction locally verified; corrected commit/CI pending; not deployed",
     "baselineCommit": "4ea37d75013940845607bb173d0f16e2f418a3b0",
     "changedFields": [
       "coverage.audio=absent",
@@ -436,9 +436,11 @@
       "decode_video_duration",
       "mark_audio_absent",
       "audio_coverage",
-      "completeCoverage"
+      "completeCoverage",
+      "read_video_duration",
+      "run_capture(stdout_reader)"
     ],
-    "nativeTests": 113,
+    "nativeTests": 119,
     "crossProcessFlows": 2,
     "derivedMedia": {
       "source": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
@@ -457,7 +459,9 @@
     },
     "fullDecodeBudget": {
       "timeoutSeconds": 180,
-      "stdoutBytes": 2097152
+      "stdout": "framecrc folded one line at a time; max line 4096 bytes; no full output capture",
+      "stderrBytes": 131072,
+      "maximumDurationMs": 10800000
     },
     "unavailableChecks": [
       "crapper",
@@ -490,6 +494,70 @@
       "passed": 24,
       "failed": 0,
       "logs": "output/deep-research-2026-11-07/noaudio-stage/js-after-native-correction.*"
+    },
+    "implementationCommit": "ac5716fd421baeff35213e4bc06583916ee3e55f",
+    "ciFirstAttempt": {
+      "runId": "42329279145",
+      "headSHA": "ac5716fd421baeff35213e4bc06583916ee3e55f",
+      "status": "completed",
+      "conclusion": "failure",
+      "nativeTests": 113,
+      "nativeFailures": 2,
+      "javascriptTests": 1810,
+      "javascriptPassed": 1809,
+      "javascriptFailures": 1,
+      "rootCause": "FFmpeg 6.1.1 progress reports last DTS; 1900ms is not full 2000ms display coverage",
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-original-*-log.*"
+    },
+    "ciCorrectionLocal": {
+      "fullNative": 119,
+      "ffmpeg6_1_1NoAudioAndTimeline": 15,
+      "mediaJavaScript": 15,
+      "build": "passed",
+      "check": "passed",
+      "index": "unchanged current snapshot, 530/2980",
+      "transactionFiles": 86,
+      "source": "full null decode plus stream-copy framecrc; use max(PTS + duration) with exact rational timebase",
+      "newRegressions": [
+        "single frame display duration",
+        "variable frame intervals and B-frame order",
+        "fractional timebase",
+        "40000 packet stream",
+        "invalid or over-budget timeline",
+        "stream reader failure and timeout reap"
+      ],
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/ci-fix-*",
+      "ffmpeg6_1_1CrossProcess": "Actual Python worker 6.1.1 plus installed decoder for controlled visual-model fixture; assertions unchanged; completed result recorded in ci-fix-ffmpeg6-worker-js.*"
+    },
+    "publicPageReadOnly": {
+      "operation": "read-only CUA public-page inspection",
+      "url": "https://www.douyin.com/video/6961737553342991651",
+      "browser": "ChatGPT in-app browser, temporary hidden tab",
+      "visibleTitle": "#杨超越 小小水手带你去远航❤️ - 抖音",
+      "visibleEvidence": [
+        "video duration 19.735011 seconds; readyState 4; currentSrc exists",
+        "public author link matches known secUID",
+        "public comments visible without login"
+      ],
+      "renderData": {
+        "scriptId": "RENDER_DATA",
+        "rawLength": 210290,
+        "topLevelKeys": [
+          "app"
+        ],
+        "objectsScanned": 1011,
+        "matchingWorkIdObjects": 0
+      },
+      "conclusion": "Video playable; inline JSON does not supply author/work detail binding. Production needs actual observed detail response; no deployed-extension capture acceptance.",
+      "actionsNotPerformed": [
+        "no login",
+        "no comment or social interaction",
+        "no runtime or extension reload",
+        "no cookie/auth extraction",
+        "no page script injection"
+      ],
+      "diagnosticCorrection": "read-only evaluate sandbox lacks decodeURIComponent (TypeError); read script textContent using documented DOM locator, then decoded in CUA REPL; no page mutation",
+      "source": "Literal CUA outputs in this conversation; this JSON is a factual receipt, not a network trace or page export."
     }
   }
 }

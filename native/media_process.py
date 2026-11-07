@@ -35,11 +35,11 @@ async def bounded_read(stream, maximum):
             raise ValueError('MEDIA_DOWNLOAD_FAILED')
 
 
-async def run_capture(args, timeout=180, maximum=2*1024*1024):
+async def run_capture(args, timeout=180, maximum=2*1024*1024, stdout_reader=None):
     process = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.DEVNULL,
                                                   stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                                                   start_new_session=True)
-    tasks = [asyncio.create_task(bounded_read(process.stdout, maximum)),
+    tasks = [asyncio.create_task(stdout_reader(process.stdout) if stdout_reader else bounded_read(process.stdout, maximum)),
              asyncio.create_task(bounded_read(process.stderr, 131072))]
     try:
         async with asyncio.timeout(timeout):

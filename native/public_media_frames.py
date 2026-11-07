@@ -1,5 +1,6 @@
 """Bounded FFmpeg keyframes; timestamps come from decoded PTS, not seek guesses."""
 from dataclasses import dataclass
+from fractions import Fraction
 import math
 import re
 
@@ -9,19 +10,41 @@ from media_process import run_capture
 MAX_FRAMES = 120
 
 
+async def read_video_duration(stream):
+    # Fold FFmpeg's packet timeline in constant space, including the last
+    # packet's display duration. DTS and progress time can exclude that tail.
+    timebase = None
+    end = 0
+    while line := await stream.readline():
+        if len(line) > 4096:
+            raise ValueError('MEDIA_DECODE_FAILED')
+        if line.startswith(b'#tb 0: '):
+            timebase = Fraction(line[7:].decode('ascii').strip())
+            if timebase <= 0:
+                raise ValueError('MEDIA_DECODE_FAILED')
+        elif not line.startswith(b'#'):
+            fields = line.split(b',')
+            if timebase is None or len(fields) < 6 or int(fields[0]) != 0 or int(fields[3]) <= 0:
+                raise ValueError('MEDIA_DECODE_FAILED')
+            end = max(end, (int(fields[2])+int(fields[3]))*timebase)
+            if end > 10800:
+                raise ValueError('MEDIA_DECODE_FAILED')
+    duration_ms = math.ceil(end*1000)
+    frame_positions(duration_ms)
+    return duration_ms
+
+
 async def decode_video_duration(ffmpeg, path):
     args = [ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-xerror',
             '-protocol_whitelist', 'file,pipe', '-i', str(path), '-map', '0:v:0', '-an',
-            '-fps_mode', 'passthrough', '-stats_period', '5', '-progress', 'pipe:1', '-nostats', '-f', 'null', '-']
+            '-fps_mode', 'passthrough', '-f', 'null', '-',
+            '-map', '0:v:0', '-c:v', 'copy', '-f', 'framecrc', 'pipe:1']
     try:
-        stdout, _ = await run_capture(args)
-        progress = dict(line.split('=', 1) for line in stdout.decode('ascii').splitlines() if '=' in line)
-        duration_ms = math.ceil(int(progress['out_time_us'])/1000)
-        if progress['progress'] != 'end' or int(progress['frame']) <= 0:
-            raise ValueError('MEDIA_DECODE_FAILED')
-        frame_positions(duration_ms)
+        # The null output still decodes every frame with -xerror; the parallel
+        # stream-copy output retains original PTS/duration, including VFR/B frames.
+        duration_ms, _ = await run_capture(args, stdout_reader=read_video_duration)
         return duration_ms
-    except (ValueError, KeyError, OSError, TimeoutError):
+    except (ValueError, ZeroDivisionError, OSError, TimeoutError):
         raise ValueError('MEDIA_DECODE_FAILED') from None
 
 
