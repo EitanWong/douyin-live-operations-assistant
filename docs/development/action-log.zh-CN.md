@@ -13,6 +13,7 @@
 - 最终完整JavaScript回归2034/2034通过，0失败/取消/跳过，284159.786666ms、exit0；643份产品/测试/脚本/native源码SHA复核全部一致，build/check及空白差异检查通过。独立副本实际执行ROLLBACK.sh --service-permission-parent恢复786份本轮父文件SHA，同输入逐字复现旧版泛化错误和本地授权后仍failed；默认回滚恢复781份初始SHA，重新应用累计DIFF_FILE后787份成员逐字一致，云端/本地授权后均succeeded且各请求1次。两轮探针stdout、stderr和exit与冻结BASELINE/MODIFIED完全一致；实际工作树一直保留修复。
 - 已完整备份Chrome原加载目录43份构建文件，原子更新ai.js/background.js/content.js/popup.html/popup.js/search.js并新增service-permissions.js；42份新版构建SHA全部一致，两份旧开发辅助文件保留。部署回滚在独立副本恢复43份原SHA，重新应用后44份部署文件一致；原项目770份受跟踪源码未变，未重载真实扩展/直播页、未授予真实权限、未调用真实服务或写入用户知识库。用户重新加载扩展、刷新直播页后，点击扩展图标→AI 服务访问权限→授权后台研究服务域名，再重试Agent。
 - 浏览器临时页已关闭，4192预览服务主动Ctrl-C停止（exit130）；lsof逐份确认无打开句柄后仅删除本轮三个可重建验收副本，保留归档、构建、截图、逐字输出、哈希和所有四角色。最终提交、普通push到dev及远端SHA一致性记录继续写入原VERIFICATION和service-permission/delivery-receipt.json；不推main、不改版本或发布标签。
+- 修复提交4fd173b0e18b72c335e94d3ad752ac2589b193f9已普通push至origin/dev（fb779c0→4fd173b，exit0），ls-remote精确一致、工作树干净。随后仅补本条交付文档；该文档提交及最终普通push的精确SHA继续记录于同一service-permission/delivery-receipt.json与VERIFICATION，产品及测试源码不再变化。
 
 ## 2026-11-08：修复知识补充误报已有草稿，直接提交 Agent
 
