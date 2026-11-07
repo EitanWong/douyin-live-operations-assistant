@@ -3772,3 +3772,4 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - crapper/dryer/mutator CLI和工具目录仍不可用，三项未执行。保留原件、角色、探针、字面输出、报告与截图；本任务独立副本和4197本地服务验证后清理，不动其他工作树与直播页。功能提交和dev普通推送结果随后补记；未改main、版本或标签。
 
 - 图内改造提交28a8fd647985a462e4a1bdaafb3622b6a5b831fa已普通push到功能分支，并由git ls-remote精确核对。远端dev同时新增独立的手动启动修正dfbfd9d，合入时仅日志/生成索引冲突，保留双方日志并重新生成索引；人物图谱源码不变。合并后补跑浏览器/关系集成与build/check，PR最终远端CI及dev合入回执将继续追加。
+- 实际推送：功能提交 **dfbfd9df57a71fce0db1ea3a234fb84f6141d4a6** 已普通push至origin/dev（16dd4d5→dfbfd9d，exit0），git ls-remote精确一致。源码全量1934/1934、构建/check与同输入1/0/1均为本地已观察结果，不声称远端CI通过。本条仅补验收回执，最终文档提交和远端确认写入原VERIFICATION/checkpoint；本任务独立副本与4197服务已实际清理。
