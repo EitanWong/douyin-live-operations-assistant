@@ -34,10 +34,11 @@ class PublicMediaVisualContracts(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temp.name)
         self.location = DataLocation(settings=self.root/'settings.json', database=str(self.root/'archive.sqlite3'))
         self.path = self.root/'colors.mp4'
+        # Exercise tolerated audio/video duration differences and AAC padding.
         command = [shutil.which('ffmpeg'), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
                    '-f', 'lavfi', '-i', 'color=c=red:s=96x64:r=10:d=1',
                    '-f', 'lavfi', '-i', 'color=c=blue:s=96x64:r=10:d=1',
-                   '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000:duration=2',
+                   '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000:duration=2.1',
                    '-filter_complex', '[0:v][1:v]concat=n=2:v=1:a=0[v]', '-map', '[v]', '-map', '2:a',
                    '-c:v', 'mpeg4', '-c:a', 'aac', '-threads', '1', str(self.path)]
         subprocess.run(command, check=True, capture_output=True)
@@ -88,13 +89,15 @@ class PublicMediaVisualContracts(unittest.IsolatedAsyncioTestCase):
         resumed=[]
         async def unknown(job, frame): resumed.append(frame.at_ms);return {'text':'','model':'fixture-vision-v2'}
         result=await self.worker(unknown).run_once()
-        self.assertEqual(resumed,[1000])
+        self.assertEqual(calls[0],0)
+        self.assertEqual(len(resumed),1)
+        self.assertEqual(resumed,calls[1:])
         self.assertEqual(result['status'],'succeeded')
         self.assertEqual(result['coverage']['video'],'sampled')
         self.assertEqual(result['coverage']['visual']['completed'],2)
         rows=self.call('evidence',self.job['id'])
         visual=[r for r in rows if r['kind']=='visual']
-        self.assertEqual([(r['startMs'],r['endMs'],r['text']) for r in visual],[(0,1,'画面是红色背景。'),(1000,1001,'')])
+        self.assertEqual([(r['startMs'],r['endMs'],r['text']) for r in visual],[(0,1,'画面是红色背景。'),(resumed[0],resumed[0]+1,'')])
         self.assertEqual([r['model'] for r in visual],['fixture-vision-v1','fixture-vision-v2'])
         self.assertTrue(all(r['speaker']=='unknown' for r in rows))
 

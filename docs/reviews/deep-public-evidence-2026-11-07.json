@@ -4,7 +4,7 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "Visual keyframe timeline implemented locally on dev from e11a0e8c44aee08309571ff58d36162e7e9e6744. Pre-Unicode-boundary full JS 1807/1807; corrected-source targeted JS 19/19; native frozen 102/102. Real public-media decoding preserved PTS 0/9400/18767ms; controlled model fixtures only. 85-file patch reconstruction and rollback pass. Implementation commit/push/CI pending; not deployed.",
+  "lastConfirmedResult": "Visual implementation 0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded pushed to origin/dev. CI native has 1 fixture failure (expected 1000ms, actual 1100ms); corrected actual-PTS test reproduces red locally and native full 102/102 passes. Production JS unchanged after prior Unicode fix; original CI JS still running. 85-file rollback and native Unicode storage round trips verified; correction commit/CI pending.",
   "nextExecutableAction": "先完成当前视觉时间轴实施的 dev 提交、推送与对应 CI 回执；随后复用同一媒体队列和 FFmpeg，为没有音轨的公开视频补充可核验的纯视觉路径，先写真实无音轨文件的失败测试，不把无音轨错误当作完整音频覆盖；保持已有取消/遗忘、身份和知识库边界。实际部署采集、真实模型准确率与长期实播仍需独立验收。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
@@ -279,7 +279,7 @@
     }
   },
   "visualStage": {
-    "status": "implemented and locally verified; commit/push/CI pending; not deployed",
+    "status": "implemented and pushed; CI native fixture assertion corrected locally, awaiting correction push and final CI; not deployed",
     "baselineCommit": "e11a0e8c44aee08309571ff58d36162e7e9e6744",
     "capabilities": {
       "publicMedia": 3,
@@ -359,6 +359,27 @@
       "dryer",
       "mutator"
     ],
-    "localCheck": "passed after Unicode correction"
+    "localCheck": "passed after Unicode correction",
+    "implementationCommit": "0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded",
+    "previousCI": {
+      "runId": "42326384275",
+      "headSHA": "0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded",
+      "native": "101 passed / 1 failed: resume test hardcoded 1000ms, actual 1100ms",
+      "javascript": "still running when correction was prepared",
+      "correction": "Use actual interrupted frame PTS, retain exact remaining-frame count and persisted evidence/model assertions; 2.1s audio vs 2s video fixture locally reproduces failure before assertion correction."
+    },
+    "nativeAfterPTSFixtureCorrection": {
+      "passed": 102,
+      "failed": 0,
+      "resourceWarnings": "errors",
+      "logs": "output/deep-research-2026-11-07/visual-stage/native-after-pts.*"
+    },
+    "unicodeNativeRoundTrip": {
+      "boundaryCharacters": 1200,
+      "boundaryUTF8Bytes": 3601,
+      "boundaryLastCharacter": "😀",
+      "upstreamMalformed": "normalized U+FFFD; native SQLite round trip exact",
+      "logs": "output/deep-research-2026-11-07/visual-stage/unicode-native-roundtrip.*"
+    }
   }
 }
