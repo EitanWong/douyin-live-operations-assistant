@@ -86,7 +86,7 @@ function mediaBody(sample,config) {
 export function createMediaClient({request,getKey,now=Date.now}) {
   let calls=[],localCalls=[],lastVisual=null;
   const usage=()=>{const cutoff=now()-3600000;calls=calls.filter(at=>at>cutoff);localCalls=localCalls.filter(at=>at>cutoff);return {cloudCalls:calls.length,localCalls:localCalls.length,windowMs:3600000};};
-  const recognize=async(sample,config,{signal}={})=>{
+  const recognize=async(sample,config,{signal,request:transport=request}={})=>{
     if(signal?.aborted)throw new Error('请求已取消');
     validateMediaConfig(config,true);
     if(sample.kind==='omni' ? !config.omniEnabled : sample.kind==='video' ? !config.videoEnabled : !config.audioEnabled)throw new Error('此媒体识别未开启');
@@ -109,7 +109,7 @@ export function createMediaClient({request,getKey,now=Date.now}) {
     if(!local && calls.length>=config.maxPerHour)throw new Error('音视频每小时调用额度已用完');
     if(local && localCalls.length>=1200)throw new Error('本机视觉每小时推理额度已用完');
     (local ? localCalls : calls).push(now());
-    const response=await requestJSON(request,{url:endpoint,key,body,operation:'media',stream:sample.kind==='omni',signal});
+    const response=await requestJSON(transport,{url:endpoint,key,body,operation:'media',stream:sample.kind==='omni',signal});
     const choice=response?.choices?.[0];
     if(choice?.finish_reason!==undefined && choice.finish_reason!=='stop')throw new Error('媒体观察未完整结束，可能已被截断或过滤');
     const text=choice?.message?.content;

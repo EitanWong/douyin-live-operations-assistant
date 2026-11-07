@@ -49,6 +49,9 @@ class ModelLease:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             if priority == 'background' and self.live_pending():
                 raise ValueError('ASR_BUSY')
+            if (self.folder / '.external-visual.json').exists():
+                from local_visual_resource import recover_external_visual
+                recover_external_visual(self.folder)
         except (BlockingIOError, ValueError):
             os.close(fd)
             raise ValueError('ASR_BUSY') from None

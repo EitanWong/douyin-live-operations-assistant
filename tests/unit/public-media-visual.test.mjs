@@ -35,3 +35,22 @@ test('取消信号传入既有视觉客户端，迟到结果不通过重新核�
  const analyzer=createPublicMediaVisualAnalyzer({readConfig:async()=>mergeConfig({anchorId:'10',ai:{enabled:true,pipeline:{mode:'local-multimodal'},edge:{enabled:true,audioEnabled:true}}}),resolveProfile:async()=>({epoch,binding:{subject:'uid:2',sources:['https://www.douyin.com/user/author-sec']}}),checkProfile:async()=>{},readVersion:async()=>0,recognize:async()=>{await gate;return {text:'late'};}});
  const pending=analyzer({job,frame});await Promise.resolve();epoch=1;finish();await assert.rejects(pending);
 });
+test('原生资源尚未确认时不启动视觉模型，确认期间取消不再推理',async()=>{
+ for(const cancel of [false,true]){
+  const f=fixture(),controller=new AbortController();let ready,resource;
+  const pending=f.analyzer({job,frame},{signal:controller.signal,beforeRecognize:value=>{resource=value;return new Promise(resolve=>ready=resolve);}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.calls.length,0);
+  assert.deepEqual(resource,{endpoint:'http://127.0.0.1:11434/v1/chat/completions',model:'qwen2.5vl:3b'});
+  if(cancel)controller.abort();ready();
+  if(cancel){await assert.rejects(pending);assert.equal(f.calls.length,0);}else{await pending;assert.equal(f.calls.length,1);}
+ }
+});
+test('等待资源确认期间关闭归档或遗忘人物后不再启动识别',async()=>{
+ for(const change of [f=>f.off(),f=>f.forget(),f=>f.clear(),f=>f.mode('local-audio')]){
+  const f=fixture();let ready;
+  const pending=f.analyzer({job,frame},{beforeRecognize:()=>new Promise(resolve=>ready=resolve)});
+  await new Promise(resolve=>setImmediate(resolve));change(f);ready();
+  await assert.rejects(pending);assert.equal(f.calls.length,0);
+ }
+});

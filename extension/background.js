@@ -5,7 +5,7 @@ import {createRelationshipLibrary} from '../src/ai/relationship-library.js';
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
 import {requestNativeDeployment} from './native-deployment.js';
-import {collectAccountWithMedia,createLocalMediaRequest} from './account-media.js';
+import {collectAccountWithMedia,createLocalMediaRequest,authorizeLocalMediaEndpoint} from './account-media.js';
 import {createPublicMediaVisualAnalyzer} from './public-media-visual.js';
 import {createAccountResearch} from './account-research.js';
 import {createPublicMediaResearch} from './public-media-research.js';
@@ -61,7 +61,7 @@ const writeRecord = async (key,value) => {
 };
 const knowledgeCorpus=createKnowledgeCorpus({read:readRecord,write:writeRecord,archive:async({room,anchor,at,...payload})=>{await dataEngine().enqueue({id:`knowledge:${room}:${anchor}:${payload.sequence}`,room,anchor,kind:'knowledge',receivedAt:at,payload});void dataEngine().flush();}});
 const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readAudience:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,readProfile:room=>readRecord(`live-assistant:profile:${room}`),readConfig:room=>readRecord(`live-assistant:config:${room}`)});
-const mediaVisual=createPublicMediaVisualAnalyzer({readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),readVersion:(room,anchor)=>automaticKnowledge.handle(room,'version',{anchor}),canArchive:()=>dataEngine().enabled(),backgroundAllowed:()=>modelOwnership.backgroundAllowed(),recognize:createMediaClient({request:createLocalMediaRequest(chrome),getKey:()=>''})});
+const mediaVisual=createPublicMediaVisualAnalyzer({authorizeResource:endpoint=>authorizeLocalMediaEndpoint(chrome,endpoint),readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),readVersion:(room,anchor)=>automaticKnowledge.handle(room,'version',{anchor}),canArchive:()=>dataEngine().enabled(),backgroundAllowed:()=>modelOwnership.backgroundAllowed(),recognize:createMediaClient({request:createLocalMediaRequest(chrome),getKey:()=>''})});
 const mediaWorker=publicMediaWorkerClient(chrome,{analyzeVisual:mediaVisual,allowed:()=>modelOwnership.backgroundAllowed(),onResult:()=>{void publicMedia?.wakeAll().catch(()=>{});}});
 publicMedia=createPublicMediaResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),request:nativeDataRequest(chrome),worker:mediaWorker,knowledge:automaticKnowledge,canArchive:()=>dataEngine().enabled(),readPrivacy:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience ?? null});
 const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),

@@ -68,12 +68,18 @@ export async function capturePublicWorkSample({audio,video,workId}){
  return result;
 }
 
+export async function authorizeLocalMediaEndpoint(chrome,endpoint){
+ const url=new URL(endpoint);
+ if(!['http:','https:'].includes(url.protocol) || !['localhost','127.0.0.1','[::1]'].includes(url.hostname) || url.username || url.password || !await chrome.permissions.contains({origins:[`${url.protocol}//${url.hostname}/*`]}))throw Error('请授权本机视觉接口');
+ return url;
+}
+
 export function createLocalMediaRequest(chrome){
  return details=>{
   const controller=new AbortController();let timer=setTimeout(()=>{controller.abort();details.ontimeout();},10000);
   void (async()=>{
    try{
-    const url=new URL(details.url);if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname) || !await chrome.permissions.contains({origins:[`${url.protocol}//${url.hostname}/*`]}))throw Error('请授权本机视觉接口');
+    const url=await authorizeLocalMediaEndpoint(chrome,details.url);
     const response=await fetch(url.href,{method:'POST',headers:{'Content-Type':'application/json'},body:details.data,credentials:'omit',redirect:'error',signal:controller.signal});
     const responseText=await response.text();if(responseText.length>1000000)throw Error('本机视觉响应过大');
     details.onload({status:response.status,responseText,finalUrl:response.url});

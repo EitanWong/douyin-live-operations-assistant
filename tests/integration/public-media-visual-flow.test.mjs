@@ -21,14 +21,14 @@ import {checkResearchProfile} from '../../src/ai/research-profile.js';
 
 function workerPort(database,analyzeVisual,noaudio){
  const child=spawn('python3',[fileURLToPath(new URL('../helpers/public-media-visual-worker.py',import.meta.url)),database,...(noaudio ? ['noaudio'] : [])]);
- const messages=new Set(),disconnects=new Set(),errors=[];let input=Buffer.alloc(0),frames=0,largestPacket=0;
+ const messages=new Set(),disconnects=new Set(),errors=[];let input=Buffer.alloc(0),frames=0,largestPacket=0,modelRequests=0;
  child.stderr.on('data',value=>errors.push(value));
- const port={onMessage:{addListener:fn=>messages.add(fn)},onDisconnect:{addListener:fn=>disconnects.add(fn)},disconnect:()=>child.stdin.end(),postMessage:value=>{const body=Buffer.from(JSON.stringify(value)),size=Buffer.alloc(4);size.writeUInt32LE(body.length);child.stdin.write(Buffer.concat([size,body]));}};
+ const port={onMessage:{addListener:fn=>messages.add(fn)},onDisconnect:{addListener:fn=>disconnects.add(fn)},disconnect:()=>child.stdin.end(),postMessage:value=>{if(value.action==='visual-infer')modelRequests++;const body=Buffer.from(JSON.stringify(value)),size=Buffer.alloc(4);size.writeUInt32LE(body.length);child.stdin.write(Buffer.concat([size,body]));}};
  child.stdout.on('data',chunk=>{input=Buffer.concat([input,chunk]);while(input.length>=4 && input.length>=input.readUInt32LE(0)+4){const size=input.readUInt32LE(0);largestPacket=Math.max(largestPacket,size);const value=JSON.parse(input.subarray(4,4+size));input=input.subarray(4+size);if(value.type==='public-media-visual')frames++;for(const fn of messages)fn(value);}});
  const timer=setTimeout(()=>child.kill('SIGKILL'),10000);
  const done=new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',code=>{clearTimeout(timer);for(const fn of disconnects)fn();code ? reject(Error(Buffer.concat(errors).toString())) : resolve();});});
  const client=createPublicMediaWorkerClient({connect:()=>port,analyzeVisual});
- return {client,done,get frames(){return frames;},get largestPacket(){return largestPacket;}};
+ return {client,done,get frames(){return frames;},get modelRequests(){return modelRequests;},get largestPacket(){return largestPacket;}};
 }
 
 for(const noaudio of [false,true])test(`${noaudio ? '无音轨' : '有音轨'}真实关键帧经原生封包→既有视觉客户端→SQLite→原文库→按人检索，重启去重和遗忘清除`,async()=>{
@@ -53,7 +53,7 @@ for(const noaudio of [false,true])test(`${noaudio ? '无音轨' : '有音轨'}�
  try{
   await bridge.collect({room:'1',anchor,records:[{kind:'work',id:'70',subject:'author-sec',url:'https://www.douyin.com/video/70',text:'背景颜色'}]});
   await port.done;await bridge.wake('1');
-  assert.equal(port.frames,2);assert.equal(modelCalls,2);assert.ok(port.largestPacket<=65536);
+  assert.equal(port.frames,2);assert.equal(port.modelRequests,2);assert.equal(modelCalls,0);assert.ok(port.largestPacket<=65536);
   const rows=await knowledge.handle('1','list',{anchor});assert.equal(rows.length,noaudio ? 2 : 3);
   assert.equal(rows.filter(row=>row.title==='公开视频关键帧观察').length,2);
   if(noaudio)assert.ok(rows.every(row=>row.coverage.includes('无音轨') && JSON.parse(row.text).audio==='absent'));
