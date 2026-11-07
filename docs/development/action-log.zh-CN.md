@@ -3890,3 +3890,4 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - npm ci成功，audit 0漏洞；agent:index为568模块/3166符号，build通过。未改UI结构、样式、共享布局或原生代码。本轮验证使用合成输入，不声称已读取/改写用户真实直播账本或已重载正在使用的扩展。完整JavaScript回归、check、回滚及提交推送结果随后追加。
 - crapper、dryer、mutator已核实PATH及启用工具目录均不可用，三项未执行，其他检查不替代。初次系统Python不支持tarfile.extractall(filter=...)导致setup退出1，随后probe尚未生成的BASELINE尝试也退出1；改为兼容API从冻结可信git归档解包后正常复现。一次zsh未匹配glob、一次command -v -a不受支持及原工作区不存在venv路径的定位错误均保留，不计通过。为完整JS测试创建任务独立Python测试venv并安装httpx==0.28.1，未变更系统Python或项目依赖。
 - 四角色固定在 /Users/eitan/.codex/income-explicit-contributions-20261107-rqyp5j2g：MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、可执行ROLLBACK.sh；固定probe、原始归档、命令stdout/stderr/exit与哈希作为补充证据。无新增代理或其他聊天消息；不清理其他工作树、用户库或正在使用的扩展。
+- 复核发现旧日榜记录的最高值比较仍会让虚构1000挡住后来的明确800；补充断言实际先红(exit1)，比较时仅对既有明确分值执行单调最大值，旧推算允许被真实较低分替换。为保证最终源码一致，仅按lsof cwd核实后停止本任务完整测试PID60561及其子进程；中止exit1保留，不计通过、不影响其他任务。最终源码已重新生成索引并启动完整回归。

@@ -521,4 +521,6 @@ test('旧榜单明确的1000贡献与无UID整榜继续生效，旧推算日榜�
   assert.equal(report.currentSession.totalDiamonds,1000);
   assert.equal(report.currentSession.estimatedIncome,50);
   assert.equal(report.calibration.legacyIncomeEstimate,0);
+  assert.equal(await store.recordContribution({room:'1',date:'2026-10-15',userId:'uid:8',name:'真实观众',score:800}),true);
+  assert.equal((await store.report('1','2026-10')).calibration.legacyIncomeEstimate,80,'明确低分可替换旧日榜的虚构1000下限');
 });

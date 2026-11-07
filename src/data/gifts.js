@@ -518,7 +518,7 @@ export class GiftStore {
       const entries = new Map(Array.isArray(state?.entries) ? state.entries : []);
       const entryKey = `${date}:${userId}`;
       const previous = entries.get(entryKey);
-      if (previous && (Number(previous.score) > score || (Number(previous.score) === score && (!previous.scoreIsFloor || scoreIsFloor)))) return false;
+      if (previous && !previous.scoreIsFloor && Number(previous.score) >= score) return false;
       entries.set(entryKey, { date, userId, name: String(name).slice(0, 60), score, scoreIsFloor:Boolean(scoreIsFloor), observedAt: this.now() });
       // 历史月报依赖这些持久记录，新一天采样不能删除以前的收入估值。
       await this.set(key, { version: 1, entries: [...entries] });
