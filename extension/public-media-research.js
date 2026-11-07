@@ -5,6 +5,13 @@ import {publicMediaEnabled as enabled,publicMediaVisualEnabled,publicMediaHasVis
 
 const profileURL=author=>`https://www.douyin.com/user/${author}`;
 const bound=(profile,subject,author)=>Boolean(subjectKeySchema.safeParse(subject).success && profile?.binding && profile.binding.subject===subject && profile.binding.sources?.includes(profileURL(author)));
+const completeCoverage=job=>{
+ if(job.coverage?.audio==='complete')return true;
+ const {coverage}=job,visual=coverage?.visual;
+ return publicMediaHasVisual(job) && coverage?.audio==='absent' && coverage.video==='sampled' && visual?.version==='uniform-keyframes-v1'
+  && Number.isInteger(coverage.durationMs) && coverage.durationMs>0 && coverage.durationMs<=10800000 && visual.durationMs===coverage.durationMs
+  && Number.isInteger(visual.planned) && visual.planned>0 && visual.planned<=120 && visual.completed===visual.planned;
+};
 
 // Native SQLite owns jobs; the existing corpus owns text. This controller only
 // bridges their acknowledgements and resolves identity from canonical memory.
@@ -27,8 +34,8 @@ export function createPublicMediaResearch({readConfig,resolveProfile,checkProfil
   const at=job.updatedAt ?? job.createdAt;
   if(!Number.isFinite(at) || at>now())throw Error('原生作品证据时间无效');
   const sources=rows.filter(r=>['transcript','visual'].includes(r.kind) && typeof r.text==='string' && r.text.trim()).map(row=>({url:job.url,title:row.kind==='visual' ? '公开视频关键帧观察' : '公开视频音轨原文',
-   text:JSON.stringify({workId:job.workId,author:job.author,subject:job.subject,mediaHash:job.mediaHash,analysisVersion:job.analysisVersion,kind:row.kind,startMs:row.startMs,endMs:row.endMs,speaker:'unknown',...(row.kind==='visual' ? {model:row.model} : {}),text:row.text}),
-   at,expiresAt:at+180*86400000,evidenceKind:'public-media',coverage:row.kind==='visual' ? `单张关键帧 ${row.startMs}ms；全片有界间隔采样，不是连续视频；模型观察待核实，不证明人物身份、心理或帧外事件` : `完整音轨分段转录 ${row.startMs}–${row.endMs}ms；说话人未确认；视频画面${job.coverage.video==='sampled' ? '仅采样' : '未分析'}；机器转录待核实，不是作者本人自述证明` }));
+   text:JSON.stringify({workId:job.workId,author:job.author,subject:job.subject,mediaHash:job.mediaHash,analysisVersion:job.analysisVersion,kind:row.kind,startMs:row.startMs,endMs:row.endMs,speaker:'unknown',...(row.kind==='visual' ? {model:row.model,audio:job.coverage.audio} : {}),text:row.text}),
+   at,expiresAt:at+180*86400000,evidenceKind:'public-media',coverage:row.kind==='visual' ? `${job.coverage.audio==='absent' ? '作品无音轨；' : ''}单张关键帧 ${row.startMs}ms；全片有界间隔采样，不是连续视频；模型观察待核实，不证明人物身份、心理或帧外事件` : `完整音轨分段转录 ${row.startMs}–${row.endMs}ms；说话人未确认；视频画面${job.coverage.video==='sampled' ? '仅采样' : '未分析'}；机器转录待核实，不是作者本人自述证明` }));
   await checkProfile({room,anchor,subject:job.subject,binding:profile.binding});
   const current=await synchronize(room,anchor,job);
   if(!current.allowed || current.profile.epoch!==job.epoch)return;
@@ -46,7 +53,7 @@ export function createPublicMediaResearch({readConfig,resolveProfile,checkProfil
    if(publicMediaHasVisual(job) && !publicMediaVisualEnabled(config)){await native({operation:'cancel',room,anchor,job:job.id});continue;}
    const {profile,allowed}=await synchronize(room,anchor,job);
    if(!allowed || profile.epoch!==job.epoch || job.status!=='succeeded' || job.imported)continue;
-   if(job.coverage?.audio!=='complete' || !/^[a-f0-9]{64}$/u.test(job.mediaHash || ''))continue;
+   if(!completeCoverage(job) || !/^[a-f0-9]{64}$/u.test(job.mediaHash || ''))continue;
    await ingest(room,anchor,job,profile);
   }
   if(String(config?.anchorId)===anchor && enabled(config) && await canArchive() && jobs.some(job=>['queued','paused'].includes(job.status)) && await worker.ready())await worker.run();

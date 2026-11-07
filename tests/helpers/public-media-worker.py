@@ -13,6 +13,9 @@ from public_media_worker import DownloadedMedia, PublicMediaWorker
 
 
 class TranscriptFixture:
+    def reserve(self, priority):
+        assert priority == 'background'
+
     def prepare(self, priority):
         assert priority == 'background'
         return {'phase': 'ready'}

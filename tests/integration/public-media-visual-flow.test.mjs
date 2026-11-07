@@ -19,8 +19,8 @@ import {mergeConfig} from '../../src/core/engine.js';
 import {createPublicMediaProfileResolver} from '../../extension/public-media-profile.js';
 import {checkResearchProfile} from '../../src/ai/research-profile.js';
 
-function workerPort(database,analyzeVisual){
- const child=spawn('python3',[fileURLToPath(new URL('../helpers/public-media-visual-worker.py',import.meta.url)),database]);
+function workerPort(database,analyzeVisual,noaudio){
+ const child=spawn('python3',[fileURLToPath(new URL('../helpers/public-media-visual-worker.py',import.meta.url)),database,...(noaudio ? ['noaudio'] : [])]);
  const messages=new Set(),disconnects=new Set(),errors=[];let input=Buffer.alloc(0),frames=0,largestPacket=0;
  child.stderr.on('data',value=>errors.push(value));
  const port={onMessage:{addListener:fn=>messages.add(fn)},onDisconnect:{addListener:fn=>disconnects.add(fn)},disconnect:()=>child.stdin.end(),postMessage:value=>{const body=Buffer.from(JSON.stringify(value)),size=Buffer.alloc(4);size.writeUInt32LE(body.length);child.stdin.write(Buffer.concat([size,body]));}};
@@ -31,7 +31,7 @@ function workerPort(database,analyzeVisual){
  return {client,done,get frames(){return frames;},get largestPacket(){return largestPacket;}};
 }
 
-test('真实关键帧经原生封包→既有视觉客户端→SQLite→原文库→按人检索，重启去重和遗忘清除',async()=>{
+for(const noaudio of [false,true])test(`${noaudio ? '无音轨' : '有音轨'}真实关键帧经原生封包→既有视觉客户端→SQLite→原文库→按人检索，重启去重和遗忘清除`,async()=>{
  const folder=await mkdtemp(join(tmpdir(),'media-visual-flow-')),database=join(folder,'archive.sqlite3'),values={},anchor='10';
  const config=mergeConfig({anchorId:anchor,ai:{enabled:true,pipeline:{mode:'local-multimodal'},edge:{enabled:true,audioEnabled:true},accountCollection:{enabled:true}}});
  const memory=new AudienceMemory({anchor});memory.observe({type:'chat',source:'socket',id:'identity',text:'背景颜色',user:{id:'2',secUid:'author-sec',name:'茶友'},receivedAt:Date.now()});
@@ -47,15 +47,16 @@ test('真实关键帧经原生封包→既有视觉客户端→SQLite→原文�
   details.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:pixels[0]>pixels[2] ? '红色背景。' : '蓝色背景。'}}]})});return {abort(){}};
  }});
  const analyzer=createPublicMediaVisualAnalyzer({readConfig:async()=>config,resolveProfile,checkProfile,readVersion:(room,anchor)=>knowledge.handle(room,'version',{anchor}),recognize});
- const port=workerPort(database,analyzer),transport=nativeDataRequest({runtime:{sendNativeMessage:(_host,message)=>nativeMessage(fileURLToPath(new URL('../../native/data_host.py',import.meta.url)),['--database',database],message)}});
+ const port=workerPort(database,analyzer,noaudio),transport=nativeDataRequest({runtime:{sendNativeMessage:(_host,message)=>nativeMessage(fileURLToPath(new URL('../../native/data_host.py',import.meta.url)),['--database',database],message)}});
  const bridge=createPublicMediaResearch({readConfig:async()=>config,resolveProfile,checkProfile,readPrivacy:async()=>memory.snapshot(),request:transport,knowledge,worker:port.client});
  const cache=createWebKnowledge({indexedDB:null});
  try{
   await bridge.collect({room:'1',anchor,records:[{kind:'work',id:'70',subject:'author-sec',url:'https://www.douyin.com/video/70',text:'背景颜色'}]});
   await port.done;await bridge.wake('1');
   assert.equal(port.frames,2);assert.equal(modelCalls,2);assert.ok(port.largestPacket<=65536);
-  const rows=await knowledge.handle('1','list',{anchor});assert.equal(rows.length,3);
+  const rows=await knowledge.handle('1','list',{anchor});assert.equal(rows.length,noaudio ? 2 : 3);
   assert.equal(rows.filter(row=>row.title==='公开视频关键帧观察').length,2);
+  if(noaudio)assert.ok(rows.every(row=>row.coverage.includes('无音轨') && JSON.parse(row.text).audio==='absent'));
   const retrieval=createKnowledgeMemory({cache,anchor:()=>anchor,transport:(action,input)=>knowledge.handle('1',action,input)});
   const matches=await retrieval.candidates('蓝色背景',config.ai.search,{subject:'uid:2'});
   assert.ok(matches.some(row=>row.results.some(source=>source.content.includes('蓝色背景'))));

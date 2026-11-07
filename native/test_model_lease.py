@@ -72,6 +72,26 @@ class ModelLeaseContracts(unittest.TestCase):
             first.close()
             live.close()
 
+    def test_background_reservation_uses_the_same_lease_without_loading_speech_weights(self):
+        runtime=LocalASR(self.root/'missing-model')
+        contender=ModelLease(runtime.folder)
+        try:
+            with patch.object(runtime,'_prepare',side_effect=AssertionError('weights must not load')):
+                runtime.reserve(priority='background')
+                self.assertIsNone(runtime.recognizer)
+                self.assertEqual(runtime.status['phase'],'unprepared')
+                with self.assertRaisesRegex(ValueError,'ASR_BUSY'):contender.acquire('live')
+                with self.assertRaisesRegex(ValueError,'LOCAL_ASR_PREEMPTED'):runtime.check_priority()
+            runtime.close();contender.acquire('live')
+            self.assertIsNotNone(contender.fd)
+        finally:
+            runtime.close();contender.close()
+
+    def test_background_without_a_shared_lease_location_is_not_allowed_to_run_unfenced(self):
+        runtime=LocalASR(None)
+        with self.assertRaisesRegex(ValueError,'LOCAL_ASR_INSTALL'):runtime.reserve('background')
+        with self.assertRaisesRegex(ValueError,'ASR_PRIORITY'):runtime.reserve('invalid')
+
     def test_live_prepare_waits_for_background_to_unload_then_obtains_the_model_lease(self):
         background, live = LocalASR(self.root), LocalASR(self.root)
         loaded = []

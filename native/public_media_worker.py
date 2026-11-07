@@ -1,4 +1,4 @@
-"""Restartable public-video audio worker. Uses yt-dlp, FFmpeg and shared LocalASR.
+"""Restartable public-video evidence worker. Uses yt-dlp, FFmpeg and shared LocalASR.
 
 Only short database operations hold the archive location lock. Downloaded media
 is temporary; transcripts retain their source job, content hash and time range.
@@ -21,7 +21,12 @@ from local_asr import LocalASR
 from public_media_jobs import MAX_DURATION_MS, PublicMediaJobs
 from public_media_source import DownloadedMedia, download_page_media
 from media_process import reap, bounded_read, run_bounded
-from public_media_frames import extract_keyframe
+from public_media_frames import decode_video_duration, extract_keyframe
+
+
+class AudioAbsent(ValueError):
+    def __init__(self):
+        super().__init__('MEDIA_AUDIO_ABSENT')
 
 
 def verify_metadata(value, job):
@@ -128,7 +133,7 @@ class PublicMediaWorker:
                 elif code in ('LOCAL_ASR_INSTALL', 'LOCAL_ASR_SLOW', 'LOCAL_ASR_NOT_READY') or isinstance(error, ModuleNotFoundError):
                     await self.db('pause', job['id'], job['lease'], 'model-unprepared', delay_ms=60000)
                 else:
-                    await self.db('fail', job['id'], job['lease'], code if code in ('MEDIA_AUTHOR_MISMATCH', 'MEDIA_DOWNLOAD_FAILED', 'MEDIA_DECODE_FAILED', 'MEDIA_VISUAL_FAILED') else 'MEDIA_ANALYSIS_FAILED')
+                    await self.db('fail', job['id'], job['lease'], code if code in ('MEDIA_AUTHOR_MISMATCH', 'MEDIA_DOWNLOAD_FAILED', 'MEDIA_DECODE_FAILED', 'MEDIA_VISUAL_FAILED', 'MEDIA_AUDIO_ABSENT') else 'MEDIA_ANALYSIS_FAILED')
             except ValueError as fence:
                 if str(fence) not in ('MEDIA_LEASE', 'MEDIA_EPOCH'):
                     raise
@@ -141,17 +146,24 @@ class PublicMediaWorker:
 
     async def process(self, job):
         # Check the shared resource before spending network or disk work.
-        status = await finish_thread(self.asr.prepare, priority='background')
-        if status['phase'] != 'ready':
-            raise ValueError('LOCAL_ASR_NOT_READY')
+        await finish_thread(self.asr.reserve, priority='background')
         with tempfile.TemporaryDirectory(prefix='douyin-public-media-') as temporary:
             page_media = await self.db('source', job['id'], job['lease'])
             downloaded = await self.download({**job, **({'pageMedia': page_media} if page_media else {})}, Path(temporary))
             path = downloaded.path
             job = await self.db('bind_media', job['id'], job['lease'], await finish_thread(content_hash, path))
-            duration = await self.transcribe(job, path)
+            absent = False
+            try:
+                duration = await self.transcribe(job, path)
+            except AudioAbsent:
+                if not job['analysisVersion'].endswith('+keyframes-v1'):
+                    raise
+                duration = await decode_video_duration(self.ffmpeg, path)
+                absent = True
             if abs(duration-downloaded.duration_ms) > min(1000, max(250, downloaded.duration_ms*.02)):
                 raise ValueError('MEDIA_DECODE_FAILED')
+            if absent:
+                await self.db('mark_audio_absent', job['id'], job['lease'], duration)
             if job['analysisVersion'].endswith('+keyframes-v1'):
                 if self.visual is None:
                     raise ValueError('MEDIA_VISUAL_FAILED')
@@ -172,6 +184,7 @@ class PublicMediaWorker:
                                                       start_new_session=True)
         stderr = asyncio.create_task(bounded_read(process.stderr, 131072))
         samples = 0
+        prepared = False
         try:
             while True:
                 try:
@@ -190,12 +203,20 @@ class PublicMediaWorker:
                 if end > job['cursorMs']:
                     if start < job['cursorMs']:
                         raise ValueError('MEDIA_DECODE_FAILED')
+                    if not prepared:
+                        status = await finish_thread(self.asr.prepare, priority='background')
+                        if status['phase'] != 'ready':
+                            raise ValueError('LOCAL_ASR_NOT_READY')
+                        prepared = True
                     # Short tail below the ASR's 10ms minimum is valid coverage.
                     text = await finish_thread(self.asr.infer, wav_payload(frames)) if len(frames) >= 320 else ''
                     segment = {'kind': 'transcript', 'startMs': start, 'endMs': end, 'text': text, 'speaker': 'unknown'}
                     await self.db('checkpoint', job['id'], job['lease'], [segment], cursor_ms=end)
-            await asyncio.wait_for(stderr, 5)
-            if await asyncio.wait_for(process.wait(), 5) != 0 or not samples:
+            errors = await asyncio.wait_for(stderr, 5)
+            exit_status = await asyncio.wait_for(process.wait(), 5)
+            if exit_status != 0 and not samples and b'Stream map ' in errors and b'matches no streams' in errors:
+                raise AudioAbsent()
+            if exit_status != 0 or not samples:
                 raise ValueError('MEDIA_DECODE_FAILED')
             return math.ceil(samples/16)
         except (asyncio.TimeoutError, OSError, asyncio.IncompleteReadError):

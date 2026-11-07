@@ -4,8 +4,8 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "Visual keyframe evidence implementation 0235ce148852b1e3f93e2e91e1f25f4d9e3f8ded and native fixture correction a0bfa585a0d4eeba769e2dc084326ff92323dcd7 pushed to origin/dev. CI 42326790987 passed: JS 1808/1808, native 102/102, build/check/index/package. Real source decoded at PTS 0/9400/18767ms; model providers remain controlled fixtures. 85-file reconstruction/rollback and native Unicode storage round trips verified. Not deployed; no real ASR/vision accuracy or long-stream acceptance claim.",
-  "nextExecutableAction": "复用同一媒体队列、FFmpeg 和现有视觉协议，为无音轨的公开视频补齐可核验的纯视觉路径：先用真实 FFmpeg 生成无音轨文件，写失败行为测试，再做最小实现；分别标明音轨不存在与解码失败，维持实际时长/PTS、取消/遗忘、身份与知识库版本边界，不加载第二份真实模型。已部署详情采集、真实模型事实性与长期实播仍需独立验收。",
+  "lastConfirmedResult": "No-audio stage locally verified: JS 1810/1810, native 113/113, build/check/index, 86-file reconstruction/rollback. Same production worker decodes derived public media without audio, marks absent, stores only visual evidence and retains actual PTS. No ASR weights loaded; original model lease and forgetting preserved. Exact implementation commit/push/CI pending.",
+  "nextExecutableAction": "完成当前无音轨阶段的原会话 JavaScript 冻结全量回归、86 文件四角色证据账本与 dev 提交推送，跟进同一实施 SHA 的远端 CI；随后核对真实页面作者/作品详情采集缺口，沿既有页面入口取得可追溯详情证据，再做真实模型和长期资源验收。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
     "native/public_media_jobs.py",
@@ -38,7 +38,10 @@
     "extension/public-media-visual.js",
     "src/services/public-media-config.js",
     "tests/integration/public-media-visual-flow.test.mjs",
-    "output/deep-research-2026-11-07/visual-stage/real-frames.json"
+    "output/deep-research-2026-11-07/visual-stage/real-frames.json",
+    "native/test_public_media_noaudio.py",
+    "native/local_asr.py",
+    "output/deep-research-2026-11-07/noaudio-stage/derived-media.json"
   ],
   "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
   "validation": {
@@ -109,7 +112,7 @@
     "basis": "Synthetic local CPU benchmark; no model, network, browser FPS or livestream acceptance claim."
   },
   "transaction": {
-    "filesVerified": 85,
+    "filesVerified": 86,
     "patchReconstructsModified": true,
     "restoredAllOriginalHashes": true,
     "newFilesRemoved": true,
@@ -134,8 +137,8 @@
     "Installed legacy native host still running; no deployment/reload or second real model load.",
     "Public evidence does not establish sensitive psychological traits, private life or wealth.",
     "Bounded full-duration keyframe sampling implemented, maximum 120 images; not continuous video understanding or real vision-model accuracy acceptance.",
-    "Current worker still requires an audio track; no-audio public-video path remains unfinished.",
-    "One unchanged live pipeline test intermittently returned DECODE_FAILED; isolated and same-code full rerun passed; root cause not confirmed or fixed."
+    "One unchanged live pipeline test intermittently returned DECODE_FAILED; isolated and same-code full rerun passed; root cause not confirmed or fixed.",
+    "No-audio path implemented and locally verified on synthetic and derived public media; untouched platform no-audio sample, deployed capture and real-model accuracy remain unverified."
   ],
   "commitPush": {
     "implementation": "pushed origin/dev",
@@ -418,6 +421,75 @@
       "index": "passed",
       "package": "passed",
       "url": "https://github.com/EitanWong/douyin-live-operations-assistant/actions/runs/42326790987"
+    }
+  },
+  "noAudioStage": {
+    "status": "implemented and locally verified; commit/push/CI pending; not deployed",
+    "baselineCommit": "4ea37d75013940845607bb173d0f16e2f418a3b0",
+    "changedFields": [
+      "coverage.audio=absent",
+      "cursorMs=0 for no-audio"
+    ],
+    "changedSymbols": [
+      "LocalASR.reserve",
+      "AudioAbsent",
+      "decode_video_duration",
+      "mark_audio_absent",
+      "audio_coverage",
+      "completeCoverage"
+    ],
+    "nativeTests": 113,
+    "crossProcessFlows": 2,
+    "derivedMedia": {
+      "source": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
+      "sourceHash": "af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881",
+      "derived": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/noaudio-stage/public-derived-noaudio.mp4",
+      "derivedHash": "4c51f0d42d513d58dd09adad8dd3e74bc37c709cad5d918c48195b2c5464157e",
+      "derivedBytes": 3345241,
+      "operation": "video stream copy; audio removed for development fixture; not an original no-audio platform sample",
+      "decodedDurationMs": 19734,
+      "ffmpeg": "/Users/eitan/.local/share/douyin-live-assistant/native/releases/30a0ff18-1856-4ee1-829f-40cf4baf52de/.venv/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v7.1"
+    },
+    "transactionFiles": 86,
+    "index": {
+      "modules": 530,
+      "symbols": 2980
+    },
+    "fullDecodeBudget": {
+      "timeoutSeconds": 180,
+      "stdoutBytes": 2097152
+    },
+    "unavailableChecks": [
+      "crapper",
+      "dryer",
+      "mutator"
+    ],
+    "limits": [
+      "No deployed detail-capture acceptance",
+      "No real-model factuality or long-livestream acceptance",
+      "Derived file is development fixture, not an untouched no-audio platform sample",
+      "Retained prior live DECODE_FAILED root cause remains unconfirmed"
+    ],
+    "resubmit": "completed→cancel→submit preserves absence/actual frame checkpoints; red reproduced, final 113/113 passed",
+    "javascript": {
+      "passed": 1810,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "command": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "tests"
+      ],
+      "outerElapsedSeconds": 435.043,
+      "runnerReportedDurationMs": 434969.549,
+      "nativeCorrectionDuringRun": "Only native coverage method and its Python regression changed during JS run; post-review media integration runs separately; final exact commit CI required."
+    },
+    "postReviewMediaJS": {
+      "passed": 24,
+      "failed": 0,
+      "logs": "output/deep-research-2026-11-07/noaudio-stage/js-after-native-correction.*"
     }
   }
 }

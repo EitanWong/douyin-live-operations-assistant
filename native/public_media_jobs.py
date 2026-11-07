@@ -275,12 +275,41 @@ class PublicMediaJobs:
             cursor = max(cursor, row['end_ms'])
         return cursor >= end_ms
 
+    def audio_coverage(self, job, duration_ms):
+        if job['cursor_ms'] == duration_ms and self.covered(job['id'], duration_ms):
+            return 'complete'
+        coverage = json.loads(job['coverage']) if job['coverage'] else {}
+        if (job['analysis_version'].endswith('+keyframes-v1') and job['cursor_ms'] == 0
+                and coverage.get('audio') == 'absent' and coverage.get('durationMs') == duration_ms):
+            return 'absent'
+        raise ValueError('MEDIA_COVERAGE')
+
+    def mark_audio_absent(self, job_id, lease, duration_ms):
+        if type(duration_ms) is not int or not 0 < duration_ms <= MAX_DURATION_MS:
+            raise ValueError('MEDIA_COVERAGE')
+        with self.transaction():
+            job = self.fenced(job_id, lease)
+            if not self.db.execute('SELECT 1 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone():
+                raise ValueError('MEDIA_UNBOUND')
+            if (not job['analysis_version'].endswith('+keyframes-v1') or job['cursor_ms'] != 0
+                    or self.db.execute("SELECT 1 FROM public_media_segments WHERE job_id=? AND kind='transcript'", (job_id,)).fetchone()):
+                raise ValueError('MEDIA_COVERAGE')
+            coverage = {'audio':'absent','durationMs':duration_ms,'video':'pending','speaker':'unknown'}
+            if job['coverage']:
+                old = json.loads(job['coverage'])
+                if old.get('audio') != 'absent' or old.get('durationMs') != duration_ms:
+                    raise ValueError('MEDIA_COVERAGE')
+            else:
+                self.db.execute('UPDATE public_media_jobs SET coverage=? WHERE id=?', (json.dumps(coverage), job_id))
+
     def checkpoint(self, job_id, lease, segments, cursor_ms):
         if not isinstance(segments, list) or not 1 <= len(segments) <= 16 or type(cursor_ms) is not int or not 0 <= cursor_ms <= MAX_DURATION_MS:
             raise ValueError('MEDIA_SEGMENT')
         parsed = [segment_data(row) for row in segments]
         with self.transaction():
             job = self.fenced(job_id, lease)
+            if job['coverage'] and json.loads(job['coverage']).get('audio') == 'absent':
+                raise ValueError('MEDIA_COVERAGE')
             if not self.db.execute('SELECT 1 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone():
                 raise ValueError('MEDIA_UNBOUND')
             if cursor_ms < job['cursor_ms']:
@@ -303,8 +332,9 @@ class PublicMediaJobs:
         positions = frame_positions(duration_ms)
         with self.transaction():
             job = self.fenced(job_id, lease)
-            if not job['analysis_version'].endswith('+keyframes-v1') or job['cursor_ms'] != duration_ms or not self.covered(job_id, duration_ms):
+            if not job['analysis_version'].endswith('+keyframes-v1'):
                 raise ValueError('MEDIA_COVERAGE')
+            self.audio_coverage(job, duration_ms)
             old = self.db.execute('SELECT duration_ms,positions FROM public_media_visual WHERE job_id=?', (job_id,)).fetchone()
             if old and (old['duration_ms'] != duration_ms or json.loads(old['positions']) != positions):
                 raise ValueError('MEDIA_COVERAGE')
@@ -338,10 +368,9 @@ class PublicMediaJobs:
             raise ValueError('MEDIA_COVERAGE')
         with self.transaction():
             job = self.fenced(job_id, lease)
-            if job['cursor_ms'] != duration_ms or not self.covered(job_id, duration_ms):
-                raise ValueError('MEDIA_COVERAGE')
+            audio = self.audio_coverage(job, duration_ms)
             visual = self.db.execute("SELECT 1 FROM public_media_segments WHERE job_id=? AND kind IN ('visual','ocr') LIMIT 1", (job_id,)).fetchone()
-            coverage = {'audio': 'complete', 'durationMs': duration_ms, 'video': 'sampled' if visual else 'not-analyzed', 'speaker': 'unknown'}
+            coverage = {'audio': audio, 'durationMs': duration_ms, 'video': 'sampled' if visual else 'not-analyzed', 'speaker': 'unknown'}
             if job['analysis_version'].endswith('+keyframes-v1'):
                 state = self.get(job_id)['visual']
                 if not state or state['durationMs'] != duration_ms or state['completed'] != state['planned']:
@@ -359,11 +388,11 @@ class PublicMediaJobs:
             self.db.execute("UPDATE public_media_jobs SET status='paused',lease=NULL,worker=NULL,error=?,not_before=?,updated_at=? WHERE id=?", (reason, self.now()+delay_ms, self.now(), job_id))
 
     def fail(self, job_id, lease, code):
-        if code not in ('MEDIA_DOWNLOAD_FAILED', 'MEDIA_AUTHOR_MISMATCH', 'MEDIA_DECODE_FAILED', 'MEDIA_ANALYSIS_FAILED', 'MEDIA_VISUAL_FAILED'):
+        if code not in ('MEDIA_DOWNLOAD_FAILED', 'MEDIA_AUTHOR_MISMATCH', 'MEDIA_DECODE_FAILED', 'MEDIA_ANALYSIS_FAILED', 'MEDIA_VISUAL_FAILED', 'MEDIA_AUDIO_ABSENT'):
             raise ValueError('MEDIA_ERROR')
         with self.transaction():
             row = self.fenced(job_id, lease)
-            retry = code != 'MEDIA_AUTHOR_MISMATCH' and row['failures'] < 2
+            retry = code not in ('MEDIA_AUTHOR_MISMATCH', 'MEDIA_AUDIO_ABSENT') and row['failures'] < 2
             if not retry:
                 self.db.execute('DELETE FROM public_media_sources WHERE job_id=?', (job_id,))
             self.db.execute('UPDATE public_media_jobs SET status=?,lease=NULL,worker=NULL,error=?,failures=failures+1,not_before=?,updated_at=? WHERE id=?',

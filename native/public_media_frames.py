@@ -9,6 +9,22 @@ from media_process import run_capture
 MAX_FRAMES = 120
 
 
+async def decode_video_duration(ffmpeg, path):
+    args = [ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-xerror',
+            '-protocol_whitelist', 'file,pipe', '-i', str(path), '-map', '0:v:0', '-an',
+            '-fps_mode', 'passthrough', '-stats_period', '5', '-progress', 'pipe:1', '-nostats', '-f', 'null', '-']
+    try:
+        stdout, _ = await run_capture(args)
+        progress = dict(line.split('=', 1) for line in stdout.decode('ascii').splitlines() if '=' in line)
+        duration_ms = math.ceil(int(progress['out_time_us'])/1000)
+        if progress['progress'] != 'end' or int(progress['frame']) <= 0:
+            raise ValueError('MEDIA_DECODE_FAILED')
+        frame_positions(duration_ms)
+        return duration_ms
+    except (ValueError, KeyError, OSError, TimeoutError):
+        raise ValueError('MEDIA_DECODE_FAILED') from None
+
+
 def frame_positions(duration_ms):
     if type(duration_ms) is not int or not 0 < duration_ms <= 10800000:
         raise ValueError('MEDIA_COVERAGE')

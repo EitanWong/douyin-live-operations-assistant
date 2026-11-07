@@ -102,7 +102,11 @@ class LocalASR:
                 self.lease.close()
             self.status['phase'] = phase
 
-    def prepare(self, priority='live'):
+    def reserve(self, priority='live'):
+        if priority not in ('live', 'background'):
+            raise ValueError('ASR_PRIORITY')
+        if priority == 'background' and self.lease is None:
+            raise ValueError('LOCAL_ASR_INSTALL')
         with self.operation_lock:
             try:
                 deadline = time.monotonic()+10
@@ -115,6 +119,15 @@ class LocalASR:
                             if str(error) != 'ASR_BUSY' or priority != 'live' or time.monotonic() >= deadline:
                                 raise
                             time.sleep(.05)
+                self.check_priority()
+            except Exception:
+                self.close()
+                raise
+
+    def prepare(self, priority='live'):
+        with self.operation_lock:
+            try:
+                self.reserve(priority)
                 result = self._prepare()
                 self.check_priority()
                 return result

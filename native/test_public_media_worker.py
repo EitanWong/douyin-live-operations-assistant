@@ -21,6 +21,9 @@ class FakeASR:
         self.preempt_at = preempt_at
         self.preempted = False
 
+    def reserve(self, priority):
+        assert priority == 'background'
+
     def prepare(self, priority):
         assert priority == 'background'
         return {'phase': 'ready'}

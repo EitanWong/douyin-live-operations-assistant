@@ -100,3 +100,20 @@ test('下载源再次核对稳定 UID、作品和有效期；不匹配时只提�
   assert.deepEqual(request.pageMedia,candidate===source ? source : undefined);
  }
 });
+
+test('无音轨任务仅在视觉计划完整时导入关键帧，证据明确无音轨且不伪造转录',async()=>{
+ for(const state of ['complete','partial','audio-only']){
+  const f=fixture();f.mode('local-multimodal');
+  f.pages([{kind:'visual',startMs:1000,endMs:1001,text:'蓝色背景。',model:'fixture',speaker:'unknown'}]);
+  await f.bridge.collect({room,anchor,records:[work]});f.complete();
+  const job=[...f.jobs.values()][0];job.analysisVersion=state==='audio-only' ? 'sensevoice-v1' : 'sensevoice-v1+keyframes-v1';
+  job.coverage={audio:'absent',video:'sampled',durationMs:2000,speaker:'unknown',visual:{version:'uniform-keyframes-v1',durationMs:2000,planned:2,completed:state==='partial' ? 1 : 2}};
+  await f.bridge.wake(room);
+  assert.equal(f.saved.length,state==='complete' ? 1 : 0);
+  if(state==='complete'){
+   assert.equal(f.saved[0].sources.length,1);const source=f.saved[0].sources[0];
+   assert.match(source.coverage,/无音轨/);assert.doesNotMatch(source.coverage,/完整音轨/);
+   assert.equal(JSON.parse(source.text).audio,'absent');assert.equal(job.imported,true);
+  }
+ }
+});
