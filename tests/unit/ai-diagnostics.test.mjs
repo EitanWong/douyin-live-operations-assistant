@@ -7,7 +7,7 @@ test('AI诊断报告实际运行配置、已到期知识与有界来源，不能
  const now=Date.parse('2026-11-02T15:00:00Z');
  const config=mergeConfig({ai:{enabled:true,assistant:{memoryEnabled:false},memory:{entries:[{id:'old',title:'资料',content:'不要暴露的个人资料',source:'秘密',updatedAt:now,expiresOn:'2026-11-01',enabled:true}]}}});
  const rows=aiDiagnostics({config,context:{context:[{text:'不要暴露的弹幕'}],mediaContext:null},mediaState:'idle',memoryCount:2,knownGaps:3,now});
- const text=rows.join('\n');assert.match(text,/已保存/);assert.match(text,/过期 1/);assert.match(text,/观众记忆.*关闭.*2/);assert.match(text,/缺口 3/);assert.match(text,/未开启/);
+ const text=rows.join('\n');assert.match(text,/已保存/);assert.match(text,/过期 1/);assert.match(text,/观众记忆.*开启.*2/);assert.match(text,/缺口 3/);assert.match(text,/未开启/);
  assert.doesNotMatch(text,/个人资料|秘密|不要暴露的弹幕|Bearer|api-key/);
 });
 

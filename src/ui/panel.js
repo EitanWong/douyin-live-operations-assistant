@@ -48,6 +48,7 @@ const categories = { system: '运行', filter: '过滤', moderation: '内容提�
 const timeFormat = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const interactionPages = ['anchor','gift','welcome','likes','keywords','bot','timers'];
 const money = value => new Intl.NumberFormat('zh-CN', {style:'currency',currency:'CNY',maximumFractionDigits:2}).format(value);
+const modeLabel = mode => ({preview:'仅预览',auto:'自动发送',collect:'静默收集'})[mode];
 
 const CSS_TEXT = `
 :host{all:initial;color-scheme:var(--sg-scheme);font:14px/1.55 var(--sg-font);color:var(--sg-foreground);--ink:var(--sg-foreground);--muted:var(--sg-muted);--line:var(--sg-border);--accent:var(--sg-brand);--accent-strong:var(--sg-brand);--paper:var(--sg-background);--surface:var(--sg-solid);--wash:var(--sg-control);--signal:var(--sg-brand);--amber:var(--sg-warning);--danger:var(--sg-danger);-webkit-font-smoothing:antialiased}
@@ -221,7 +222,7 @@ export class Panel {
           <section class="page" role="tabpanel" id="page-runtime" aria-labelledby="tab-runtime" data-page="runtime" hidden>
             <h2>运行规则</h2><p class="intro">符合规则的消息按优先级及时发送。</p>
             <div class="status"><strong data-state>已暂停</strong></div>
-            <section class="settings-group"><h3>互动发送</h3><p class="group-note">所有已接受的互动按优先级连续处理；发送控件就绪后立即提交，无需逐条审核。</p><div class="grid">${this.select('mode', '回复方式', [['auto', '自动发送'], ['preview', '仅预览，不发送']])}</div><label class="toggle"><input type="checkbox" data-field="automation.monitorRoom">持续监控直播间，未开播时自动刷新</label><label class="toggle"><input type="checkbox" data-field="automation.autoStart">进入此主播直播间后自动开始场控</label><p class="hint">仅当前主播生效；未开播时持续检测并定期刷新，开播后按自动开始设置运行，下播后等待下一场。手动暂停后本页停止自动启动与刷新。</p><p class="hint" data-room-monitor role="status"></p><div class="mode-note" data-mode-note>符合规则的回复会自动发送。</div></section>
+            <section class="settings-group"><h3>运行模式</h3><p class="group-note">所有模式持续保存采集数据，AI 可用时按额度整理原文和研究背景。静默收集禁止公屏回复、自动管理、点赞、送礼及活动参与；切回回复模式保留原有互动设置。</p><div class="grid">${this.select('mode', '回复方式', [['auto', '回复并持续收集'], ['collect', '静默收集（不回复、不互动）'], ['preview', '仅预览，不发送']])}</div><label class="toggle"><input type="checkbox" data-field="automation.monitorRoom">持续监控直播间，未开播时自动刷新</label><label class="toggle"><input type="checkbox" data-field="automation.autoStart">进入此主播直播间后自动开始场控</label><p class="hint">仅当前主播生效；未开播时持续检测并定期刷新，开播后按自动开始设置运行，下播后等待下一场。手动暂停后本页停止自动启动与刷新。</p><p class="hint" data-room-monitor role="status"></p><div class="mode-note" data-mode-note>符合规则的回复会自动发送。</div></section>
           </section>
           <section class="page" role="tabpanel" id="page-appearance" aria-labelledby="tab-appearance" data-page="appearance" hidden>
             <h2>外观</h2><p class="intro">选择适合当前环境的亮暗模式。</p>
@@ -233,7 +234,7 @@ export class Panel {
             <div class="feature-settings">
             <section class="feature-section"><h3>直播互动</h3><p class="group-note">按礼物、进场、点赞和弹幕触发；定时消息按已配置的间隔发送。</p><div class="feature-list">${[['gift','礼物感谢'],['welcome','进场欢迎'],['like','点赞感谢'],['keyword','关键词回复'],['bot','机器人互动'],['timers','定时消息']].map(([key,label]) => `<div class="feature-row"><div class="feature-title">${label}<small data-feature-note="${key}"></small></div><label class="switch" aria-label="${label}"><input type="checkbox" role="switch" data-field="${key==='timers' ? 'timersEnabled' : key+'.enabled'}" aria-label="${label}"><span></span></label></div>`).join('')}</div></section>
             <section class="feature-section"><h3>AI 互动</h3><p class="group-note">先启用 AI 服务，再选择问答或冷场互动；机器人被 @ 时优先使用 AI 接话，不可用时使用内置回复。</p><div class="feature-list">${[['ai.enabled','AI 服务','ai-service'],['ai.chatEnabled','AI 弹幕问答','ai-chat'],['ai.idleEnabled','AI 冷场互动','ai-idle']].map(([path,label,note]) => `<div class="feature-row"><div class="feature-title">${label}<small data-feature-note="${note}"></small></div><label class="switch" aria-label="${label}"><input type="checkbox" role="switch" data-field="${path}" aria-label="${label}"><span></span></label></div>`).join('')}</div><button type="button" class="text-button" data-go="ai">配置 AI 服务与问答</button></section>
-            <section class="feature-section"><h3>治理与统计</h3><p class="group-note">内容治理按提醒条件触发；收入统计独立于礼物感谢，按主播与直播场次保存。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">内容治理<small data-feature-note="moderation"></small></div><label class="switch" aria-label="内容治理"><input type="checkbox" role="switch" data-field="moderation.enabled" aria-label="内容治理"><span></span></label></div><div class="feature-row"><div class="feature-title">收入统计<small>本地保存每场直播的礼物价值与月度收入估算；关闭后停止采集，历史数据仍保留。</small></div><label class="switch" aria-label="收入统计"><input type="checkbox" role="switch" data-field="incomeEnabled" aria-label="收入统计"><span></span></label></div></div></section>
+            <section class="feature-section"><h3>治理与统计</h3><p class="group-note">内容治理按提醒条件触发；收入统计独立于礼物感谢，按主播与直播场次保存。</p><div class="feature-list"><div class="feature-row"><div class="feature-title">内容治理<small data-feature-note="moderation"></small></div><label class="switch" aria-label="内容治理"><input type="checkbox" role="switch" data-field="moderation.enabled" aria-label="内容治理"><span></span></label></div><div class="feature-row"><div class="feature-title">收入统计<small>底层持续保存每场直播的礼物价值与月度收入估算，不随回复模式关闭。</small></div><label class="switch" aria-label="收入统计"><input type="checkbox" role="switch" data-field="incomeEnabled" aria-label="收入统计" disabled><span></span></label></div></div></section>
             </div>
           </section>
           <section class="page" id="page-replies" data-page="replies" aria-label="回复记录（暂未开放）" hidden>
@@ -519,7 +520,7 @@ export class Panel {
     this.renderBotScores(this.latest?.[0]?.bot);
     this.text('[data-bot-ai]', aiReady ? '启用 AI 服务即可 @账号聊天，无需开启自动接话。菜单与游戏指令优先；游戏互动使用 AI 接话，忙碌、失败或等待超过 5 秒时自动使用内置回复。菜单和游戏结果由本地确定。' : '当前使用内置题库和算法回复；启用 AI 服务后自动使用 AI 接话。主播和观众可直接回答，也可用文字或表情完成挑战。');
     this.text('[data-summary=keyword]', !get('keyword.enabled').checked ? '已关闭，不会回复关键词弹幕。' : `${keywordCount} 条规则 · 按顺序命中首条 · ${strategy(get('keyword.responseMode').value)} · 即时回复。`);
-    this.text('[data-summary=ai]', !aiReady ? 'AI 服务已关闭；已启用的模块仅使用预设话术。' : `AI 服务已开启 · 弹幕问答${get('ai.chatEnabled').checked ? '：AI 按语境判断 · @账号直接对话' : '：关闭'} · 每小时最多 ${get('ai.maxPerHour').value} 次 · ${get('mode').value === 'preview' ? '当前仅预览' : '自动发送'}`);
+    this.text('[data-summary=ai]', !aiReady ? 'AI 服务已关闭；原文继续采集，模型分析暂停。' : `AI 服务已开启 · 弹幕问答${get('ai.chatEnabled').checked ? '：AI 按语境判断 · @账号直接对话' : '：关闭'} · 每小时最多 ${get('ai.maxPerHour').value} 次 · ${modeLabel(get('mode').value)}`);
     const timerRows = [...this.root.querySelectorAll('[data-list=timers] [data-list-row=timers]')];
     const activeTimerRows = timerRows.filter(row=>row.querySelector('[data-item=enabled]')?.checked);
     const timers = activeTimerRows.length;
@@ -530,7 +531,7 @@ export class Panel {
     this.text('[data-feature-note=ai-chat]', get('ai.chatEnabled').checked ? (aiReady ? '按语境择机回应 · 发言节奏见 AI 设置' : '需先启用 AI 服务') : '不处理弹幕问答');
     this.text('[data-feature-note=ai-idle]', get('ai.idleEnabled').checked ? `无互动 ${get('ai.idleSec').value} 秒后依据现场线索接话` : '已关闭');
     this.text('[data-feature-note=moderation]', get('moderation.enabled').checked ? '敏感话题、辱骂与恶意言论分级处置' : '已关闭');
-    this.text('[data-mode-note]', {preview:'仅预览，不会发送到直播间。AI 开启后仍会调用模型。',auto:'符合规则的回复会自动发送。'}[get('mode').value]);
+    this.text('[data-mode-note]', {collect:'静默收集中：持续保存原文与数据，AI 在后台整理和研究；不回复、不执行对外互动。语音识别需要可用的直播感知服务。',preview:'仅预览，不会发送到直播间。底层持续收集，AI 开启后仍会调用模型。',auto:'符合规则的回复会自动发送，后台持续收集和研究。'}[get('mode').value]);
     const fan = get('welcome.requireFan').checked;
     get('welcome.requireLit').disabled = !fan; get('welcome.minFanLevel').disabled = !fan;
     get('welcome.admin.minWealth').disabled = !get('welcome.admin.enabled').checked;
@@ -684,7 +685,7 @@ export class Panel {
   }
   syncLauncher() {
     const launcher = this.node('.launcher'), running = Boolean(this.latest?.[0].running);
-    const status = running ? (this.latest[0].config.mode === 'preview' ? '仅预览' : '自动发送') : '已暂停';
+    const status = running ? modeLabel(this.latest[0].config.mode) : '已暂停';
     launcher.classList.toggle('running', running); this.text('.launcher span', this.aiServiceError ? 'AI 异常' : status);
     const attributes = { 'aria-expanded':String(this.open), 'aria-label':`${this.open ? '收起' : '展开'}场控面板，当前${status}${this.aiServiceError ? '，AI 服务异常' : ''}`, title:`点击${this.open ? '收起' : '展开'} · 拖动调整位置` };
     for (const [key, value] of Object.entries(attributes)) if (launcher.getAttribute(key) !== value) launcher.setAttribute(key, value);
@@ -882,6 +883,7 @@ export class Panel {
     });
     const edited = e => {
       if (!e.target.closest('[data-field],[data-item],[data-api-key],[data-remember-key],[data-preset]')) return;
+      if(e.target.matches('[data-field="mode"]') && e.target.value==='collect'){this.node('[data-field="ai.enabled"]').checked=true;if(this.node('[data-field="ai.pipeline.mode"]').value==='custom' && !this.node('[data-field="ai.media.audioEnabled"]').checked && !this.node('[data-field="ai.media.omniEnabled"]').checked)this.node('[data-field="ai.pipeline.mode"]').value='local-audio';}
       this.markDirty(); e.target.removeAttribute('aria-invalid'); this.syncControls();
       if (e.target.dataset.field?.startsWith('identity.') && this.identity) this.updateIdentity(this.identity);
     };
@@ -1060,7 +1062,7 @@ export class Panel {
   renderOverview(engine) {
     const alertEntries = this.entries.filter(entry => entry.category === 'moderation' || entry.category === 'error');
     const recentAlerts = alertEntries.slice(-4).reverse();
-    this.text('[data-overview-state]', engine.running ? `运行中 · ${{preview:'仅预览',auto:'自动发送'}[engine.config.mode]}` : '已暂停');
+    this.text('[data-overview-state]', engine.running ? `运行中 · ${modeLabel(engine.config.mode)}` : '已暂停');
     this.text('[data-overview-stat="events"]', engine.stats.events);
     this.text('[data-overview-stat="submitted"]', engine.stats.submitted);
     this.text('[data-overview-stat="alerts"]', alertEntries.length);
@@ -1139,7 +1141,7 @@ export class Panel {
   }
   refresh(engine, network = {}) {
     this.latest = [engine,network];
-    const mode = { preview: '仅预览', auto: '自动发送' }[engine.config.mode];
+    const mode = modeLabel(engine.config.mode);
     this.syncLauncher();
     if (!this.open) return;
     const monitor=network.roomMonitor,monitorLabel=({waiting:'等待开播 · 持续监控中',connected:'直播已连接',reconnecting:'等待直播连接恢复',refreshing:'正在刷新直播间',offline:'网络离线 · 等待恢复'})[monitor?.state] || '';

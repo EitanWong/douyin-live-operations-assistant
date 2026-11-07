@@ -126,7 +126,7 @@ export function boot(options = {}) {
     if (persistenceDisabled || sendingScheduled || senderActive || !engine?.senderEnabled() || engine.busy || closed || suspended || !roomContext.current()) return;
     const now = Date.now();
     if (!engine.queue.some(job => engine.giftReady(job, now)) && ![...engine.gifts.values()].some(gift => gift.due <= now && gift.count > gift.credited)) return;
-    if (!demo && (liveEnded() || engine.config.mode !== 'preview' && !liveConnection())) return;
+    if (!demo && (liveEnded() || engine.config.mode === 'auto' && !liveConnection())) return;
     sendingScheduled = true;
     queueMicrotask(async () => {
       sendingScheduled = false;
@@ -134,7 +134,7 @@ export function boot(options = {}) {
       const beforeJob = engine.selectNextJob(engine.queue, Date.now())?.id;
       const beforeSent = engine.stats.submitted + engine.stats.previews;
       senderActive = true;
-      try { await engine.tick(!liveEnded() && (demo || engine.config.mode === 'preview' || liveConnection())); }
+      try { await engine.tick(!liveEnded() && (demo || engine.config.mode !== 'auto' || liveConnection())); }
       catch (error) { reportPersistenceError(error, '即时发送异常，消息保留'); }
       finally {
         senderActive = false;
@@ -313,7 +313,7 @@ export function boot(options = {}) {
     return captureMedia(args);
   },
     realtimeCapture:options.realtimeCapture || realtimeCapture,nativeCapture:options.nativeCapture || createNativeCapture({connect:options.nativeConnect,getKey:mediaKey,room,onMemoryWarning:message=>{log('error',message);panel?.aiSettings.showError(message);}}),recognize:createSpeechRecognizer({cloud:recognizeMedia,edge,config:()=>engine.config.ai.edge}),
-    onObservation:row=>{mediaEvidence.add(row);if(engine?.config.ai.assistant.memoryEnabled && memoryScope().perception.observe(row))persistRuntime();panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
+    onObservation:row=>{mediaEvidence.add(row);if(engine && memoryScope().perception.observe(row))persistRuntime();panel?.aiSettings.observations(mediaEvidence.context(activeMediaConfig.contextAgeSec).observations);if(engine?.running && media.state==='running')engine.requestProactive(Date.now());},
     onState:state=>{if(state.state==='idle')clearMedia();panel?.aiSettings.state(state);},
     onError:error=>{panel?.aiSettings.showError(error.message);log('ai',`音视频识别：${error.message}`);}
   });
@@ -339,7 +339,7 @@ export function boot(options = {}) {
     if(retrieveRelationships)return retrieveRelationships(query,memory,graphOptions);
     return localRelationships(query,memory,graphOptions);
   };
-  const localRelationships=(query,memory=engine.config.ai.memory,graphOptions)=>liveMemory.relationships(engine.config.anchorId,query,{memory,knowledge:engine.config.ai.knowledge,anchorName:identity.anchor?.name,anchorSecUid:identity.anchor?.secUid,accounts:engine.config.ai.contextSources.accounts ? [...accounts.history(engine.config.anchorId),...accounts.list(engine.config.anchorId)] : [],includeAccountHistory:true,graphOptions,includeAudience:engine.config.ai.assistant.memoryEnabled && engine.config.ai.contextSources.audience,includePerception:engine.config.ai.assistant.memoryEnabled});
+  const localRelationships=(query,memory=engine.config.ai.memory,graphOptions)=>liveMemory.relationships(engine.config.anchorId,query,{memory,knowledge:engine.config.ai.knowledge,anchorName:identity.anchor?.name,anchorSecUid:identity.anchor?.secUid,accounts:engine.config.ai.contextSources.accounts ? [...accounts.history(engine.config.anchorId),...accounts.list(engine.config.anchorId)] : [],includeAccountHistory:true,graphOptions,includeAudience:true,includePerception:true});
   const client=withRelationshipEvidence({reply:resilientClient,query:retrieveRelationships,persist:()=>persistRuntime(true)});
   const lock = options.lock || new RoomLock({ room });
   const makeAdapter = options.adapterFactory || (settings => new DouyinAdapter(settings));
@@ -377,7 +377,7 @@ export function boot(options = {}) {
         if (journalKey) await options.journal.ack(journalKey);
         return;
       }
-      if(engine.config.ai.assistant.memoryEnabled && currentMemory().observe(liveEvent))persistRuntime();
+      if(currentMemory().observe(liveEvent))persistRuntime();
       let journalWrite = null;
       const passiveDataEvent = ['anchor-fanclub','room-likes','like','room-stats','room-audience','social','fansclub','emoji-chat','screen-chat','room-notice','room-rank','rank-update','room-notify','room-sync','audio-chat','highlight-comment','light-gift','live-shopping','product-change','room-banner','rank-award','red-packet','activity-signal','chat-like','fan-ticket','room-activity-state','gift-panel-state','room-indicator','gift-catalog','battle-bonus','battle-property','battle-season-honor','popular-card','fansclub-statistics','group-live-members','group-live-income','room-ticket','linkmic-positions','link-state','guest-link-state','fansclub-push','anchor-exhibition','pk-rank-season','anchor-pk-tasks'].includes(liveEvent.type);
       if ((engine.running || predictions.enabled() || tools?.state('giveaway')?.receiving || ['gift','start','end'].includes(liveEvent.type) || passiveDataEvent) && options.journal && !journalKey && !persistenceDisabled) {
@@ -449,7 +449,7 @@ export function boot(options = {}) {
       refresh(); wakeSender();
       if (collectionGapCount(status) !== previousGaps || JSON.stringify(acknowledgedRuntimeAlert) !== previousAcknowledgement) persistRuntime();
     },
-    shouldReadChat: () => predictions.enabled() || tools?.state('giveaway')?.phase==='running' || engine.config.ai.enabled || engine.running && (engine.config.bot.enabled || engine.config.keyword.enabled || engine.config.moderation.enabled),
+    shouldReadChat: () => true,
     shouldReadMilestones: () => engine.running
   });
   engine = new Engine({
@@ -481,13 +481,13 @@ export function boot(options = {}) {
         giftHistory:engine.config.incomeEnabled && giftHistoryContext?.anchorId===engine.config.anchorId ? giftHistoryContext : null,
         predictions:predictions.context(),collectionHealth:{connected:adapter.healthy?.() || false,lastFrameAt:network.lastFrame || null,gaps:collectionGapCount(network)}};
     },
-    manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
+    manage: demo ? async (action,user,isCurrent) => { if (!isCurrent()) return {submitted:false}; log('lab',`模拟${action==='ban'?'封禁':'禁言'}：${user.name}`); return {submitted:true,simulated:true}; } : (action,user,isCurrent) => adapter.moderate(action,user,() => engine.config.mode==='auto' && isCurrent() && lock.held && !closed && !suspended && !persistenceDisabled && roomContext.current()),
     changed: () => { refresh(); persistRuntime(); wakeSender(); }, checkpoint: () => persistRuntime(true),
     onStop: () => { stopForegroundMedia(); lock.release(); autoStartArmed = false; },
     send: demo ? async (text, isCurrent, hooks) => { if (!isCurrent()) return { submitted: false }; await hooks.beforeClick(); log('lab', `模拟发送：${text}`); engine.observeEcho({type:'chat',source:'socket',user:{id:engine.config.selfId},text,receivedAt:Date.now()}); return { submitted: true,clicked:true }; } : async (text, isCurrent, hooks) => {
       const independent=!engine.running;
       if(independent && (!isCurrent() || !await lock.acquire()))return {submitted:false,reason:'等待当前直播间发送锁'};
-      try {return await adapter.send(text,()=>isCurrent() && lock.held && roomContext.current(),hooks);}
+      try {return await adapter.send(text,()=>engine.config.mode==='auto' && isCurrent() && lock.held && roomContext.current(),hooks);}
       finally {if(independent && !engine.running && !starting)lock.release();}
     }
   });
@@ -638,7 +638,7 @@ export function boot(options = {}) {
     if (engine.running || starting || closed || suspended) return;
     if (!automatic) { manualPause = false; tools.notify('resume'); autoStartArmed = true; autoStartError = ''; }
     adapter.sync?.();
-    if (!demo && engine.config.mode !== 'preview') {
+    if (!demo && engine.config.mode === 'auto') {
       if (!adapter.healthy()) {
         if (automatic) return false;
         throw new Error('尚未连接直播数据，请刷新直播页，先用仅预览检查事件');
@@ -664,7 +664,7 @@ export function boot(options = {}) {
   async function tryAutoStart() {
     if (persistenceDisabled || !engine || engine.running || !engine.config.automation.autoStart && !engine.resumeRequested || !autoStartArmed || manualPause || closed || suspended || starting || liveEnded() || Date.now() < autoStartNext) return;
     // 预览模式不需要直播连接；自动模式等连接 open 后再申请锁和检查输入框。
-    if (!demo && (!broadcastLive() || engine.config.mode !== 'preview' && !adapter.healthy())) return;
+    if (!demo && (!broadcastLive() || engine.config.mode === 'auto' && !adapter.healthy())) return;
     autoStartNext = Date.now() + 2000;
     try {
       const started = await start({ automatic: true });
@@ -860,10 +860,10 @@ export function boot(options = {}) {
       void tryAutoStart();
       syncMedia();
       if (persistenceDisabled) return;
-      const waiting = engine.running && !demo && engine.config.mode !== 'preview' && !adapter.healthy();
+      const waiting = engine.running && !demo && engine.config.mode === 'auto' && !adapter.healthy();
       if (waiting !== waitingForConnection) { waitingForConnection = waiting; if (engine.running) log('system', waiting ? '直播数据重连中，暂缓发送；连接恢复后继续' : '直播数据连接已恢复，继续场控'); }
       const tickEpoch = engine.epoch;
-      try { await engine.tick(!liveEnded() && (demo || engine.config.mode === 'preview' || liveConnection())); }
+      try { await engine.tick(!liveEnded() && (demo || engine.config.mode !== 'auto' || liveConnection())); }
       catch (e) { if (engine.epoch === tickEpoch) reportPersistenceError(e, '运行异常，场控保持运行'); }
     }, 250);
     const wake=()=>{void wakeRoom().catch(error=>log('error',`直播间恢复检测：${error.message}`));};

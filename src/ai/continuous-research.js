@@ -1,8 +1,9 @@
 import {z} from 'zod';
 import {audienceProfile,subjectKeySchema,subjectEpoch,profileSources,subjectRow} from './audience-profile.js';
-export const RESEARCH_DEFAULTS=Object.freeze({enabled:false,intervalSec:180,maxPerHour:3});
+import {nextCollectionBatch} from './collection-analysis.js';
+export const RESEARCH_DEFAULTS=Object.freeze({enabled:true,intervalSec:180,maxPerHour:3});
 export const researchSettingsSchema=z.strictObject({enabled:z.boolean(),intervalSec:z.number().int().min(60).max(3600),maxPerHour:z.number().int().min(1).max(10)});
-export const continuousEnabled=config=>Boolean(config?.ai?.enabled && config.ai.assistant?.memoryEnabled!==false && config.ai.assistant?.research?.enabled);
+export const continuousEnabled=config=>Boolean(config?.ai?.enabled);
 const normalize=text=>text.normalize('NFKC').trim().replace(/\s+/gu,' ').toLowerCase();
 function observations(memory,now,seen,includeAudience,turn,includeAccounts){
  const viewers=(includeAudience ? memory.audience?.viewers || [] : []).flatMap(v=>{
@@ -25,26 +26,37 @@ async function digest(text){const bytes=await crypto.subtle.digest('SHA-256',new
 
 // Alarm-driven work discovery. No timer or long model request holds the page.
 // Stable task IDs bridge the crash window between submission and watermark save.
-export function createContinuousResearch({configs,read,store,submit,cancelDisabled,hasPending,now=Date.now}){
+export function createContinuousResearch({configs,read,store,submit,cancelDisabled,hasPending,jobStatus=()=>null,collect=false,now=Date.now}){
  let pending;
  const tick=async()=>{
   const values=await configs();await cancelDisabled(values);
   for(const [key,config] of Object.entries(values)){
    if(!/^live-assistant:config:\d+$/u.test(key) || !continuousEnabled(config))continue;
-   const room=key.split(':').at(-1),anchor=String(config.anchorId),scope=`${room}:${anchor}`,parsed=researchSettingsSchema.safeParse({...RESEARCH_DEFAULTS,...config.ai.assistant.research});
+   const room=key.split(':').at(-1),anchor=String(config.anchorId),scope=`${room}:${anchor}`,parsed=researchSettingsSchema.safeParse({...RESEARCH_DEFAULTS,...config.ai.assistant?.research});
    if(!parsed.success)continue;const settings=parsed.data;
    if(!/^\d{1,30}$/u.test(anchor) || hasPending(scope))continue;
    const at=now(),old=await store.readLoop(scope) || {scope,seen:[],calls:[],nextAt:0};
    const calls=old.calls.filter(t=>t<=at && at-t<3600000);if(old.nextAt>at || calls.length>=settings.maxPerHour)continue;
    const memory=await read(`live-assistant:live-memory:${room}:${anchor}`);if(memory?.anchor!==anchor)continue;
+   const batch=collect ? nextCollectionBatch(memory) : [];
    const turn=(old.turn ?? old.seen.length)%3,seen=old.seen.filter(r=>at-r.at<86400000);let candidate,hash;
    for(const row of observations(memory,at,seen,config.ai.contextSources?.audience!==false,turn,config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false)){const key=await digest(`${row.subject || 'unattributed'}:${row.epoch || 0}:${row.kind==='profile-refresh' ? row.kind : normalize(row.text)}`);if(!seen.some(r=>r.key===key)){candidate=row;hash=key;break;}}
+   if(batch.length && (turn!==1 || !candidate)){
+    const hash=await digest(JSON.stringify([scope,batch])),day=Math.floor(at/86400000),previous=old.collection;
+    let attempt=previous?.hash===hash && previous.day===day ? previous.attempt : 0;
+    const id=()=>`auto-profile-${hash.slice(0,48)}-${day}-${attempt}`;
+    if(['failed','cancelled','interrupted'].includes(jobStatus(id())))attempt++;
+    if(attempt<3){
+     await submit({id:id(),scope,question:'整理采集原文中的明确人物关系和行为线索，保留来源与待核实假设',input:{anchor,ai:config.ai,collection:batch,sources:[],context:{now:at}}});
+     await store.writeLoop({...old,scope,collection:{hash,day,attempt},turn:(turn+1)%3,updatedAt:at,seen,calls:[...calls,at],nextAt:at+settings.intervalSec*1000});continue;
+    }
+   }
    if(!candidate)continue;
    const id=`auto-${(await digest(`${scope}:${hash}:${Math.floor(candidate.at/86400000)}`)).slice(0,64)}`;
    await submit({id,scope,question:candidate.text.trim().slice(0,1000),input:{anchor,...(candidate.subject ? {subject:candidate.subject,subjectEpoch:candidate.epoch} : {}),ai:config.ai,sources:candidate.sources || [],context:{now:at,persona:config.ai.persona,knowledge:config.ai.knowledge,
     context:[{text:candidate.text.slice(0,1000),at:candidate.at,source:candidate.kind,identity:candidate.subject || 'unverified sampled conversation'}]}}});
    const nextSeen=[...seen,{key:hash,at,subject:candidate.subject,kind:candidate.kind}],retained=[...nextSeen.filter(r=>r.kind==='profile-refresh'),...nextSeen.filter(r=>r.kind!=='profile-refresh').slice(-100)];
-   await store.writeLoop({scope,turn:(turn+1)%3,updatedAt:at,seen:retained,calls:[...calls,at],nextAt:at+settings.intervalSec*1000});
+   await store.writeLoop({...old,scope,turn:(turn+1)%3,updatedAt:at,seen:retained,calls:[...calls,at],nextAt:at+settings.intervalSec*1000});
   }
  };
  return {tick(){if(!pending)pending=tick().finally(()=>{pending=null;});return pending;}};

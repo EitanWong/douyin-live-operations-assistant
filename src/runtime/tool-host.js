@@ -1,3 +1,4 @@
+import {isSilentCollection} from '../core/collection-policy.js';
 import {ToolRuntime} from '../tools/runtime.js';
 import {bundledTools} from '../tools/bundled.js';
 import {toolOperations} from '../tools/gateway.js';
@@ -6,7 +7,8 @@ import {demoGiftTransport} from '../tools/auto-gift/demo.js';
 
 // Page policy and transport adapters live here; plugins receive the scoped API.
 export function createPageTools({page,room,engine,adapter,demo,current,unavailable,liveStatus,log,rewardStorage,giveawayStorage,giveawayPendingEvents,saveConfig,changed,getRoomId,predictions,predictionAI,isToolVisible}) {
-  const guard=id=>!current() ? '页面或直播间已切换，已停止工具任务'
+  const guard=id=>isSilentCollection(engine.config) && id!=='predictions' ? '静默收集模式禁止点赞、送礼、活动参与和对外互动'
+    : !current() ? '页面或直播间已切换，已停止工具任务'
     : unavailable() ? '扩展连接已失效，请刷新直播页'
     : id==='rewards' && demo ? '模拟器不参与真实活动，请在直播页使用'
     : !demo && (!adapter.healthy() || liveStatus() && liveStatus()!=='live') ? '直播已结束或连接中断，已停止工具任务'

@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {accountSource} from '../ai/account-context.js';
-export const ACCOUNT_COLLECTION_DEFAULTS=Object.freeze({enabled:true,autoRefresh:true,autoResearch:false,researchLimit:10,minDiamonds:100,minChats:3,intervalMinutes:60,maxPerHour:6,urls:[]});
+export const ACCOUNT_COLLECTION_DEFAULTS=Object.freeze({enabled:true,autoRefresh:true,autoResearch:true,researchLimit:10,minDiamonds:100,minChats:3,intervalMinutes:60,maxPerHour:6,urls:[]});
 const schema=z.object({enabled:z.boolean(),autoRefresh:z.boolean(),autoResearch:z.boolean(),researchLimit:z.number().int().min(1).max(20),minDiamonds:z.number().int().min(1).max(1e9),minChats:z.number().int().min(1).max(1000),intervalMinutes:z.number().int().min(15).max(1440),maxPerHour:z.number().int().min(1).max(30),urls:z.array(z.string().max(300)).max(10)});
 export function validateAccountCollection(input){const c=schema.parse({...ACCOUNT_COLLECTION_DEFAULTS,...input});c.urls=[...new Set(c.urls.map(url=>accountSource(url).url))];return c;}
 export function createAccountRefresh({collector,accounts,scope,config,changed,targets=()=>[],snapshot,now=Date.now,onStatus=()=>{}}){

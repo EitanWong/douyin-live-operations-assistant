@@ -47,7 +47,7 @@ test('无关系的独立人物也能浏览；长事件保留原档，只向AI披
  assert.ok(person.dossier.events.every(e=>e.range && e.originalChars===text.length));
  assert.ok(JSON.stringify(person.dossier).length<=6500);
 });
-test('同名不混合档案，第三方搜索材料只能作待查线索；遗忘版本和来源开关即时生效',async()=>{
+test('同名不混合档案，第三方搜索材料只能作待查线索；遗忘即时生效且回复上下文开关不隐藏档案',async()=>{
  const f=fixture(),archive=()=>({version:1,anchor:'10',audience:f.audience.snapshot(),perception:{observations:[]}});
  const values={'live-assistant:config:1':{anchorId:'10',ai:{assistant:{memoryEnabled:true},contextSources:{audience:true,accounts:true}}},'live-assistant:live-memory:1:10':archive()};
  const corpus={version:1,revision:0,rows:[{id:'a',subject:'uid:1',subjectEpoch:0,source:'https://example.org/rain',title:'公开线索',text:'我喜欢滑雪。小雨是阿明的妹妹。',at,expiresAt:at+60000,trust:'unverified'}]};
@@ -63,7 +63,7 @@ test('同名不混合档案，第三方搜索材料只能作待查线索；遗�
  result=await library.query('1','小雨');dossier=result.entities.find(n=>n.name==='小雨').dossier;
  assert.equal(dossier.leads.length,0);assert.equal(dossier.facets.length,0);
  values['live-assistant:config:1'].ai.contextSources.audience=false;
- result=await library.query('1','小雨');assert.equal(result.entities.length,0);
+ result=await library.query('1','小雨');assert.equal(result.entities.length,1);
 });
 test('运营明确字段可建模，同字段矛盾原样并列，否定和疑问不被提取成正向爱好',()=>{
  const f=fixture();f.audience.observe(chat('no','我不喜欢滑雪。我喜欢爬山吗？'));

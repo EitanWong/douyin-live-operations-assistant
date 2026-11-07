@@ -2,7 +2,6 @@ import {PerceptionMemory,mergeLiveMemory} from '../src/ai/live-memory.js';
 
 export async function persistNativeMemory({room,row,scope,read,write,transaction}){
  const config=await read(`live-assistant:config:${room}`);
- if(config?.ai?.assistant?.memoryEnabled===false)return;
  const anchor=String(scope?.anchorId || config?.anchorId || ''),key=`live-assistant:live-memory:${room}:${anchor || 'unknown'}`;
  await transaction(async()=>{
   const previous=await read(key),perception=new PerceptionMemory({state:previous?.perception});

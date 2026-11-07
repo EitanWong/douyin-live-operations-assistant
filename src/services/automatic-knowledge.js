@@ -1,3 +1,4 @@
+import {collectionPolicy} from '../core/collection-policy.js';
 import {subjectKeySchema,researchSubject} from '../ai/audience-profile.js';
 import {canReuseSource,knowledgeLifetime} from './web-knowledge.js';
 import {retrieveKnowledge,RETRIEVAL_LIMITS} from './retrieval.js';
@@ -59,7 +60,7 @@ export function createAutomaticKnowledge({corpus,readConfig,all,readAudience=asy
   const work=tail.then(()=>handle(room,action,input));tail=work.catch(()=>{});return work;
  }};
  async function handle(room,action,input){
-  const config=await readConfig(room),anchor=String(config?.anchorId || '');
+  const config=collectionPolicy(await readConfig(room)),anchor=String(config?.anchorId || '');
   if(!/^\d{1,30}$/u.test(anchor) || input.anchor!==anchor)throw Error('主播已变化，请刷新知识库');
   if(action==='version')return corpus.version(room,anchor);
   if(action==='clear'){for(const source of await scopes(room,anchor))await corpus.clear(source.room,source.anchor);return;}
@@ -71,7 +72,7 @@ export function createAutomaticKnowledge({corpus,readConfig,all,readAudience=asy
    if(config.ai?.search?.rememberKnowledge===false || config.ai?.assistant?.memoryEnabled===false)return [];
    const rows=[];
    for(const source of await scopes(room,anchor)){
-    const owner=await readConfig(source.room);
+    const owner=collectionPolicy(await readConfig(source.room));
     if(owner?.ai?.assistant?.memoryEnabled===false || owner?.ai?.search?.rememberKnowledge===false)continue;
     const audience=await readAudience(source.room,source.anchor),profile=await readProfile(source.room);
     rows.push(...(await corpus.list(source.room,source.anchor)).filter(r=>r.expiresAt>now() && (!r.subject || config.ai?.contextSources?.audience!==false && owner?.ai?.contextSources?.audience!==false && Number.isSafeInteger(r.subjectEpoch) && r.subjectEpoch===researchSubject(audience,r.subject,{...source,profile})?.epoch)).map(r=>({...r,scope:source})));

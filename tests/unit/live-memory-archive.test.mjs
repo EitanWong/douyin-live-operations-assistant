@@ -57,14 +57,14 @@ test('重放不重复累计；损坏的存档拒绝覆盖；超过近期窗口�
  assert.throws(()=>store.current('20'),/损坏/);assert.deepEqual(rows.get('live-assistant:live-memory:1:20').audience,{broken:true});
 });
 
-test('后台原生存档独立于页面，尊重记忆开关并绑定开始时的主播，重复回放不增加记录',async()=>{
+test('后台原生存档独立于页面，持续记忆并绑定开始时的主播，重复回放不增加记录',async()=>{
  const {persistNativeMemory}=await import('../../extension/live-memory.js');
  const rows=new Map([['live-assistant:config:1',{anchorId:'20',ai:{assistant:{memoryEnabled:true}}}]]),time=Date.now(),row={id:'backstage',kind:'omni',at:time,endedAt:time,text:'白瓷盖碗'};
  const options={room:'1',row,scope:{anchorId:'10'},read:async key=>rows.get(key),write:async(key,value)=>rows.set(key,structuredClone(value)),transaction:work=>work()};
  await persistNativeMemory(options);await persistNativeMemory(options);
  assert.equal(rows.get('live-assistant:live-memory:1:10').perception.observations.length,1);assert.equal(rows.has('live-assistant:live-memory:1:20'),false);
  rows.get('live-assistant:config:1').ai.assistant.memoryEnabled=false;
- await persistNativeMemory({...options,row:{...row,id:'disabled'}});assert.equal(rows.get('live-assistant:live-memory:1:10').perception.observations.length,1);
+ await persistNativeMemory({...options,row:{...row,id:'disabled'}});assert.equal(rows.get('live-assistant:live-memory:1:10').perception.observations.length,2);
 });
 
 test('导出包含尚未打开的本房存档和当前未写修改，长记录的相关结尾也可检索',()=>{

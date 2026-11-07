@@ -286,7 +286,7 @@ test('昵称、回复和日志不会注入 HTML；界面不再提供人工审核
   assert.equal(panel.root.querySelector('[data-sending-details]'), null);
   assert.equal(panel.root.querySelector('[data-field="sending.intervalSec"]'), null);
   assert.equal(panel.root.querySelector('[data-field="sending.perMinute"]'), null);
-  assert.deepEqual([...panel.node('[data-field=mode]').options].map(option => option.value), ['auto','preview']);
+  assert.deepEqual([...panel.node('[data-field=mode]').options].map(option => option.value), ['auto','collect','preview']);
   panel.log('preview', '<script>alert(1)</script>'); assert.equal(panel.node('[data-last-reply]').textContent, '<script>alert(1)</script>');
   panel.log('error', '<script>alert(1)</script>'); assert.equal(panel.root.querySelectorAll('script').length, 0); dom.window.close();
 });
@@ -787,7 +787,7 @@ test('各模块摘要跟随草稿；礼物快捷阈值和独立关键词页可�
     assert.equal(p.read().keyword.rules[0].reply,'请看直播预告');
 
     assert.equal(p.node('[data-field="gift.responseMode"]').querySelector('[value=ai]').hidden,true);
-    p.node('[data-field="ai.enabled"]').checked=true;p.syncControls();assert.match(p.node('[data-summary=ai]').textContent,/当前仅预览/);
+    p.node('[data-field="ai.enabled"]').checked=true;p.syncControls();assert.match(p.node('[data-summary=ai]').textContent,/仅预览/);
     assert.equal(p.node('[data-tab="ai"]').hidden,false);
     p.node('[data-field="ai.idleEnabled"]').checked=true;p.syncControls();
     assert.equal(p.node('[data-idle-controls]').hidden,false);
@@ -1198,7 +1198,7 @@ test('发送控件短暂缺失或输入禁用可以重试，多个发送候选�
   } finally {dom.window.close();}
 });
 
-test('月报可选多个主播月份，关闭采集后仍可从主播数据查看历史账本', () => {
+test('月报可选多个主播月份，基础采集保持启用且历史账本可查看', () => {
   const dom=setup(),panel=new Panel({config:copy(DEFAULTS),room:'1',callbacks:{}});
   try {
     panel.updateProfiles([{room:'1',name:'主播甲',anchorId:'101'},{room:'2',name:'<img src=x>',anchorId:'202'}]);
@@ -1213,7 +1213,7 @@ test('月报可选多个主播月份，关闭采集后仍可从主播数据查�
     assert.equal(panel.node('[data-tab=income]'),null);panel.tab('anchor');assert.equal(panel.node('[data-page=anchor]').hidden,false);
     panel.node('[data-field=incomeEnabled]').checked=false;panel.syncControls();
     assert.equal(panel.node('[data-tab=anchor]').hidden,false);assert.equal(panel.node('[data-tab=profiles]').hidden,false);
-    assert.equal(panel.activeTab,'anchor');assert.equal(panel.read().incomeEnabled,false);
+    assert.equal(panel.activeTab,'anchor');assert.equal(panel.read().incomeEnabled,true);
     panel.node('[data-income-link]').click();
     assert.equal(panel.node('[data-anchor-content=income]').hidden,false);
     assert.equal(panel.node('[data-anchor-content=overview]').hidden,true);

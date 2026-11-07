@@ -1,3 +1,4 @@
+import {collectionPolicy,isSilentCollection} from './collection-policy.js';
 import {REPLY_FREQUENCIES,TurnTaking,conversational,jobTurn,turnViewerKey} from '../ai/turn-taking.js';
 import {hostSpeechInstruction,EVERY_TURN_INSTRUCTION,DIRECT_TURN_INSTRUCTION} from '../ai/conversation-policy.js';
 import {freshObservations,liveMoment,awaitingVisual,observationKey,sceneKey,proactiveMode} from '../ai/proactive.js';
@@ -114,14 +115,14 @@ export function mergeConfig(input = {}, base = DEFAULTS) {
     result.gift.mergeSec = 0;
     result.ai.intervalSec = 0; result.ai.userCooldownSec = 0;
   }
-  return result;
+  return base===DEFAULTS ? collectionPolicy(result) : result;
 }
 
 export function validateConfig(c) {
   const range = (v, min, max, name) => { if (!Number.isFinite(v) || v < min || v > max) throw new Error(`${name}范围为 ${min}–${max}`); };
   const choice = (v, values, name) => { if (!values.includes(v)) throw new Error(`${name}无效`); };
   const strings = (v, name) => { if (!Array.isArray(v) || v.length > 200 || v.some(x => typeof x !== 'string' || x.length > 4000)) throw new Error(`${name}必须是文本数组（最多 200 条）`); };
-  choice(c.mode, ['preview', 'auto'], '发送模式');
+  choice(c.mode, ['preview', 'auto', 'collect'], '发送模式');
   for (const key of ['enabled','luckyBag','redPacket','nativePassword']) if (typeof c.rewards[key] !== 'boolean') throw new Error('福袋红包自动参与开关无效');
   if (typeof c.rewards.entryXPath !== 'string' || c.rewards.entryXPath.length > 2000 || c.rewards.entryXPath && !c.rewards.entryXPath.startsWith('/')) throw new Error('福袋入口 XPath 应以 / 开头，最多 2000 字符');
   if (typeof c.automation.autoStart !== 'boolean' || typeof c.gift.batchEnabled !== 'boolean') throw new Error('自动开启或合并感谢开关无效');
@@ -299,8 +300,9 @@ export class Engine {
   update(config) {
     // 配置保存不会中断正在运行的场控；新规则从下一条事件开始生效。
     const next=validateConfig(mergeConfig(config));
-    if(next.anchorId!==this.config.anchorId || JSON.stringify(next.ai)!==JSON.stringify(this.config.ai))this.cancelAI();
+    if(next.mode!==this.config.mode || next.anchorId!==this.config.anchorId || JSON.stringify(next.ai)!==JSON.stringify(this.config.ai))this.cancelAI();
     this.config = next;
+    if(isSilentCollection(next)){this.queue=[];this.giftJobs.clear();this.gifts.clear();this.chatAIQueue=[];this.chatAIBackground=null;}
     if (!this.config.ai.enabled || !this.config.ai.chatEnabled || this.config.ai.replyFrequency==='off') this.chatAIBackground = null;
     if (!this.config.ai.enabled || !(this.config.ai.chatEnabled || this.config.bot.enabled) || this.config.ai.replyFrequency==='off') this.chatAIQueue = [];
     if (!this.config.moderation.enabled || !this.config.moderation.warningsEnabled) this.queue = this.queue.filter(job => job.kind !== 'moderation');
@@ -572,6 +574,7 @@ export class Engine {
     await this.checkpoint();return true;
   }
   enqueue(kind, text, extra = {}) {
+    if(isSilentCollection(this.config))return false;
     const checked = cleanMessage(text, this.config);
     if (!checked.ok) { this.filtered(`${kind}：${checked.reason}`); return false; }
     const now = this.now();
@@ -705,7 +708,7 @@ export class Engine {
       this.log('system', `${labels[event.type]}${detail ? `：${String(detail).slice(0,160)}` : '已更新'}`);
       return;
     }
-    if (!this.running) return;
+    if (!this.running || isSilentCollection(this.config)) return;
     if (event.type === 'end') { this.log('system', '收到直播结束事件'); return; }
     if (event.type === 'milestone') {
       if ((this.selfTexts.get(event.text) || 0) > now) return;
@@ -871,6 +874,7 @@ export class Engine {
     return row && sceneKey(row)!==this.lastProactiveScene ? {mode,row} : null;
   }
   requestProactive(now) {
+    if(isSilentCollection(this.config))return false;
     if(this.activeAI?.current && !this.activeAI.current())this.cancelAI({includeResearch:false});
     const ai=this.config.ai;
     if(!ai.enabled || this.aiBusy || this.researchAI.size || this.queue.length || this.chatAIQueue.length || this.chatAIBackground
@@ -885,6 +889,7 @@ export class Engine {
     return true;
   }
   requestChatAI(event, addressed) {
+    if(isSilentCollection(this.config))return;
     if(this.config.ai.replyFrequency==='off')return;
     if(!addressed && (event.mentions?.length || /^\s*@/u.test(event.text)))return;
     if(addressed && this.activeAI?.background)this.cancelAI({includeResearch:false});
@@ -1339,7 +1344,7 @@ export class Engine {
       for (const record of expiredDeliveries) this.log('system',`未收到公屏回显，不自动重发：${record.text}`);
       this.changed();
     }
-    if (!this.senderEnabled() || this.busy) return;
+    if (isSilentCollection(this.config) || !this.senderEnabled() || this.busy) return;
     const now = this.now(); let stateChanged = false;
     const currentReplies=this.queue.filter(job=>this.validChatReply(job) && this.validGiveawayJob(job)!==false);
     if (currentReplies.length!==this.queue.length) {this.queue=currentReplies;stateChanged=true;}
@@ -1418,6 +1423,7 @@ export class Engine {
       } finally { clearTimeout(timer); }
     };
     try {
+      if (isSilentCollection(this.config))return;
       if (this.config.mode === 'preview') {
         if(q.giveaway && !await this.claimGiveaway(q.giveaway,this.giveawayInstance))return;
         submitted(); this.stats.previews++; this.log('preview', batch.text);
@@ -1428,7 +1434,7 @@ export class Engine {
         this.selfTexts.set(batch.text, now + 120000);
         const channel = q.kind === 'welcome' ? this.welcomeChannel(q.welcomeUser) : q.kind === 'giveaway' ? 'admin' : q.channel || 'chat';
         const mentions=batch.text.includes('@') ? resolveChatMentions(batch.text,this.audience.snapshot().map(([,user])=>user),batch.jobs.flatMap(job=>job.mentionTargets || [])) : [];
-        const result = await this.send(batch.text, () => (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.conversationReady(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, mentions, beforeClick:async()=>{
+        const result = await this.send(batch.text, () => !isSilentCollection(this.config) && (this.running || q.kind==='giveaway') && this.epoch === epoch && (!q.giveaway || q.expires>this.now()) && this.validGiveawayJob(q)===true && this.validChatReply(q) && this.conversationReady(q) && this.pkOperations.validJob(q) && (!q.idiomHintToken || q.idiomHintToken===this.bot.hintToken()), {channel, mentions, beforeClick:async()=>{
           this.deliveries.clicked(delivery);
           try {
             await checkpointForSend(true);

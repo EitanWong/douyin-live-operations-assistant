@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import {AudienceMemory,audienceStateSchema,selectMemoryPassages} from './audience-memory.js';
 import {createRelationshipRetriever} from './relationship-memory.js';
+import {collectionAnalysisSchema,validCollectionAnalyses} from './collection-analysis.js';
 
 const observation=z.object({id:z.string().max(300),kind:z.enum(['audio','video','omni']),text:z.string().min(1).max(12000),at:z.number().finite(),endedAt:z.number().finite(),inputSource:z.string().max(80).default('')});
 const perceptionState=z.object({observations:z.array(observation),forgetBefore:z.number().finite().default(0)});
@@ -27,7 +28,7 @@ export class PerceptionMemory {
  snapshot(){return {observations:structuredClone([...this.observations.values()]),forgetBefore:this.forgetBefore};}
 }
 
-const archiveSchema=z.object({version:z.literal(1),anchor:z.string().max(40),audience:audienceStateSchema,perception:perceptionState}).refine(row=>row.anchor===row.audience.anchor,{error:'直播记忆归属不一致'});
+const archiveSchema=z.object({version:z.literal(1),anchor:z.string().max(40),audience:audienceStateSchema,perception:perceptionState,analyses:z.array(collectionAnalysisSchema).default([])}).refine(row=>row.anchor===row.audience.anchor,{error:'直播记忆归属不一致'});
 const unique=(rows,key)=>[...new Map(rows.map(row=>[key(row),row])).values()];
 function mergeViewer(rows,watermark){
  const active=rows.filter(row=>row.lastAt>watermark).sort((a,b)=>a.lastAt-b.lastAt);if(!active.length)return null;
@@ -46,8 +47,9 @@ export function mergeLiveMemory(previous,incoming){
  const viewers=new Map();for(const row of [...old.audience.viewers,...next.audience.viewers]){const rows=viewers.get(row.key) || [];rows.push(row);viewers.set(row.key,rows);}
  const perceptionCutoff=Math.max(old.perception.forgetBefore,next.perception.forgetBefore);
  const interactions=unique([...old.audience.interactions,...next.audience.interactions].filter(row=>row.at>Math.max(forgetBefore,forgotten.get(row.from.key) || 0,forgotten.get(row.to.key) || 0)).sort((a,b)=>a.at-b.at),row=>row.id);
- return {version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0))).filter(Boolean),unattributed:unique([...old.audience.unattributed,...next.audience.unattributed].filter(row=>row.at>forgetBefore).sort((a,b)=>a.at-b.at),row=>row.id),interactions},
+ const merged={version:1,anchor:next.anchor,audience:{version:2,anchor:next.anchor,forgetBefore,forgotten:[...forgotten].map(([key,at])=>({key,at})),viewers:[...viewers].map(([key,rows])=>mergeViewer(rows,Math.max(forgetBefore,forgotten.get(key) || 0))).filter(Boolean),unattributed:unique([...old.audience.unattributed,...next.audience.unattributed].filter(row=>row.at>forgetBefore).sort((a,b)=>a.at-b.at),row=>row.id),interactions},
   perception:{forgetBefore:perceptionCutoff,observations:unique([...old.perception.observations,...next.perception.observations].filter(row=>row.at>perceptionCutoff).sort((a,b)=>a.at-b.at),identity)}};
+ merged.analyses=validCollectionAnalyses({...merged,analyses:unique([...old.analyses,...next.analyses],row=>row.id)});return merged;
 }
 
 // The runtime writer is the single writer of captured archive revisions and its

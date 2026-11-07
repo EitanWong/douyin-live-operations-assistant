@@ -166,7 +166,7 @@ test('功能开关按用途分组直接操作，不为单个开关创建卡片',
   assert.equal(page.querySelectorAll('.workspace-card,.feature-tile').length,0);
   assert.equal(page.querySelectorAll('.feature-row input[role=switch]').length,11);
   assert.ok(page.querySelector('[data-go=ai]'),'配置入口在 AI 分组直接可用');
-  assert.match(page.textContent,/关闭后停止采集，历史数据仍保留/u);
+  assert.match(page.textContent,/底层持续保存.*不随回复模式关闭/u);
   const input=page.querySelector('[data-field="bot.enabled"]');input.closest('label').click();assert.equal(input.checked,false);assert.equal(f.panel.dirty,true);
  }finally{f.close();}
 });

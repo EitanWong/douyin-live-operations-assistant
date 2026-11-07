@@ -40,7 +40,7 @@ test('上下文诊断使用运行配置，未保存的开关和不完整草稿�
   const dirty=panel.dirty;panel.node('[data-ai-diagnose]').click();assert.equal(panel.node('[data-ai-diagnose]').disabled,true);
   await new Promise(setImmediate);
   assert.equal(calls,1);assert.equal(unexpected,0);assert.equal(panel.dirty,dirty);
-  assert.match(panel.node('[data-ai-context-status]').textContent,/观众记忆：关闭.*2/);
+  assert.match(panel.node('[data-ai-context-status]').textContent,/观众记忆：开启.*2/);
   assert.ok(panel.node('[data-ai-context-status]').querySelectorAll('p').length>=5,'各项诊断单独成行，不依赖产品界面会丢弃的内联样式');
   assert.match(panel.node('[data-ai-context-status]').textContent,/缺口 3/);assert.equal(panel.node('[data-ai-diagnose]').disabled,false);
  }finally{panel.destroy();dom.window.close();}
