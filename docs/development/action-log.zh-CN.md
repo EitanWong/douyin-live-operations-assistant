@@ -3831,3 +3831,7 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 四角色沿用同目录MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、可执行ROLLBACK.sh，源码原件BASELINE.tar保留。相同6项输入：BASELINE3失败exit1→MODIFIED6/6通过exit0→独立副本ROLLBACK同3失败exit1，两个源码恢复SHA与原件相等；再应用patch保留修改版，补丁逐字重建成功。旧宿主真实32条重放同样得到失败exit1→当前源码成功exit0→旧宿主失败exit1，所有stdout/stderr/status保存并追加原VERIFICATION。
 - npm run build、npm run check及git diff --check通过。系统python3首次原生全测缺httpx出现5错误/1skip，未计通过；改用已有native/.venv/bin/python后138/138通过。首次npm test无界并发与另一个任务测试同时运行造成大量swap，仅按lsof stdout核实后终止本任务PID9864/9916及其子进程，保留中止日志；以现有venv和node --test --test-concurrency=2 tests重跑，结果后续追加，不终止其他任务。查找不存在的docs/development/data-engine.zh-CN.md一次exit2，改用rg --files确认docs/features/local-data-engine.zh-CN.md并补充同步宿主和恢复说明。
 - crapper/dryer/mutator已核对CLI及当前工具目录均不可用，三项未执行，不以其他检查替代。agent:index已更新；完整测试、并行dev集成、最终构建/check、提交与普通push回执随后追加。未改main、版本、标签或Release。
+
+- 首轮有界完整回归结束：1958项中1957通过、1失败，972164.082ms。唯一失败为extension.test.mjs的archive-pagehide旧断言，要求归档等待时handled仍为空，正好与本次“归档不阻挡实时交付”新行为冲突。保留失败输出，不计全通过；更新该生命周期断言为已交付一次，并加验pagehide后原帧仅保存一次、MAIN仍保留1个未确认事件，pageshow后不重复交付且最终排空。lost-response/pagehide/archive-pagehide及新增故障共6/6通过；没有修改产品逻辑来迁就旧断言。
+- 另以只读SQLite核对同房间最近5分钟：98帧72454原始字节，所有part/parts连续且Base64有效；account/coverage/event/forecast/pk-state/protocol均有记录。文档替换过时的“未做实播验证”说明，明确同步宿主步骤、实时交付与持久确认边界及本次实测范围。完整回归保留JSDOM不支持reload的诊断输出与ECharts旧grid警告，未屏蔽；它们不是本轮唯一失败的原因。
+- 完成的transaction-copy经源码SHA匹配和lsof无打开文件确认后移除，回收14MiB；保留BASELINE、四角色、原始整树归档、旧宿主、网络证据与全部字面输出，不动共享node_modules和其他任务。一次查找不存在的native/live_summary.py退出2，后直接读取实际data_store.py确认SQL结构；未对真实库执行修写或清理。

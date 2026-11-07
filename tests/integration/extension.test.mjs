@@ -356,7 +356,11 @@ for(const mode of ['lost-response','pagehide','archive-pagehide'])test(`内容�
     await page.eval(`(async()=>{${await rawEntry('content')}})()`);await new Promise(setImmediate);
     if(mode==='pagehide' || mode==='archive-pagehide'){
       page.dispatchEvent(new page.Event('pagehide'));release();await new Promise(setImmediate);
-      assert.deepEqual(handled,[]);
+      // An archive wait no longer delays live admission. Hiding during that wait
+      // must retain the MAIN batch, then restore without delivering it twice.
+      assert.deepEqual(handled,mode==='archive-pagehide' ? ['retained'] : []);
+      assert.equal(saved.length,mode==='archive-pagehide' ? 1 : 0);
+      assert.equal(page.__douyinAssistantPageV2.call({type:'drain'}).status.bridgePending,1);
       page.dispatchEvent(new page.PageTransitionEvent('pageshow',{persisted:true}));
     }else await timers.shift()();
     await new Promise(setImmediate);await adapter.inbox.whenIdle();
