@@ -11,6 +11,7 @@ import sqlite3
 import time
 import uuid
 from public_media_source import MAX_DURATION_MS, validate_media_source
+from public_media_frames import frame_positions
 
 
 LEASE_MS = 60000
@@ -33,7 +34,10 @@ def initialize(db):
       CREATE TABLE IF NOT EXISTS public_media_controls(room TEXT,anchor TEXT,subject TEXT,allowed INTEGER NOT NULL,PRIMARY KEY(room,anchor,subject));
       CREATE TABLE IF NOT EXISTS public_media_imports(job_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS public_media_sources(job_id TEXT PRIMARY KEY,payload TEXT NOT NULL,observed_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS public_media_visual(job_id TEXT PRIMARY KEY,duration_ms INTEGER NOT NULL,positions TEXT NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,models TEXT NOT NULL DEFAULT '{}');
     ''')
+    if 'models' not in {row[1] for row in db.execute('PRAGMA table_info(public_media_visual)')}:
+        db.execute("ALTER TABLE public_media_visual ADD COLUMN models TEXT NOT NULL DEFAULT '{}'")
 
 
 def scope(room, anchor, subject=None):
@@ -43,7 +47,7 @@ def scope(room, anchor, subject=None):
 
 def request_data(request):
     keys = {'room', 'anchor', 'subject', 'epoch', 'workId', 'author', 'url'}
-    if not isinstance(request, dict) or not keys <= set(request) <= keys | {'knowledgeVersion', 'pageMedia'}:
+    if not isinstance(request, dict) or not keys <= set(request) <= keys | {'knowledgeVersion', 'pageMedia', 'visualVersion'}:
         raise ValueError('MEDIA_INPUT')
     if not isinstance(request['subject'], str):
         raise ValueError('MEDIA_SCOPE')
@@ -55,6 +59,8 @@ def request_data(request):
         raise ValueError('MEDIA_INPUT')
     version = request.get('knowledgeVersion', 0)
     if type(version) is not int or not 0 <= version < 2**53:
+        raise ValueError('MEDIA_INPUT')
+    if 'visualVersion' in request and (type(request['visualVersion']) is not int or request['visualVersion'] != 1):
         raise ValueError('MEDIA_INPUT')
     return {**request, 'knowledgeVersion': version}
 
@@ -88,6 +94,10 @@ class PublicMediaJobs:
     def submit(self, request):
         data = request_data(request)
         identity = [data[k] for k in ('room', 'anchor', 'subject', 'epoch', 'workId', 'author')]+['sensevoice-v1', data['knowledgeVersion']]
+        analysis = 'sensevoice-v1'
+        if data.get('visualVersion') == 1:
+            identity.append('keyframes-v1')
+            analysis += '+keyframes-v1'
         job_id = hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest()
         with self.transaction():
             page_media = validate_media_source(data['pageMedia'], data, self.now()) if 'pageMedia' in data else None
@@ -105,7 +115,7 @@ class PublicMediaJobs:
             if not existing:
                 at = self.now()
                 self.db.execute('INSERT INTO public_media_jobs(id,room,anchor,subject,epoch,work_id,author,url,analysis_version,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
-                                (job_id, data['room'], data['anchor'], data['subject'], data['epoch'], data['workId'], data['author'], data['url'], 'sensevoice-v1', 'queued', at, at))
+                                (job_id, data['room'], data['anchor'], data['subject'], data['epoch'], data['workId'], data['author'], data['url'], analysis, 'queued', at, at))
                 self.db.execute('INSERT INTO public_media_imports(job_id,revision) VALUES(?,?)', (job_id, data['knowledgeVersion']))
             elif reopen:
                 self.db.execute("UPDATE public_media_jobs SET status='queued',error=NULL,not_before=0,failures=0,recoveries=0 WHERE id=?", (job_id,))
@@ -120,10 +130,12 @@ class PublicMediaJobs:
             raise ValueError('MEDIA_JOB')
         blob = self.db.execute('SELECT sha256 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone()
         receipt = self.db.execute('SELECT * FROM public_media_imports WHERE job_id=?', (job_id,)).fetchone()
+        visual = self.visual_state(job_id)
         return {'id': row['id'], 'room': row['room'], 'anchor': row['anchor'], 'subject': row['subject'], 'epoch': row['epoch'],
                 'workId': row['work_id'], 'author': row['author'], 'url': row['url'], 'analysisVersion': row['analysis_version'],
                 'status': row['status'], 'cursorMs': row['cursor_ms'], 'lease': row['lease'], 'leaseUntil': row['lease_until'],
                 'mediaHash': blob['sha256'] if blob else None,
+                'visual': {'version':visual['version'],'durationMs':visual['durationMs'],'planned':len(visual['positionsMs']),'completed':visual['completed']} if visual else None,
                 'createdAt': row['created_at'], 'updatedAt': row['updated_at'],
                 'knowledgeVersion': receipt['revision'] if receipt else 0,
                 'importCursor': receipt['cursor'] if receipt else 0, 'imported': bool(receipt['complete']) if receipt else False,
@@ -175,6 +187,7 @@ class PublicMediaJobs:
         return epoch
 
     def _erase_subject(self, args):
+        self.db.execute('DELETE FROM public_media_visual WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
         self.db.execute('DELETE FROM public_media_sources WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
         self.db.execute('DELETE FROM public_media_segments WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
         self.db.execute('DELETE FROM public_media_blobs WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
@@ -247,6 +260,7 @@ class PublicMediaJobs:
             self.fenced(job_id, lease)
             old = self.db.execute('SELECT sha256 FROM public_media_blobs WHERE job_id=?', (job_id,)).fetchone()
             if not old or old['sha256'] != sha256:
+                self.db.execute('DELETE FROM public_media_visual WHERE job_id=?', (job_id,))
                 self.db.execute('DELETE FROM public_media_segments WHERE job_id=?', (job_id,))
                 self.db.execute('UPDATE public_media_imports SET cursor=0,complete=0 WHERE job_id=?', (job_id,))
                 self.db.execute('UPDATE public_media_jobs SET cursor_ms=0,coverage=NULL WHERE id=?', (job_id,))
@@ -281,6 +295,44 @@ class PublicMediaJobs:
                 raise ValueError('MEDIA_SEGMENT_GAP')
             self.db.execute('UPDATE public_media_jobs SET cursor_ms=?,lease_until=?,updated_at=? WHERE id=?', (cursor_ms, self.now()+LEASE_MS, self.now(), job_id))
 
+    def visual_state(self, job_id):
+        row = self.db.execute('SELECT * FROM public_media_visual WHERE job_id=?', (job_id,)).fetchone()
+        return {'version':'uniform-keyframes-v1','durationMs':row['duration_ms'],'positionsMs':json.loads(row['positions']),'completed':row['cursor']} if row else None
+
+    def configure_visual(self, job_id, lease, duration_ms):
+        positions = frame_positions(duration_ms)
+        with self.transaction():
+            job = self.fenced(job_id, lease)
+            if not job['analysis_version'].endswith('+keyframes-v1') or job['cursor_ms'] != duration_ms or not self.covered(job_id, duration_ms):
+                raise ValueError('MEDIA_COVERAGE')
+            old = self.db.execute('SELECT duration_ms,positions FROM public_media_visual WHERE job_id=?', (job_id,)).fetchone()
+            if old and (old['duration_ms'] != duration_ms or json.loads(old['positions']) != positions):
+                raise ValueError('MEDIA_COVERAGE')
+            self.db.execute('INSERT OR IGNORE INTO public_media_visual(job_id,duration_ms,positions) VALUES(?,?,?)', (job_id, duration_ms, json.dumps(positions)))
+        return self.visual_state(job_id)
+
+    def checkpoint_visual(self, job_id, lease, position_ms, at_ms, text, model):
+        with self.transaction():
+            self.fenced(job_id, lease)
+            state = self.db.execute('SELECT * FROM public_media_visual WHERE job_id=?', (job_id,)).fetchone()
+            if state is None or type(position_ms) is not int or type(at_ms) is not int or not isinstance(model, str) or not 1 <= len(model) <= 200 or '\x00' in model:
+                raise ValueError('MEDIA_VISUAL_FAILED')
+            positions = json.loads(state['positions'])
+            if position_ms not in positions:
+                raise ValueError('MEDIA_VISUAL_FAILED')
+            index = positions.index(position_ms)
+            if index > state['cursor'] or not position_ms <= at_ms < (positions[index+1] if index+1 < len(positions) else state['duration_ms']):
+                raise ValueError('MEDIA_VISUAL_FAILED')
+            row = segment_data({'kind':'visual','startMs':at_ms,'endMs':at_ms+1,'text':text,'speaker':'unknown'})
+            old = self.db.execute("SELECT text FROM public_media_segments WHERE job_id=? AND kind='visual' AND start_ms=? AND end_ms=?", (job_id, at_ms, at_ms+1)).fetchone()
+            models = json.loads(state['models'])
+            if old and old['text'] != row['text'] or index < state['cursor'] and (old is None or models.get(str(at_ms)) != model):
+                raise ValueError('MEDIA_SEGMENT_CONFLICT')
+            self.db.execute('INSERT OR IGNORE INTO public_media_segments VALUES(?,?,?,?,?,?)', (job_id,'visual',at_ms,at_ms+1,row['text'],'unknown'))
+            models[str(at_ms)] = model
+            self.db.execute('UPDATE public_media_visual SET cursor=MAX(cursor,?),models=? WHERE job_id=?', (index+1,json.dumps(models),job_id))
+        return self.get(job_id)['visual']
+
     def complete(self, job_id, lease, duration_ms):
         if type(duration_ms) is not int or not 0 < duration_ms <= MAX_DURATION_MS:
             raise ValueError('MEDIA_COVERAGE')
@@ -290,6 +342,11 @@ class PublicMediaJobs:
                 raise ValueError('MEDIA_COVERAGE')
             visual = self.db.execute("SELECT 1 FROM public_media_segments WHERE job_id=? AND kind IN ('visual','ocr') LIMIT 1", (job_id,)).fetchone()
             coverage = {'audio': 'complete', 'durationMs': duration_ms, 'video': 'sampled' if visual else 'not-analyzed', 'speaker': 'unknown'}
+            if job['analysis_version'].endswith('+keyframes-v1'):
+                state = self.get(job_id)['visual']
+                if not state or state['durationMs'] != duration_ms or state['completed'] != state['planned']:
+                    raise ValueError('MEDIA_COVERAGE')
+                coverage['visual'] = state
             self.db.execute("UPDATE public_media_jobs SET status='succeeded',lease=NULL,worker=NULL,updated_at=?,coverage=? WHERE id=?", (self.now(), json.dumps(coverage), job_id))
             self.db.execute('DELETE FROM public_media_sources WHERE job_id=?', (job_id,))
         return self.get(job_id)
@@ -302,7 +359,7 @@ class PublicMediaJobs:
             self.db.execute("UPDATE public_media_jobs SET status='paused',lease=NULL,worker=NULL,error=?,not_before=?,updated_at=? WHERE id=?", (reason, self.now()+delay_ms, self.now(), job_id))
 
     def fail(self, job_id, lease, code):
-        if code not in ('MEDIA_DOWNLOAD_FAILED', 'MEDIA_AUTHOR_MISMATCH', 'MEDIA_DECODE_FAILED', 'MEDIA_ANALYSIS_FAILED'):
+        if code not in ('MEDIA_DOWNLOAD_FAILED', 'MEDIA_AUTHOR_MISMATCH', 'MEDIA_DECODE_FAILED', 'MEDIA_ANALYSIS_FAILED', 'MEDIA_VISUAL_FAILED'):
             raise ValueError('MEDIA_ERROR')
         with self.transaction():
             row = self.fenced(job_id, lease)
@@ -340,5 +397,8 @@ class PublicMediaJobs:
         self.get(job_id)
         if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 8:
             raise ValueError('MEDIA_SEGMENT_PAGE')
-        return [{'kind': r['kind'], 'startMs': r['start_ms'], 'endMs': r['end_ms'], 'text': r['text'], 'speaker': r['speaker']}
+        visual = self.db.execute('SELECT models FROM public_media_visual WHERE job_id=?', (job_id,)).fetchone()
+        models = json.loads(visual['models']) if visual else {}
+        return [{'kind': r['kind'], 'startMs': r['start_ms'], 'endMs': r['end_ms'], 'text': r['text'], 'speaker': r['speaker'],
+                 **({'model':models[str(r['start_ms'])]} if r['kind']=='visual' and str(r['start_ms']) in models else {})}
                 for r in self.db.execute('SELECT * FROM public_media_segments WHERE job_id=? ORDER BY start_ms,end_ms,kind LIMIT ? OFFSET ?', (job_id, limit, offset))]

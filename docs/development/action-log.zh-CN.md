@@ -3285,3 +3285,22 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 远端最终验证：实施 SHA e25376fdd485646127572252b4941155290c62ee 的 CI 42321632834 completed/success。远端完整 JavaScript 1801/1801、0 失败/取消/跳过，原生 94/94；agent:index 核对、正式 build、check、Chrome 扩展打包和分发物上传均通过。JavaScript 自报 633096.181726ms，test-build job 总耗时 11m51s；等待比上轮长但没有失败或取消，不能作为产品性能基准。此前缺 FFmpeg 导致的两项集成失败本轮均通过。
 - 日志获取更正：gh run view --job --log 在整轮运行中返回“logs will be available when it is complete”；已结束原生 job 的 API 日志要求显式允许终端转义，按 CLI 提示重试成功；仍在运行的 JavaScript job 日志 API 返回 BlobNotFound/404。只读网页随后直接显示 test-build succeeded，立即结束浏览器核查；整轮结束后原命令成功取得完整日志。失败命令、字面输出和最终成功回执均留在原账本，不尝试改写失败结果或绕过权限。
 - 文档回执：本次后续提交仅记录实施 SHA、已核实推送与 CI、限制和下一动作；四角色仍指向相同 77 文件实现，没有再次改变代码。回执提交/推送结果及最终 SHA 在完成报告提供。持续目标保持 active，下一单位是有界关键帧与既有视觉客户端接入；已部署页面采集、真实模型准确率和长期实播仍未完成，不宣称商业级验收。crapper/dryer/mutator 未执行的状态不变。
+
+
+## 2026-11-07：公开视频有界关键帧、原生视觉协议与原文检索
+
+- 当前基线：dev / e11a0e8c44aee08309571ff58d36162e7e9e6744。续接公开证据长期研究目标，复用原 SQLite 媒体队列、FFmpeg、createMediaClient 和原文知识库。此前 agent:find / agent:impact 已定位入口，本阶段修改后重建索引为 530 模块 / 2979 符号。没有新增人物数据库、模型所有者、下载框架或工作台界面。
+- TDD：先新增关键帧计划/实际解码、视觉断点、取消/遗忘、未完成覆盖和 native session/browser protocol 行为测试，观察缺 public_media_frames、缺 analyzer 和旧能力协议的失败；最小实现后通过。首次 JS green 仍有旧 v2 连接夹具失败，同步 v3 契约后通过；保留所有失败日志，不计为通过。
+- 实现：音画模式提交 visualVersion:1，任务身份与 analysisVersion 分离于音频任务；最多 120 帧，约 12 秒间隔并覆盖开头和接近结尾，长视频按固定上限稀疏采样。FFmpeg JPEG 最长边 320、超限降至 224，每帧最多 36,000 字节/30 秒；用整数 PTS/timebase 计算实际帧时间。原有有界子进程生命周期抽到 media_process.py 共享，取消时仍回收进程组和管道。
+- 状态边界：同 SQLite 的 public_media_visual 保存计划、游标和按实际时间对应的模型标识，重启只继续剩余帧；顺序错误、内容或模型冲突重放拒绝。内容哈希变化与遗忘清除计划，未完成不能结案。公开任务只返回计划数量/完成数量摘要，最长任务列表和每页证据仍满足原生 64KiB 限制。
+- 桥接：publicMedia:3 / modelLease:1 / keyframes:1，旧协议拒绝运行；单项视觉请求经既有本地媒体客户端处理，20 秒超时、取消/断线 AbortController 以及迟到结果栅栏。识别前后核对配置、稳定身份、遗忘版本、知识库版本、归档与模型所有权。统一开关从 public-media-config.js 提供；切到仅音频会撤销视觉任务。
+- 入库：沿原每页八条确认/去重入口纳入视觉段，保存媒体哈希、实际时间、分析版本及请求模型标识；UNKNOWN/空输出只推进覆盖，不生成知识事实。关键帧声明“单张观察、间隔采样、非连续视频、模型结果待核实”，不将声音、评论或画面人物等同于作者。
+- 实际证据：复用 SHA-256 af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881 的同一 19,735ms 公开文件，production extract_keyframe 与已安装 FFmpeg 7.1 解出计划 0/9367/18735ms 对应实际 0/9400/18767ms，JPEG 6309/6054/6957 字节。原文件哈希未变；没加载真实模型，不能把这项解码成功解释为真实语义分析通过。
+- 集成验证：真实 native framing → production session/worker → FFmpeg 红蓝视频 → 既有 createMediaClient → SQLite → 原文库 → 按人检索，覆盖重启去重、遗忘和主体隔离；下载/ASR/视觉服务为明确夹具，像素解码为真实 FFmpeg。最终专项 18/18，跨进程集成包含其中；原生冻结最终 102/102，ResourceWarning 升格错误。npm ci（审计 0）、build、check、索引与发布安装快照实际导入 --help 通过；JavaScript 冻结全量及提交/CI 回执随后补记。
+- 保留风险：native-frozen 一轮在未修改的 test_pipeline.Pipeline.test_real_websocket_accepts_both_tracks_and_silent_scene_returns_observation 触发 native/host.py:174 DECODE_FAILED；隔离 1/1 与随后同代码全量 102/102 通过。没有定位根因、改 host.py 或放宽断言，不宣称已修复该偶发错误。路径诊断中 src/ai/public-media* 的 zsh glob、猜测 src/browser/model-ownership.js 与 native/test_host.py 不存在，随后改用实际源码；这类诊断错误不计为产品失败或通过。
+- 事务终验：继续原四个绝对路径，扩展到 85 文件；原始 BASELINE.tar 沿用初始 pristine 字节，新增本阶段文件不重置历史。五组同输入 BASELINE/MODIFIED/ROLLBACK 均执行：原生“不支持→排队/4000ms/遗忘清除/迟到拒绝→不支持”；来源“旧7天摘要引用→同编号73天正文→旧7天摘要引用”；无弹幕主播“拒绝→保存/检索1/遗忘0→拒绝”；页面来源“不支持→绑定/脱敏/错UID拒绝/遗忘清除→不支持”；视觉“不支持→三帧完成/未完成拒绝/实际PTS与模型标识/遗忘0/迟到拒绝→不支持”。补丁重建和独立副本回滚逐哈希通过，新增文件被移除，当前项目保留修改版。
+- 工具与边界：CLI 和工具目录均未提供 crapper/dryer/mutator，三项未执行，其他验证不替代。没有改 UI/布局、发送弹幕、部署/重载旧原生宿主或并发加载真实模型。已部署扩展真实 detail 捕获、真实 ASR/视觉事实性、无音轨作品、长期实播与商业准确率仍未验收；目标保持 active。详细命令、输入、字面输出、退出码和哈希扩展原 VERIFICATION.txt。
+
+- 冻结全量回执：现有 JavaScript 原进程最终 1807/1807，0 失败/取消/跳过，外层 477.049 秒、Node 自报 476960.376458ms。该快照先于随后 Unicode 边界修正，不能将它标作最终修正源码的全量结果。复核新路径发现 slice(0,1200) 会截断 emoji，先用独立探针及永久单元测试复现，再按完整 Unicode 字符截取；同时对上游孤立代理项规范化为 U+FFFD，第二个红测也保留。修正后的专项 19/19（含真实跨进程视觉集成），重新生成相同 530/2979 索引、build 与 85 文件事务；最终 check 与实施 CI 后续补记。
+
+- 提交前终验：Unicode 修正后的 build/check、530/2979 索引、85 文件补丁重建和五组回滚再次通过；原生源码自 102/102 冻结后未变。四角色重新打开核对并追加账本；下面执行 dev 集成提交与普通推送，不修改 main、版本和标签。

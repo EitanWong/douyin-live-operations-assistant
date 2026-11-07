@@ -5,11 +5,11 @@ import {createPublicMediaResearch} from '../../extension/public-media-research.j
 const room='1',anchor='10',sec='author-sec',subject='uid:2',workId='70';
 const work={kind:'work',id:workId,subject:sec,url:`https://www.douyin.com/video/${workId}`,text:'公开茶杯作品',observedAt:1800000000000};
 function fixture(){
- let epoch=0,enabled=true,version=0,archiving=true;
+ let epoch=0,enabled=true,version=0,archiving=true,mode='local-audio';
  let segments=[{kind:'transcript',startMs:0,endMs:4000,text:'这个杯子不能加热。',speaker:'unknown'}];
  const calls=[],saved=[];
  const jobs=new Map();
- const readConfig=async()=>({anchorId:anchor,ai:{enabled:true,assistant:{memoryEnabled:true},contextSources:{audience:true,accounts:true},accountCollection:{enabled},pipeline:{mode:'local-audio'},edge:{enabled:true,audioEnabled:true}}});
+ const readConfig=async()=>({anchorId:anchor,ai:{enabled:true,assistant:{memoryEnabled:true},contextSources:{audience:true,accounts:true},accountCollection:{enabled},pipeline:{mode},edge:{enabled:true,audioEnabled:true}}});
  const resolve=async()=>({epoch,sources:[`https://www.douyin.com/user/${sec}`],binding:{subject,epoch,sources:[`https://www.douyin.com/user/${sec}`]}});
  const request=async(action,input)=>{
   assert.equal(action,'public-media');calls.push(structuredClone(input));
@@ -28,7 +28,7 @@ function fixture(){
  const bridge=createPublicMediaResearch({readConfig,resolveProfile:resolve,checkProfile:async({binding})=>{if(binding.epoch!==epoch)throw Error('已遗忘');},request,
   canArchive:async()=>archiving,worker:{ready:async()=>true,run:async()=>true},knowledge:{handle:async(r,action,input)=>{if(action==='version')return version;if(action==='remember'){saved.push(input);return true;}throw Error(action);}},
   now:()=>1800000001000});
- return {bridge,calls,saved,jobs,pages:rows=>segments=rows,archiveOff:()=>archiving=false,clear:()=>version++,forget:()=>{epoch=1800000000100;version++;},disable:()=>{enabled=false;},complete:()=>{for(const job of jobs.values()){job.status='succeeded';job.coverage={audio:'complete',durationMs:4000,video:'not-analyzed',speaker:'unknown'};}}};
+ return {bridge,calls,saved,jobs,mode:value=>mode=value,pages:rows=>segments=rows,archiveOff:()=>archiving=false,clear:()=>version++,forget:()=>{epoch=1800000000100;version++;},disable:()=>{enabled=false;},complete:()=>{for(const job of jobs.values()){job.status='succeeded';job.coverage={audio:'complete',durationMs:4000,video:'not-analyzed',speaker:'unknown'};}}};
 }
 
 test('公开作品按稳定账号绑定原生任务，重试不增加同作品任务；完成后原文进入既有知识库',async()=>{
@@ -43,6 +43,15 @@ test('公开作品按稳定账号绑定原生任务，重试不增加同作品�
  const source=f.saved[0].sources[0];
  assert.match(source.text,/这个杯子不能加热/);assert.match(source.text,/0.*4000/);assert.match(source.coverage,/说话人未确认/);
  assert.equal(source.url,work.url);assert.equal(source.evidenceKind,'public-media');
+});
+test('视觉版本单独提交；单帧观察进入原文库，未知帧只推进游标，改为仅音频后撤销视觉任务',async()=>{
+ const f=fixture();f.mode('local-multimodal');
+ f.pages([{kind:'visual',startMs:1000,endMs:1001,text:'红色茶杯，杯身文字冷水。',speaker:'unknown'},{kind:'visual',startMs:2000,endMs:2001,text:'',speaker:'unknown'}]);
+ await f.bridge.collect({room,anchor,records:[work]});assert.equal(f.calls.find(r=>r.operation==='submit').request.visualVersion,1);
+ f.complete();const job=[...f.jobs.values()][0];job.analysisVersion='sensevoice-v1+keyframes-v1';job.coverage.video='sampled';
+ await f.bridge.wake(room);assert.equal(f.saved[0].sources.length,1);
+ const source=f.saved[0].sources[0];assert.equal(JSON.parse(source.text).kind,'visual');assert.match(source.coverage,/单张关键帧 1000ms/);assert.match(source.coverage,/不是连续视频/);
+ assert.equal(job.importCursor,2);f.mode('local-audio');await f.bridge.wake(room);assert.equal(job.status,'cancelled');
 });
 
 test('浏览器权威遗忘时间戳直接同步；旧任务即使成功也不能恢复原文',async()=>{

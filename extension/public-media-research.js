@@ -1,8 +1,8 @@
 import {accountSource} from '../src/ai/account-context.js';
 import {subjectKeySchema} from '../src/ai/audience-profile.js';
 import {parsePublicMediaSource} from '../src/services/public-media-source.js';
+import {publicMediaEnabled as enabled,publicMediaVisualEnabled,publicMediaHasVisual} from '../src/services/public-media-config.js';
 
-const enabled=config=>Boolean(config?.ai?.enabled && config.ai.assistant?.memoryEnabled!==false && config.ai.search?.rememberKnowledge!==false && config.ai.contextSources?.audience!==false && config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false && config.ai.edge?.enabled && config.ai.edge.audioEnabled && ['local-audio','local-multimodal'].includes(config.ai.pipeline?.mode));
 const profileURL=author=>`https://www.douyin.com/user/${author}`;
 const bound=(profile,subject,author)=>Boolean(subjectKeySchema.safeParse(subject).success && profile?.binding && profile.binding.subject===subject && profile.binding.sources?.includes(profileURL(author)));
 
@@ -26,9 +26,9 @@ export function createPublicMediaResearch({readConfig,resolveProfile,checkProfil
   if(!Array.isArray(rows) || rows.length>8)throw Error('原生作品证据分页无效');
   const at=job.updatedAt ?? job.createdAt;
   if(!Number.isFinite(at) || at>now())throw Error('原生作品证据时间无效');
-  const sources=rows.filter(r=>r.kind==='transcript' && typeof r.text==='string' && r.text.trim()).map(row=>({url:job.url,title:'公开视频音轨原文',
-   text:JSON.stringify({workId:job.workId,author:job.author,subject:job.subject,mediaHash:job.mediaHash,analysisVersion:job.analysisVersion,startMs:row.startMs,endMs:row.endMs,speaker:'unknown',text:row.text}),
-   at,expiresAt:at+180*86400000,evidenceKind:'public-media',coverage:`完整音轨分段转录 ${row.startMs}–${row.endMs}ms；说话人未确认；视频画面${job.coverage.video==='sampled' ? '仅采样' : '未分析'}；机器转录待核实，不是作者本人自述证明` }));
+  const sources=rows.filter(r=>['transcript','visual'].includes(r.kind) && typeof r.text==='string' && r.text.trim()).map(row=>({url:job.url,title:row.kind==='visual' ? '公开视频关键帧观察' : '公开视频音轨原文',
+   text:JSON.stringify({workId:job.workId,author:job.author,subject:job.subject,mediaHash:job.mediaHash,analysisVersion:job.analysisVersion,kind:row.kind,startMs:row.startMs,endMs:row.endMs,speaker:'unknown',...(row.kind==='visual' ? {model:row.model} : {}),text:row.text}),
+   at,expiresAt:at+180*86400000,evidenceKind:'public-media',coverage:row.kind==='visual' ? `单张关键帧 ${row.startMs}ms；全片有界间隔采样，不是连续视频；模型观察待核实，不证明人物身份、心理或帧外事件` : `完整音轨分段转录 ${row.startMs}–${row.endMs}ms；说话人未确认；视频画面${job.coverage.video==='sampled' ? '仅采样' : '未分析'}；机器转录待核实，不是作者本人自述证明` }));
   await checkProfile({room,anchor,subject:job.subject,binding:profile.binding});
   const current=await synchronize(room,anchor,job);
   if(!current.allowed || current.profile.epoch!==job.epoch)return;
@@ -43,6 +43,7 @@ export function createPublicMediaResearch({readConfig,resolveProfile,checkProfil
   if(privacy!==undefined)await native({operation:'reconcile',room,anchor,privacy:{present:Boolean(privacy),forgetBefore:privacy?.forgetBefore || 0,forgotten:privacy?.forgotten || []},allowed:String(config?.anchorId)===anchor && enabled(config) && await canArchive()});
   const jobs=await native({operation:'list',room,anchor});
   for(const job of jobs){
+   if(publicMediaHasVisual(job) && !publicMediaVisualEnabled(config)){await native({operation:'cancel',room,anchor,job:job.id});continue;}
    const {profile,allowed}=await synchronize(room,anchor,job);
    if(!allowed || profile.epoch!==job.epoch || job.status!=='succeeded' || job.imported)continue;
    if(job.coverage?.audio!=='complete' || !/^[a-f0-9]{64}$/u.test(job.mediaHash || ''))continue;
@@ -65,7 +66,7 @@ export function createPublicMediaResearch({readConfig,resolveProfile,checkProfil
     const knowledgeVersion=await knowledge.handle(room,'version',{anchor});
     await checkProfile({room,anchor,subject,binding:profile.binding});
     const pageMedia=media.map(value=>parsePublicMediaSource(value,{workId:work.id,author:work.subject,subject,epoch:profile.epoch,now:now()})).find(Boolean);
-    await native({operation:'submit',request:{room,anchor,subject,epoch:profile.epoch,author:work.subject,workId:work.id,url:source.url,knowledgeVersion,...(pageMedia ? {pageMedia} : {})}});submitted++;
+    await native({operation:'submit',request:{room,anchor,subject,epoch:profile.epoch,author:work.subject,workId:work.id,url:source.url,knowledgeVersion,...(publicMediaVisualEnabled(config) ? {visualVersion:1} : {}),...(pageMedia ? {pageMedia} : {})}});submitted++;
    }
    if(submitted)await worker.run();return {submitted};
   })),

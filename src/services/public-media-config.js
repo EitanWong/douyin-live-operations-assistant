@@ -1,0 +1,3 @@
+export const publicMediaEnabled=config=>Boolean(config?.ai?.enabled && config.ai.assistant?.memoryEnabled!==false && config.ai.search?.rememberKnowledge!==false && config.ai.contextSources?.audience!==false && config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false && config.ai.edge?.enabled && config.ai.edge.audioEnabled && ['local-audio','local-multimodal'].includes(config.ai.pipeline?.mode));
+export const publicMediaVisualEnabled=config=>publicMediaEnabled(config) && config.ai.pipeline.mode==='local-multimodal';
+export const publicMediaHasVisual=job=>job?.analysisVersion==='sensevoice-v1+keyframes-v1';

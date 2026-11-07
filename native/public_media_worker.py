@@ -10,9 +10,7 @@ import hashlib
 import io
 import json
 import math
-import os
 from pathlib import Path
-import signal
 import sys
 import tempfile
 import uuid
@@ -22,56 +20,8 @@ from data_location import DataLocation
 from local_asr import LocalASR
 from public_media_jobs import MAX_DURATION_MS, PublicMediaJobs
 from public_media_source import DownloadedMedia, download_page_media
-
-
-async def reap(process):
-    def signal_group(value):
-        try:
-            os.killpg(process.pid, value)
-        except ProcessLookupError:
-            pass
-    async def drain(stream):
-        while await stream.read(65536):
-            pass
-    # Readers must be joined before this function. Drain even when the child
-    # already exited: unread pipes otherwise retain transports after loop close.
-    signal_group(signal.SIGTERM)
-    tasks = [asyncio.create_task(drain(stream)) for stream in (process.stdout, process.stderr)]
-    tasks.append(asyncio.create_task(process.wait()))
-    _, pending = await asyncio.wait(tasks, timeout=2)
-    if pending:
-        signal_group(signal.SIGKILL)
-    await asyncio.gather(*tasks)
-
-
-async def bounded_read(stream, maximum):
-    result = bytearray()
-    while True:
-        block = await stream.read(min(65536, maximum+1-len(result)))
-        if not block:
-            return bytes(result)
-        result.extend(block)
-        if len(result) > maximum:
-            raise ValueError('MEDIA_DOWNLOAD_FAILED')
-
-
-async def run_bounded(args, timeout=180, maximum=2*1024*1024):
-    process = await asyncio.create_subprocess_exec(*args, stdin=asyncio.subprocess.DEVNULL,
-                                                  stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                                                  start_new_session=True)
-    tasks = [asyncio.create_task(bounded_read(process.stdout, maximum)),
-             asyncio.create_task(bounded_read(process.stderr, 131072))]
-    try:
-        async with asyncio.timeout(timeout):
-            stdout, _ = await asyncio.gather(*tasks)
-            if await process.wait() != 0:
-                raise ValueError('MEDIA_DOWNLOAD_FAILED')
-            return stdout
-    finally:
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        await reap(process)
+from media_process import reap, bounded_read, run_bounded
+from public_media_frames import extract_keyframe
 
 
 def verify_metadata(value, job):
@@ -133,10 +83,11 @@ async def finish_thread(function, *args, **kwargs):
 
 
 class PublicMediaWorker:
-    def __init__(self, location, asr, ffmpeg, download=download_public_video, heartbeat_seconds=1):
+    def __init__(self, location, asr, ffmpeg, download=download_public_video, heartbeat_seconds=1, visual=None):
         self.location, self.asr, self.ffmpeg = location, asr, ffmpeg
         self.download, self.heartbeat_seconds = download, heartbeat_seconds
         self.worker = 'media-'+uuid.uuid4().hex
+        self.visual = visual
 
     def call(self, method, *args, **kwargs):
         with self.location.open() as store:
@@ -177,7 +128,7 @@ class PublicMediaWorker:
                 elif code in ('LOCAL_ASR_INSTALL', 'LOCAL_ASR_SLOW', 'LOCAL_ASR_NOT_READY') or isinstance(error, ModuleNotFoundError):
                     await self.db('pause', job['id'], job['lease'], 'model-unprepared', delay_ms=60000)
                 else:
-                    await self.db('fail', job['id'], job['lease'], code if code in ('MEDIA_AUTHOR_MISMATCH', 'MEDIA_DOWNLOAD_FAILED', 'MEDIA_DECODE_FAILED') else 'MEDIA_ANALYSIS_FAILED')
+                    await self.db('fail', job['id'], job['lease'], code if code in ('MEDIA_AUTHOR_MISMATCH', 'MEDIA_DOWNLOAD_FAILED', 'MEDIA_DECODE_FAILED', 'MEDIA_VISUAL_FAILED') else 'MEDIA_ANALYSIS_FAILED')
             except ValueError as fence:
                 if str(fence) not in ('MEDIA_LEASE', 'MEDIA_EPOCH'):
                     raise
@@ -201,6 +152,15 @@ class PublicMediaWorker:
             duration = await self.transcribe(job, path)
             if abs(duration-downloaded.duration_ms) > min(1000, max(250, downloaded.duration_ms*.02)):
                 raise ValueError('MEDIA_DECODE_FAILED')
+            if job['analysisVersion'].endswith('+keyframes-v1'):
+                if self.visual is None:
+                    raise ValueError('MEDIA_VISUAL_FAILED')
+                state = await self.db('configure_visual', job['id'], job['lease'], duration)
+                for position in state['positionsMs'][state['completed']:]:
+                    await self.db('fenced', job['id'], job['lease'])
+                    frame = await extract_keyframe(self.ffmpeg, path, position)
+                    observation = await self.visual(job, frame)
+                    await self.db('checkpoint_visual', job['id'], job['lease'], position, frame.at_ms, observation['text'], observation['model'])
             await self.db('complete', job['id'], job['lease'], duration_ms=duration)
 
     async def transcribe(self, job, path):

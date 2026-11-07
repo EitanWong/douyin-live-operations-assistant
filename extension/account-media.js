@@ -67,7 +67,7 @@ export async function capturePublicWorkSample({audio,video,workId}){
  return result;
 }
 
-function localRequest(chrome){
+export function createLocalMediaRequest(chrome){
  return details=>{
   const controller=new AbortController();let timer=setTimeout(()=>{controller.abort();details.ontimeout();},10000);
   void (async()=>{
@@ -84,7 +84,7 @@ function localRequest(chrome){
 
 export async function collectAccountWithMedia(chrome,url,{readAI,onMedia,...options}){
  const native=createNativeASRClient({connect:()=>{const port=chrome.runtime.connectNative(NATIVE_HOST);return {onMessage:port.onMessage,onDisconnect:port.onDisconnect,disconnect:()=>port.disconnect(),postMessage:m=>port.postMessage({...m,type:'local-asr'})};}});
- const recognize=createMediaClient({request:localRequest(chrome),getKey:()=>''});
+ const recognize=createMediaClient({request:createLocalMediaRequest(chrome),getKey:()=>''});
  const transcribe=(sample,signal,ai)=>withDeadline(async active=>{
   if(ai.edge.audioBackend==='browser-whisper')throw Error('作品后台语音需要选择 SenseVoice 或自动后端');
   const abort=()=>native.close();active.addEventListener('abort',abort,{once:true});

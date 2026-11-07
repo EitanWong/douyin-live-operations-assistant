@@ -5,7 +5,8 @@ import {createRelationshipLibrary} from '../src/ai/relationship-library.js';
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
 import {requestNativeDeployment} from './native-deployment.js';
-import {collectAccountWithMedia} from './account-media.js';
+import {collectAccountWithMedia,createLocalMediaRequest} from './account-media.js';
+import {createPublicMediaVisualAnalyzer} from './public-media-visual.js';
 import {createAccountResearch} from './account-research.js';
 import {createPublicMediaResearch} from './public-media-research.js';
 import {createPublicMediaProfileResolver} from './public-media-profile.js';
@@ -23,7 +24,7 @@ import { validateEndpoint } from '../src/services/ai.js';
 import { validateSearchEndpoint, validateSearchBody } from '../src/services/search.js';
 import {validateWeatherURL} from '../src/services/weather.js';
 import {validatePublicDataURL} from '../src/services/public-data.js';
-import {validateMediaRequest,MEDIA_REQUEST_LIMIT} from '../src/services/media.js';
+import {createMediaClient,validateMediaRequest,MEDIA_REQUEST_LIMIT} from '../src/services/media.js';
 import { GiftStore } from '../src/data/gifts.js';
 import { DurableStorage, isDurableKey } from './durable-storage.js';
 import { installCollectionKeeper } from './collection-keeper.js';
@@ -60,7 +61,8 @@ const writeRecord = async (key,value) => {
 };
 const knowledgeCorpus=createKnowledgeCorpus({read:readRecord,write:writeRecord,archive:async({room,anchor,at,...payload})=>{await dataEngine().enqueue({id:`knowledge:${room}:${anchor}:${payload.sequence}`,room,anchor,kind:'knowledge',receivedAt:at,payload});void dataEngine().flush();}});
 const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readAudience:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,readProfile:room=>readRecord(`live-assistant:profile:${room}`),readConfig:room=>readRecord(`live-assistant:config:${room}`)});
-const mediaWorker=publicMediaWorkerClient(chrome,{allowed:()=>modelOwnership.backgroundAllowed(),onResult:()=>{void publicMedia?.wakeAll().catch(()=>{});}});
+const mediaVisual=createPublicMediaVisualAnalyzer({readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),readVersion:(room,anchor)=>automaticKnowledge.handle(room,'version',{anchor}),canArchive:()=>dataEngine().enabled(),backgroundAllowed:()=>modelOwnership.backgroundAllowed(),recognize:createMediaClient({request:createLocalMediaRequest(chrome),getKey:()=>''})});
+const mediaWorker=publicMediaWorkerClient(chrome,{analyzeVisual:mediaVisual,allowed:()=>modelOwnership.backgroundAllowed(),onResult:()=>{void publicMedia?.wakeAll().catch(()=>{});}});
 publicMedia=createPublicMediaResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),request:nativeDataRequest(chrome),worker:mediaWorker,knowledge:automaticKnowledge,canArchive:()=>dataEngine().enabled(),readPrivacy:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience ?? null});
 const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),readBudget:()=>readRecord('live-assistant:account-budget'),writeBudget:rows=>writeRecord('live-assistant:account-budget',rows),
   readProgress:(room,anchor)=>readRecord(`live-assistant:account-progress:${room}:${anchor}`),writeProgress:(room,anchor,value)=>writeRecord(`live-assistant:account-progress:${room}:${anchor}`,value),
