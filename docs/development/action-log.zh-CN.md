@@ -3856,3 +3856,8 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 完成的transaction-copy经源码SHA匹配和lsof无打开文件确认后移除，回收14MiB；保留BASELINE、四角色、原始整树归档、旧宿主、网络证据与全部字面输出，不动共享node_modules和其他任务。一次查找不存在的native/live_summary.py退出2，后直接读取实际data_store.py确认SQL结构；未对真实库执行修写或清理。
 
 - 普通合并origin/dev的8dda988/7768c29/a27b78f，保留其他任务的稳定身份去重源码；唯一文本冲突为行动日志同位置追加，完整保留双方内容并重新生成索引。采集修复两个源码SHA与已现场部署/事务验证版本相同。最终合并树重新执行完整JavaScript回归、build/check，再记录提交与普通push结果。
+
+- 最终合并源码3ee5ec92cd97dceaaed289064a5bf930ca508ec3完整回归退出0：**1967/1967通过**，0失败/取消/跳过，717477.246416ms；前一轮1957/1958和中止日志原样保留。最终build、check（568模块/3161符号索引新鲜度及源码/产物语法）与git diff --check通过。原生138/138为本次同步宿主后的已观察结果，后续合并无native改动；实际安装的data_host.py/data_store.py/knowledge_index.py与最终源码SHA一致。
+- 完整回归后再次查询实库：176770条，目标房间最新coverage connected=true、fresh=true、gaps=0，原始协议与事件仍持续写入。实时状态与命令/字面输出保存在live-final-ledger.json，未将已解析字段覆盖扩张为平台全部资料。
+- 功能425922d、生命周期补验d00fdee及最终合并3ee5ec9已普通push到origin/dev（a27b78f→3ee5ec9，exit0），git ls-remote精确一致；未推main、发布版本或标签，也未声称远端CI已通过。本条仅补交付日志，随后文档提交/普通push的精确SHA与回执写入同一证据目录delivery-receipt.json及VERIFICATION.txt，完成报告据实给出。
+- 本任务四角色继续使用原绝对路径并重新打开，采集修复两个成员与MODIFIED_FILE.tar逐字一致；BASELINE3项失败exit1→MODIFIED6/6通过exit0→独立副本ROLLBACK重现同3失败exit1，原始SHA恢复，修改版保留。12类未知method保留原帧、无法补造平台未下发或旧缺口仍为边界；crapper/dryer/mutator不可用三项仍未执行。没有未完成的本次故障修复或待用户重载操作。
