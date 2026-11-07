@@ -2,7 +2,7 @@ import cytoscape from 'cytoscape';
 import {networkElements} from '../relationship-network.js';
 const style=[
  {selector:'node',style:{'background-color':'data(color)','width':'data(size)','height':'data(size)','border-width':2,'border-color':'data(color)','border-opacity':.5,'background-opacity':.88,'label':'data(label)','color':'#e9f2ff','font-size':16,'font-weight':600,'text-valign':'bottom','text-margin-y':10,'text-wrap':'wrap','text-max-width':100,'text-background-color':'#101a2e','text-background-opacity':.78,'text-background-padding':3,'text-background-shape':'roundrectangle','overlay-color':'data(color)','overlay-opacity':.07,'overlay-padding':9}},
- {selector:'edge',style:{'width':1.7,'line-color':'data(color)','target-arrow-color':'data(color)','target-arrow-shape':'triangle','arrow-scale':.7,'curve-style':'bezier','label':'data(label)','font-size':12,'color':'data(color)','text-rotation':'autorotate','text-background-color':'#101a2e','text-background-opacity':.93,'text-background-padding':4,'text-margin-y':-8,'opacity':.7}},
+ {selector:'edge',style:{'width':1.7,'line-color':'data(color)','target-arrow-color':'data(color)','target-arrow-shape':'data(arrow)','arrow-scale':.7,'curve-style':'bezier','label':'data(label)','font-size':12,'color':'data(color)','text-rotation':'autorotate','text-background-color':'#101a2e','text-background-opacity':.93,'text-background-padding':4,'text-margin-y':-8,'opacity':.7}},
  {selector:'edge[status = "unverified"],edge[status = "conflicted"]',style:{'line-style':'dashed'}},
  {selector:'.muted',style:{'opacity':.14,'text-opacity':.15}},
  {selector:'node.selected,node.path',style:{'border-width':4,'border-color':'#ffffff','overlay-opacity':.18,'overlay-padding':15,'z-index':20}},
@@ -11,7 +11,7 @@ const style=[
 ];
 export function createNetworkView(element,{onSelect,create=cytoscape,headless=false}={}){
  const view=element.ownerDocument.defaultView;
- const cy=create({container:headless ? undefined : element,headless,styleEnabled:true,style,layout:{name:'preset'},minZoom:.15,maxZoom:4,wheelSensitivity:.18,pixelRatio:Math.min(view.devicePixelRatio || 1,2),boxSelectionEnabled:false,autounselectify:true,textureOnViewport:true});
+ const cy=create({container:headless ? undefined : element,headless,styleEnabled:true,style,layout:{name:'preset'},minZoom:.15,maxZoom:4,pixelRatio:Math.min(view.devicePixelRatio || 1,2),boxSelectionEnabled:false,autounselectify:true,textureOnViewport:true});
  let topology='',layoutName='',focusId='',frame=0,touched=false,closed=false;
  const fit=()=>{if(cy.elements().length)cy.fit(cy.elements(),24);};
  const touch=()=>{touched=true;};
@@ -21,8 +21,8 @@ export function createNetworkView(element,{onSelect,create=cytoscape,headless=fa
  const observer=new view.ResizeObserver(resize);observer.observe(element);
  cy.on('tap','node,edge',event=>onSelect?.({kind:event.target.data('kind'),id:event.target.data('recordId')}));
  cy.on('tap',event=>{if(event.target===cy)onSelect?.(null);});
- return {core:cy,update(graph,{layout:nextLayout='concentric',selected,path}={}){
-  const elements=networkElements(graph),nextTopology=JSON.stringify(elements.map(e=>[e.data.id,e.data.source,e.data.target]));
+ return {core:cy,update(graph,{layout:nextLayout='concentric',selected,path,dimension}={}){
+  const elements=networkElements(graph,{dimension}),nextTopology=JSON.stringify(elements.map(e=>[e.data.id,e.data.source,e.data.target]));
   if(nextTopology!==topology){
    const ids=new Set(elements.map(e=>e.data.id));cy.batch(()=>{cy.elements().filter(e=>!ids.has(e.id())).remove();for(const el of elements){const existing=cy.getElementById(el.data.id);if(existing.length)existing.data(el.data);else cy.add(el);}});
   }else cy.batch(()=>{for(const el of elements)cy.getElementById(el.data.id).data(el.data);});

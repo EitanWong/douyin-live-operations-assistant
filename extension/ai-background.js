@@ -1,5 +1,5 @@
 import {knowledgeLifetime,canReuseSource} from '../src/services/web-knowledge.js';
-import {relationshipEvidenceVersion} from '../src/services/relationship-query.js';
+import {relationshipEvidenceVersion,relationshipResearchOptions,scopedRelationshipContext} from '../src/services/relationship-query.js';
 import {AgentHarness} from '../src/ai/harness.js';
 import {createAgentTaskStore} from '../src/ai/task-store.js';
 import {createResearchAgent,validateAgentInput} from '../src/ai/agent.js';
@@ -35,9 +35,9 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
   const config=await readRecord(`live-assistant:config:${job.scope.split(':')[0]}`);
   if(!config?.ai?.enabled || String(config.anchorId)!==job.input.anchor)throw new Error('AI已关闭或主播已变化，请核对后重新提交');
   const ai=resolveReplyConfig(config.ai);job.input.ai=ai;
-  const room=job.scope.split(':')[0],subject=await resolveResearchProfile({room,anchor:job.input.anchor,subject:job.input.subject,epoch:job.input.subjectEpoch,ai,question:job.question,read:readRecord}),tier=subject?.tier || 'standard',limits=RESEARCH_BUDGETS[tier],graph=relationships ? await relationships(room,job.question) : null;
+  const room=job.scope.split(':')[0],subject=await resolveResearchProfile({room,anchor:job.input.anchor,subject:job.input.subject,epoch:job.input.subjectEpoch,ai,question:job.question,read:readRecord}),tier=subject?.tier || 'standard',limits=RESEARCH_BUDGETS[tier],relationshipContext=job.input.context?.relationshipContext,graphOptions=relationshipResearchOptions(relationshipContext),graph=relationships ? await relationships(room,job.question,graphOptions) : null;
   if(subject && config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false)job.input.sources=[...new Set([...subject.sources,...job.input.sources])].slice(0,3);
-  if(relationships){job.input.context ||= {};job.input.context.relationshipContext=graph;}
+  if(relationships){job.input.context ||= {};job.input.context.relationshipContext=scopedRelationshipContext(graph,relationshipContext);}
   const keys=new Map();for(const [kind,endpoint] of [['ai',ai.endpoint],['search',ai.search?.enabled ? ai.search.endpoint : null]])if(endpoint){const origin=new URL(endpoint).origin;keys.set(`${kind}:${endpoint}`,await readRecord(`live-assistant:${kind==='ai'?'api-key':'search-key'}:${origin}`) || (kind==='ai' ? await readRecord(`live-assistant:media-key:${origin}`) : '') || '');}
   const knowledgeVersion=knowledge ? await knowledge.handle(room,'version',{anchor:job.input.anchor}) : undefined;
   const binding={profile:subject?.binding,tier,ai:validateAgentInput(job.input).ai,knowledgeVersion,relationships:relationshipEvidenceVersion(graph)};
@@ -49,7 +49,7 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
    const current=validateAgentInput({...job.input,ai:resolveReplyConfig(latest.ai)}).ai;
    if(JSON.stringify(current)!==JSON.stringify(binding.ai))throw Error('AI设置已变化，请重新提交研究');
    if(knowledge && knowledgeVersion!==await knowledge.handle(room,'version',{anchor:job.input.anchor}))throw Error('知识已删除或变化，旧研究已作废');
-   if(relationships && binding.relationships!==relationshipEvidenceVersion(await relationships(room,job.question)))throw Error('人物资料已变化，本次研究已作废');
+   if(relationships && binding.relationships!==relationshipEvidenceVersion(await relationships(room,job.question,graphOptions)))throw Error('人物资料已变化，本次研究已作废');
   };
   const read=async(url,signal)=>{
    if(collectAccount && new URL(url).hostname==='www.douyin.com'){
@@ -64,10 +64,12 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
   const agent=createResearchAgent({tier,profile:subject?.profile,request,getKey:(kind,url)=>keys.get(`${kind}:${url}`) || '',readPublicPage:read,checkpointer:store.checkpointer,guard,
    reserve:async scope=>{await store.reserve(`task:${scope}:${job.id}`,limits.modelCalls,{lifetime:true});return store.reserve(scope);},reserveSearch:async scope=>{await store.reserve(`task-search:${scope}:${job.id}`,limits.searches,{lifetime:true});return store.reserve(`search:${scope}`,20);},
    knowledge:async query=>ai.assistant?.memoryEnabled===false || !knowledge ? [] : retrieveSourceRecords(await knowledge.handle(room,'list',{anchor:job.input.anchor}),query,Date.now(),{subject:job.input.subject,anchor:job.input.anchor}).flatMap(r=>r.results),
-   relationships:query=>ai.assistant?.memoryEnabled===false ? null : relationships?.(room,query)});
+   relationships:(query,options)=>ai.assistant?.memoryEnabled===false ? null : relationships?.(room,query,options)});
   const result=await agent(job,options);
   await guard();
-  if(knowledge && ai.search?.rememberKnowledge!==false && ai.assistant?.memoryEnabled!==false){
+  // Workbench questions retain sources on the task. Writing them into the
+  // corpus here would invalidate the evidence snapshot of their own answer.
+  if(knowledge && !relationshipContext?.focus && ai.search?.rememberKnowledge!==false && ai.assistant?.memoryEnabled!==false){
    const sources=subject ? result.sources : result.sources.filter(r=>new URL(r.url).hostname!=='www.douyin.com');
    try{result.knowledgeStored=await knowledge.handle(room,'remember',{anchor:job.input.anchor,...(subject ? {subject:job.input.subject,subjectEpoch:subject.epoch} : {}),sources,version:knowledgeVersion,lifetime:knowledgeLifetime(job.question,'stable')});}
    catch(error){result.knowledgeError=error.message;}

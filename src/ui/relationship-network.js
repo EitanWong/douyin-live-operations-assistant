@@ -21,8 +21,9 @@ export function relationshipPath(graph,from,to){
  for(let id=to;previous.get(id);){const p=previous.get(id);edges.unshift(p.edge);nodes.unshift(p.id);id=p.id;}
  return {nodes,edges};
 }
-export function networkElements(graph){
+export function networkElements(graph,{dimension='role'}={}){
  const degree=new Map();for(const edge of graph.relations)for(const id of [edge.from,edge.to])degree.set(id,(degree.get(id)||0)+1);
- return [...graph.entities.map(n=>({data:{id:`node:${n.id}`,recordId:n.id,kind:'entity',label:n.name,role:n.role || '人物提及',size:Math.min(44,24+(degree.get(n.id)||0)*2),color:n.role==='主播' ? '#ff81b2' : n.role==='观众' ? '#73c9ff' : '#ad9bff'}})),
- ...graph.relations.map(r=>({data:{id:`edge:${r.id}`,recordId:r.id,kind:'relation',source:`node:${r.from}`,target:`node:${r.to}`,label:`${r.negative ? '不是' : ''}${r.predicate}`,status:r.status,color:NETWORK_COLORS[r.status] || NETWORK_COLORS.unverified}}))];
+ const color=n=>dimension==='evidence' ? (n.dossier?.coverage?.records ? '#38d9a9' : '#f5bd62') : dimension==='activity' ? ((degree.get(n.id)||0)>3 ? '#ff81b2' : '#73c9ff') : n.role==='主播' ? '#ff81b2' : n.role==='观众' ? '#73c9ff' : '#ad9bff';
+ return [...graph.entities.map(n=>({data:{id:`node:${n.id}`,recordId:n.id,kind:'entity',label:n.name,role:n.role || '人物提及',size:Math.min(44,24+(degree.get(n.id)||0)*2),color:color(n)}})),
+ ...graph.relations.map(r=>({data:{id:`edge:${r.id}`,recordId:r.id,kind:'relation',source:`node:${r.from}`,target:`node:${r.to}`,label:`${r.negative ? '不是' : ''}${r.predicate}`,status:r.status,arrow:r.symmetric ? 'none' : 'triangle',color:NETWORK_COLORS[r.status] || NETWORK_COLORS.unverified}}))];
 }

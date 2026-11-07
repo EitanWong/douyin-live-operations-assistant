@@ -31,3 +31,9 @@ test('只有人物档案也复核；送礼统计窗口的时钟移动不误判�
  const graph=t=>({entities:[{dossier:{gifting:{observed:{count:3,from:t-30*86400000,through:t,basis:'deduplicated observed gifts in this room over 30 days; lower bound, not lifetime spending'}}}}]});
  assert.equal(relationshipEvidenceVersion(graph(100)),relationshipEvidenceVersion(graph(200)));
 });
+test('长图谱的固定人物证据种子保留选择与冲突，受上下文预算裁剪后仍可查证',async()=>{
+ const {relationshipResearchSeed,scopedRelationshipContext}=await import('../../src/services/relationship-query.js');
+ const graph={focus:{scope:'single',entityIds:['person:a'],names:['小雨']},entities:[{id:'person:a',name:'小雨',dossier:{facets:[{category:'interests',text:'陶艺',source:'本人原话',trust:'unverified'}],events:[{text:'完整事件'.repeat(2000),source:'弹幕'}]}},{id:'person:b',name:'小雨'}],relations:Array.from({length:80},(_,i)=>({from:'person:a',to:'person:b',predicate:'朋友',status:i===79 ? 'conflicted' : 'unverified',evidence:[{text:'关系陈述',source:'弹幕',trust:'unverified'}]}))};
+ const seed=relationshipResearchSeed(graph);assert.ok(JSON.stringify(seed).length<=6000);assert.deepEqual(seed.focus,graph.focus);assert.equal(seed.relations[0].status,'conflicted');assert.ok(seed.omittedRelations>0);assert.equal(seed.people.length,1);assert.equal(seed.people[0].facets[0].text,'陶艺');
+ assert.throws(()=>scopedRelationshipContext({...graph,entities:[]},graph),/选定人物/);
+});

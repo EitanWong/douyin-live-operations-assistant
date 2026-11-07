@@ -1,0 +1,75 @@
+{
+  "date": "2026-11-07",
+  "baseline": "f2dabbff3daa61838f60856af0032df4f0cd1837",
+  "branch": "codex/relationship-intelligence",
+  "integrationBranch": "dev",
+  "changes": [
+    "Symmetric relationship canonicalization across statement grammar and direction; independent account names remain separate.",
+    "Repeated dossier facts merge display rows while retaining evidence counts; diverse facet selection.",
+    "Thirteen-dimensional profile coverage, timeline, evidence distribution, three graph color dimensions, bounded person float.",
+    "Single/group/global workbench questions reuse durable background LangGraph, stable identity scope on every relationship tool call, actual trace and sources.",
+    "Shared workbench body keeps canvas and inspector accessible after narrow-screen toolbar wrapping; reduced-motion and lifecycle cleanup."
+  ],
+  "validation": {
+    "javascriptFull": {
+      "passed": 1938,
+      "failed": 0,
+      "skipped": 0,
+      "durationMs": 297154.926167,
+      "note": "Later focused changes also covered by impacted tests."
+    },
+    "impactedTests": {
+      "passed": 50,
+      "failed": 0
+    },
+    "native": {
+      "passed": 138,
+      "failed": 0,
+      "skipped": 0,
+      "python": "existing installed native Python 3.14 environment"
+    },
+    "browser": {
+      "graphStates": 18,
+      "workspaceStates": 120,
+      "consoleErrors": 0,
+      "consoleWarnings": 0,
+      "horizontalOverflow": false,
+      "cleanup": true,
+      "fixture": "Synthetic UI answers; separate real LangGraph tool integration with controlled model responses."
+    },
+    "graphBenchmark": {
+      "node": "v26.12.1",
+      "sourceClaims": 2000,
+      "uniqueRelations": 1000,
+      "displayedPeople": 80,
+      "displayedRelations": 76,
+      "coldMs": 20.818082999999994,
+      "warmMedianMs": 3.133375000000001,
+      "warmP95Ms": 4.690415999999999,
+      "basis": "synthetic CPU only; no model calls, browser FPS or RSS assertion"
+    },
+    "build": "passed",
+    "check": "passed",
+    "agentIndex": "passed",
+    "diffWhitespace": "passed",
+    "rollback": {
+      "command": "node probe.mjs ROOT",
+      "baselineRelations": 2,
+      "modifiedRelations": 1,
+      "rollbackRelations": 2,
+      "allExitStatuses": 0,
+      "restoredSHA256": "6ab95e404116a9067928f3908b5fc8d8942b113ac2e72e9123890fd3e6b9bae3"
+    }
+  },
+  "unavailableChecks": [
+    "crapper",
+    "dryer",
+    "mutator"
+  ],
+  "limits": [
+    "No paid model quality evaluation or real Douyin account end-to-end collection.",
+    "Finite synthetic browser states do not prove every device/content combination or all-day RSS/FPS.",
+    "Public and local research remain bounded by available evidence, domain permissions and existing host budgets."
+  ],
+  "localEvidenceDirectory": "/Users/eitan/.codex/worktrees/relationship-intelligence/douyin-live-operations-assistant/output/relationship-intelligence-2026-11-07"
+}

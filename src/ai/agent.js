@@ -2,7 +2,7 @@ import {subjectKeySchema,RESEARCH_BUDGETS} from './audience-profile.js';
 import {makeAIRequest} from '../services/ai.js';
 import {createResearchGraph,RESEARCH_INSTRUCTION} from './research-graph.js';
 import {sourceExpiresAt} from '../services/web-knowledge.js';
-import {relationshipEvidenceVersion} from '../services/relationship-query.js';
+import {relationshipEvidenceVersion,relationshipResearchSeed,relationshipResearchOptions,scopedRelationshipContext} from '../services/relationship-query.js';
 import {createPublicDataClient} from '../services/public-data.js';
 import {createWeatherClient} from '../services/weather.js';
 import {createSearchClient,requestJSON} from '../services/search.js';
@@ -22,22 +22,23 @@ export function validateAgentInput(input){
 export function createResearchAgent({tier='standard',profile,request,getKey,readPublicPage,reserve=async()=>{},reserveSearch=async()=>{},knowledge,relationships,checkpointer,guard=async()=>{}}){
  return async(job,{signal,checkpoint})=>{
   const data=validateAgentInput(job.input),limits=RESEARCH_BUDGETS[tier];if(!limits)throw Error('研究深度无效');
+  const scopedLookup=relationships && (async query=>scopedRelationshipContext(await relationships(query,relationshipResearchOptions(data.context.relationshipContext)),data.context.relationshipContext));
   const current=async state=>{
    if(signal.aborted)throw Error('任务已取消');await guard();
    if(state?.sources?.some(row=>row.expiresAt && row.expiresAt<=Date.now()))throw Error('研究来源已过期，请重新提交');
-   for(const row of state?.observations || [])if(row.action==='relationships' && !row.output?.error && relationships && relationshipEvidenceVersion(row.output)!==relationshipEvidenceVersion(await relationships(row.query)))throw Error('人物资料已变化，研究结果已作废');
+   for(const row of state?.observations || [])if(row.action==='relationships' && !row.output?.error && scopedLookup && relationshipEvidenceVersion(row.output)!==relationshipEvidenceVersion(await scopedLookup(row.query)))throw Error('人物资料已变化，研究结果已作废');
   };
   await current();await checkpoint('context','读取当前有效知识与关系，恢复已落盘的研究步骤');
   const search=createSearchClient({request,getKey:endpoint=>getKey('search',endpoint)});
   const dated=(found,freshness='stable')=>({...found,results:(found.results || []).map(row=>{const at=found.searchedAt ?? Date.now();return {...row,at,expiresAt:sourceExpiresAt(`${job.question} ${found.query || ''}`,freshness,at)};})});
   const runtime=createResearchGraph({tier,checkpointer,checkpoint,guard:current,question:job.question,initialSources:data.sources,
    search:async query=>{await reserveSearch(job.scope);return dated(await search(query,data.ai.search,{signal,timeout:15000}));},
-   read:async url=>{const page=await readPublicPage(url,signal),at=page.at ?? page.readAt ?? Date.now();return {...page,at,expiresAt:Math.min(Number.isFinite(page.expiresAt) ? page.expiresAt : Infinity,sourceExpiresAt(job.question,'stable',at))};},knowledge,relationships,
+   read:async url=>{const page=await readPublicPage(url,signal),at=page.at ?? page.readAt ?? Date.now();return {...page,at,expiresAt:Math.min(Number.isFinite(page.expiresAt) ? page.expiresAt : Infinity,sourceExpiresAt(job.question,'stable',at))};},knowledge,relationships:scopedLookup,
    publicData:async call=>dated(await createPublicDataClient({request})(call,{signal,now:Date.now(),timeout:15000}),'realtime'),
    weather:async({action,...plan})=>dated(await createWeatherClient({request})({...plan,intent:'weather'},{signal,now:Date.now(),timeout:15000}),'realtime'),
    plan:async state=>{
     await reserve(job.scope);await current();
-    const body=makeAIRequest({...data.context,task:{kind:'agent'},researchInstruction:RESEARCH_INSTRUCTION,target:{text:job.question,...(profile ? {profile} : {}),
+    const body=makeAIRequest({...data.context,task:{kind:'agent'},researchInstruction:RESEARCH_INSTRUCTION,target:{text:job.question,...(profile ? {profile} : {}),...((data.context.relationshipContext?.focus) ? {relationshipEvidence:relationshipResearchSeed(data.context.relationshipContext)} : {}),
      agent_state:{...state.workingContext,remainingModelCalls:limits.modelCalls-state.modelCalls,budget:limits}},maxLength:1000},data.ai);
     const result=await requestJSON(request,{url:data.ai.endpoint,key:getKey('ai',data.ai.endpoint),body,stream:body.stream,signal});
     const raw=result.choices?.[0]?.message?.content;if(typeof raw!=='string')throw Error('研究模型没有返回文本');return raw;
