@@ -105,6 +105,25 @@ test('运行后台共享知识单写入者跨房保存、通知、重启和图�
  const graph=await restarted.send({type:'relationship-query',query:'云杉'});assert.equal(graph.value.relations[0].predicate,'搭档');
  const raw=await w.durable().get('live-assistant:config:2');assert.deepEqual(raw.ai.memory.entries,[]);
 });
+test('AI连接和已记住的密钥跨房共享、实时通知并重启恢复，主播节奏独立',async()=>{
+ const key='live-assistant:api-key:https://cloud.example';
+ const w=await worker({[key]:'fixture-secret','live-assistant:config:1':{version:2,ai:{endpoint:'https://cloud.example/chat/completions',model:'fixture-model',pipeline:{workspaceId:'fixture-space'},replyFrequency:'quiet'}},'live-assistant:config:2':{version:2,ai:{replyFrequency:'every',persona:'主播乙'}}});
+ const sender={frameId:0,tab:{url:'https://live.douyin.com/2'}};
+ const init=await w.send({type:'init'},sender),base=init.value['live-assistant:config:2'];
+ assert.equal(base.ai.pipeline.workspaceId,'fixture-space');assert.equal(base.ai.model,'fixture-model');assert.equal(init.value[key],'fixture-secret');
+ const config=structuredClone(base);config.ai.model='updated-model';config.ai.replyFrequency='off';
+ const result=await w.send({type:'save-config',config,base},sender);assert.equal(result.ok,true,result.error);
+ const notice=w.sent.findLast(([id,m])=>id===1 && m.sharedKnowledge)?.[1].changes['live-assistant:config:1'].newValue;
+ assert.equal(notice.ai.model,'updated-model');assert.equal(notice.ai.replyFrequency,'quiet');
+ await w.send({type:'set',key,value:'updated-fixture-secret'},sender);
+ assert.ok(w.sent.some(([id,m])=>id===1 && m.type==='ai-credentials-changed'));
+ assert.ok(!JSON.stringify(w.sent).includes('updated-fixture-secret'));
+ assert.equal((await w.send({type:'ai-credentials-read'},sender)).value[key],'updated-fixture-secret');
+ const restarted=await worker({},w.indexedDB),again=await restarted.send({type:'init'},sender);
+ assert.equal(again.value['live-assistant:config:2'].ai.replyFrequency,'off');assert.equal(again.value[key],'updated-fixture-secret');
+ await w.send({type:'delete',key},sender);
+ assert.equal((await w.send({type:'ai-credentials-read'},sender)).value[key],undefined);
+});
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
   assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*','https://geocoding-api.open-meteo.com/*','https://api.open-meteo.com/*','https://wttr.in/*','https://air-quality-api.open-meteo.com/*','https://api.frankfurter.dev/*','https://raw.githubusercontent.com/*','https://date.nager.at/*']);
@@ -733,8 +752,30 @@ test('存储水位阻塞的新事件不会挡住持久日志恢复与释放容�
   } finally {dom.window.close();}
 });
 test('同步只送当前房间配置/租约，不广播AI密钥',async()=>{
-  const w=await worker(); await w.changed({'live-assistant:api-key:https://ai.example':{newValue:'dummy'}},'local'); assert.equal(w.sent.length,0);
+  const w=await worker(); await w.changed({'live-assistant:api-key:https://ai.example':{newValue:'dummy'}},'local'); assert.equal(w.sent.length,2);
+  assert.ok(w.sent.every(([,message])=>message.type==='ai-credentials-changed'));assert.ok(!JSON.stringify(w.sent).includes('dummy'));w.sent.length=0;
   await w.changed({'live-assistant:config:1':{newValue:{}}},'local'); assert.equal(w.sent.length,1); assert.equal(w.sent[0][0],1);
+});
+test('已打开页面按通知读取密钥，迟到结果不覆盖新值，删除后停止沿用',async()=>{
+ const key='live-assistant:api-key:https://cloud.example',listeners=[],reads=[],requests=[];
+ const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1',runScripts:'outside-only',pretendToBeVisual:true});
+ Object.assign(dom.window,{TextDecoder,TextEncoder,structuredClone,fetch:async()=>({ok:true,text:async()=>'{"status_code":0,"data":{}}'}),chrome:{runtime:{onMessage:{addListener:f=>listeners.push(f)},sendMessage:async m=>{
+  if(m.type==='init')return {ok:true,value:{[key]:'fixture-old','live-assistant:config:1':{version:2,ai:{endpoint:'https://cloud.example/chat/completions',model:'fixture'}}}};
+  if(m.type==='ai-credentials-read')return new Promise(resolve=>reads.push(resolve));
+  if(m.type==='ai'){requests.push(m);return {ok:true,value:{status:200,responseText:JSON.stringify({choices:[{message:{content:'连接成功'}}]})}};}
+  return {ok:true,value:[]};
+ }}}});
+ const wait=async predicate=>{const end=Date.now()+3000;while(!predicate() && Date.now()<end)await new Promise(resolve=>setTimeout(resolve,10));assert.ok(predicate());};
+ try{
+  await evalContent(dom.window);await wait(()=>dom.window.document.querySelector('#douyin-live-assistant')?.shadowRoot.querySelector('[data-action=test-ai]'));
+  const root=dom.window.document.querySelector('#douyin-live-assistant').shadowRoot,button=root.querySelector('[data-action=test-ai]');
+  button.click();await wait(()=>requests.length===1 && !button.disabled);assert.equal(requests[0].headers.Authorization,'Bearer fixture-old');
+  for(let i=0;i<2;i++)for(const listener of listeners)listener({type:'ai-credentials-changed'},{},()=>{});
+  await wait(()=>reads.length===2);reads[1]({ok:true,value:{[key]:'fixture-new'}});await new Promise(setImmediate);reads[0]({ok:true,value:{[key]:'fixture-stale'}});await new Promise(setImmediate);
+  button.click();await wait(()=>requests.length===2 && !button.disabled);assert.equal(requests[1].headers.Authorization,'Bearer fixture-new');
+  for(const listener of listeners)listener({type:'ai-credentials-changed'},{},()=>{});await wait(()=>reads.length===3);reads[2]({ok:true,value:{}});await new Promise(setImmediate);
+  button.click();await wait(()=>!button.disabled);assert.equal(requests.length,2);assert.match(root.querySelector('.toast').textContent,/Key|密钥/u);
+ }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 test('实际扩展content产物通过Chrome接口启动；保存失败显示且保持未保存',async()=>{
   const listeners=[];
@@ -849,11 +890,13 @@ test('实际扩展接收点赞和礼物，本人礼物入账但不自发感谢�
   } finally {dom.window.dispatchEvent(new dom.window.Event('pagehide'));dom.window.close();}
 });
 
-test('实际后台持久存储月报，重启后仍去重；两个主播配置与收入隔离',async()=>{
+test('实际后台持久存储月报，重启后仍去重；AI服务共享，主播个性设置与收入隔离',async()=>{
   const w=await worker();
   const other={frameId:0,tab:{url:'https://live.douyin.com/2'}};
   await w.send({type:'set',key:'live-assistant:config:1',value:{selfId:'10',gift:{minValue:100},ai:{model:'model-a'}}});
   await w.send({type:'set',key:'live-assistant:config:2',value:{selfId:'20',gift:{minValue:500},ai:{model:'model-b'}}},other);
+  const base=(await w.send({type:'init'})).value['live-assistant:config:1'],config=structuredClone(base);config.ai.model='shared-model';
+  assert.equal((await w.send({type:'save-config',config,base})).ok,true);
   await w.send({type:'income-profile',profile:{room:'1',name:'主播甲',anchorId:'101'}});
   await w.send({type:'income-profile',profile:{room:'2',name:'主播乙',anchorId:'202'}},other);
   const event={type:'gift',roomId:'stream-1',giftId:'g',groupId:'combo',count:2,unitValue:100,user:{id:'30'},final:true};
@@ -868,7 +911,9 @@ test('实际后台持久存储月报，重启后仍去重；两个主播配置�
   await again.send(message);
   assert.equal((await again.send({type:'income-report',room:'1',month})).value.summary.giftCount,4);
   const initial=(await again.send({type:'init'})).value;
-  assert.equal(initial['live-assistant:config:1'].ai.model,'model-a');assert.equal(initial['live-assistant:config:2'].ai.model,'model-b');
+  assert.equal(initial['live-assistant:config:1'].ai.model,'shared-model');assert.equal(initial['live-assistant:config:2'].ai.model,'shared-model');
+  assert.equal(initial['live-assistant:config:1'].selfId,'10');assert.equal(initial['live-assistant:config:2'].selfId,'20');
+  assert.equal(initial['live-assistant:config:1'].gift.minValue,100);assert.equal(initial['live-assistant:config:2'].gift.minValue,500);
   assert.equal(initial['live-assistant:income:1'],undefined);
   assert.equal((await again.send({type:'income-profiles'})).value.length,2);
 });

@@ -440,10 +440,14 @@ export class Panel {
     this.aiSettings.populate(config.ai.assistant);this.knowledgeLibrary.populate(config.ai.memory);
     this.node('[data-api-key]').value = '';
     this.node('[data-search-key]').value = '';
+    this.syncAIConnection();
+    this.syncControls(); this.markDirty(false);
+  }
+  syncAIConnection() {
+    const config=this.config;
     const preset = Object.entries(presets).find(([,values])=>values[0] === config.ai.endpoint)?.[0] || 'custom';
     this.node('[data-preset]').value = preset; this.node('[data-ai-connection]').open = ['custom','doubao','local'].includes(preset);
     this.modelPickers.setChoices('ai.model',replyModelOptions(preset));this.modelPickers.populate();
-    this.syncControls(); this.markDirty(false);
   }
   syncPKSettings(aiReady) {
     const get = key => this.node(`[data-field="pkOperations.${key}"]`);
@@ -881,7 +885,7 @@ export class Panel {
       if (action && ['Enter',' '].includes(e.key) && (e.repeat || e.isComposing || e.keyCode === 229 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey)) e.preventDefault();
     });
     const edited = e => {
-      if (!e.target.closest('[data-field],[data-item],[data-api-key],[data-remember-key],[data-preset]')) return;
+      if (!e.target.closest('[data-field],[data-item],[data-api-key],[data-remember-key],[data-search-key],[data-remember-search-key],[data-preset]')) return;
       this.markDirty(); e.target.removeAttribute('aria-invalid'); this.syncControls();
       if (e.target.dataset.field?.startsWith('identity.') && this.identity) this.updateIdentity(this.identity);
     };

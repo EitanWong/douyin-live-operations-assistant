@@ -1,4 +1,5 @@
 import {validateMemory} from './knowledge.js';
+import {migrateAIServices,projectSharedAIServices,mergeSharedAIServices} from './shared-ai-services.js';
 
 export const SHARED_KNOWLEDGE_KEY='live-assistant:knowledge:global';
 const clone=value=>structuredClone(value);
@@ -11,7 +12,8 @@ const stripped=config=>{
  return result;
 };
 export function projectSharedKnowledge(config,state){
- return {...config,ai:{...config?.ai,knowledge:state.knowledge,memory:{enabled:config?.ai?.memory?.enabled!==false,entries:clone(state.entries)}}};
+ const result=projectSharedAIServices(config,state.services);
+ return {...result,ai:{...result.ai,knowledge:state.knowledge,memory:{enabled:config?.ai?.memory?.enabled!==false,entries:clone(state.entries)}}};
 }
 
 // Background owns this state. Commit the shared record and room configuration
@@ -20,8 +22,11 @@ export function createSharedKnowledge({read,all,commit}){
  let tail=Promise.resolve();
  const serial=work=>{const result=tail.then(work);tail=result.catch(()=>{});return result;};
  async function ensure(){
-  const saved=await read(SHARED_KNOWLEDGE_KEY);if(saved)return saved;
-  const values=await all(),state={version:1,entries:[],knowledge:''},rooms=[];
+  const saved=await read(SHARED_KNOWLEDGE_KEY);if(saved?.services)return saved;
+  const values=Object.fromEntries(Object.entries(await all()).filter(([key])=>/^live-assistant:config:\d+$/u.test(key)).sort(([a],[b])=>a.localeCompare(b)));
+  const services=migrateAIServices(Object.values(values));
+  if(saved){const next={...saved,services};await commit([[SHARED_KNOWLEDGE_KEY,next]]);return next;}
+  const state={version:1,entries:[],knowledge:'',services},rooms=[];
   for(const [key,config] of Object.entries(values).sort(([a],[b])=>a.localeCompare(b))){
    if(!/^live-assistant:config:\d+$/u.test(key))continue;
    const room=key.split(':').at(-1);
@@ -56,6 +61,7 @@ export function createSharedKnowledge({read,all,commit}){
     if(current.knowledge!==before.knowledge && current.knowledge!==incoming.knowledge)throw Error('其他窗口已更正共享背景资料，请保留草稿并重新载入后核对');
     next.knowledge=incoming.knowledge;
    }
+   next.services=mergeSharedAIServices(current.services,config,base);
    validate(next);
    await commit([[SHARED_KNOWLEDGE_KEY,next],[`live-assistant:config:${room}`,stripped(config)]]);
    return projectSharedKnowledge(config,next);

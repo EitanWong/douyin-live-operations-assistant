@@ -8,6 +8,7 @@ import { IdentityReader } from '../src/browser/identity.js';
 import { EventInbox, failureCode } from '../src/runtime/inbox.js';
 import { roomFromURL } from '../src/browser/room-context.js';
 import { StorageMirror } from './storage-mirror.js';
+import {isAISecretKey} from '../src/services/shared-ai-services.js';
 import {createDataCapture,runReadOnlyCollector} from './data-capture.js';
 
 async function startContent() {
@@ -99,6 +100,7 @@ if (room) {
   };
   window.addEventListener('pagehide',()=>{void updateCollectionLease(false);});
   const storageMirror=new StorageMirror(await message({type:'init'}),message),values=storageMirror.values;
+  let credentialsRevision=0;
   const set = (key,value) => storageMirror.write(key,value);
   const del = key => storageMirror.write(key,undefined,true);
   const journal = {
@@ -134,6 +136,13 @@ if (room) {
       return true;
     }
     if (request.type === 'storage') {storageMirror.observe(request.changes);if(request.sharedKnowledge)sharedKnowledgeChanged?.(values.get(`live-assistant:config:${room}`));}
+    if(request.type==='ai-credentials-changed'){
+      const revision=++credentialsRevision;
+      void message({type:'ai-credentials-read'}).then(saved=>{
+        if(revision!==credentialsRevision)return;
+        storageMirror.observe(Object.fromEntries([...new Set([...values.keys(),...Object.keys(saved)])].filter(isAISecretKey).map(key=>[key,{newValue:saved[key]}])));
+      }).catch(()=>{});
+    }
     if (request.type === 'income-updated') incomeChanged?.();
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
     if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });

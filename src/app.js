@@ -1,4 +1,5 @@
 import {createKnowledgeMemory} from './services/automatic-knowledge.js';
+import {AI_SERVICE_GROUPS,selectAIServices,projectSharedAIServices} from './services/shared-ai-services.js';
 import {updatePersonProfile} from './services/person-profile.js';
 import {createRelationshipLibrary} from './ai/relationship-library.js';
 import {withRelationshipEvidence} from './services/relationship-query.js';
@@ -557,12 +558,12 @@ export function boot(options = {}) {
   async function keepKey(c, key, remember) {
     if (!key) return;
     const name = secretKey(c.ai.endpoint); sessionKeys.set(name, key);
-    if (remember) await set(name, key); else await del(name);
+    if (remember) {await set(name, key);sessionKeys.delete(name);} else await del(name);
   }
   async function keepSearchKey(c, credentials = {}) {
     if(!credentials.key)return;
     const name=searchSecretKey(c.ai.search.endpoint);sessionKeys.set(name,credentials.key);
-    if(credentials.remember)await set(name,credentials.key);else await del(name);
+    if(credentials.remember){await set(name,credentials.key);sessionKeys.delete(name);}else await del(name);
   }
   function prepareMediaKeys(c,credentials={}) {
     const keys=new Map();
@@ -574,7 +575,7 @@ export function boot(options = {}) {
       keys.set(name,value);
     }
     for(const [name,value] of keys)sessionKeys.set(name,value.key);
-    return async()=>{for(const [name,value] of keys)if(value.remember)await set(name,value.key);else await del(name);};
+    return async()=>{for(const [name,value] of keys)if(value.remember){await set(name,value.key);sessionKeys.delete(name);}else await del(name);};
   }
   const mediaRunKey=()=>JSON.stringify([engine.epoch,engine.config.anchorId,resolveMediaConfig(engine.config.ai)]);
   async function startMedia(c,credentials){
@@ -939,9 +940,16 @@ export function boot(options = {}) {
     const installCommand=panel.root.querySelector('[data-native-install-command]');
     if(installCommand && /^[a-p]{32}$/u.test(options.nativeExtensionId || ''))installCommand.textContent=`npm run native:install -- --extension-id=${options.nativeExtensionId}`;
     options.onReady?.({ engine, panel, adapter, tools,media,predictions, stop: pause, rememberUser, refreshIncome, wake:wakeRoom, sharedKnowledgeChanged:saved=>{
-      const next=copy(engine.config);next.ai.memory.entries=copy(saved.ai.memory.entries);next.ai.knowledge=saved.ai.knowledge;engine.update(next);
+      const services=selectAIServices(saved),next=projectSharedAIServices(engine.config,services);
+      next.ai.memory.entries=copy(saved.ai.memory.entries);next.ai.knowledge=saved.ai.knowledge;
+      if(JSON.stringify(resolveMediaConfig(next.ai))!==JSON.stringify(resolveMediaConfig(engine.config.ai))){media.stop();mediaAttemptKey='';}
+      engine.update(next);playground?.cancel();playground?.updateConfig();
       if(!panel.dirty && !panel.knowledgeLibrary.editing){
-        sharedBaseConfig=copy(next);panel.config.ai.memory=copy(next.ai.memory);panel.config.ai.knowledge=next.ai.knowledge;
+        sharedBaseConfig=copy(next);panel.config=projectSharedAIServices(panel.config,services);panel.config.ai.memory=copy(next.ai.memory);panel.config.ai.knowledge=next.ai.knowledge;
+        for(const path of Object.values(AI_SERVICE_GROUPS).flat()){
+          const node=panel.root.querySelector(`[data-field="ai.${path}"]`);if(node)node.value=path.split('.').reduce((value,key)=>value[key],next.ai);
+        }
+        panel.syncAIConnection();panel.aiSettings.syncPipeline();panel.aiSettings.syncSearch();
         panel.knowledgeLibrary.populate(next.ai.memory);panel.node('[data-field="ai.knowledge"]').value=next.ai.knowledge;
       }
       refresh();

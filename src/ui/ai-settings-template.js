@@ -14,7 +14,7 @@ const card=(title,content,wide=false)=>`<section class="ai-card${wide ? ' worksp
 function setupProgressTemplate(){return ['text','audio','native'].map(kind=>`<div data-setup-kind="${kind}" hidden><p role="status" aria-live="polite" data-setup-text></p><div class="stat-progress" role="progressbar" aria-label="${({text:'中文回复',audio:'浏览器中文语音',native:'本机组件'})[kind]}当前文件下载进度" aria-valuemax="100" hidden></div></div>`).join('');}
 function credentials(kind,title){return `<label class="field"><span>${title} API Key</span><input type="password" data-media-key="${kind}" autocomplete="new-password" placeholder="留空使用已保存密钥"><small>密钥只在本机使用，不随配置导出。</small></label><div class="ai-key-actions"><label class="toggle"><input type="checkbox" data-media-remember="${kind}">记住密钥（仅此设备）</label><button type="button" class="text-button" data-media-forget="${kind}">清除密钥</button></div>`;}
 
-function replyTemplate(panel){return `<section class="ai-card" data-text-service><h3>回复模型</h3><p class="group-note">弹幕问答与各项 AI 功能使用这套服务生成回复。</p><div class="grid">
+function replyTemplate(panel){return `<section class="ai-card" data-text-service><h3>回复模型</h3><p class="group-note">扩展版的服务连接、模型、业务空间和已记住的密钥在本机各主播间共享；接话频率、风格与开关仍单独设置。</p><div class="grid">
 <label class="field"><span>服务预设</span><select data-preset><option value="custom">自定义兼容接口</option><option value="deepseek">DeepSeek</option><option value="qwen">通义千问 / DashScope</option><option value="doubao">豆包 / 火山方舟</option><option value="local">本地 Ollama</option></select></label>
 ${modelPicker('ai.model','回复模型',replyModelOptions('custom'))}</div>
 <label class="field"><span>API Key</span><input type="password" data-api-key autocomplete="new-password" placeholder="留空保留此服务已有密钥"><small data-key-status>密钥按服务域名隔离，不随配置导出。</small></label>

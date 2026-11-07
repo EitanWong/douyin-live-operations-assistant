@@ -3,6 +3,7 @@ import {createAutomaticKnowledge} from '../src/services/automatic-knowledge.js';
 import {validateMemory} from '../src/services/knowledge.js';
 import {mergeConfig,validateConfig} from '../src/core/engine.js';
 import {createSharedKnowledge,SHARED_KNOWLEDGE_KEY,projectSharedKnowledge} from '../src/services/shared-knowledge.js';
+import {AI_SECRET_PREFIXES,isAISecretKey} from '../src/services/shared-ai-services.js';
 import {createRelationshipLibrary} from '../src/ai/relationship-library.js';
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
@@ -84,6 +85,7 @@ const deleteRecord = async keys => {
   const list = Array.isArray(keys) ? keys : [keys], durable = list.filter(durableKey), local = list.filter(key=>!durableKey(key));
   if (durable.length) await durableStorage.remove(durable);
   if (local.length) await chrome.storage.local.remove(local);
+  await notifyChanges(Object.fromEntries(list.filter(isAISecretKey).map(key=>[key,{newValue:undefined}])));
 };
 const giftStore = new GiftStore({
   get: async (key, fallback) => await readRecord(key) ?? fallback,
@@ -267,9 +269,10 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         }finally{accountCollections.delete(key);}
       }else if(message.type==='account-cancel' && isRoom(sender)){accountCollections.get(sender.tab.id)?.abort();value=true;}
       else if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
+      else if(message.type==='ai-credentials-read' && isRoom(sender))value=await durableStorage.getAll(AI_SECRET_PREFIXES);
       else if (message.type === 'init' && isRoom(sender)) {
         const room=roomFromUrl(sender.tab.url),shared=await sharedKnowledge.ensure();
-        const values=await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:',`live-assistant:live-memory:${room}:`,'live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:']);
+        const values=await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:',`live-assistant:live-memory:${room}:`,'live-assistant:income-calibration:',...AI_SECRET_PREFIXES]);
         values[`live-assistant:config:${room}`] ||= {};
         value=Object.fromEntries(Object.entries(values).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')).map(([key,value])=>[key,/^live-assistant:config:\d+$/u.test(key) ? projectSharedKnowledge(value,shared) : value]));
       }
@@ -431,19 +434,21 @@ async function notifyChanges(changes) {
     }
   }
   if(mediaChanged && publicMedia)void publicMedia.wakeAll().catch(()=>{});
+  const credentialsChanged=Object.keys(changes).some(isAISecretKey);
   const relevant = Object.fromEntries(Object.entries(changes).filter(([key]) => /^(live-assistant:(config|income|income-calibration|profile):\d+|douyin-live-assistant:(theme|palette|material))$/.test(key)));
   const shared=changes[SHARED_KNOWLEDGE_KEY]?.newValue || await rawReadRecord(SHARED_KNOWLEDGE_KEY);
   const sharedChanged=Boolean(changes[SHARED_KNOWLEDGE_KEY]);
-  if (!Object.keys(relevant).length && !sharedChanged) return;
+  if (!Object.keys(relevant).length && !sharedChanged && !credentialsChanged) return;
   // Delivery of change notifications must never turn a committed write into a failure.
   try {
     const tabs = await chrome.tabs.query({url:'https://live.douyin.com/*'});
     for (const tab of tabs) {
       const room = roomFromUrl(tab.url);
+      if(credentialsChanged)void chrome.tabs.sendMessage(tab.id,{type:'ai-credentials-changed'}).catch(()=>{});
       const scoped = Object.fromEntries(Object.entries(relevant).filter(([key]) => /:config:/.test(key) && key.endsWith(`:${room}`)));
       const configKey=`live-assistant:config:${room}`;
       if(sharedChanged && !scoped[configKey])scoped[configKey]={newValue:await rawReadRecord(configKey) || {}};
-      if(shared)for(const change of Object.values(scoped))change.newValue=projectSharedKnowledge(change.newValue,shared);
+      if(shared)for(const [key,change] of Object.entries(scoped))if(key===configKey)change.newValue=projectSharedKnowledge(change.newValue,shared);
       if (Object.keys(scoped).length) void chrome.tabs.sendMessage(tab.id,{type:'storage',changes:scoped,...(sharedChanged ? {sharedKnowledge:true} : {})}).catch(()=>{});
       if (Object.keys(relevant).some(key => /:(income|income-calibration|profile):/.test(key))) void chrome.tabs.sendMessage(tab.id,{type:'income-updated'}).catch(()=>{});
       if (relevant[themeKey]) void chrome.tabs.sendMessage(tab.id,{type:'theme-changed',value:relevant[themeKey].newValue}).catch(()=>{});

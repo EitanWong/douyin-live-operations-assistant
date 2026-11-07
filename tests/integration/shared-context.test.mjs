@@ -3,6 +3,33 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {boot} from '../../src/app.js';
 
+test('共享连接更新运行配置与未编辑表单，同时保留本主播节奏和正在编辑的草稿',async()=>{
+ const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1234567890',pretendToBeVisual:true});
+ for(const key of ['document','window','location','MutationObserver','HTMLElement'])globalThis[key]=dom.window[key];
+ globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);globalThis.CSS={escape:s=>s};let api;const values=new Map(),requests=[];
+ try{
+  boot({page:dom.window,get:(key,fallback)=>values.get(key) ?? fallback,set:async(key,value)=>values.set(key,value),del:async key=>values.delete(key),request:details=>{requests.push(details);details.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:'测试成功'}}]})});},adapterFactory:()=>({status:{},hook(){},observeDOM(){},stopDOM(){},healthy:()=>false,sync(){}}),identityFactory:()=>({refresh:async()=>{},close(){}}),onReady:value=>api=value});
+  const until=Date.now()+3000;while(!api && Date.now()<until)await new Promise(resolve=>setTimeout(resolve,10));assert.ok(api);
+  const saved=structuredClone(api.engine.config);saved.ai.model='shared-model';saved.ai.pipeline.workspaceId='shared-space';saved.ai.replyFrequency='every';
+  const frequency=api.engine.config.ai.replyFrequency;
+  api.sharedKnowledgeChanged(saved);
+  assert.equal(api.engine.config.ai.model,'shared-model');assert.equal(api.engine.config.ai.replyFrequency,frequency);
+  assert.equal(api.panel.node('[data-field="ai.pipeline.workspaceId"]').value,'shared-space');
+  const beforeSearchEndpoint=api.engine.config.ai.search.endpoint,searchKey=api.panel.node('[data-search-key]');searchKey.value='fixture-search-draft';searchKey.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+  assert.equal(api.panel.dirty,true,'填写搜索密钥也属于待保存草稿');
+  saved.ai.search.endpoint='https://search.example/search';api.sharedKnowledgeChanged(saved);
+  assert.equal(api.engine.config.ai.search.endpoint,'https://search.example/search');assert.equal(api.panel.node('[data-field="ai.search.endpoint"]').value,beforeSearchEndpoint);assert.equal(searchKey.value,'fixture-search-draft');
+  const persona=api.panel.node('[data-field="ai.persona"]');persona.value='未保存的主播风格';api.panel.markDirty();persona.focus();
+  saved.ai.model='new-shared-model';api.sharedKnowledgeChanged(saved);
+  assert.equal(api.engine.config.ai.model,'new-shared-model');assert.equal(persona.value,'未保存的主播风格');assert.equal(api.panel.root.activeElement,persona);
+  assert.equal(api.panel.read().ai.model,'shared-model','编辑中的服务草稿保留，由保存时三方合并处理');
+  await api.panel.callbacks.testAI(api.engine.config,'fixture-key',true);
+  values.set('live-assistant:api-key:https://api.deepseek.com','fixture-replaced-key');
+  await api.panel.callbacks.testAI(api.engine.config,'',false);
+  assert.equal(requests.at(-1).headers.Authorization,'Bearer fixture-replaced-key','已记住的旧密钥不被页面会话副本遮盖');
+ }finally{dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}
+});
+
 test('应用将当前场次账本、暂停时弹幕和观众数据传给话术生成与连接测试',async()=>{
   const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/1234567890?anchor_id=123',pretendToBeVisual:true});
   for(const key of ['document','window','location','MutationObserver','HTMLElement'])globalThis[key]=dom.window[key];
