@@ -1,4 +1,5 @@
 import {NATIVE_HOST} from './native-perception.js';
+import {onPortDisconnect} from '../src/browser/extension-port.js';
 
 export function installNativeASRBridge(chrome){
  const owners=new Map();
@@ -7,7 +8,7 @@ export function installNativeASRBridge(chrome){
   let valid=false;try{const s=client.sender;valid=s.frameId===0 && new URL(s.url).origin==='https://live.douyin.com' && s.url===s.tab.url;}catch{}
   if(!valid){client.disconnect();return;}
   let host,closed=false;
-  client.onDisconnect.addListener(()=>{closed=true;owners.delete(client);host?.disconnect();});
+  onPortDisconnect(client,()=>{closed=true;owners.delete(client);host?.disconnect();},chrome.runtime);
   client.onMessage.addListener(m=>{
    if(!['prepare','infer','status'].includes(m?.action) || typeof m.id!=='string' || m.id.length>80 || m.action==='infer' && (typeof m.data!=='string' || m.data.length>640100))return;
    try{

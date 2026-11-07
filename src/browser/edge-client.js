@@ -1,6 +1,7 @@
 import {semanticMessages,parseSemanticLabels} from '../analytics/ai.js';
 import {makeEdgeMessages} from '../ai/edge-prompt.js';
 import {currentAIPrompt,liveFactFingerprint} from '../services/ai-context.js';
+import {onPortDisconnect} from './extension-port.js';
 
 export function createEdgeClient({connect,pollMs=1000}){
  let port;const pending=new Map(),observers=new Set(),watchers=new Set();
@@ -8,7 +9,7 @@ export function createEdgeClient({connect,pollMs=1000}){
  const failure=()=>{for(const job of pending.values())job.finish(new Error('端侧连接已断开，请重新准备模型'));port=null;};
  const call=(action,data={},signal,timeout=12000)=>new Promise((resolve,reject)=>{
   if(signal?.aborted){reject(new Error('端侧请求已取消'));return;}
-  if(!port){const active=port=connect();active.onMessage.addListener(m=>{if(port!==active)return;if(m.type==='edge-state'){notify(m.value);return;}const job=pending.get(m.id);if(job)job.finish(m.error ? new Error(m.error) : null,m.value);});active.onDisconnect.addListener(()=>{if(port===active)failure();});}
+  if(!port){const active=port=connect();active.onMessage.addListener(m=>{if(port!==active)return;if(m.type==='edge-state'){notify(m.value);return;}const job=pending.get(m.id);if(job)job.finish(m.error ? new Error(m.error) : null,m.value);});onPortDisconnect(active,()=>{if(port===active)failure();});}
   const id=crypto.randomUUID();let timer;
   const finish=(error,value)=>{if(!pending.has(id))return;pending.delete(id);clearTimeout(timer);signal?.removeEventListener('abort',abort);error ? reject(error) : resolve(value);};
   const abort=()=>{if(action==='infer')port?.postMessage({action:'cancel',id});finish(new Error('端侧请求已取消'));};
