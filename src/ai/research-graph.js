@@ -5,6 +5,7 @@ import {validatePublicURL} from './public-sources.js';
 import {publicCallSchema,PUBLIC_DATA_TOOLS} from '../services/public-data.js';
 import {weatherPlanSchema} from '../services/weather.js';
 import {compactResearchState} from './research-context.js';
+import {mergeSourcePassage,evidenceOffset} from './source-evidence.js';
 
 export const RESEARCH_LIMITS=RESEARCH_BUDGETS.standard;
 const query=z.string().trim().min(1).max(300);
@@ -45,17 +46,17 @@ function sourceRows(rows,existing,limits,reading=false,kind='search-snippet'){
  const result=[...existing];
  for(const row of rows){
   let url;try{url=validatePublicURL(row.url || row.source);}catch{continue;}
-  const content=String(row.content || row.text || '').trim().slice(0,6000);if(!content)continue;
+  const text=String(row.content || row.text || '').replace(/\u0000/gu,'').trim(),content=text.slice(0,evidenceOffset(text,Math.min(text.length,6000)));if(!content)continue;
   const previous=result.findIndex(s=>s.url===url),old=result[previous];
-  // A URL is one citation. Reading upgrades its snippet in place; subsequent
-  // searches cannot downgrade the original page to a second-hand excerpt.
-  if(old && (!reading && (old.evidenceKind==='public-page' || old.content.includes(content)) || old.content===content && old.evidenceKind==='public-page'))continue;
   if(result.length>=limits.sources && previous<0)continue;
-  const merging=old && !reading,at=row.at ?? row.readAt ?? Date.now(),expiresAt=merging ? Math.min(old.expiresAt ?? Infinity,row.expiresAt ?? Infinity) : row.expiresAt;
+  const at=row.at ?? row.readAt ?? Date.now();
   const evidenceKind=reading ? 'public-page' : kind==='stored-passage' && Object.hasOwn(evidenceCoverage,row.evidenceKind) ? row.evidenceKind : kind;
-  const source={index:old?.index ?? result.length+1,url,title:String(row.title || url).slice(0,160),content:merging ? `${old.content}\n${content}`.slice(0,6000) : content,at:merging ? Math.min(old.at,at) : at,...(Number.isFinite(expiresAt) ? {expiresAt} : {}),
+  const source=mergeSourcePassage(old,{url,title:String(row.title || url).slice(0,160),content,at,...(Number.isFinite(row.expiresAt) ? {expiresAt:row.expiresAt} : {}),
+   ...(kind==='stored-passage' && row.sourceId ? {sourceId:row.sourceId} : {}),
    evidenceKind,publishedAt:typeof row.publishedAt==='string' ? row.publishedAt.slice(0,80) : old?.publishedAt ?? null,
-   coverage:String(row.coverage || evidenceCoverage[evidenceKind]).slice(0,500)};
+   coverage:String(row.coverage || evidenceCoverage[evidenceKind]).slice(0,500)},reading);
+  if(source===old)continue;
+  source.index=old?.index ?? result.length+1;
   if(previous>=0)result[previous]=source;else result.push(source);
  }return result;
 }
@@ -85,8 +86,8 @@ export function createResearchGraph({tier='standard',plan,search,read,knowledge,
     if(![...initialSources,...state.sources.map(row=>row.url)].some(known=>validatePublicURL(known)===url))throw Error('链接未在已提供或已搜索到的来源中');
     if(state.reads>=limits.reads)throw Error('原文读取预算已用完');
     changes.reads=state.reads+1;
-    const page=await read(url),bounded={...page,text:String(page.text || '').slice(0,6000),truncated:String(page.text || '').length>6000};
-    changes.publicSources=[...state.publicSources,bounded];changes.sources=sourceRows([bounded],state.sources,limits,true);output={url,sourceIndex:changes.sources.find(s=>s.url===url && s.content===bounded.text)?.index,truncated:bounded.truncated};
+    const page=await read(url),text=String(page.text || ''),bounded={...page,text:text.slice(0,evidenceOffset(text,Math.min(text.length,6000))),truncated:text.length>6000};
+    changes.publicSources=[...state.publicSources,bounded];changes.sources=sourceRows([bounded],state.sources,limits,true);output={url,sourceIndex:changes.sources.find(s=>s.url===url)?.index,truncated:bounded.truncated};
    }else if(decision.action==='inspect'){
     const source=state.sources.find(r=>r.index===decision.source);if(!source || decision.offset>=source.content.length)throw Error('原文编号或偏移无效');
     changes.focus={source:decision.source,offset:decision.offset};output={sourceIndex:decision.source,offset:decision.offset};
