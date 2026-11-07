@@ -3257,3 +3257,24 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 验收账本：原四角色扩展到 67 文件，补丁重建和回滚哈希、三个同输入行为探针通过，四份原绝对路径已重新打开；保持修改实现。真实公开作品额外作为本地补充证据，不改变四角色职责。当前项目始终未切换，最终提交/推送回执随后补记。
 
 - 推送回执：浏览器桥接实施提交 e7c4b00643bd76b93098e9cea738617dbc4a87e0 已推送 origin/dev（8503cbb→e7c4b00），git ls-remote 核对远端 SHA 一致，实施提交后工作区干净。未改 main/版本/标签；未部署或重载运行环境。该回执与检查点作为后续文档提交同步，最终文档 SHA 见完成报告；持续目标 active，下一项为经过作品/作者绑定的产品公开媒体回退。
+
+
+## 2026-11-07 · 已观测公开作品媒体下载适配器
+
+- 连续目标：上轮属于明确进展（浏览器/原生桥、主播身份、原文入库与 dev 推送），本轮从干净 dev/d8efb73 承接检查点的下一步。先读 index/checkpoint 的当前结果和下一动作，agent:find/agent:impact 后确认 account-page、account-media、account-research 与原下载器源码；对象仍是本项目，未启动子 Agent。沿用四角色，并在 source-stage 保存 67 文件的父 manifest、原始归档与补丁副本。
+- TDD：先写页面 mediaSource 缺接口、原生模块缺失、独立媒体回调未传、原生请求不支持 pageMedia、旧宿主仍接受新任务等预期红测。再实现共享浏览器描述解析、HTTPX 下载、原队列持久化和短期地址传递。额外复核发现遗忘前的地址可承接新画像版本，两端红测后要求 observedAt 严格晚于权威 epoch。失败和修复命令/字面输出保存在 output/deep-research-2026-11-07/source-stage，不把红测计为通过。
+- 成熟依赖与下载：复用已经锁定的 HTTPX 0.28.1，并将直接使用的依赖显式列入 requirements.txt，lock 无版本变化。下载使用流式响应、TLS 校验、独立客户端、无环境代理/认证/Cookie、禁止重定向、180 秒总期限/15 秒网络超时及 256MiB 字节预算。只接受 200、mp4/二进制类型、未压缩且长度完整的响应；挑战 HTML、重定向、过大、截断和取消均清理部分文件。规范页面提取器 yt-dlp 继续作为无有效页面源时的已有路线，没有自造签名或抓取凭据。
+- 归属与生命周期：account-page 只为同作品、同作者元数据中已观测且与当前播放源精确相等的地址生成描述；同作品冲突 UID 不选择最后一条。只允许 HTTPS Douyin VOD CDN、精确 __vid、规范稳定账号、时长与五分钟有效期。浏览器和原生提交边界再次核对 UID/secUID、作品、时间和遗忘 epoch；不接受任意 URL、用户信息、其他端口或额外字段。媒体描述经每次账号采集独有的 media 参数在归档后传递，不进入账号原记录、浏览器原文库或模型上下文。
+- 原生恢复：临时来源在同一 SQLite 的 public_media_sources 中按任务保存，可重启恢复，公开列表不返回地址。工作者取得 fenced 任务后读取有效源，失败的任务只有显式带新有效源提交才可重新入队，并沿用 32 待处理上限；过期回到原提取器路线。完成、取消、停用和遗忘删除临时来源。原有媒体哈希断点、租约、直播优先、FFmpeg 解码和导入确认继续使用。协议提升为 publicMedia:2/modelLease:1，旧音轨协议被能力探测拒绝；两种安装快照都包含新 stdlib 边界模块，数据宿主不因使用校验而依赖 HTTPX。
+- 集成验证：页面/桥接专项冻结 27/27；原生冻结完整 94/94（已安装 Python 3.12，ResourceWarning 升格错误）。新增真实 HTTPX 流→原工作者→真实 FFmpeg→证据时间轴测试，ASR 为受控替身；覆盖无 Cookie、禁止重定向、chunked 字节超限、截断、取消关闭连接、过期、重启、遗忘和停用。浏览器→native framing/SQLite→既有知识库集成也携带新描述，并确认临时地址不进入原文库；Node 测试任务不额外安装 Python 网络依赖。
+- 真实公开下载：正常未登录页面核对作品 6961737553342991651、可见作者主页与 currentSrc 后，生产 download_public_video→download_page_media 使用真实 HTTPX 下载 3,676,544 字节；SHA-256 af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881，与上轮浏览器下载一致。真实 FFmpeg 音画全部解码退出 0，元数据时长 19735ms；原下载失败的 403 仍保留，不改写其结果。本次浏览器读取与 native 下载之间由开发探针传参，尚非已部署扩展自动采集验收；没有加载真实 ASR/视觉模型。
+- 页面入口的实际限制：读取真实页面 script#RENDER_DATA 确认其只包含应用外壳，没有作品详情；完整产品仍依赖 document_start 观察原页面实际发出的 detail 响应。没有把可见作者链接单独当作产品作者认证，也没有放宽精确媒体匹配来掩盖未采到元数据。统一浏览器只读解析器中 decodeURIComponent 不可用，改为读取同一 DOM 文本后在 REPL 解析；没有执行页面代码或访问登录凭据。
+- 其他错误与范围：一次猜测 tests/unit/data-native-install.test.mjs 不存在，改查现有安装入口；系统 python3 无 HTTPX，确认后所有网络原生测试使用已安装虚拟环境，未给系统 Python 安装依赖。crapper/dryer/mutator CLI 与当前工具目录不可用，三项未执行。再次确认旧发布宿主仍在运行，未升级/重启、未并发载入第二个真实模型。没有布局改动、没有发送弹幕或更改用户开关；未发现可确认无用的工作树，不删除。
+- 中途验收：npm ci（审计 0 漏洞）、build、agent:index（526 模块/2967 符号）及 diff 检查通过。完整 JavaScript 串行与 check 正在运行，最终结果随后补记；94 原生通过不替代真实模型准确率、完整视觉时间轴、已部署浏览器与长期实播验收。
+- 四角色扩展：原路径不变，现合并 75 个实现/测试/依赖/索引文件，补丁重建与独立副本回滚逐哈希通过。新增同输入探针 BASELINE/ROLLBACK 不支持 pageMedia；MODIFIED 绑定匹配源、公开行脱敏、错误 UID→MEDIA_SOURCE、遗忘后来源 0/任务 cancelled。原有研究 7→73→7 天引用、原生 unsupported→queued/4000ms/遗忘栅栏→unsupported、主播 rejected→saved/检索1/遗忘0→rejected 探针共同重验。最终账本、四份重新打开的哈希和提交推送回执随后补记。
+
+- 最终本机验证：JavaScript 冻结串行完整 1801/1801，0 失败/取消/跳过（外层 582.888 秒，Node 582808.152792ms，分别保留）；原生复核后全量 94/94，ResourceWarning 升格错误；npm ci（审计 0 漏洞）、build、最终 check、526 模块/2967 符号索引与 diff 检查通过。最后新增重复空 __vid 夹具、原生单行修正后，浏览器边界/真实原生集成专项 6/6 与完整原生重新通过；生产 JavaScript 未在全量后改变。发布安装副本 --help 再次实际导入通过，数据宿主不加载 HTTPX/模型。
+- CI 根因与修复：读取 d8efb73 对应运行 42318795159 的真实失败日志，native-perception 成功，test-build 1793 通过/2 失败，均为真实 FFmpeg 音轨集成。独立 job 的依赖安装不能共享；本机使用只有 python3 的 PATH 原样复现任务 MEDIA_ANALYSIS_FAILED，加入真实 FFmpeg 后同输入 2/2 通过。CI test-build 和 Release job 显式安装 ffmpeg，保留真实解码断言，不改成跳过或替身。新 CI 在推送后观察；旧 CI 失败不记为通过。
+- 复核边界：Python parse_qs 默认忽略空重复参数，使 __vid=70&__vid= 被接受，新增断言先观察 ValueError not raised 的失败，再用 keep_blank_values=True 修正；浏览器既有解析也拒绝这一输入。相同 URL 只能有一个精确作品 ID。
+- 事务终验：同一路径四角色扩展为 77 文件，纳入两份工作流；补丁重建、独立副本回滚逐哈希通过，新增文件从恢复副本移除，当前源码保留修改版。四组 BASELINE/MODIFIED/ROLLBACK 探针保持前述行为，来源原始输入、字面 stdout/stderr 与退出码追加原 VERIFICATION.txt；最终路径与哈希重新打开核对。
+- 本轮续查的命令错误：两次 zsh 对猜测 glob 报 no matches found，改用现有目录 rg；全量未结束时读取 javascript-final.json 返回文件不存在，随后续等原会话得到成功回执，没有重启同一测试。crapper/dryer/mutator 再次检查均不可用，三项仍未执行。未删除工作树、未部署/重载原生宿主、未加载第二个真实模型、未发送直播消息。

@@ -10,10 +10,10 @@ import re
 import sqlite3
 import time
 import uuid
+from public_media_source import MAX_DURATION_MS, validate_media_source
 
 
 LEASE_MS = 60000
-MAX_DURATION_MS = 3 * 3600000
 SUBJECT = r'(?:uid:[0-9]{1,30}|sec:[A-Za-z0-9_-]{8,160})'
 
 
@@ -32,6 +32,7 @@ def initialize(db):
       CREATE TABLE IF NOT EXISTS public_media_blobs(job_id TEXT PRIMARY KEY,sha256 TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS public_media_controls(room TEXT,anchor TEXT,subject TEXT,allowed INTEGER NOT NULL,PRIMARY KEY(room,anchor,subject));
       CREATE TABLE IF NOT EXISTS public_media_imports(job_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS public_media_sources(job_id TEXT PRIMARY KEY,payload TEXT NOT NULL,observed_at INTEGER NOT NULL,expires_at INTEGER NOT NULL);
     ''')
 
 
@@ -42,7 +43,7 @@ def scope(room, anchor, subject=None):
 
 def request_data(request):
     keys = {'room', 'anchor', 'subject', 'epoch', 'workId', 'author', 'url'}
-    if not isinstance(request, dict) or set(request) not in (keys, keys | {'knowledgeVersion'}):
+    if not isinstance(request, dict) or not keys <= set(request) <= keys | {'knowledgeVersion', 'pageMedia'}:
         raise ValueError('MEDIA_INPUT')
     if not isinstance(request['subject'], str):
         raise ValueError('MEDIA_SCOPE')
@@ -89,6 +90,7 @@ class PublicMediaJobs:
         identity = [data[k] for k in ('room', 'anchor', 'subject', 'epoch', 'workId', 'author')]+['sensevoice-v1', data['knowledgeVersion']]
         job_id = hashlib.sha256(json.dumps(identity, separators=(',', ':')).encode()).hexdigest()
         with self.transaction():
+            page_media = validate_media_source(data['pageMedia'], data, self.now()) if 'pageMedia' in data else None
             current = self.current_epoch(data['room'], data['anchor'], data['subject'])
             if current is not None and data['epoch'] != current:
                 raise ValueError('MEDIA_EPOCH')
@@ -97,15 +99,19 @@ class PublicMediaJobs:
                 raise ValueError('MEDIA_DISABLED')
             self.db.execute('INSERT OR IGNORE INTO public_media_epochs VALUES(?,?,?,?)', (data['room'], data['anchor'], data['subject'], data['epoch']))
             existing = self.db.execute('SELECT status FROM public_media_jobs WHERE id=?', (job_id,)).fetchone()
-            if (not existing or existing['status'] == 'cancelled') and self.db.execute("SELECT COUNT(*) FROM public_media_jobs WHERE status IN ('queued','running','paused')").fetchone()[0] >= 32:
+            reopen = existing and (existing['status'] == 'cancelled' or existing['status'] == 'failed' and page_media)
+            if (not existing or reopen) and self.db.execute("SELECT COUNT(*) FROM public_media_jobs WHERE status IN ('queued','running','paused')").fetchone()[0] >= 32:
                 raise ValueError('MEDIA_QUEUE_FULL')
             if not existing:
                 at = self.now()
                 self.db.execute('INSERT INTO public_media_jobs(id,room,anchor,subject,epoch,work_id,author,url,analysis_version,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
                                 (job_id, data['room'], data['anchor'], data['subject'], data['epoch'], data['workId'], data['author'], data['url'], 'sensevoice-v1', 'queued', at, at))
                 self.db.execute('INSERT INTO public_media_imports(job_id,revision) VALUES(?,?)', (job_id, data['knowledgeVersion']))
-            else:
-                self.db.execute("UPDATE public_media_jobs SET status='queued',error=NULL,not_before=0,failures=0,recoveries=0 WHERE id=? AND status='cancelled'", (job_id,))
+            elif reopen:
+                self.db.execute("UPDATE public_media_jobs SET status='queued',error=NULL,not_before=0,failures=0,recoveries=0 WHERE id=?", (job_id,))
+            if page_media and (not existing or existing['status'] != 'succeeded'):
+                self.db.execute('INSERT INTO public_media_sources VALUES(?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET payload=excluded.payload,observed_at=excluded.observed_at,expires_at=excluded.expires_at WHERE excluded.observed_at>=observed_at',
+                                (job_id, json.dumps(page_media), page_media['observedAt'], page_media['expiresAt']))
         return self.get(job_id)
 
     def get(self, job_id):
@@ -122,6 +128,15 @@ class PublicMediaJobs:
                 'knowledgeVersion': receipt['revision'] if receipt else 0,
                 'importCursor': receipt['cursor'] if receipt else 0, 'imported': bool(receipt['complete']) if receipt else False,
                 'error': row['error'], 'coverage': json.loads(row['coverage']) if row['coverage'] else {'audio': 'pending', 'video': 'not-analyzed'}}
+
+    def source(self, job_id, lease):
+        with self.transaction():
+            job = dict(self.fenced(job_id, lease))
+            self.db.execute('DELETE FROM public_media_sources WHERE expires_at<=?', (self.now(),))
+            row = self.db.execute('SELECT payload FROM public_media_sources WHERE job_id=?', (job_id,)).fetchone()
+            if row is None:
+                return None
+            return validate_media_source(json.loads(row['payload']), {'workId':job['work_id'],'author':job['author'],'subject':job['subject'],'epoch':job['epoch']}, self.now())
 
     def list(self, room, anchor):
         scope(room, anchor)
@@ -153,12 +168,14 @@ class PublicMediaJobs:
         if current is not None and epoch > current:
             self._erase_subject(args)
         if not allowed:
+            self.db.execute('DELETE FROM public_media_sources WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
             self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL WHERE room=? AND anchor=? AND subject=?", args)
         self.db.execute('INSERT INTO public_media_epochs VALUES(?,?,?,?) ON CONFLICT(room,anchor,subject) DO UPDATE SET epoch=excluded.epoch', (*args, epoch))
         self.db.execute('INSERT INTO public_media_controls VALUES(?,?,?,?) ON CONFLICT(room,anchor,subject) DO UPDATE SET allowed=excluded.allowed', (*args, int(allowed)))
         return epoch
 
     def _erase_subject(self, args):
+        self.db.execute('DELETE FROM public_media_sources WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
         self.db.execute('DELETE FROM public_media_segments WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
         self.db.execute('DELETE FROM public_media_blobs WHERE job_id IN (SELECT id FROM public_media_jobs WHERE room=? AND anchor=? AND subject=?)', args)
         self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL,coverage=NULL,cursor_ms=0,updated_at=? WHERE room=? AND anchor=? AND subject=?", (self.now(), *args))
@@ -274,6 +291,7 @@ class PublicMediaJobs:
             visual = self.db.execute("SELECT 1 FROM public_media_segments WHERE job_id=? AND kind IN ('visual','ocr') LIMIT 1", (job_id,)).fetchone()
             coverage = {'audio': 'complete', 'durationMs': duration_ms, 'video': 'sampled' if visual else 'not-analyzed', 'speaker': 'unknown'}
             self.db.execute("UPDATE public_media_jobs SET status='succeeded',lease=NULL,worker=NULL,updated_at=?,coverage=? WHERE id=?", (self.now(), json.dumps(coverage), job_id))
+            self.db.execute('DELETE FROM public_media_sources WHERE job_id=?', (job_id,))
         return self.get(job_id)
 
     def pause(self, job_id, lease, reason, delay_ms=1000):
@@ -289,6 +307,8 @@ class PublicMediaJobs:
         with self.transaction():
             row = self.fenced(job_id, lease)
             retry = code != 'MEDIA_AUTHOR_MISMATCH' and row['failures'] < 2
+            if not retry:
+                self.db.execute('DELETE FROM public_media_sources WHERE job_id=?', (job_id,))
             self.db.execute('UPDATE public_media_jobs SET status=?,lease=NULL,worker=NULL,error=?,failures=failures+1,not_before=?,updated_at=? WHERE id=?',
                             ('paused' if retry else 'failed', code, self.now()+60000*(row['failures']+1), self.now(), job_id))
 
@@ -299,6 +319,7 @@ class PublicMediaJobs:
             if job['room'] != room or job['anchor'] != anchor:
                 raise ValueError('MEDIA_SCOPE')
             self.db.execute("UPDATE public_media_jobs SET status='cancelled',lease=NULL,worker=NULL,updated_at=? WHERE id=?", (self.now(), job_id))
+            self.db.execute('DELETE FROM public_media_sources WHERE job_id=?', (job_id,))
         return self.get(job_id)
 
     def forget(self, room, anchor, subject, epoch):

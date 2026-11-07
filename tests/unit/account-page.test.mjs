@@ -23,3 +23,20 @@ test('原页面已请求的评论在作品详情晚到时仍保留，错误作�
   page.history.replaceState(null,'','/video/71');assert.equal(page.__liveAssistantPublicAccountV1.snapshot().length,0);
  }finally{page.close();}
 });
+test('下载描述只绑定当前作品和作者的已播放 CDN，过期路由与冲突身份不返回媒体',()=>{
+ const dom=new JSDOM('<body></body>',{url:'https://www.douyin.com/video/70',runScripts:'outside-only'}),page=dom.window;
+ const url='https://v1.example.douyinvod.com/video/file.mp4?__vid=70';
+ try{
+  page.fetch=async()=>new Response('{}');page.eval(code);
+  page.__INITIAL_STATE__={aweme_detail:{aweme_id:'70',desc:'实际作品',author:{uid:'2',sec_uid:'sec-author',nickname:'作者'},video:{duration:8400,play_addr:{url_list:[url]}}}};
+  page.__liveAssistantPublicAccountV1.snapshot();
+  const value=page.__liveAssistantPublicAccountV1.mediaSource(url);
+  assert.equal(value.workId,'70');assert.equal(value.author,'sec-author');assert.equal(value.authorUid,'2');assert.equal(value.durationMs,8400);
+  assert.equal(value.expiresAt-value.observedAt,300000);
+  assert.equal(page.__liveAssistantPublicAccountV1.mediaSource('https://127.0.0.1/clip?__vid=70'),null);
+  assert.equal(page.__liveAssistantPublicAccountV1.mediaSource(url.replace('__vid=70','__vid=71')),null);
+  page.__INITIAL_STATE__.aweme_detail.author.uid='3';page.__liveAssistantPublicAccountV1.snapshot();
+  assert.equal(page.__liveAssistantPublicAccountV1.mediaSource(url),null,'同一作品冲突 UID 不能选择最后一条');
+  page.history.replaceState(null,'','/video/71');assert.equal(page.__liveAssistantPublicAccountV1.mediaSource(url),null);
+ }finally{page.close();}
+});

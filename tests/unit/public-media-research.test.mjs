@@ -83,3 +83,11 @@ test('能力探测后身份解析失败也释放闲置端口',async()=>{
   request:async()=>{},knowledge:{},worker:{ready:async()=>true,release:()=>released++}});
  await assert.rejects(bridge.collect({room,anchor,records:[work]}),/fixture read failure/);assert.equal(released,1);
 });
+test('下载源再次核对稳定 UID、作品和有效期；不匹配时只提交规范作品地址',async()=>{
+ const source={workId,author:sec,authorUid:'2',url:'https://v1.example.douyinvod.com/file?__vid=70',durationMs:4000,observedAt:1800000000000,expiresAt:1800000300000};
+ for(const candidate of [source,{...source,authorUid:'3'},{...source,workId:'71'},{...source,expiresAt:1800000001000}]){
+  const f=fixture();await f.bridge.collect({room,anchor,records:[work],media:[candidate]});
+  const request=f.calls.find(r=>r.operation==='submit').request;
+  assert.deepEqual(request.pageMedia,candidate===source ? source : undefined);
+ }
+});

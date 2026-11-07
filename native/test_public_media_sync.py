@@ -129,6 +129,44 @@ class BrowserMediaSynchronization(unittest.TestCase):
         self.assertFalse(changed['imported'])
         self.assertEqual(self.jobs.evidence(job['id']),[])
 
+    def test_transient_page_source_is_bound_persisted_redacted_and_removed_on_forget(self):
+        now=self.jobs.now()
+        source={'workId':'70','author':'author-sec','authorUid':'2','url':'https://v1.example.douyinvod.com/file?__vid=70',
+                'durationMs':4000,'observedAt':now,'expiresAt':now+300000}
+        job=self.api('submit',request={**self.request,'pageMedia':source})
+        self.assertNotIn('pageMedia',job)
+        self.store.close();self.store=DataStore(Path(self.temp.name)/'archive.sqlite3');self.jobs=PublicMediaJobs(self.store.db)
+        claim=self.jobs.claim('worker');self.assertEqual(self.jobs.source(job['id'],claim['lease']),source)
+        self.api('sync',epoch=now+1,allowed=True)
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM public_media_sources').fetchone()[0],0)
+        with self.assertRaisesRegex(ValueError,'LEASE'):self.jobs.source(job['id'],claim['lease'])
+
+    def test_expired_source_is_not_used_and_fresh_source_can_reopen_a_failed_job(self):
+        now=1800000000000;self.jobs.now=lambda:now
+        source={'workId':'70','author':'author-sec','authorUid':'2','url':'https://v1.example.douyinvod.com/file?__vid=70',
+                'durationMs':4000,'observedAt':now,'expiresAt':now+300000}
+        job=self.jobs.submit({**self.request,'pageMedia':source});now+=300000
+        claim=self.jobs.claim('worker');self.assertIsNone(self.jobs.source(job['id'],claim['lease']))
+        for _ in range(3):
+            if claim is None:claim=self.jobs.claim('worker')
+            self.jobs.fail(job['id'],claim['lease'],'MEDIA_DOWNLOAD_FAILED');claim=None;now+=300000
+        self.assertEqual(self.jobs.get(job['id'])['status'],'failed')
+        updated=self.jobs.submit({**self.request,'pageMedia':{**source,'observedAt':now,'expiresAt':now+300000}})
+        self.assertEqual(updated['id'],job['id']);self.assertEqual(updated['status'],'queued')
+
+    def test_disable_and_cancel_remove_transient_sources_and_invalid_late_source_cannot_restore_them(self):
+        now=self.jobs.now()
+        source={'workId':'70','author':'author-sec','authorUid':'2','url':'https://v1.example.douyinvod.com/file?__vid=70',
+                'durationMs':4000,'observedAt':now,'expiresAt':now+300000}
+        for operation in ['cancel','disable']:
+            self.api('sync',epoch=0,allowed=True)
+            job=self.api('submit',request={**self.request,'pageMedia':source})
+            if operation=='cancel':self.api('cancel',job=job['id'])
+            else:self.api('sync',epoch=0,allowed=False)
+            self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM public_media_sources').fetchone()[0],0)
+        with self.assertRaisesRegex(ValueError,'DISABLED'):
+            self.api('submit',request={**self.request,'pageMedia':source})
+
 
 if __name__=='__main__':
     unittest.main()

@@ -1,15 +1,22 @@
 import {accountSource,normalizeAccountPayload,mergeAccountRecord,ACCOUNT_SAMPLE_LIMIT} from '../src/ai/account-context.js';
+import {parsePublicMediaSource,PUBLIC_MEDIA_SOURCE_TTL} from '../src/services/public-media-source.js';
 // Observe only responses the native page already requests; no signer or cookies leave the page.
 const key='__liveAssistantPublicAccountV1';
 let source;try{source=accountSource(location.href);}catch{}
 if(source && !window[key]){
- const rows=new Map(),pending=[],mediaSources=new Set();
+ const rows=new Map(),pending=[],mediaSources=new Set(),downloadSources=new Map();
  const mediaURLs=payload=>{
   const work=rows.get(`work:${source.id}`);if(!work)return;
   const stack=[payload];let visited=0;
   while(stack.length && visited++<1000){const row=stack.pop();if(!row || typeof row!=='object' || row.secret || row.status?.is_private || row.status?.is_delete)continue;
    if(row.aweme_id===source.id && row.author?.sec_uid===work.subject){
-    for(const address of [row.video?.play_addr,row.video?.play_addr_h264,row.video?.play_addr_265,...(Array.isArray(row.video?.bit_rate) ? row.video.bit_rate : []).slice(0,8).map(r=>r?.play_addr)])for(const value of (Array.isArray(address?.url_list) ? address.url_list : []).slice(0,4))if(typeof value==='string' && value.length<=2000 && value.startsWith('https://') && mediaSources.size<32)mediaSources.add(value);
+    for(const address of [row.video?.play_addr,row.video?.play_addr_h264,row.video?.play_addr_265,...(Array.isArray(row.video?.bit_rate) ? row.video.bit_rate : []).slice(0,8).map(r=>r?.play_addr)])for(const value of (Array.isArray(address?.url_list) ? address.url_list : []).slice(0,4))if(typeof value==='string' && value.length<=2000 && value.startsWith('https://') && (mediaSources.has(value) || mediaSources.size<32)){
+     mediaSources.add(value);const at=Date.now();
+     const candidate=parsePublicMediaSource({workId:source.id,author:work.subject,authorUid:work.actor?.uid ?? null,url:value,durationMs:row.video?.duration,observedAt:at,expiresAt:at+PUBLIC_MEDIA_SOURCE_TTL});
+     if(!candidate)continue;
+     const previous=downloadSources.get(value);
+     downloadSources.set(value,downloadSources.has(value) && (!previous || previous.authorUid!==candidate.authorUid || previous.author!==candidate.author || previous.durationMs!==candidate.durationMs) ? null : candidate);
+    }
    }
    for(const child of Object.values(row).slice(0,100))if(child && typeof child==='object' && stack.length<1000)stack.push(child);
   }
@@ -37,7 +44,9 @@ if(source && !window[key]){
   }
   return [...rows.values()];
  };
- Object.defineProperty(window,key,{value:{snapshot,mediaMatches:value=>location.href.split('?')[0].replace(/\/$/u,'')===source.url && mediaSources.has(value)},configurable:false});
+ const mediaMatches=value=>location.href.split('?')[0].replace(/\/$/u,'')===source.url && mediaSources.has(value);
+ const mediaSource=value=>mediaMatches(value) ? parsePublicMediaSource(downloadSources.get(value),{workId:source.id,author:rows.get(`work:${source.id}`)?.subject}) : null;
+ Object.defineProperty(window,key,{value:{snapshot,mediaMatches,mediaSource},configurable:false});
  const original=window.fetch;
  window.fetch=function(...args){const result=original.apply(this,args);if(accepted(args[0]?.url || args[0]))void result.then(async r=>{
   const reader=r.clone().body?.getReader();if(!reader)return;const chunks=[];let bytes=0;

@@ -31,11 +31,13 @@ for(const subject of ['uid:2','uid:10'])test(`${subject} 浏览器稳定身份�
   worker:{ready:async()=>true,run:async()=>{execFileSync('python3',[fileURLToPath(new URL('../helpers/public-media-worker.py',import.meta.url)),database]);return true;}}};
  const bridge=createPublicMediaResearch(options),cache=createWebKnowledge({indexedDB:null});
  try{
-  await bridge.collect({room:'1',anchor,records:[{kind:'work',id:'70',subject:'author-sec',url:'https://www.douyin.com/video/70',text:'茶杯清洗'}]});
+  const observedAt=Date.now(),media=[{workId:'70',author:'author-sec',authorUid:subject.slice(4),url:'https://v1.example.douyinvod.com/file?__vid=70',durationMs:8000,observedAt,expiresAt:observedAt+300000}];
+  await bridge.collect({room:'1',anchor,records:[{kind:'work',id:'70',subject:'author-sec',url:'https://www.douyin.com/video/70',text:'茶杯清洗'}],media});
   await assert.rejects(bridge.wake('1'),/interruption/);
   assert.equal((await knowledge.handle('1','list',{anchor})).length,2,'入库之后、确认之前中断仍保留已提交原文');
   await createPublicMediaResearch(options).wake('1');
   const rows=await knowledge.handle('1','list',{anchor});assert.equal(rows.length,2);assert.equal(rows[0].subject,subject);assert.equal(rows[0].evidenceKind,'public-media');assert.match(rows[0].coverage,/说话人未确认/);
+  assert.equal(JSON.stringify(values).includes('douyinvod'),false,'临时播放源不能进入浏览器原文库');
   const sequence=values['live-assistant:knowledge:1:10'].sequence;await createPublicMediaResearch(options).wake('1');assert.equal(values['live-assistant:knowledge:1:10'].sequence,sequence);
   const retrieval=createKnowledgeMemory({cache,anchor:()=>anchor,transport:(action,input)=>knowledge.handle('1',action,input)});
   let calls=0;const client=createAIClient({knowledge:retrieval,getKey:()=> 'test',request:details=>{calls++;const input=JSON.parse(JSON.parse(details.data).messages[1].content),candidate=input.knowledge_candidates.find(row=>row.results.some(source=>source.content.includes('冷水')));assert.ok(candidate);assert.match(candidate.results[0].coverage,/说话人未确认/);details.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:JSON.stringify({intent:'knowledge',query:candidate.id,reply:'视频音轨提到冷水清洗，语音说话人未确认。',sources:[1]})}}]})});}});

@@ -28,7 +28,7 @@ export function createPublicMediaWorkerClient({connect,onResult=()=>{},allowed=(
      if(message.error)row.reject(Error('本机公开视频任务不可用'));else row.resolve(message.value);
     });
     const value=await ask('capabilities');
-    if(value?.publicMedia!==1 || value.modelLease!==1){close();return false;}
+    if(value?.publicMedia!==2 || value.modelLease!==1){close();return false;}
     return true;
    }catch{close();return false;}
   })();return probe;

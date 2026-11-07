@@ -6,7 +6,6 @@ is temporary; transcripts retain their source job, content hash and time range.
 import argparse
 import asyncio
 import base64
-from dataclasses import dataclass
 import hashlib
 import io
 import json
@@ -22,12 +21,7 @@ import wave
 from data_location import DataLocation
 from local_asr import LocalASR
 from public_media_jobs import MAX_DURATION_MS, PublicMediaJobs
-
-
-@dataclass(frozen=True)
-class DownloadedMedia:
-    path: Path
-    duration_ms: int
+from public_media_source import DownloadedMedia, download_page_media
 
 
 async def reap(process):
@@ -95,6 +89,8 @@ def verify_metadata(value, job):
 
 
 async def download_public_video(job, folder):
+    if job.get('pageMedia'):
+        return await download_page_media(job['pageMedia'], folder)
     common = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-plugin-dirs', '--no-playlist',
               '--no-cache-dir', '--socket-timeout', '15', '--retries', '1', '--fragment-retries', '1',
               '--extractor-retries', '1', '--no-progress', '--quiet']
@@ -198,7 +194,8 @@ class PublicMediaWorker:
         if status['phase'] != 'ready':
             raise ValueError('LOCAL_ASR_NOT_READY')
         with tempfile.TemporaryDirectory(prefix='douyin-public-media-') as temporary:
-            downloaded = await self.download(job, Path(temporary))
+            page_media = await self.db('source', job['id'], job['lease'])
+            downloaded = await self.download({**job, **({'pageMedia': page_media} if page_media else {})}, Path(temporary))
             path = downloaded.path
             job = await self.db('bind_media', job['id'], job['lease'], await finish_thread(content_hash, path))
             duration = await self.transcribe(job, path)

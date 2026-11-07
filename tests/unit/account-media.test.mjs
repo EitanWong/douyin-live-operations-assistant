@@ -11,6 +11,13 @@ test('仅明确启用的本地方案采样作品音画；每作一帧/4秒，转
  assert.equal(rows[0].kind,'transcript');assert.equal(rows[0].actor,undefined);assert.equal(rows[0].positionMs,1200);assert.equal(rows[1].kind,'visual');assert.match(rows[0].coverage,/4秒/);
  config.pipeline.mode='ali-split';assert.deepEqual(await analyzer({source,records,tabId:1}),[]);assert.equal(calls.length,3);
 });
+test('播放源经独立回调交给任务，不成为音画文字记录，变更配置丢弃迟到地址',async()=>{
+ const ai=mergeConfig({ai:{pipeline:{mode:'local-audio'}}}).ai,media={workId:'70',author:'sec-author'},sources=[];
+ const analyzer=createAccountMediaAnalyzer({readAI:async()=>ai,capture:async()=>({mediaSource:media}),onMedia:value=>sources.push(value)});
+ assert.deepEqual(await analyzer({source,records,tabId:1}),[]);assert.deepEqual(sources,[media]);
+ const late=createAccountMediaAnalyzer({readAI:async()=>ai,capture:async()=>{ai.pipeline.mode='text';return {mediaSource:media};},onMedia:value=>sources.push(value)});
+ await late({source,records,tabId:1});assert.equal(sources.length,1);
+});
 test('缺失、失败和取消不伪造媒体证据，改配置后丢弃迟到结果，保留可用画面',async()=>{
  const config=mergeConfig({ai:{pipeline:{mode:'local-multimodal'}}}).ai;
  const analyzer=createAccountMediaAnalyzer({readAI:async()=>config,capture:async()=>({frame:'data:image/jpeg;base64,anBlZw=='}),transcribe:async()=>{throw Error('missing');},recognize:async()=>({text:'可见文字'}),now:()=>1800000000000});

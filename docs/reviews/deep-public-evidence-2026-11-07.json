@@ -4,8 +4,8 @@
   "activeObject": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant",
   "baselineCommit": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49",
   "integrationBranch": "dev",
-  "lastConfirmedResult": "Frozen JavaScript serial full suite 1795/1795; native 86/86 with ResourceWarning elevated; npm ci/build/check/index passed. Browser/native bridge and canonical anchor knowledge retrieval implemented. 67 aggregate files reconstruct and roll back. Real public-page video acquired and decoded, but automated product fallback/real-model acceptance remain pending.",
-  "nextExecutableAction": "基于 account-page 已观测的作品/作者/mediaSources 绑定，为原下载适配器实现有界公开媒体回退；先写失败行为测试，覆盖未匹配作者、过期媒体、重定向、取消/遗忘与重启，再以已取得的真实公开作品验证。",
+  "lastConfirmedResult": "Public page-attributed media source transport and HTTPX download implemented; JS full 1801/1801, post-review integration/boundary 6/6, native 94/94. Missing-FFmpeg CI failures reproduced and workflow prerequisites corrected. 77 files reconstruct and rollback. Real public media downloaded/decoded through production function. Commit/push and new CI pending; extension deployment and real-model acceptance incomplete.",
+  "nextExecutableAction": "提交并推送本轮公开媒体来源适配器及 CI 依赖修复到 dev，观察新 CI；完成回执后，为同一原生媒体队列增加有界全片关键帧时间轴与既有本地视觉分析器的协议/行为测试。扩展自动捕获真实详情响应、真实 ASR/视觉和长期实播仍为独立验收门槛。",
   "inputPaths": [
     "docs/research/deep-public-evidence-2026-11-07.zh-CN.md",
     "native/public_media_jobs.py",
@@ -25,12 +25,16 @@
     "src/ai/audience-profile.js",
     "src/ai/research-profile.js",
     "src/services/automatic-knowledge.js",
-    "output/deep-research-2026-11-07/browser-stage/public-work-decode.json"
+    "output/deep-research-2026-11-07/browser-stage/public-work-decode.json",
+    "native/public_media_source.py",
+    "src/services/public-media-source.js",
+    "native/test_public_media_source.py",
+    "output/deep-research-2026-11-07/source-stage/real-download-result.json"
   ],
   "acceptanceEvent": "一个实际可访问公开作品贯通作者核对、下载、音轨/关键帧时间轴、证据入库、按人问答及取消/遗忘；之后真实模型和长期实播验收。",
   "validation": {
     "javascript": {
-      "passed": 1795,
+      "passed": 1801,
       "failed": 0,
       "skipped": 0,
       "cancelled": 0,
@@ -40,31 +44,33 @@
         "--test-concurrency=1",
         "tests"
       ],
-      "outerElapsedSeconds": 518.615,
-      "runnerReportedDurationMs": 1114623.170333,
-      "timingBasis": "Literal outer and test-runner values kept separately; not reconciled or mixed."
+      "outerElapsedSeconds": 582.888,
+      "runnerReportedDurationMs": 582808.152792,
+      "timingBasis": "Literal outer and test-runner values kept separately.",
+      "logs": "output/deep-research-2026-11-07/source-stage/javascript-final.*"
     },
     "harness": {
-      "previousStagePassed": 85,
-      "thisStage": "Harness tests included in full 1795; standalone eval:harness not rerun"
+      "thisStage": "Harness tests included in full 1801; standalone eval:harness not rerun"
     },
     "native": {
-      "passed": 86,
+      "passed": 94,
       "runtime": "installed Python 3.12 virtual environment",
-      "resourceWarnings": "elevated to errors; final frozen run passed"
+      "resourceWarnings": "elevated to errors; post-review frozen run passed",
+      "logs": "output/deep-research-2026-11-07/source-stage/native-final-after-review.*"
     },
     "npmCi": "passed; audit 0 vulnerabilities",
     "build": "passed",
     "check": "passed",
     "index": {
-      "modules": 524,
-      "symbols": 2962
+      "modules": 526,
+      "symbols": 2967
     },
     "diffCheck": "passed",
     "javascriptThisStage": {
-      "final": "1795/1795 serial passed",
-      "interrupted": "First serial runner interrupted after source correction; exit 1, not a passing validation.",
-      "logs": "output/deep-research-2026-11-07/browser-stage/javascript-final.*"
+      "full": "1801/1801 serial passed before final native-only boundary correction",
+      "postReview": "6/6 source/parser/real native integration passed after native-only correction",
+      "productionJSChangedAfterFullRun": false,
+      "logs": "output/deep-research-2026-11-07/source-stage/"
     }
   },
   "benchmark": {
@@ -81,7 +87,7 @@
     "basis": "Synthetic local CPU benchmark; no model, network, browser FPS or livestream acceptance claim."
   },
   "transaction": {
-    "filesVerified": 67,
+    "filesVerified": 77,
     "patchReconstructsModified": true,
     "restoredAllOriginalHashes": true,
     "newFilesRemoved": true,
@@ -100,7 +106,8 @@
     "mutator"
   ],
   "limitations": [
-    "Product yt-dlp route still returns HTTP 403. Normal unauthenticated public page plays the same work and manual browser media download/real FFmpeg decode succeeded; automated product fallback not implemented.",
+    "Native production page-media download path fetched and decoded a real public video. Browser metadata-to-native step used a development probe; actual deployed extension auto-capture not verified.",
+    "Original yt-dlp metadata path still returns HTTP 403; page-media route does not export cookies or bypass challenges.",
     "No full visual timeline or real ASR/factuality accuracy acceptance.",
     "No long-duration livestream/resource acceptance or commercial accuracy conclusion.",
     "Installed legacy native host still running; no deployment/reload or second real model load.",
@@ -111,7 +118,8 @@
     "verifiedRemoteImplementationSHA": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
     "documentationReceipt": "separate following commit; final SHA in completion report",
     "nativeStage": "pushed origin/dev; verified remote da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
-    "browserStage": "pushed origin/dev; verified remote e7c4b00643bd76b93098e9cea738617dbc4a87e0"
+    "browserStage": "pushed origin/dev; verified remote e7c4b00643bd76b93098e9cea738617dbc4a87e0",
+    "pageSourceStage": "pending"
   },
   "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
   "nativeStage": {
@@ -142,10 +150,15 @@
     ]
   },
   "previousCI": {
-    "runId": "42301278967",
+    "runId": "42318795159",
     "status": "completed",
-    "conclusion": "success",
-    "appliesTo": "previous stage only"
+    "conclusion": "failure",
+    "headSHA": "d8efb73e5ed630027668bc631b0204fda3e98b26",
+    "nativeJob": "success",
+    "testBuild": "1793 passed / 2 failed in FFmpeg integration",
+    "reproduction": "Same tests fail identically with python3-only PATH; 2/2 pass when real FFmpeg is available",
+    "correction": "Install FFmpeg explicitly in test-build and release jobs; independent native job installations do not carry over",
+    "newRun": "pending push"
   },
   "nativeStageImplementationCommit": "da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
   "browserStage": {
@@ -181,5 +194,54 @@
     "nativeTests": 86,
     "javascriptTests": 1795
   },
-  "browserStageImplementationCommit": "e7c4b00643bd76b93098e9cea738617dbc4a87e0"
+  "browserStageImplementationCommit": "e7c4b00643bd76b93098e9cea738617dbc4a87e0",
+  "pageSourceStage": {
+    "status": "implemented and locally verified; commit/push and CI pending; not deployed",
+    "capabilities": {
+      "publicMedia": 2,
+      "modelLease": 1
+    },
+    "limits": {
+      "ttlMs": 300000,
+      "bytes": 268435456,
+      "totalSeconds": 180,
+      "networkSeconds": 15,
+      "redirects": 0
+    },
+    "downloader": "existing httpx==0.28.1, explicit requirement; yt-dlp retained when no valid page media",
+    "nativeTests": 94,
+    "targetedJSTests": 27,
+    "realDownload": {
+      "downloadFunction": "public_media_worker.download_public_video → HTTPX download_page_media",
+      "workId": "6961737553342991651",
+      "subject": "sec:MS4wLjABAAAAEKnfa654JAJ_N5lgZDQluwsxmY0lhfmEYNQBBkwGG98",
+      "downloadBytes": 3676544,
+      "sha256": "af479be42a1f90e57b9305a57807732393324c62c8fa80930780fea023f13881",
+      "expectedDurationMs": 19735,
+      "decodeCommand": [
+        "/Users/eitan/.local/share/douyin-live-assistant/native/releases/30a0ff18-1856-4ee1-829f-40cf4baf52de/.venv/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-macos-aarch64-v7.1",
+        "-nostdin",
+        "-hide_banner",
+        "-i",
+        "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
+        "-map",
+        "0:a:0",
+        "-map",
+        "0:v:0",
+        "-f",
+        "null",
+        "-"
+      ],
+      "decodeExit": 0,
+      "path": "/Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/output/deep-research-2026-11-07/source-stage/page-media.mp4",
+      "noCookiesExported": true,
+      "noRealModelLoaded": true,
+      "browserStep": "ordinary public page currentSrc + visible author link, not deployed extension acceptance"
+    },
+    "browserCapture": "not deployed; real RENDER_DATA holds application shell only; product requires observed author/work detail response and exact currentSrc matching",
+    "javascriptTests": 1801,
+    "postReviewJSTests": 6,
+    "boundaryReview": "Blank duplicate __vid rejected with keep_blank_values=True after expected red test; browser and native agree",
+    "transactionFiles": 77
+  }
 }

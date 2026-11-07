@@ -64,3 +64,10 @@ test('不匹配作者的作品详情不会确认完成，保留原主页说明�
  assert.deepEqual(events.map(r=>r.status),['failed','failed']);
  assert.ok(rows.every(r=>r.subject==='author'));assert.match(rows.find(r=>r.id==='4').coverage,/作者与主页不匹配/);
 });
+test('临时媒体地址只经独立参数交给归档后调度，不混入账号原记录',async()=>{
+ const source={workId:'70',url:'https://v1.example.douyinvod.com/file?__vid=70'},records=[{kind:'work',id:'70'}];let archived;
+ const service=createAccountResearch({readConfig:async()=>({anchorId:'10',ai:{accountCollection:{enabled:true}}}),readBudget:async()=>[],writeBudget:async()=>{},
+  collect:async(_url,{onMedia})=>{onMedia(source);return records;},archive:async input=>archived=input});
+ const result=await service.collect('1',profile);
+ assert.equal(result,records);assert.deepEqual(archived.media,[source]);assert.equal(JSON.stringify(result).includes('douyinvod'),false);
+});

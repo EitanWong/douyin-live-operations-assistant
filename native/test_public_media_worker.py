@@ -83,6 +83,24 @@ class PublicMediaWorkerContracts(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r['startMs'] for r in evidence], [0, 4000, 8000])
         self.assertEqual(len(result['mediaHash']), 64)
 
+    async def test_page_attributed_source_passes_real_httpx_stream_and_ffmpeg_without_extractor(self):
+        import httpx
+        from public_media_source import download_page_media
+        now=self.call('get',self.job['id'])['createdAt'];seen=[]
+        source={'workId':'70','author':'author-sec','authorUid':'2','url':'https://v1.example.douyinvod.com/file?__vid=70',
+                'durationMs':8400,'observedAt':now,'expiresAt':now+300000}
+        self.call('submit',{**self.request,'pageMedia':source})
+        async def handler(request):
+            seen.append(request)
+            return httpx.Response(200,headers={'Content-Type':'video/mp4'},content=self.audio.read_bytes())
+        async def download(value,folder):return await download_page_media(value,folder,transport=httpx.MockTransport(handler))
+        with patch('public_media_worker.download_page_media',side_effect=download),patch('public_media_worker.run_bounded',side_effect=AssertionError('extractor must not run')):
+            result=await PublicMediaWorker(self.location,FakeASR(),shutil.which('ffmpeg')).run_once()
+        self.assertEqual(result['status'],'succeeded');self.assertEqual(result['coverage']['durationMs'],8400)
+        self.assertEqual(str(seen[0].url),source['url']);self.assertNotIn('cookie',seen[0].headers)
+        self.assertEqual(len(self.call('evidence',self.job['id'])),3)
+        with self.location.open() as store:self.assertEqual(store.db.execute('SELECT COUNT(*) FROM public_media_sources').fetchone()[0],0)
+
     async def test_live_preemption_resumes_after_committed_segment_without_duplicate_evidence(self):
         asr = FakeASR(preempt_at=1)
         result = await self.worker(asr).run_once()

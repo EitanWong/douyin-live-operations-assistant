@@ -1,5 +1,6 @@
 import {accountSource} from '../src/ai/account-context.js';
 import {subjectKeySchema} from '../src/ai/audience-profile.js';
+import {parsePublicMediaSource} from '../src/services/public-media-source.js';
 
 const enabled=config=>Boolean(config?.ai?.enabled && config.ai.assistant?.memoryEnabled!==false && config.ai.search?.rememberKnowledge!==false && config.ai.contextSources?.audience!==false && config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false && config.ai.edge?.enabled && config.ai.edge.audioEnabled && ['local-audio','local-multimodal'].includes(config.ai.pipeline?.mode));
 const profileURL=author=>`https://www.douyin.com/user/${author}`;
@@ -51,7 +52,7 @@ export function createPublicMediaResearch({readConfig,resolveProfile,checkProfil
  });
  return {
   collect:input=>serial(()=>withWorker(async()=>{
-   const {room,anchor,records}=input,config=await readConfig(room);
+   const {room,anchor,records,media=[]}=input,config=await readConfig(room);
    if(String(config?.anchorId)!==anchor || !enabled(config) || !await canArchive())return {submitted:0};
    if(!await worker.ready())return {submitted:0,error:'请更新本机组件以支持完整音轨任务'};
    let submitted=0;
@@ -63,7 +64,8 @@ export function createPublicMediaResearch({readConfig,resolveProfile,checkProfil
     const gate=await synchronize(room,anchor,{subject,author:work.subject});if(!gate.allowed)continue;
     const knowledgeVersion=await knowledge.handle(room,'version',{anchor});
     await checkProfile({room,anchor,subject,binding:profile.binding});
-    await native({operation:'submit',request:{room,anchor,subject,epoch:profile.epoch,author:work.subject,workId:work.id,url:source.url,knowledgeVersion}});submitted++;
+    const pageMedia=media.map(value=>parsePublicMediaSource(value,{workId:work.id,author:work.subject,subject,epoch:profile.epoch,now:now()})).find(Boolean);
+    await native({operation:'submit',request:{room,anchor,subject,epoch:profile.epoch,author:work.subject,workId:work.id,url:source.url,knowledgeVersion,...(pageMedia ? {pageMedia} : {})}});submitted++;
    }
    if(submitted)await worker.run();return {submitted};
   })),

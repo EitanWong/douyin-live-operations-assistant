@@ -22,9 +22,9 @@ export function createAccountResearch({readConfig,readBudget,writeBudget,readPro
    const calls=Array.isArray(saved) ? saved.filter(t=>Number.isFinite(t) && t<=at && at-t<3600000).slice(-30) : [];
    if(calls.length>=config.maxPerHour)throw Error('公开资料采集已达共享每小时上限');
    await writeBudget([...calls,at]);await check(room,initial.anchor,signal);
-   const progress=source.kind==='profile' ? parseWorkProgress(await readProgress(room,initial.anchor),now()) : null,visits=[];
-   const records=await collect(url,{signal,room,anchor:initial.anchor,visited:progress?.profiles.find(r=>r.url===url)?.works || [],onWork:visit=>visits.push(visit)});await check(room,initial.anchor,signal);
-   await archive({room,anchor:initial.anchor,source:url,records,at:now()});
+   const progress=source.kind==='profile' ? parseWorkProgress(await readProgress(room,initial.anchor),now()) : null,visits=[],media=[];
+   const records=await collect(url,{signal,room,anchor:initial.anchor,visited:progress?.profiles.find(r=>r.url===url)?.works || [],onWork:visit=>visits.push(visit),onMedia:value=>{if(media.length<2)media.push(value);}});await check(room,initial.anchor,signal);
+   await archive({room,anchor:initial.anchor,source:url,records,media,at:now()});
    await check(room,initial.anchor,signal);
    if(progress && visits.length)await writeProgress(room,initial.anchor,advanceWorkProgress(progress,url,visits,now()));
    return records;

@@ -14,7 +14,7 @@ class PublicMediaSession:
     def handle(self, message):
         action = message.get('action')
         if action == 'capabilities':
-            self.emit({'id': message.get('id'), 'value': {'publicMedia': 1, 'modelLease': 1}})
+            self.emit({'id': message.get('id'), 'value': {'publicMedia': 2, 'modelLease': 1}})
         elif action == 'run':
             if self.task is None or self.task.done():
                 self.task = asyncio.create_task(self.run())
