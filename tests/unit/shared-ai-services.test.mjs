@@ -8,6 +8,16 @@ function fixture(values){
  return {values,service};
 }
 const room=(frequency,ai={})=>mergeConfig({version:2,ai:{replyFrequency:frequency,...ai}});
+test('已有共享服务可增量迁移任务连接，任务开关与模型一起共享，旧草稿不覆盖新路由',async()=>{
+ const f=fixture({'live-assistant:config:1':room('quiet'),'live-assistant:config:2':room('every')});
+ await f.service.ensure();delete f.values[SHARED_KNOWLEDGE_KEY].services.research;delete f.values[SHARED_KNOWLEDGE_KEY].services.profile;
+ const upgraded=fixture(f.values),base=await upgraded.service.config('1'),edit=structuredClone(base);
+ edit.ai.taskModels.research={enabled:true,endpoint:'https://deep.example/chat/completions',model:'deep'};
+ await upgraded.service.save('1',edit,base);
+ assert.deepEqual((await upgraded.service.config('2')).ai.taskModels.research,edit.ai.taskModels.research);
+ await upgraded.service.save('2',base,base);
+ assert.equal((await upgraded.service.config('1')).ai.taskModels.research.model,'deep');
+});
 test('服务连接和业务空间跨主播复用，节奏、风格、开关与额度独立',async()=>{
  const a=room('quiet',{endpoint:'https://cloud.example/chat/completions',model:'shared-model',pipeline:{mode:'omni-llm',workspaceId:'workspace-a'},persona:'主播甲风格'});
  const b=room('every',{enabled:true,maxPerHour:80,persona:'主播乙风格'});

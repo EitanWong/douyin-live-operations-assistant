@@ -15,6 +15,24 @@ function setup(callbacks={}){
 }
 function visible(el){for(let node=el;node;node=node.parentElement)if(node.hidden)return false;return true;}
 
+test('后台研究和人物整理可独立配置，切换保留草稿与独立密钥，停用时不删除已填内容',()=>{
+ const s=setup();try{
+  const {panel,change,section,dom}=s;
+  for(const kind of ['research','profile']){
+   const path=`ai.taskModels.${kind}`;
+   assert.equal(panel.node(`[data-field="${path}.enabled"]`).closest('[data-ai-section]'),section('models'));
+   change(`${path}.enabled`,true);change(`${path}.endpoint`,`https://${kind}.example/chat/completions`);change(`${path}.model`,kind);
+   panel.node(`[data-media-key="${kind}"]`).value=`${kind}-private`;
+  }
+  panel.aiSettings.showSection('audience');change('ai.assistant.research.profileEnabled',true);panel.aiSettings.showSection('models');
+  assert.equal(panel.aiSettings.credentials().research.key,'research-private');
+  assert.equal(panel.read().ai.taskModels.profile.model,'profile');
+  change('ai.taskModels.research.enabled',false);assert.equal(panel.read().ai.taskModels.research.model,'research');
+  const endpoint=panel.node('[data-field="ai.taskModels.profile.endpoint"]');endpoint.value='https://new.example/chat/completions';endpoint.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+  assert.equal(panel.aiSettings.credentials().profile.key,'');
+ }finally{s.close();}
+});
+
 test('AI 设置按用途归类，切换不修改配置、不丢草稿或密钥，键盘可导航',async()=>{
   let saved;const s=setup({save:async config=>saved=config});
   try{

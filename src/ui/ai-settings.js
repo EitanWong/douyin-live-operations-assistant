@@ -16,6 +16,7 @@ export class AISettings {
     root.addEventListener('change',event=>{
       if(event.target.matches('[data-field^="ai.media."]'))this.syncMedia();
       if(event.target.matches('[data-field^="ai.search."]'))this.syncSearch();
+      if(event.target.matches('[data-field^="ai.taskModels."]'))this.syncTaskModels();
       if(event.target.matches('[data-field="ai.edge.localOnly"],[data-field="ai.edge.enabled"]'))this.syncPipeline();
     });
     root.querySelector('[data-field="ai.pipeline.mode"]').addEventListener('change',()=>this.syncPipeline());
@@ -38,6 +39,7 @@ export class AISettings {
     root.querySelector('[data-media-clear]').addEventListener('click',()=>clear());
     for(const button of root.querySelectorAll('[data-media-forget]'))button.addEventListener('click',()=>{void Promise.resolve(forget(button.dataset.mediaForget)).catch(error);});
     for(const kind of ['vision','audio'])root.querySelector(`[data-field="ai.media.${kind}Endpoint"]`).addEventListener('input',()=>{root.querySelector(`[data-media-key="${kind}"]`).value='';});
+    for(const kind of ['research','profile'])root.querySelector(`[data-field="ai.taskModels.${kind}.endpoint"]`).addEventListener('input',()=>{root.querySelector(`[data-media-key="${kind}"]`).value='';});
   }
   syncReplyFrequency(){
     const value=this.root.querySelector('[data-field="ai.replyFrequency"]').value;
@@ -111,13 +113,14 @@ export class AISettings {
     this.root.querySelector('[data-searxng-help]').hidden=!local;
     this.root.querySelector('[data-search-endpoint]').open=local;
   }
+  syncTaskModels(){for(const kind of ['research','profile'])this.root.querySelector(`[data-task-connection="${kind}"]`).hidden=!this.root.querySelector(`[data-field="ai.taskModels.${kind}.enabled"]`).checked;}
   pipelineEndpoint(){
     const ai={pipeline:{mode:this.root.querySelector('[data-field="ai.pipeline.mode"]').value,region:this.root.querySelector('[data-field="ai.pipeline.region"]').value,workspaceId:this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim()}};
     return aliEndpoints(ai).chat;
   }
   showSkills(){const target=this.root.querySelector('[data-skill-list]');target.replaceChildren();for(const skill of this.skills){const row=target.ownerDocument.createElement('p');row.textContent=skill.name+' · '+skill.scenes.join('、');const button=target.ownerDocument.createElement('button');button.type='button';button.textContent='移除技能';button.addEventListener('click',()=>{this.skills=this.skills.filter(s=>s.id!==skill.id);this.showSkills();this.dirty();});row.append(button);target.append(row);}}
-  populate(assistant){this.syncReplyFrequency();this.skills=structuredClone(assistant?.skills || []);this.showSkills();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
-  credentials(){return Object.fromEntries(['vision','audio','pipeline'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
+  populate(assistant){this.syncReplyFrequency();this.skills=structuredClone(assistant?.skills || []);this.showSkills();for(const input of this.root.querySelectorAll('[data-media-key]'))input.value='';this.syncPipeline();this.syncSearch();this.syncTaskModels();this.root.querySelector('[data-ali-account]').open=!this.root.querySelector('[data-field="ai.pipeline.workspaceId"]').value.trim();}
+  credentials(){return Object.fromEntries(['vision','audio','pipeline','research','profile'].map(kind=>[kind,{key:this.root.querySelector(`[data-media-key="${kind}"]`).value.trim(),remember:this.root.querySelector(`[data-media-remember="${kind}"]`).checked}]));}
   state({state,skipped=0,errors=0,totalTokens,lastFinalAt,phase}){
     this.mediaState=state;this.syncPerception();
     this.mediaPhase=state==='idle' ? undefined : phase || this.mediaPhase;phase=this.mediaPhase;

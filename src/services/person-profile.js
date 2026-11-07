@@ -1,14 +1,19 @@
 import {personProfileSchema,profileOutputSchema,PROFILE_FIELDS} from '../ai/person-profile.js';
+import {resolveAITaskConfig} from './ai-task-config.js';
 const cancelled=()=>Object.assign(Error('人物整理已取消'),{name:'AbortError'});
 export async function updatePersonProfile({name,key='',profile,message,signal},config,client){
  if(signal?.aborted)throw cancelled();
  if(profile){profile=personProfileSchema.parse(profile);if(profile.name!==name || profile.key!==key)throw Error('人物已变化，请重新打开资料');}
  const turns=[...(profile?.turns || []),{text:String(message || '').trim(),at:Date.now()}];
+ return organizePersonProfile({name,key,turns},config,client,{signal});
+}
+export async function organizePersonProfile({name,key,turns},config,client,{signal}={}){
+ if(signal?.aborted)throw cancelled();
  // Validate the complete input before any model request, including raw history.
  const base=personProfileSchema.safeParse({version:1,name,key,turns,facts:[],relationships:[],analysis:[],knowledge:[],reply:'待整理'});
  if(!base.success)throw Error('人物资料格式无效：每轮1–4000字，最多16轮、12000字；名称与账号需有效');
  const input={name,key,turns:base.data.turns};
- const raw=await client({task:{kind:'person-profile'},profileConversation:input,maxLength:2000,signal},config);
+ const raw=await client({task:{kind:'person-profile'},profileConversation:input,maxLength:2000,signal},resolveAITaskConfig(config,'profile'));
  if(signal?.aborted)throw cancelled();
  if(typeof raw!=='string' || raw.length>50000)throw Error('人物整理结果过长或无效');
  let value;try{value=profileOutputSchema.parse(JSON.parse(raw.trim().replace(/^```(?:json)?\s*/iu,'').replace(/\s*```$/u,'')));}catch{throw Error('人物整理格式或心理解读无效，请重试；原资料已保留');}

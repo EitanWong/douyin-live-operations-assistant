@@ -34,6 +34,7 @@ export class AIWorkbench {
   const labels={queued:'等待执行',running:'后台执行中',succeeded:'已完成',failed:'失败',cancelled:'已取消',interrupted:'执行中断，未自动重试'};
   for(const row of rows){const item=doc.createElement('article');item.className='editor-row';const heading=doc.createElement('strong');heading.textContent=`${row.result?.stopReason==='budget' ? '达到研究预算' : labels[row.status] || row.status} · ${row.question}`;item.append(heading);
    const text=doc.createElement('p');text.textContent=row.result?.answer || row.error || row.trace?.at(-1)?.detail || '已进入后台队列，前台可继续操作';item.append(text);
+   if(row.result?.profileUpdated || row.result?.profileError){const status=doc.createElement('p');status.textContent=row.result.profileError ? `人物整理未更新：${row.result.profileError}` : '人物画像与明确关系已更新，可在人物关系图谱查看原话与推测依据。';item.append(status);}
    for(const source of [...(row.result?.sources || []),...(row.result?.publicSources || [])]){const p=doc.createElement('p');p.textContent=source.error ? `${source.url}：${source.error}` : `${source.title || source.url} · ${source.url}`;item.append(p);}
    if(['queued','running'].includes(row.status)){const button=doc.createElement('button');button.type='button';button.dataset.agentCancel=row.id;button.textContent='取消任务';item.append(button);}target.append(item);
   }

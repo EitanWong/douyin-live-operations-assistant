@@ -35,7 +35,7 @@ export function createRelationshipLibrary({all,now=Date.now}){
     const accounts=new AccountContext({snapshot:values[`live-assistant:runtime:${sourceRoom}`]?.accountSources,now});
     const profile=values[`live-assistant:profile:${sourceRoom}`];
     scopes.push({room:sourceRoom,anchor,audience,perception:new PerceptionMemory({state:saved.perception,now}),
-     anchorSecUid:active && String(profile?.anchorId)===anchor ? profile?.secUid : undefined,anchorName:active && String(profile?.anchorId)===anchor ? profile?.name : undefined,memory:active ? ai.memory : undefined,knowledge:active ? ai.knowledge : '',corpus:current?.ai?.search?.rememberKnowledge!==false && ai.search?.rememberKnowledge!==false ? parseKnowledgeCorpus(values[`live-assistant:knowledge:${sourceRoom}:${anchor}`],now()).rows : [],
+     anchorSecUid:active && String(profile?.anchorId)===anchor ? profile?.secUid : undefined,anchorName:active && String(profile?.anchorId)===anchor ? profile?.name : undefined,memory:active ? ai.memory : undefined,knowledge:active ? ai.knowledge : '',profileInsights:values[`live-assistant:profile-insights:${sourceRoom}:${anchor}`],corpus:current?.ai?.search?.rememberKnowledge!==false && ai.search?.rememberKnowledge!==false ? parseKnowledgeCorpus(values[`live-assistant:knowledge:${sourceRoom}:${anchor}`],now()).rows : [],
      accounts:current?.ai?.contextSources?.accounts!==false && ai.contextSources?.accounts!==false ? [...accounts.history(anchor),...accounts.list(anchor)] : [],includeAccountHistory:true,
      ...(selected && !shared ? override : {}),...(shared ? {memory:undefined,knowledge:''} : {})});
    }catch{skipped.push({room:sourceRoom,anchor});}
