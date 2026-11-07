@@ -3723,3 +3723,8 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 验收只使用本地模拟弹幕、受控模型响应和临时数据库，未操作真实直播间、未调用付费模型、未测试长期实播与真实语音准确率。后台自动整理依赖Chrome扩展、可用模型和直播页/感知服务；浏览器关闭、直播断线、未知说话人和采样缺口不视作完整采集，油猴/演示仍仅支持页面存活时的手动研究。
 - 操作诊断保留：几次rg/sed猜测路径或zsh通配无匹配退出1/2，改为实际路径检索；一次测试补丁上下文不匹配被拒后按原文更正；工具阻止静默启动会明确reject，测试改为断言拒绝。CUA重载早期暂停状态随保存配置恢复为collect，旧定位超时后重读；宽窗口无功能菜单按钮时使用可见导航。均不计作功能成功证据。
 - 同输入基线探针为collect+旧关闭记忆/研究：原版输出mode“发送模式无效”、memory/research=false，修改版输出collect、true、true，均退出0。四角色沿用 `/Users/eitan/.codex/silent-collection-m50ptvik/` 下 MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；将以独立副本实际回滚、同输入重验和哈希相等收尾，提交/推送回执随后追加。版本、main和发布标签均不改动。
+
+- 最终JS全量 `node --test --test-concurrency=2 tests`：1935/1935通过，0失败/取消/跳过，358582.963959ms，退出0。仅在测试进程PATH前置隔离Python3.12，不改系统Python或用户配置；最终源码构建、check及索引检查已通过，随后仅补充说明与回执。
+- 四角色已实际执行并重开：BASELINE为发送模式无效/记忆false/研究false；MODIFIED为collect/true/true；ROLLBACK恢复同一基线，三次探针均退出0。独立修改副本执行可执行ROLLBACK.sh后全部基线源文件SHA相同；再用DIFF_FILE.patch重建修改副本，与修改版全文件SHA一致。原始BASELINE.tar保留，四角色随最终文档提交刷新；确切角色哈希、命令、字面stdout/stderr/exit和源清单记录在同目录VERIFICATION.txt及transaction.json。
+- 功能提交 `a933588e7d9ac054d7ee33465c849f2cff925597` 已推送并用ls-remote核对一致；已创建并关联[PR #22](https://github.com/EitanWong/douyin-live-operations-assistant/pull/22)，base=dev，保持草稿待评阅。最近观察CI 42368412842中native-perception成功、test-build进行中，不宣称远端CI全过或已合入dev。最终文档回执提交与远端精确SHA补记本机VERIFICATION，未更新main、版本或标签。
+- 已核对端口4186对应本任务工作树的node服务PID24736，停止该临时服务；浏览器视口已复位，截图待界面过渡稳定后重新保存。保留功能工作树、构建和可复验四角色；不清理原工作区及其他任务进程。长期实播、真实语音和真实模型准确率仍未验收，crapper/dryer/mutator仍未执行。
