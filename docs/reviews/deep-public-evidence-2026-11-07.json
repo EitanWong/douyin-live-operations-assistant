@@ -111,7 +111,7 @@
     "verifiedRemoteImplementationSHA": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
     "documentationReceipt": "separate following commit; final SHA in completion report",
     "nativeStage": "pushed origin/dev; verified remote da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
-    "browserStage": "pending"
+    "browserStage": "pushed origin/dev; verified remote e7c4b00643bd76b93098e9cea738617dbc4a87e0"
   },
   "implementationCommit": "fdf56a983ce95b6d50f2b047cc099c007f2a31bb",
   "nativeStage": {
@@ -149,7 +149,7 @@
   },
   "nativeStageImplementationCommit": "da9d5a1cbe23d3b55707c5595dbf6f8da6e45a46",
   "browserStage": {
-    "status": "implemented and fully regression-tested; dev commit/push pending; not deployed",
+    "status": "implemented, fully regression-tested and pushed to dev; not deployed",
     "capabilities": {
       "publicMedia": 1,
       "modelLease": 1
@@ -180,5 +180,6 @@
     },
     "nativeTests": 86,
     "javascriptTests": 1795
-  }
+  },
+  "browserStageImplementationCommit": "e7c4b00643bd76b93098e9cea738617dbc4a87e0"
 }
