@@ -1,4 +1,24 @@
+import {isMaskedName} from './account-names.js';
+
 const stableKey=/^(?:uid:[1-9]\d{0,39}|sec:[A-Za-z0-9_.=-]{1,200}|room:[1-9]\d{0,39})$/u;
+
+function sourceProfileAliases(entities,canonical){
+ const names=new Map(),aliases=new Map();
+ for(const row of entities){
+  if(!stableKey.test(row.key) || !row.scope || isMaskedName(row.name))continue;
+  const name=JSON.stringify([row.scope,row.name]),keys=names.get(name) || new Set();
+  keys.add(canonical(row.key));names.set(name,keys);
+ }
+ for(const row of entities){
+  if(!row.key.startsWith('manual:') || !row.origin || isMaskedName(row.name))continue;
+  const scope=JSON.stringify([row.origin.room,row.origin.anchor]),keys=names.get(JSON.stringify([scope,row.name]));
+  const host=canonical(`uid:${row.origin.anchor}`);
+  // Shared profiles retain their original room/host context. Reuse that host's
+  // unique observed node in the projection; never write an inferred account key.
+  if(keys?.size===1 && keys.has(host))aliases.set(row.key,host);
+ }
+ return aliases;
+}
 
 // A component may contain several room/secUID aliases, but never two UIDs.
 // Keep conflicting components separate until their source records are corrected.
@@ -22,7 +42,8 @@ export function identityResolver(entities){
   const key=uids[0] || secs[0] || component.toSorted()[0];
   for(const id of component)aliases.set(id,key);
  }
- return key=>aliases.get(key) || key;
+ const canonical=key=>aliases.get(key) || key,profiles=sourceProfileAliases(entities,canonical);
+ return key=>profiles.get(key) || canonical(key);
 }
 
 // Read only explicit fields in operator-verified records. Source room and
