@@ -3722,6 +3722,16 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终代码全量退出0：node --test --test-concurrency=2 tests，**1930/1930通过**，0失败/取消/跳过，364145.676708ms。最终修正后的构建、npm run check（含索引新鲜度与源码/产物语法）、git diff --check均通过；索引553模块/3113符号。所有冻结源码/测试/索引及修改档成员SHA与工作区逐一相同；同输入三行为、补丁重建、原文件回滚哈希均通过。未将此前失败/中止结果计入本次通过数。
 - 实际提交与推送：功能提交 **b061eee770a2b157cb6f61b08b0fbe889d1b3326** 已普通push到origin/dev（3e305c1→b061eee，exit0），git ls-remote核对精确一致；没有改main、版本或标签。随后仅提交本条交付回执，最终文档提交SHA及远端精确核对写入同一VERIFICATION/checkpoint，不把本地通过视为远端CI通过。仅清理本任务可由原件/修改档复建的验收副本与演示服务，四角色、原件、输入、脚本、日志和截图保留；其他工作树及其测试未动。
 
+## 2026-11-07：导出并修复 Cytoscape 浏览器警告
+
+- 目标保持当前仓库 dev，用户提供的两条 Cytoscape 警告均在 `createNetworkView` 与共享画布样式中定位。先查 agent:find / agent:impact、保存两份源码原字节与 SHA，再写行为红测；两项均按预期失败，分别观察到自定义滚轮敏感度警告和缺失定位上下文。仅删除 `wheelSensitivity:.18` 并在共享 `.network-canvas` 增加 `position:relative`；采用库默认滚轮行为，不屏蔽 console，不新增尺寸算法。
+- 真实 Chrome 首次普通 DOM 仅复现滚轮警告，查明 Cytoscape 自动将定位样式写到 document.head；将夹具改成扩展相同的 Shadow DOM 后，两条原警告同时复现，确认根因是文档样式不能跨影子树。浏览器同输入 BASELINE 两警告/static → MODIFIED 无警告/relative → ROLLBACK 两警告/static。独立回滚副本原始 SHA 全部恢复，patch 重建与修改档逐字一致；工作区保留修改版。原件、原始控制台 JSON、源码副本、补丁、输入、stdout/stderr/exit、截图与可执行回滚留在 `output/cytoscape-browser-errors-2026-11-07`，四角色已重开。
+- 独立浏览器夹具实际验证放大/缩小、三种布局、键盘缩放/平移、滚轮、隐藏/恢复、图片导出、销毁后零 canvas；完整本地工作台通过 UI 写入虚构长资料，观察3人物/2关系，长原文与人物档案在有界正文滚动，独立放大/关闭、反复展开/收起、面板隐藏/恢复、两次指针拖动及六次键盘缩放未新增控制台警告或错误。390窄屏稳定状态主内容362px、画布278px，正文scrollHeight2419px由220px高的overflow:auto区域承接，无主内容横向溢出；桌面恢复与拖动后同样通过。560视口的首次读数处于过渡、仍为桌面几何，不作为该断点通过证据。未修改通用尺寸预算；不声称所有硬件性能或所有页面全面浏览器回归。
+- 验证通过：专项12/12；完整 `node --test --test-concurrency=2 tests` **1932/1932**、0失败/取消/跳过，332581.026833ms；agent:index 554模块/3113符号；build、check（含索引与源码/产物语法）、git diff --check 均退出0。原生与依赖未修改，未重复原生测试；crapper/dryer/mutator 已检查CLI与当前工具目录，均不可用，三项未执行，不用其他检查冒充通过。
+- 工具诊断：首轮shell误用zsh只读变量status退出1，改为result_code后重新保留红测退出1；浏览器等待下载事件超时，但实际JSON已落盘，恢复会话后直接读回并解析验证。真实直播页被另一任务占用，本轮不抢占或重载；诊断导出范围是本项目真实Chrome复现和完整本地工作台，未声称导出 chrome://extensions 全部历史或其他扩展错误。修复已重新构建到 dist/chrome-extension，运行实例需重新加载扩展及刷新直播页后生效。
+- 无新增工作树，其他工作树均未清理；只清理本任务可重建验收副本与本地演示服务，保留四角色及原件、证据。未改main、版本或标签。功能提交与dev普通推送回执随后补记，最终精确SHA记入同一VERIFICATION/checkpoint。
+- 实际提交与推送：功能提交 **da153fb5feff3bc0f7025f0996f3025cadc10363** 已普通 push 到 origin/dev（f2dabbf→da153fb，exit0），git ls-remote 精确一致；全量1932/1932与本地浏览器2/0/2是已观察结果，未将其等同远端CI通过。仅追加本验收回执；最终文档提交与远端确认记录同一VERIFICATION/checkpoint。本任务四角色、原件及浏览器报告仍在原路径，已关闭本地4197服务，未重载用户直播页。
+
 ## 2026-11-07：按任务分配模型、感知研究与人物投影闭环
 
 - 保持用户指定仓库为目标，从干净 dev f2dabbff 创建本聊天 ai-task-pipelines 副本；原始工作区未改字节。先读 AGENTS、导航、发布与布局标准，执行 agent:find / agent:impact 确认源码。基线同输入观测：reply/research/profile 全走 fast，VIDEO_RESEARCH 为 []，exit0；原始源码归档及哈希保存在本次证据目录。
@@ -3736,3 +3746,4 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 原始工作区后来出现另一任务的network-view、workbench-styles、agent-index及对应测试改动，本任务始终在独立工作树中执行，未改动或清理这些文件。
 - 最终冻结源码完整回归：PATH 指向现有 Python 3.12.12，node --test --test-concurrency=2 tests，**1939/1939通过**，0失败/取消/跳过，341656.928291ms，exit0；npm run build、npm run check、git diff --check通过。索引558模块/3136符号，无原生源码改动。
 - 四角色为 /Users/eitan/.codex/ai-task-pipelines-20261107-u1ftbxmz 下的 MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh。实际同输入：BASELINE三任务均走fast且VIDEO_RESEARCH=[]；MODIFIED分别走fast/deep/profile且画面产生一项video研究；ROLLBACK独立副本恢复BASELINE，三次均exit0，所有原文件SHA恢复一致。再次应用补丁恢复MODIFIED，另一个原件副本经patch -p1重建逐文件SHA一致，工作树保持修改版。四角色已重开并核对，输入、原件档和哈希清单同目录保留；仅删除可重建的验收副本，未清理其他工作树。
+- 功能提交a2015d86c5c86e924e5e536797bafdaee8a70f79已推送codex/ai-task-pipelines并建立PR #24到dev。等待远端CI时dev推进至16dd4d5（独立Cytoscape警告修复）；普通合并保留该修复，唯一文本冲突是行动日志追加段，按远端段后本任务段保留双方全文，索引重新生成559模块/3136符号。两项画布测试与任务链路共19/19通过；合并后完整测试与PR的新一轮CI继续执行，旧基线CI不作为合并结果的通过证据。
