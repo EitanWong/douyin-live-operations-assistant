@@ -3599,3 +3599,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 父提交精确CI42353540403已观察至success，不重启：JavaScript1847/1847、347184.50802ms，原生138/138、17.220秒，build/check/打包上传成功；字面job日志与完整元数据保存在retrieval-audit-stage。本轮未修改native，未重复真实音画推理或下载。最终check、普通提交/推送与新CI回执接着补记，未将父CI冒充本轮实现CI。
 
 - 最终check退出0（38.395秒），包含索引新鲜度与源码/生成JavaScript语法；git diff --check及暂存差异检查通过。验证证据追加同一VERIFICATION.txt，重新打开四角色后普通提交本次10文件并推送origin/dev；本节后续补记精确提交与远端回执，不修改main、版本或标签。
+
+- 实现交付：07e66ecd867b8ea7969061c3b11dae1d980d136c已提交。首次普通git push因LibreSSL SSL_ERROR_SYSCALL退出128，未关闭TLS校验；改用单命令http.version=HTTP/1.1正常推送退出0（2.712秒）。git ls-remote核实origin/dev完整SHA一致，工作区干净。该精确实现CI42355535275已启动，未重启或冒称通过；本条作为独立文档回执提交推送，最终CI和完整SHA记录于retrieval-audit-stage/final-receipt.json。补充实际引用边界探针验证2种拆代理对范围拒绝、完整Unicode通过、237字符三段引用及1802字符合并正文通过；源码与全量冻结SHA未变，不重复已有全测。
