@@ -3806,3 +3806,14 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 已于2026-11-07 13:01:02 UTC普通merge PR到dev，合并提交 **faf10fae47d5173c29d38bff83a71733632e0c94**；fetch并快进本任务工作树确认来源一致。没有推送main、发布版本或重载用户直播页。此处仅补交付文档，最终回执提交/推送SHA与远端一致性记录于同一VERIFICATION/roles.json。
 - 最终合并源码已再次跑Chrome 22个图谱交互状态、120个页面/子页布局状态、图内外放大关闭/焦点/同一草稿，全部通过，0运行错误；减少动效的Motion开发提示1条保留。临时4217服务两次启动均经cwd和command核实后关闭，任务浏览器均已关闭，其他工作树和用户运行配置保留。
 - 原四角色路径沿用，补丁从冻结f2dabbf基线重建最终修改版，所有成员逐字核对；关系2→1→2、UI常驻侧栏有→无→恢复的同输入回滚与恢复哈希验证通过。独立回滚副本均未覆盖生产修改版，修改版重新打开保留。crapper/dryer/mutator不可用，三项未执行；真实付费模型回答质量和全天RSS/FPS未评估，合成性能与后台工具执行证据不冒充这些结果。
+
+
+## 2026-11-07：将最新 dev 更新到现有 Chrome 扩展
+
+- 用户要求“更新到Chrome扩展”。目标始终为本仓库及现有扩展 `ochlmfoecapadlllbeodlpnnlpehjdla`，Chrome 详情实际确认加载路径为 `dist/chrome-extension`。原工作区干净，fetch 后发现 dev 落后14提交，执行 `git merge --ff-only origin/dev` 到 `6d1f0a730bc885399c39e02db3d9bf8bd39a8a24`。无活动开发构建写入者；保留失效旧锁和其他任务文件，不改源码、版本或权限。
+- 先按导航运行 agent:find/agent:impact。manifest 未收录导致一次 impact 退出1，改查 scripts/build.mjs 后成功。保存原扩展43文件的完整 BASELINE.tar 与哈希，在本任务独立输出构建；`npm run build`、`npm run check`（索引新鲜度与源码/生成物语法）均退出0。版本仍为0.1.3，permissions、host_permissions、optional_host_permissions、CSP、key逐项一致。依赖未变，不重复安装；本次为部署操作，未重复完整业务测试或UI布局回归。
+- 验收角色在 `output/chrome-extension-update-2026-11-07-dnyfabzf/`：MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、可执行ROLLBACK.sh，均已实际重开。相同 probe.py 输入下，BASELINE 人物速览标记false、MODIFIED true、独立副本ROLLBACK false，三个命令均exit0；回滚后全部原文件哈希恢复，目录摘要回到 `3b0a949bce2bbb1c00bdca0ebd84601482c1b3e7137e35d156b9d83a556a8cc1`。修改档41文件逐一与部署目录SHA一致，旧目录两个未被manifest引用的开发文件保留。补丁重建逐文件SHA通过，生产目录保持更新版。
+- 两次验收脚本问题如实保留：首次用中文原文搜索esbuild ASCII产物误报缺功能，改为源码真实样式标记 `network-person-float` 后复用既有构建；BSD patch 默认留下两个空删除文件，原命令exit0但哈希断言exit1，改用 `patch -E -p2` 后重建与原修改档一致。没有为探针问题改产品或重建已通过产物。
+- Chrome 本机界面点击目标扩展Reload，实际观察字面提示 `Reloaded`。确认两个直播页设置已保存、场控暂停后，使用绑定标签的reload刷新两页；原生快捷键首次未清除旧上下文，定向reload后原失效提示消失。已打开的知识库实际显示新版图内探索入口、80人物/72关系；第二页显示“等待开播 · 持续监控中 · 等待直播数据”“设置已保存”。截图随后因用户切换页面显示新版后台研究模型/人物整理模型设置，图谱数据保存在同任务ui-evidence.json；不将该截图当作图谱截图。未启动场控、发送测试弹幕、提交设置或调用模型。
+- UI中途检测到用户切换Chrome，先重读状态再继续；一次内部页绑定不受支持，使用受支持的本机Chrome界面操作；一次第二标签尚未claim导致查询失败，claim后完成刷新。原文stdout/stderr/exit、探针修正、补丁及UI证据均保留。crapper、dryer、mutator已检查CLI与当前工具目录，均不可用，三项未执行，不由其他检查代替。
+- 本任务无新增工作树；仅清理本任务可重建的baseline/candidate/独立回滚副本及多余构建目录，保留原件、四角色、输入、命令回执和截图。行动日志提交后普通push到dev；精确提交SHA与远端一致性回执存于同目录delivery-receipt.json，完成报告注明实际结果。不操作main、版本、标签或Release。
