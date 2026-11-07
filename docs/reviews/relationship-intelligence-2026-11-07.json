@@ -140,6 +140,14 @@
       "escapeClosesInnerOnly": true,
       "returnFocus": true,
       "nodeFitAvoidsToolbar": true
+    },
+    "integration": {
+      "devPipelinePR": 24,
+      "affectedTests": 57,
+      "modelScopeTests": 6,
+      "defaultAndDedicatedModelScopedResearch": true,
+      "baselineCommit": "f2dabbff3daa61838f60856af0032df4f0cd1837",
+      "finalCI": "pending"
     }
   }
 }

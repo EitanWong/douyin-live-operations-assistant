@@ -39,12 +39,12 @@ test('Harness每个房间串行、跨房并发，有执行截止和幂等提交'
  }finally{h.close();}
 });
 
-test('图谱问答经真实后台LangGraph执行，稳定人物范围保留且关系工具实际被调用',async()=>{
- const store=createAgentTaskStore({indexedDB:new IDBFactory(),IDBKeyRange}),config=mergeConfig({anchorId:'10',ai:{enabled:true,endpoint:'https://model.test/chat/completions',model:'test'}});
+for(const dedicated of [false,true])test(`图谱问答经真实后台LangGraph执行，稳定人物范围保留且关系工具实际被调用${dedicated ? '（独立后台模型）' : ''}`,async()=>{
+ const store=createAgentTaskStore({indexedDB:new IDBFactory(),IDBKeyRange}),config=mergeConfig({anchorId:'10',ai:{enabled:true,endpoint:'https://model.test/chat/completions',model:'test',taskModels:{research:{enabled:dedicated,endpoint:'https://model.test/chat/completions',model:'deep'}}}});
  const context={focus:{scope:'single',entityIds:['person:uid%3A1'],names:['小雨']}},queries=[];let requests=0,provided,remembered=0;
  const graph={entities:[{id:'person:uid%3A1',name:'小雨',role:'观众',dossier:{facets:[{category:'interests',text:'陶艺',source:'弹幕',trust:'unverified'}],events:[]}},{id:'person:uid%3A2',name:'小雨',role:'观众'}],relations:[],ambiguities:[]};
- const host=createBackgroundAI({store,chrome:{permissions:{contains:async()=>true}},readRecord:async key=>key==='live-assistant:config:1' ? config : '',knowledge:{handle:async(room,action)=>{if(action==='remember')remembered++;return action==='version' ? 0 : [];}},relationships:async(room,question,options)=>{queries.push(options);return graph;},fetch:async(_url,options)=>{
-  requests++;provided=JSON.parse(JSON.parse(options.body).messages[1].content);
+ const host=createBackgroundAI({store,chrome:{permissions:{contains:async()=>true}},readRecord:async key=>key==='live-assistant:config:1' ? config : key==='live-assistant:task-key:research:https://model.test' ? 'fixture-deep-key' : '',knowledge:{handle:async(room,action)=>{if(action==='remember')remembered++;return action==='version' ? 0 : [];}},relationships:async(room,question,options)=>{queries.push(options);return graph;},fetch:async(_url,options)=>{
+  requests++;const body=JSON.parse(options.body);assert.equal(body.model,dedicated ? 'deep' : 'test');if(dedicated)assert.equal(options.headers.Authorization,'Bearer fixture-deep-key');provided=JSON.parse(body.messages[1].content);
   const content=requests===1 ? '{"action":"relationships","query":"小雨的兴趣与原话"}' : '{"action":"finish","answer":"所选小雨自述喜欢陶艺，尚未独立核实。","citations":[]}';
   return {status:200,url:'https://model.test/chat/completions',text:async()=>JSON.stringify({choices:[{message:{content}}]})};
  }});
