@@ -64,7 +64,7 @@ function sourceDocuments(input){
   if(row.person){
    const parsed=personProfileSchema.safeParse(row.person);if(!parsed.success)continue;
    const person=parsed.data,key=person.key || `manual:${input.room || 'current'}:${input.anchor}:${row.id}`;
-   entities.push({key,name:person.name,role:person.key ? '已指定账号' : '资料人物（未绑定账号）'});
+   entities.push({key,name:person.name,role:person.key ? '已指定账号' : '资料人物（未绑定账号）',origin:row.origin});
    documents.push({id:`memory:${row.id}`,text:row.content,at:row.updatedAt,source:row.source || '用户补充',trust:'unverified',person,personKey:key,origin:row.origin});
   }else {add(`memory:${row.id}`,row.content,row.updatedAt,row.source || '运营背景知识',row.trust || 'verified');documents.at(-1).origin=row.origin;}
  }

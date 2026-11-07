@@ -3943,3 +3943,12 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 推送前远端又完成收入统计修复并推进到1b059023d1f4972b8ef0e6eeb6be0a78fd1e3be6。普通合并为7b226d4，双方产品/测试文件无交集，完整保留两段日志，生成索引冲突通过重建解决；保留先前2010/2010完整输出为full-tests-before-income-integration.txt，并为实际交付树重新冻结594份源码、重跑完整回归，避免将上一版本结果冒充最终版本。补充项目补丁基线随集成推进到1b05902，固定ai.js四角色及基线SHA保持不变。
 - 实际交付树完整JavaScript回归 **2014/2014通过**，0失败/取消/跳过，379569.398708ms，exit0；594份产品/测试/脚本SHA前后全部一致。全测结束后npm run build与npm run check再次完成且exit0，独立油猴脚本与MV3扩展已生成，源码和产物语法通过，git diff --check通过。原生137通过/1跳过、三项不可用工具、真实服务未调用与现用扩展未重载的边界保持原记录。固定四角色及完整项目补丁重新打开核对；提交与普通push的精确SHA和字面回执写入同目录delivery-receipt.json及VERIFICATION.txt。
 - 功能f720ca8、并行整合6d4253b/7b226d4和最终验收提交 **07268fb6595e6833f0b5fe48739fe0d464624696** 已普通push至origin/dev（1b05902→07268fb，exit0），git ls-remote精确一致，工作树干净；未推main、修改版本、发布标签或重载现用扩展。本条仅补交付日志，随后的文档提交与普通push精确SHA及四角色最终哈希继续写同目录delivery-receipt.json、VERIFICATION.txt和role-manifest.json。后台持续研究需在重载新扩展后启用并保存AI及对应服务权限；现有明确关闭与手动正数额度保留，可在设置恢复不限额默认值。
+
+## 2026-11-07：修复共享人物资料与来源主播重复展示
+
+- 用户反馈 Lucy小露 仍有重复；目标为当前仓库的人物关系图谱。按 agent:find/agent:impact 核实归档与图谱源码，从干净 dev dc58d64 创建本聊天 lucy-profile-origin 工作树，保留原工作区源码。逐项检查命令、源码和历史四角色；历史角色先备份，补充证据沿原目录 lucy-origin 保存。
+- 只读检查实际直播页，确认已有一份 Lucy 的结构化人物资料；页面同时有未提交的人物编辑草稿，因此未关闭弹窗、刷新直播或重载扩展。未读取凭据、发送消息或改写实际知识库。以相同结构的合成资料复现：共享资料仍有 origin，但 sourceDocuments 未将它交给身份解析器，未填写账号的资料始终另建 manual 节点。未把合成 UID 称为真实账号验收。
+- TDD：新增行为测试先观察2项因2节点而非1节点失败。最小修改在 sourceDocuments 保留人物来源，在 identityResolver 的 sourceProfileAliases 分支按原房间/主播范围复用唯一对应原主播的已采集节点；不写回推定 person.key，不改变待核实状态。无来源、来源不匹配、同名多UID、隐藏昵称、显式指定其他账号及仅同名观众均保持独立；撤销来源、停用和删除即时重建。
+- 第一次专项48/49通过：Lucy已为1节点；剩余断言错误假设不同范围内无账号的“阿明”也应合并。保留该错误exit1，改为验证两条原始关系均连接同一Lucy，另一个人物保持各自来源边界；53/53专项及工作台集成通过。没有再添加昵称跨范围合并规则。
+- npm ci完成，183包、audit 0漏洞；crapper、dryer、mutator的CLI与启用工具目录不可用，三项未执行，其他检查不替代。定位时一次rg包含不存在的extension/shared-knowledge.js退出2，已改查src/services/shared-knowledge.js。原生数据库仅用mode=ro与query_only检查表名，无数据写入；本轮无界面布局或原生源码改动。
+- 四角色继续为 /Users/eitan/.codex/relationship-identity-dedup-20261107-rbctkf5h 下 MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh；上一阶段原件先备份于lucy-origin/previous-*，本轮父源码单独冻结为lucy-origin/PARENT.tar。索引、完整回归、构建/check、三行为回滚、最终提交和dev推送随后追加。
