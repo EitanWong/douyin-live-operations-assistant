@@ -3570,3 +3570,14 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 同一四角色仍96文件/16组。此次实际重新从原BASELINE.tar及ORIGINAL_SUPPLEMENTS.tar应用patch重建修改版，并在另一修改版副本执行默认ROLLBACK.sh；逐文件原始/修改SHA一致、两个原始档案字节不变、脚本语法与可执行位通过，生产源码保持原修改版。既有16组同输入行为保留，不伪称重跑：最新快照组BASELINE在150ms间停顿下固定顺序断言失败exit1→MODIFIED受控100ms批次、持久化完成后ack、分窗/重试/回放通过exit0→ROLLBACK恢复原失败exit1。补充诊断/调度记录追加原VERIFICATION.txt，不替换原四角色。
 - 工具错误完整保留：调度探针首次相对导入多上一层，ERR_MODULE_NOT_FOUND/exit1；改为相对同一仓库的正确路径后通过，原回执另存probe-import-error，未更改生产导入。若干只读命令猜测不存在的旧receipt/test文件并退出1/2，随后按rg实际文件继续；这些不是产品红测或检查通过。crapper/dryer/mutator的CLI与可用工具目录均不可用，三项未执行，其他验证不替代。
 - 本轮仅更新行动日志与外部验收记录，沿用70b1f9e已经通过的完整源码/测试/索引；未为文档重复执行全测。没有UI/布局实现变化、真实公屏发送、用户扩展/宿主重载、安装清单变更、main/版本/标签修改或其他工作树删除。目标仍active：独立人工ASR/视觉参考及CER/WER、用户实际安装、真实长期实播/Chrome持续后台调度、原生174行旧故障根因尚未完成。随后以单独文档提交普通推送dev；最终完整提交/远端回执写入本轮外部证据并在完成报告中给出。
+
+
+## 2026-11-07：真实Chrome持续研究定时唤醒、重启与取消验收
+
+- 从dev/03365d351e4c12204be7bdab8a2e504c012d45a8续接，工作区干净；上轮实际推进了跨日离线验收和提交，本轮继续原checkpoint的真实Chrome调度单元。先读取精确CI42352414567并观察同一run至success，未重启：JavaScript1847/1847、0失败、454404.549925ms，原生138/138、19.827秒，index/build/check/package/upload成功。元数据和两个job原始日志存入chrome-alarm-stage。
+- 先agent:find/impact、源码确认生产ai-task-wake为每分钟一次，并复用durable-background-stage的独立Chrome/CDP与DurableStorage测试方式。重新构建当前源码以绑定浏览器使用的确切产物，生产background包SHA为51c0538197fff7ca4ab80789d1d46d0654b9cbb7a4bea67f0cad3c13d74f05fd；原bundle正文完整复制，测试外层只记录事件并提供离线模型/搜索响应。独立user-data-dir，不替换用户扩展，不访问真实房间，不发送公屏；原生消息在API边界拦截并记录，7次正常能力探测未转发到用户宿主。原始数据库和5份用户宿主清单共6个文件逐SHA未变。
+- 主验收185.820秒退出0，使用真实Chrome MV3 worker、真实IndexedDB/Dexie和生产1分钟alarm，未模拟时间。三次在下一研究定时事件前约3秒通过ServiceWorker.stopAllWorkers停止worker，并以Target.getTargets确认0个worker；随后三个实际ai-task-wake事件均被记录，保留采集保活定时器。首次停止后3062ms触发研究成功（LangGraph、两次夹具模型请求、一次夹具搜索、无knowledgeError）；第二次定时事件在首任务创建60074ms后到达，已超过60秒冷却，同观测仍1项任务/2次模型请求，验证持久去重。
+- 新观测通过原生产配置写入入口唤醒第二项任务，暂扣模型响应。关闭持续研究后1ms收到abort，任务变cancelled。关闭并重开整个独立浏览器，再停止worker，第三个真实研究alarm后仍只有原succeeded/cancelled两项任务、累计3次夹具模型请求/1次搜索，关闭状态不恢复旧任务。另一次独立浏览器重开只读验收确认原公开来源1行、周期73天原文和原URL仍在知识库，任务状态保持，0新增模型请求。模型/搜索内容均为离线夹具，不是实际模型准确率测试。
+- 保留探针错误：初次真实alarm已产生1项成功任务，但断言把2次采集保活alarm与1次研究alarm合计成3，误期望1而退出1；重新打开其独立profile读取持久日志，按name证实来源，原脚本、profile、字面stdout/stderr/exit与检查结果保存在first-attempt-unfiltered-count。更正探针为按ai-task-wake名称计数，并记录停止/到期/到达时刻；生产代码、定时参数和其他alarm均未更改。原生探测拦截是隔离测试边界，最终明确记录其次数，不能声称生产没有发起能力探测。
+- 本轮未修改生产/测试/索引，仅追加行动日志和外部验收证据，因此不重复完整本机测试。原四角色仍96文件/16组；本轮实际再次补丁重建和独立修改版副本回滚，逐SHA核对原始档案不变、源码保持修改版，脚本语法/可执行位通过。既有同输入快照证据保留：BASELINE的150ms间隔触发原固定顺序断言失败exit1→MODIFIED受控批次/耐久确认通过exit0→ROLLBACK恢复失败exit1，未伪称本轮重跑16组。全部新命令、输入和字面输出追加原VERIFICATION.txt，四角色重开后报告。
+- crapper/dryer/mutator在CLI及可用工具目录仍不可用，三项未执行，其他验证不替代。没有UI/共享布局、main/版本/标签修改、其他工作树或用户数据清理。本次证明三个真实定时事件和有限重启/取消行为；真实多日实播、独立人工ASR/视觉参考及CER/WER、用户实际安装、旧native/host.py:174故障根因仍未完成，目标active。随后以单独验收日志提交普通推送dev，最终完整SHA与推送回执写入外部证据并在完成报告给出。
