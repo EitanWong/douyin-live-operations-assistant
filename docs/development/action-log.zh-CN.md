@@ -3957,3 +3957,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 同一固定合成probe：BASELINE2节点→MODIFIED1节点→ROLLBACK2节点，三次exit0；资料“陶艺”仍待核实，person.key仍为空，来源对象不变，重复查询幂等。回滚恢复770份父版文件的全部SHA及精确文件集合，新增文件全部移除；累计补丁重建782份当前文件逐字一致，再次应用后仍1节点。累计角色包含继承的并行dev改动，未把其称为本轮新增修复。第一次probe未处理空主播档案导致exit1，已保留原探针与错误，修正仅影响验收脚本。
 - 补充预检错误：默认及Homebrew Python可选numpy/sklearn导入缺包exit1，核实数据模型仅用标准库，无需安装，按已验证PATH启动全测；zsh的command -v -a语法exit127、未匹配glob exit1均保留并纠正。一次内联Python脚本UTF-8语法错误exit1发生在执行前，改用ASCII脚本后成功；全测未以这些无关预检替代。
 - 已把验收通过的dist产物同步到原项目dist目录：核验59份文件，原子替换13份差异文件，旧字节备份为lucy-origin/DIST_BEFORE.tar，原项目源码未改。用户当前人物编辑草稿未关闭，未重载扩展或刷新直播页，实际直播图谱尚待重新加载后核验。确认无打开句柄后清理本次两份可重建旧副本，保留源归档、历史角色、固定输入与字面证据。最终提交和dev普通push回执随后追加。
+
+- 最终dev push: functional 3ce9789571b96b62c040c835562e49e7958b12a7; delivery b916de5956bae536599e41d9c04686631e05b573; origin/dev b916de5956bae536599e41d9c04686631e05b573; exit0, ls-remote exact match. 2019/2019 tests passed; main/version/tags unchanged. Final receipt commit and reopened role hashes are recorded in VERIFICATION.txt and roles.json.
