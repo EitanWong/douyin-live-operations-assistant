@@ -28,7 +28,7 @@ class PublicMediaHandoffContracts(unittest.IsolatedAsyncioTestCase):
         self.path = self.root/'media.mp4'
         subprocess.run([shutil.which('ffmpeg'), '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
                         '-f', 'lavfi', '-i', 'color=c=blue:s=96x64:r=10:d=2',
-                        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000:duration=2',
+                        '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000:duration=2.1',
                         '-c:v', 'mpeg4', '-c:a', 'aac', '-threads', '1', str(self.path)],
                        check=True, capture_output=True)
         self.asr = LocalASR(self.root/'controlled-model')
@@ -97,8 +97,13 @@ class PublicMediaHandoffContracts(unittest.IsolatedAsyncioTestCase):
             return {'text':'蓝色背景。','model':'controlled-visual'}
         result = await self.worker(visual).run_once()
         self.assertEqual(result['status'], 'succeeded')
-        self.assertEqual(seen, [0, 1000])
-        self.assertEqual(retained, [False, False], 'no speech model may remain during visual inference')
+        self.assertEqual(seen[0], 0)
+        self.assertEqual(seen, sorted(set(seen)))
+        self.assertEqual(len(seen), result['visual']['planned'])
+        self.assertEqual(len(seen), result['visual']['completed'])
+        self.assertEqual([row['startMs'] for row in self.call('evidence', self.job['id'])
+                          if row['kind']=='visual'], seen)
+        self.assertEqual(retained, [False]*len(seen), 'no speech model may remain during visual inference')
         self.assertEqual(len(set(leases)), 1)
         self.assertEqual(self.prepares, 1)
         self.assertTrue(any(row['kind']=='transcript' and row['text']=='受控转录。'
