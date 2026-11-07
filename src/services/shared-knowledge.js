@@ -1,5 +1,5 @@
 import {validateMemory} from './knowledge.js';
-import {migrateAIServices,projectSharedAIServices,mergeSharedAIServices} from './shared-ai-services.js';
+import {AI_SERVICE_GROUPS,migrateAIServices,projectSharedAIServices,mergeSharedAIServices} from './shared-ai-services.js';
 
 export const SHARED_KNOWLEDGE_KEY='live-assistant:knowledge:global';
 const clone=value=>structuredClone(value);
@@ -22,9 +22,11 @@ export function createSharedKnowledge({read,all,commit}){
  let tail=Promise.resolve();
  const serial=work=>{const result=tail.then(work);tail=result.catch(()=>{});return result;};
  async function ensure(){
-  const saved=await read(SHARED_KNOWLEDGE_KEY);if(saved?.services)return saved;
+  const saved=await read(SHARED_KNOWLEDGE_KEY);
+  if(saved?.services && Object.keys(AI_SERVICE_GROUPS).every(key=>Object.hasOwn(saved.services,key)))return saved;
   const values=Object.fromEntries(Object.entries(await all()).filter(([key])=>/^live-assistant:config:\d+$/u.test(key)).sort(([a],[b])=>a.localeCompare(b)));
   const services=migrateAIServices(Object.values(values));
+  if(saved?.services){const next={...saved,services:{...services,...saved.services}};if(!same(next,saved))await commit([[SHARED_KNOWLEDGE_KEY,next]]);return next;}
   if(saved){const next={...saved,services};await commit([[SHARED_KNOWLEDGE_KEY,next]]);return next;}
   const state={version:1,entries:[],knowledge:'',services},rooms=[];
   for(const [key,config] of Object.entries(values).sort(([a],[b])=>a.localeCompare(b))){

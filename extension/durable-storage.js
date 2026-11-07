@@ -3,7 +3,7 @@ const DB_NAME='douyin-live-assistant';
 // Dexie versions are native IndexedDB versions / 10. Keep the existing native
 // v1 database, records and journalOrder compound index; no data copy or upgrade.
 const DB_VERSION=.1;
-export const isDurableKey=key=>/^(live-assistant:(config|runtime|live-memory|knowledge|income|income-calibration|profile|event|rewards|giveaway|api-key|search-key|media-key):|douyin-live-assistant:theme$)/.test(key);
+export const isDurableKey=key=>/^(live-assistant:(config|runtime|live-memory|knowledge|profile-insights|income|income-calibration|profile|event|rewards|giveaway|api-key|search-key|media-key|task-key):|douyin-live-assistant:theme$)/.test(key);
 const categoryOf=key=>/^live-assistant:(income|income-calibration|profile):/.test(key) ? 'income' : key.startsWith('live-assistant:event:') ? 'pending' : key.startsWith('live-assistant:runtime:') ? 'runtime' : 'settings';
 const encodedSize=(key,value)=>new TextEncoder().encode(key+JSON.stringify(value)).byteLength;
 export class DurableStorage {

@@ -47,6 +47,7 @@ git diff --check
 | 可见界面与表单 | `src/ui/panel.js`、`src/ui/product/bridge.js`、`src/ui/product/runtime.js` | 原控制器是唯一草稿来源；`product-workspace`、`product-runtime`、`workspace-system` 测试 |
 | 布局、放大、动效 | `src/ui/product/layout.js`、`src/ui/product/fit.js`、`src/ui/product/inspect.js` | 尺寸、密度、焦点与减少动效；`workspace-fit`、`product-layout`、`adaptive-layout` 测试 |
 | AI 回复与上下文 | `src/services/ai.js`、`src/services/ai-context.js`、`src/ai/context-policy.js` | 共享现场事实、预算、过期回复拒绝；`ai-context-budget`、`ai-stale-facts` 测试 |
+| 任务模型与派生人物画像 | `src/services/ai-task-config.js`、`src/ai/profile-insights.js` | 同域任务密钥、研究到画像和图谱、删除与在途隔离；`ai-task-pipelines`、`profile-insights` 测试 |
 | 本地模型准备与安装进度 | `extension/model-preparation.js`、`extension/edge-offscreen.js`、`scripts/lib/native-deployment.mjs`、`src/ui/setup-progress.js` | 离屏仅用runtime、后台存储、重载恢复与显式释放；`model-preparation`、`edge-background-prepare`、`native-deployment`、`setup-progress` 测试 |
 | 产品内 Agent 任务 | `src/ai/harness.js`、`extension/ai-background.js`、`src/ai/task-store.js` | 后台持久任务、取消、额度与发送分离；`agent-execution`、`agent-lifecycle` 测试 |
 | 多步研究与断点恢复 | `src/ai/research-graph.js`、`src/ai/checkpoint-store.js` | LangGraph原生节点和pending writes、源时效与恢复绑定；`research-loop`、`research-checkpoint`、`continuous-research-flow` 测试 |

@@ -1,12 +1,14 @@
 import {DEFAULTS} from '../core/engine.js';
 
-export const AI_SECRET_PREFIXES=['api-key','search-key','media-key'].map(kind=>`live-assistant:${kind}:`);
+export const AI_SECRET_PREFIXES=['api-key','search-key','media-key','task-key'].map(kind=>`live-assistant:${kind}:`);
 export const isAISecretKey=key=>AI_SECRET_PREFIXES.some(prefix=>key.startsWith(prefix));
 
 // Only connection/model choices belong here. Runtime switches, prompts, cadence,
 // sampling, budgets and context preferences remain owned by each room.
 export const AI_SERVICE_GROUPS={
  reply:['endpoint','model'],
+ research:['taskModels.research.enabled','taskModels.research.endpoint','taskModels.research.model'],
+ profile:['taskModels.profile.enabled','taskModels.profile.endpoint','taskModels.profile.model'],
  pipeline:['pipeline.region','pipeline.workspaceId','pipeline.realtimeModel','pipeline.replyModel','pipeline.visionModel','pipeline.audioModel','pipeline.localVisionEndpoint','pipeline.localVisionModel'],
  vision:['media.visionEndpoint','media.visionModel'],
  audio:['media.audioEndpoint','media.audioModel'],

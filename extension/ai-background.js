@@ -6,15 +6,16 @@ import {createResearchAgent,validateAgentInput} from '../src/ai/agent.js';
 import {RESEARCH_BUDGETS,subjectEpoch} from '../src/ai/audience-profile.js';
 import {resolveResearchProfile,checkResearchProfile} from '../src/ai/research-profile.js';
 import {readPublicPage,validatePublicURL} from '../src/ai/public-sources.js';
-import {validateEndpoint} from '../src/services/ai.js';
+import {createAIClient,validateEndpoint} from '../src/services/ai.js';
 import {validateSearchEndpoint,validateSearchBody} from '../src/services/search.js';
-import {resolveReplyConfig} from '../src/services/ai-pipeline.js';
+import {resolveAITaskConfig,taskModelSecret} from '../src/services/ai-task-config.js';
+import {createProfileInsightUpdater} from '../src/ai/profile-insights.js';
 import {validateWeatherURL} from '../src/services/weather.js';
 import {validatePublicDataURL} from '../src/services/public-data.js';
 import {retrieveSourceRecords} from '../src/services/automatic-knowledge.js';
 import {formatAccountEvidence} from '../src/ai/account-evidence.js';
-import {continuousEnabled,createContinuousResearch} from '../src/ai/continuous-research.js';
-export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
+import {continuousEnabled,createContinuousResearch,researchEvidenceIsCurrent} from '../src/ai/continuous-research.js';
+export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
  const authorized=origin=>chrome.permissions.contains({origins:[`${origin}/*`]});
  const request=details=>{
   const controller=new AbortController();let timeout;
@@ -31,23 +32,30 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
   }catch(error){details.onerror?.(error);}finally{clearTimeout(timeout);}})();
   return {abort(){controller.abort();details.onabort?.();}};
  };
+ const profiles=writeRecord && createProfileInsightUpdater({read:readRecord,write:writeRecord,reserve:scope=>store.reserve(scope),client:async(prompt,ai)=>{
+  const origin=new URL(ai.endpoint).origin,secret=taskModelSecret(ai,'profile'),key=(secret && await readRecord(secret)) || await readRecord(`live-assistant:api-key:${origin}`) || await readRecord(`live-assistant:media-key:${origin}`) || '';
+  return createAIClient({request,getKey:()=>key})(prompt,ai);
+ }});
  const execute=async(job,options)=>{
   const config=await readRecord(`live-assistant:config:${job.scope.split(':')[0]}`);
   if(!config?.ai?.enabled || String(config.anchorId)!==job.input.anchor)throw new Error('AI已关闭或主播已变化，请核对后重新提交');
-  const ai=resolveReplyConfig(config.ai);job.input.ai=ai;
+  const ai=resolveAITaskConfig(config.ai,'research');job.input.ai=ai;
   const room=job.scope.split(':')[0],subject=await resolveResearchProfile({room,anchor:job.input.anchor,subject:job.input.subject,epoch:job.input.subjectEpoch,ai,question:job.question,read:readRecord}),tier=subject?.tier || 'standard',limits=RESEARCH_BUDGETS[tier],graph=relationships ? await relationships(room,job.question) : null;
   if(subject && config.ai.contextSources?.accounts!==false && config.ai.accountCollection?.enabled!==false)job.input.sources=[...new Set([...subject.sources,...job.input.sources])].slice(0,3);
   if(relationships){job.input.context ||= {};job.input.context.relationshipContext=graph;}
-  const keys=new Map();for(const [kind,endpoint] of [['ai',ai.endpoint],['search',ai.search?.enabled ? ai.search.endpoint : null]])if(endpoint){const origin=new URL(endpoint).origin;keys.set(`${kind}:${endpoint}`,await readRecord(`live-assistant:${kind==='ai'?'api-key':'search-key'}:${origin}`) || (kind==='ai' ? await readRecord(`live-assistant:media-key:${origin}`) : '') || '');}
+  const keys=new Map();for(const [kind,endpoint] of [['ai',ai.endpoint],['search',ai.search?.enabled ? ai.search.endpoint : null]])if(endpoint){const origin=new URL(endpoint).origin;keys.set(`${kind}:${endpoint}`,(kind==='ai' && taskModelSecret(config.ai,'research') && await readRecord(taskModelSecret(config.ai,'research'))) || await readRecord(`live-assistant:${kind==='ai'?'api-key':'search-key'}:${origin}`) || (kind==='ai' ? await readRecord(`live-assistant:media-key:${origin}`) : '') || '');}
   const knowledgeVersion=knowledge ? await knowledge.handle(room,'version',{anchor:job.input.anchor}) : undefined;
-  const binding={profile:subject?.binding,tier,ai:validateAgentInput(job.input).ai,knowledgeVersion,relationships:relationshipEvidenceVersion(graph)};
+  const profileConfig=resolveAITaskConfig(config.ai,'profile');
+  const binding={profile:subject?.binding,tier,ai:validateAgentInput(job.input).ai,knowledgeVersion,relationships:relationshipEvidenceVersion(graph),...(config.ai.assistant?.research?.profileEnabled ? {profileModel:[profileConfig.endpoint,profileConfig.model]} : {})};
   await options.bind?.(binding);
   const guard=async()=>{
    const latest=await readRecord(`live-assistant:config:${room}`);
    if(!latest?.ai?.enabled || String(latest.anchorId)!==job.input.anchor || job.id.startsWith('auto-') && !continuousEnabled(latest))throw Error('AI或持续研究已关闭，或主播已变化');
+   if(job.id.startsWith('auto-') && !researchEvidenceIsCurrent(job.input.context?.context,await readRecord(`live-assistant:live-memory:${room}:${job.input.anchor}`)))throw Error('研究原始对话或感知已删除，本次研究已作废');
    await checkResearchProfile({room,anchor:job.input.anchor,subject:job.input.subject,binding:subject?.binding,read:readRecord});
-   const current=validateAgentInput({...job.input,ai:resolveReplyConfig(latest.ai)}).ai;
+   const current=validateAgentInput({...job.input,ai:resolveAITaskConfig(latest.ai,'research')}).ai;
    if(JSON.stringify(current)!==JSON.stringify(binding.ai))throw Error('AI设置已变化，请重新提交研究');
+   if(binding.profileModel){const model=resolveAITaskConfig(latest.ai,'profile');if(!latest.ai.assistant?.research?.profileEnabled || JSON.stringify([model.endpoint,model.model])!==JSON.stringify(binding.profileModel))throw Error('人物整理模型设置已变化');}
    if(knowledge && knowledgeVersion!==await knowledge.handle(room,'version',{anchor:job.input.anchor}))throw Error('知识已删除或变化，旧研究已作废');
    if(relationships && binding.relationships!==relationshipEvidenceVersion(await relationships(room,job.question)))throw Error('人物资料已变化，本次研究已作废');
   };
@@ -67,6 +75,11 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
    relationships:query=>ai.assistant?.memoryEnabled===false ? null : relationships?.(room,query)});
   const result=await agent(job,options);
   await guard();
+  if(profiles && subject && config.ai.assistant?.research?.profileEnabled){
+   await options.checkpoint('profile','按稳定账号原话更新人物资料，保留引用和推测边界');
+   try{result.profileUpdated=Boolean(await profiles({room,anchor:job.input.anchor,subject:job.input.subject,ai:config.ai,signal:options.signal,guard}));}
+   catch(error){if(options.signal.aborted)throw error;await guard();result.profileError=error.message;}
+  }
   if(knowledge && ai.search?.rememberKnowledge!==false && ai.assistant?.memoryEnabled!==false){
    const sources=subject ? result.sources : result.sources.filter(r=>new URL(r.url).hostname!=='www.douyin.com');
    try{result.knowledgeStored=await knowledge.handle(room,'remember',{anchor:job.input.anchor,...(subject ? {subject:job.input.subject,subjectEpoch:subject.epoch} : {}),sources,version:knowledgeVersion,lifetime:knowledgeLifetime(job.question,'stable')});}
@@ -85,8 +98,8 @@ export function createBackgroundAI({chrome,readRecord,readConfigs=async()=>({}),
    if(message.type==='agent-list')return harness.list(scope);
    if(message.type==='agent-cancel')return harness.cancel(message.id,scope);
    if(!config.ai?.enabled)throw new Error('请先启用并保存AI设置');
-   const input=validateAgentInput({...message.input,anchor,ai:resolveReplyConfig(config.ai)});for(const url of input.sources)validatePublicURL(url);
+   const input=validateAgentInput({...message.input,anchor,ai:resolveAITaskConfig(config.ai,'research')});for(const url of input.sources)validatePublicURL(url);
    if(input.subject)input.subjectEpoch=subjectEpoch((await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,input.subject);
    return harness.submit({id:message.id,scope,question:message.question,input});
-  },wake:async()=>{await harness.ready;await loop.tick();harness.drain();},close:async()=>{await harness.close();store.close();}};
+  },pruneProfiles:(room,anchor)=>profiles?.prune(room,anchor),wake:async()=>{await harness.ready;await loop.tick();harness.drain();},close:async()=>{await harness.close();store.close();}};
 }
