@@ -1,5 +1,6 @@
 import {TEXT_MODELS} from '../src/ai/device-policy.js';
 import {MODEL_PREPARATION_KEY} from './model-preparation.js';
+import {onPortDisconnect} from '../src/browser/extension-port.js';
 export function installEdgeBridge(chrome){
  let creating;const clients=new Set();
  const ensure=async()=>{
@@ -39,6 +40,6 @@ export function installEdgeBridge(chrome){
     }catch{if(!closed)port.postMessage({id:m.id,error:'端侧服务不可用，请重新准备模型。'});}finally{active.delete(m.id);}
    })();
   });
-  port.onDisconnect.addListener(()=>{closed=true;clients.delete(port);for(const id of active)void send({action:'cancel',id:`${sender.tab.id}:${id}`}).catch(()=>{});});
+  onPortDisconnect(port,()=>{closed=true;clients.delete(port);for(const id of active)void send({action:'cancel',id:`${sender.tab.id}:${id}`}).catch(()=>{});},chrome.runtime);
  });
 }

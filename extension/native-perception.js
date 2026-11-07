@@ -2,6 +2,7 @@ import {validateRealtimeEndpoint} from '../src/services/ai-pipeline.js';
 import {roomFromURL} from '../src/browser/room-context.js';
 import {accessPage} from './page-access.js';
 import {validateStreamURL} from '../src/browser/live-stream.js';
+import {onPortDisconnect} from '../src/browser/extension-port.js';
 
 export const NATIVE_HOST='com.douyin_live_assistant.perception';
 
@@ -131,7 +132,7 @@ export function installNativePerceptionBridge(chrome,{onObservation,onStart=()=>
     if(client.name!=='native-perception')return;
     let room;try{room=senderRoom(client,chrome);}catch{client.disconnect();return;}
     const channel={client,room,closed:false};
-    client.onDisconnect.addListener(()=>detach(channel));
+    onPortDisconnect(client,()=>detach(channel),chrome.runtime);
     client.onMessage.addListener(message=>{
       if(channel.closed)return;
       if(message?.type==='detach'){disconnect(channel);return;}

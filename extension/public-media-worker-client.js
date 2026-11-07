@@ -1,4 +1,5 @@
 import {NATIVE_HOST} from './native-perception.js';
+import {onPortDisconnect} from '../src/browser/extension-port.js';
 
 export function createPublicMediaWorkerClient({connect,onResult=()=>{},analyzeVisual=async()=>{throw Error('作品视觉分析不可用');},allowed=()=>true,timeoutMs=3000}){
  let port=null,probe=null,running=false,starting=null;const pending=new Map(),visuals=new Map();
@@ -39,7 +40,7 @@ export function createPublicMediaWorkerClient({connect,onResult=()=>{},analyzeVi
   probe=(async()=>{
    try{
     const current=connect();port=current;
-    current.onDisconnect.addListener(()=>{if(port===current)close();});
+    onPortDisconnect(current,()=>{if(port===current)close();});
     current.onMessage.addListener(message=>{
      if(port!==current)return;
      if(message.type==='public-media-visual'){visual(current,message);return;}

@@ -1,4 +1,5 @@
 import {validateRealtimeEndpoint} from '../services/ai-pipeline.js';
+import {onPortDisconnect} from './extension-port.js';
 
 const messages={NOT_INSTALLED:'未连接本地感知组件。请按“本地组件安装”说明安装后重试。',RESOLVE_FAILED:'无法解析本房原始直播流，请检查直播状态、本地网络或本地组件的 Cookie 配置。',DECODE_FAILED:'原始流无法连续解码，已停止；请检查本地 FFmpeg 和直播状态。',MODEL_FAILED:'Omni 实时连接失败，请检查百炼地域、业务空间、模型权限和密钥。',LIMIT:'实时识别额度或会话时长已用完，已停止。',BUSY:'此直播间已有原生识别任务，请先停止另一页面的识别。',INVALID:'本地感知配置无效，请选择 Omni 实时组合并检查配置。'};
 export function readNativeSession(connect){
@@ -7,7 +8,7 @@ export function readNativeSession(connect){
     const finish=(value,error)=>{if(done)return;done=true;clearTimeout(timer);try{port?.disconnect();}catch{}error ? reject(error) : resolve(value);};
     const timer=setTimeout(()=>finish(null,new Error(messages.NOT_INSTALLED)),5000);
     try{
-      port=connect();port.onDisconnect.addListener(()=>finish(null,new Error(messages.NOT_INSTALLED)));
+      port=connect();onPortDisconnect(port,()=>finish(null,new Error(messages.NOT_INSTALLED)));
       port.onMessage.addListener(event=>{if(event?.type==='session')finish(event);});
       port.postMessage({type:'status'});
     }catch(error){finish(null,error);}
@@ -20,7 +21,7 @@ export function checkNativeComponent(connect){
     const timer=setTimeout(()=>finish(new Error(messages.NOT_INSTALLED)),10000);
     try{
       if(!connect)throw new Error(messages.NOT_INSTALLED);
-      port=connect();port.onDisconnect.addListener(()=>finish(new Error(messages.NOT_INSTALLED)));
+      port=connect();onPortDisconnect(port,()=>finish(new Error(messages.NOT_INSTALLED)));
       port.onMessage.addListener(e=>{if(e?.type==='health' && e.ready===true)finish();else if(e?.type==='error')finish(new Error(messages.NOT_INSTALLED));});
       port.postMessage({type:'probe'});
     }catch{finish(new Error(messages.NOT_INSTALLED));}
@@ -43,7 +44,7 @@ export function createNativeCapture({connect,getKey,room,now=Date.now,setupTimeo
       const endpoint=validateRealtimeEndpoint(config.realtimeEndpoint),key=getKey(`${new URL(endpoint).origin}/compatible-mode/v1/chat/completions`);
       if(!key && !config.resume)throw new Error('请填写百炼 API Key');
       port=connect();
-      port.onDisconnect.addListener(()=>fail('NOT_INSTALLED'));
+      onPortDisconnect(port,()=>fail('NOT_INSTALLED'));
       port.onMessage.addListener(event=>{
         if(!active())return;
         if(event?.type==='memory-warning'){onMemoryWarning('感知记忆保存失败，原文保留待重试；请检查本地存储空间。');return;}
