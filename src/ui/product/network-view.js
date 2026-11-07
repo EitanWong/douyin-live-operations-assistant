@@ -11,7 +11,7 @@ const style=[
 ];
 export function createNetworkView(element,{onSelect,create=cytoscape,headless=false}={}){
  const view=element.ownerDocument.defaultView;
- const cy=create({container:headless ? undefined : element,headless,styleEnabled:true,style,layout:{name:'preset'},minZoom:.15,maxZoom:4,wheelSensitivity:.18,pixelRatio:Math.min(view.devicePixelRatio || 1,2),boxSelectionEnabled:false,autounselectify:true,textureOnViewport:true});
+ const cy=create({container:headless ? undefined : element,headless,styleEnabled:true,style,layout:{name:'preset'},minZoom:.15,maxZoom:4,pixelRatio:Math.min(view.devicePixelRatio || 1,2),boxSelectionEnabled:false,autounselectify:true,textureOnViewport:true});
  let topology='',layoutName='',focusId='',frame=0,touched=false,closed=false;
  const fit=()=>{if(cy.elements().length)cy.fit(cy.elements(),24);};
  const touch=()=>{touched=true;};
