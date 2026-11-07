@@ -1,7 +1,9 @@
 import {relationshipEvidenceVersion} from '../services/relationship-query.js';
 import {relationshipChartOption,RELATIONSHIP_STATUS_LABELS} from './relationship-graph.js';
-import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate} from '../services/knowledge.js';
+import {MEMORY_LIMITS,validateMemory,retrieveMemories,beijingDate,memoryEntrySize} from '../services/knowledge.js';
 import {PERSON_FACETS} from '../ai/person-dossier.js';
+import {PersonProfileEditor} from './person-profile-editor.js';
+import {profileMemoryEntry} from '../services/person-profile.js';
 
 const fields=[['title','资料标题','text',80],['content','背景正文','textarea',MEMORY_LIMITS.content],['source','资料来源 / 确认人','text',200],['expiresOn','到期日期（可留空，当日仍有效）','date']];
 const time=at=>new Date(at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
@@ -10,12 +12,14 @@ const statusOf=row=>!row.enabled ? 'disabled' : row.expiresOn && row.expiresOn<b
 const statusLabel={active:'可用',disabled:'已停用',expired:'已过期'};
 
 export class KnowledgeLibrary {
- constructor(root,{dirty,error,reveal,webKnowledge,relationships}){
+ constructor(root,{dirty,error,reveal,webKnowledge,relationships,profileTurn}){
   this.root=root;this.document=root.ownerDocument;this.dirty=dirty;this.error=error;this.reveal=reveal;this.webKnowledge=webKnowledge;this.serial=0;this.relationships=relationships;this.lastGraphAt=0;
   this.list=root.querySelector('[data-memory-list]');this.webList=root.querySelector('[data-web-knowledge-list]');
   const on=(selector,event,fn)=>root.querySelector(selector).addEventListener(event,fn);
   this.dialog=root.querySelector('[data-knowledge-dialog]');this.buildEditor();
+  this.personEditor=new PersonProfileEditor(this,profileTurn);
   on('[data-memory-add]','click',()=>this.createDraft());
+  on('[data-person-add]','click',()=>{if(this.createDraft()){this.personEditor.open(this.editing.record,true);this.returnFocus=this.root.querySelector('[data-person-add]');this.root.querySelector('[data-person-name]').focus();}});
   on('[data-memory-confirm]','click',()=>this.confirmEditor());
   for(const selector of ['[data-memory-cancel]','[data-memory-close]'])on(selector,'click',()=>this.closeEditor());
   this.dialog.addEventListener('keydown',event=>this.editorKey(event));
@@ -60,7 +64,14 @@ export class KnowledgeLibrary {
   for(const input of this.dialog.querySelectorAll('[data-memory-field]')){if(input.type==='checkbox')input.checked=record[input.dataset.memoryField];else input.value=record[input.dataset.memoryField];input.removeAttribute('aria-invalid');}
   this.root.querySelector('[data-memory-dialog-title]').textContent=row ? '编辑知识' : '添加知识';
   this.root.querySelector('[data-memory-dialog-error]').hidden=true;
-  this.dialog.hidden=false;this.editorCount();this.dialog.querySelector('input').focus();
+  this.dialog.hidden=false;this.editorCount();this.dialog.querySelector('[data-memory-field="title"]').focus();
+  this.personEditor?.open(record);
+ }
+ applyPersonProfile(profile){
+  const record=this.editing.record,value=profileMemoryEntry(profile,{...record,source:record.person ? record.source : '用户补充 · AI整理，待核实'});
+  this.editing.record={...this.editing.record,...value};
+  for(const field of ['title','content','source'])this.dialog.querySelector(`[data-memory-field="${field}"]`).value=value[field];
+  this.editorCount();
  }
  editorValue(){const record={...this.editing.record};for(const input of this.dialog.querySelectorAll('[data-memory-field]'))record[input.dataset.memoryField]=input.type==='checkbox' ? input.checked : input.value.trim();return record;}
  editorCount(){const content=this.dialog.querySelector('[data-memory-field="content"]');if(content)this.root.querySelector('[data-memory-dialog-count]').textContent=`正文 ${content.value.length} / ${MEMORY_LIMITS.content} 字`;}
@@ -76,11 +87,11 @@ export class KnowledgeLibrary {
    this.closeEditor();if(!row)this.reset();this.metrics();this.filter();this.dirty();
   }catch(reason){const message=this.root.querySelector('[data-memory-dialog-error]');message.textContent=reason.message;message.hidden=false;this.reveal(invalid);}
  }
- closeEditor(){this.dialog.hidden=true;this.editing=null;this.returnFocus?.focus();}
+ closeEditor(){this.personEditor?.cancel();this.dialog.hidden=true;this.editing=null;this.returnFocus?.focus();}
  editorKey(event){
   if(event.key==='Escape'){event.preventDefault();event.stopPropagation();this.closeEditor();return;}
   if(event.key!=='Tab')return;
-  const controls=[...this.dialog.querySelectorAll('button,input,textarea')].filter(node=>!node.disabled),index=controls.indexOf(this.root.activeElement);
+  const controls=[...this.dialog.querySelectorAll('button,input,textarea')].filter(node=>!node.disabled && !node.closest('[hidden]')),index=controls.indexOf(this.root.activeElement);
   if(event.shiftKey && index===0 || !event.shiftKey && index===controls.length-1){event.preventDefault();controls[event.shiftKey ? controls.length-1 : 0].focus();}
  }
  add(record){
@@ -93,7 +104,7 @@ export class KnowledgeLibrary {
   paragraph(record.content);paragraph(`资料来源：${record.source || '未填写来源'}`);paragraph(`核对时间：${time(record.updatedAt)} · 到期日期：${record.expiresOn || '长期有效'}`);
   const validity=this.document.createElement('small');validity.dataset.memoryValidity='';body.append(validity);
   const actions=this.document.createElement('div');actions.className='actions';body.append(actions);
-  const edit=this.document.createElement('button');edit.type='button';edit.dataset.memoryEdit='';edit.textContent='编辑知识';edit.addEventListener('click',()=>this.openEditor(row.record,row));actions.append(edit);
+  const edit=this.document.createElement('button');edit.type='button';edit.dataset.memoryEdit='';edit.textContent=record.person ? '继续补充人物' : '编辑知识';edit.addEventListener('click',()=>this.openEditor(row.record,row));actions.append(edit);
   const remove=this.document.createElement('button');remove.type='button';remove.dataset.memoryRemove='';remove.textContent='删除这条记忆';remove.className='danger';remove.addEventListener('click',()=>this.remove(row));actions.append(remove);this.summary(row);
  }
  remove(row){
@@ -110,7 +121,7 @@ export class KnowledgeLibrary {
   const entries=[...this.list.children].map(row=>this.value(row));
   const text=(selector,value)=>{this.root.querySelector(selector).textContent=value;};
   text('[data-knowledge-manual-count]',`${entries.length} / ${MEMORY_LIMITS.entries}`);text('[data-knowledge-active-count]',entries.filter(row=>statusOf(row)==='active').length);
-  text('[data-knowledge-chars]',`${entries.reduce((sum,row)=>sum+row.content.length,0)} / ${MEMORY_LIMITS.total}`);
+  text('[data-knowledge-chars]',`${entries.reduce((sum,row)=>sum+memoryEntrySize(row),0)} / ${MEMORY_LIMITS.total}`);
   this.root.querySelector('[data-memory-empty]').hidden=Boolean(entries.length);
  }
  reset(){this.root.querySelector('[data-memory-filter-query]').value='';for(const key of ['kind','status'])this.root.querySelector(`[data-knowledge-${key}]`).value='all';this.filter();}
@@ -134,7 +145,7 @@ export class KnowledgeLibrary {
  }
  populate(memory){this.closeEditor();this.list.replaceChildren();this.root.querySelector('[data-memory-undo]')?.remove();for(const record of memory.entries)this.add(record);this.metrics();this.filter();}
  read(){return validateMemory({enabled:this.root.querySelector('[data-field="ai.memory.enabled"]').checked,entries:[...this.list.children].map(row=>this.value(row))});}
- destroy(){this.closed=true;this.relationshipRevision=(this.relationshipRevision || 0)+1;}
+ destroy(){this.personEditor?.cancel();this.closed=true;this.relationshipRevision=(this.relationshipRevision || 0)+1;}
  previewRelationships(retrieve){
   if(this.closed)return;this.graphPending=false;
   const revision=this.relationshipRevision=(this.relationshipRevision || 0)+1;
@@ -170,6 +181,7 @@ export class KnowledgeLibrary {
   const origin=row=>`${RELATIONSHIP_STATUS_LABELS[row.trust] || '待核实'} · ${row.source} · ${time(row.at)}${row.scope ? ` · 房间${row.scope.room}/主播${row.scope.anchor}` : ''}`;
   for(const url of dossier.profiles){const p=this.document.createElement('p'),link=this.document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.textContent=`抖音主页：${url}`;p.append(link);target.append(p);}
   for(const row of dossier.facets)paragraph(`${PERSON_FACETS[row.category]}：${row.text} · ${origin(row)}`);
+  for(const row of dossier.analysis || [])paragraph(`心理与互动解读（待核实假设）：${row.text} ${row.limitations} · ${origin(row)}`);
   const observed=dossier.gifting?.observed;
   if(observed)paragraph(`本房30天已观察送礼：${observed.count}件，已知价值${observed.knownDiamonds===null ? '未知' : `至少${observed.knownDiamonds}钻石`}，未知单价${observed.unknownPriceCount}件；未来送礼概率未知。`);
   for(const row of dossier.gifting?.byScope || [])paragraph(`房间${row.scope?.room || '未知'}30天送礼观测：${row.count}件，已知价值${row.knownDiamonds ?? '未知'}钻石；不同房间分别统计。`);

@@ -74,7 +74,7 @@ export function createAutomaticKnowledge({corpus,readConfig,readAudience=async()
 export function createKnowledgeMemory({cache,transport,anchor}){
  const call=(action,input={})=>transport(action,{anchor:String(anchor()),...input});
  const scope=options=>({...options,anchor:String(anchor())});
-  const eligible=(record,rows)=>record?.results?.every(s=>rows.some(r=>r.source===s.url && (s.sourceId ? r.id===s.sourceId && r.text.includes(s.content) : r.text===s.content)));
+ const eligible=(record,rows,question='')=>record?.results?.every(s=>rows.some(r=>canReuseSource(question || record.query,r) && r.source===s.url && (s.sourceId ? r.id===s.sourceId && r.text.includes(s.content) : r.text===s.content)));
  return {...cache,capacity:1000,
   async revision(){return {cache:await cache.revision(),corpus:await call('version'),anchor:String(anchor())};},
   async remember(found,config,options={}){
@@ -89,13 +89,13 @@ export function createKnowledgeMemory({cache,transport,anchor}){
     if(config.rememberKnowledge===false)return null;
     return resolveCorpusRecord(query,rows,options.question || '');
    }
-   const record=await cache.find(query,config,options);return eligible(record,rows) ? record : null;
+   const record=await cache.find(query,config,options);return eligible(record,rows,options.question) ? record : null;
   },
   async candidates(question,config,options={}){
    if(config.rememberKnowledge===false)return [];
    const [records,rows]=await Promise.all([cache.candidates(question,config),call('list')]);
    const scoped=rows.filter(r=>sourceInScope(r,scope(options))),selected=retrieveSourceRecords(scoped,question,Date.now(),scope(options)),urls=new Set(selected.flatMap(r=>r.results.map(s=>s.url)));
-   for(const record of records.filter(r=>eligible(r,scoped)))if(selected.length<3 && record.results.every(s=>!urls.has(s.url))){selected.push(record);for(const s of record.results)urls.add(s.url);}
+   for(const record of records.filter(r=>eligible(r,scoped,question)))if(selected.length<3 && record.results.every(s=>!urls.has(s.url))){selected.push(record);for(const s of record.results)urls.add(s.url);}
    return selected;
   },
   async list(){

@@ -3616,3 +3616,20 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终静态check退出0（64.921秒），包含索引新鲜度与源码/生成JavaScript语法；git diff --check通过。完整源码/测试/索引8份冻结哈希保持不变。已再次核实父CI42355619775为精确749f6e9的success，当前远端dev仍为该父提交；新实现完整全量尚在执行，未将父CI当成本轮通过。
 
 - 冻结全量退出0：node --test --test-concurrency=2 tests，1872/1872通过、0失败/取消/跳过，340585.563334ms（外层340.679秒）。没有扩大测试时限或跳过用例。8份源码/测试/索引与全量前冻结哈希一致；本轮未修改native，原生本机未重复运行，待精确新提交CI核实。本轮所有命令、输入、字面stdout/stderr/exit、父/修改/回滚哈希补充进同一VERIFICATION.txt；四角色重新打开后提交推送dev，后续完整SHA与远端/CI回执写入外部证据和交付日志。
+
+## 2026-11-07：人物对话建档、可纠错关系与普通缓存交付复核
+
+- 续接 dev/e00a90c0cb564c666959b496984b8fdfb120f37d、原四角色及18组已确认结果。读取既有执行会话完成结果，未重启已完成步骤；精确父CI 42357766140的 native-perception、test-build均success。先通过agent:find/agent:impact定位KnowledgeLibrary、AI上下文、人物档案及相关测试，再确认实际源码。目标仍是同一项目，没有转向其他安装、清理工作树或委派代理。
+- 普通缓存红测：原8条真实媒体记录作为固定输入，云端/实际createLocalReply的web-search意图命中历史UUID缓存，生成或修订中canonical原文删除后仍交付旧结论并通知旧来源。专项首轮25失败/2通过；最小修复共用createAIClient交付前重读及sameKnowledge，新增取消检查，createKnowledgeMemory.eligible按实际问题核对canReuseSource，防止较长缓存寿命掩盖原文到期。关联63/63通过，保留有效缓存的调用次数与正常无缓存流程。
+- 人物资料先定Zod结构及原话依据，新增profileOutputSchema/personProfileSchema、专用makePersonProfileRequest、updatePersonProfile和profileMemoryEntry。每轮4000字、最多16轮/12000原文字、有限事实/明确关系/假设/一般知识，当前住址和家乡各单值；逐项依据必须是对应轮次连续原话。当前模型只接收指定人物的对话，不附无关直播上下文；本机专用开关拒绝远程接口。复用原知识条目、后台查询和图谱，姓名不自动匹配账号，人工资料保持unverified，心理解读独立于事实且保留局限，不认证诊断或私人关系。
+- UI入口先红测缺少按钮，再接入原KnowledgeLibrary弹窗/控制器与共享Mantine投影，确认后进入原草稿，原保存设置负责持久化；继续补充保留同ID及历史，取消中止请求，迟到/旧输入结果不覆盖草稿。单独PersonProfileEditor只管理弹窗请求，不另建持久状态。首次UI回归15/16，一个既有焦点测试发现新增隐藏输入改变querySelector('input')结果，改为明确标题字段并排除隐藏Tab候选；后续16/16。追加继续编辑/失败/输入变化回归，先复现取消返回错误入口，再修正人物入口的returnFocus，最终相关18/18。
+- 实际补齐两个新缺陷：人物资料普通回复丢失trust、喜好过多挤掉按字段提问的人物经历，7项中2项红测如期失败。assembleAIContext从原条目恢复可信状态和用户补充归属，makeEdgeMessages保留相同边界；personDossier复用MiniSearch按字段标题/正文选取，未引入另一套搜索器。共享memoryEntrySize让验证和可见容量统计都包含结构对话资料；工作台统一说明补充操作、保存方式、限额及模型调用范围。相关31/31通过。后台JSON保存/重读、跨房查询、更正、停用/到期/删除及同名不合并均实际执行。
+- 真实浏览器使用全新独立Chrome profile、本地离线合成人物和夹具模型，没有触碰用户扩展、宿主、真实弹幕或外部账户。已执行1440×1000、390×844、560×650、900×700、390×560及恢复桌面；长原话、展开历史、8次反复收起/展开、24次指针resize采样、12次键盘缩放、多处折叠、Tab焦点/ Escape、保存后再开与两轮更正共11状态通过，截图实际打开核对。弹窗均在视口边界内且无横向溢出，长正文有界滚动，草稿与当前值保留，运行异常0。没有改共享尺寸/高度算法；有限交互与测量不等于全设备FPS、屏幕阅读器或全天性能证明。
+- 验收脚本错误保留，不算产品缺陷：首次HTML脚本先于body导致Panel append空节点（exit1），诊断复现同因（exit1），补body；脚本重复展开误将React Disclosure当原生summary（exit1），改为实际按钮；一次新增CDP选择器字符串引号无效导致SyntaxError（exit1），修正后完整浏览器exit0。只读搜索误猜src/ai/context.js、src/ui/product/fields.js、dialog.js及根checkpoint路径，rg退出2；zsh未匹配browser-harness/checkpoint通配符退出1，更正为rg --files和已确认实际路径。所有已录字面失败回执保留；不以假路径缺失声明产品上下文缺失。
+- 用户后续补充写入忽略output下的真实人物本地准备JSON、原话和可读资料，并重新解析验证。保留最新居住信息与独立的老家/家庭联系、住房需求、职业、用户提供关系等语义，不推断户籍或心理诊断；未绑定UID/secUID、未独立核实、未写入运行中应用，真实原文没有进入提交的测试/公开Git资料。项目测试仅用合成人物。
+- npm run agent:index生成540模块/3055符号；npm run build通过；npm test全量1910/1910通过，0失败/取消/跳过，345338.29225ms；npm run check退出0，54.337秒，包含索引新鲜度与源码/产物语法。git diff --check通过。未更改native，未重复下载/推理原媒体；可用工具目录和CLI核实crapper/dryer/mutator均不可用，三项未执行，不把其他检查冒充通过。
+- 同输入事务保留最初四个原件档案字节，原四角色扩展为120文件/20组，原18组保留不声称重跑。两组本轮实际执行：人物BASELINE无对话入口exit1→MODIFIED两轮更正为横店、原话保留、同ID保存、助理关系unverified且不绑定账号exit0→独立修改副本ROLLBACK恢复无入口exit1；普通缓存BASELINE云/端生成及修订交付已删除结论exit1→MODIFIED四场景拒绝旧结论/旧来源exit0→ROLLBACK恢复旧行为exit1。对应输入SHA一致，父字节、聚合原件、补丁重建、可执行回滚与生产工作区保持修改版均已逐SHA核对。
+- 目标仍active：真实模型独立事实抽取/引用支持与礼貌盲评、独立ASR/视觉真值及CER/WER、用户实际安装、多日实播与历史native/host.py:174新鲜度根因仍未完成。整理后的能力与实际边界见research-capability-audit；以下执行普通dev提交/推送，精确提交、远端和CI回执将写入本地checkpoint与同一VERIFICATION，不以父CI代替新提交CI。
+
+- 提交前将人物表单占位示例改为合成人物及无关城市，避免真实人物补充内容进入产品示例。此步仅替换示例文案，随后更新索引、重建、运行人物UI回归及静态检查；既有全量结果仍明确对应此前功能实现。
+- 最终示例文案调整后：索引540模块/3055符号、build通过，人物UI及原知识库18/18再次通过，check退出0（52.478秒），最终19份源码/测试/索引SHA冻结到profile-intake-stage/frozen-hashes.json；没有扩大时限或跳过测试。接着将最终字节更新到同一四角色并重开核对。

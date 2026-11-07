@@ -29,7 +29,11 @@ export function assembleAIContext(prompt,config) {
   // Keep the established memories field; serialize each passage only once.
   const {chunks,contextQuery:retrievalContext,...retrievalMeta}=retrieval;
   retrievalMeta.contextQueryChars=retrievalContext?.length || 0;
-  const memories=chunks.map(row=>({...row,id:row.entryId,chunkId:row.id}));
+  const memories=chunks.map(row=>{
+    const entry=config.memory.entries.find(entry=>entry.id===row.entryId);
+    return {...row,id:row.entryId,chunkId:row.id,trust:entry.person ? 'unverified' : entry.trust || 'verified',
+      ...(entry.person ? {attribution:'用户补充，经AI整理，未经独立核实'} : {})};
+  });
   const perceptionHistory=prompt.getPerceptionMemory?.(query) || null;
   const sessionMemory=prompt.getSessionMemory?.(query) || null;
   const conversationHistory=prompt.getConversationMemory?.(query) || null;

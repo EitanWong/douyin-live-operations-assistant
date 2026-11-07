@@ -137,7 +137,7 @@ export class Panel {
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
       forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
-    this.knowledgeLibrary=new KnowledgeLibrary(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),reveal:element=>this.revealError(element),webKnowledge:this.callbacks.webKnowledge,relationships:this.callbacks.relationships});
+    this.knowledgeLibrary=new KnowledgeLibrary(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),reveal:element=>this.revealError(element),webKnowledge:this.callbacks.webKnowledge,relationships:this.callbacks.relationships,profileTurn:input=>this.profileTurn(input)});
     this.modelPickers=new ModelPickers(this.root);
     this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});this.workspaceLayout.show(this.activeTab);
     this.productUI=mountProductPanel(this);
@@ -157,6 +157,13 @@ export class Panel {
       const pipeline=this.readPipeline(),reply=resolveReplyConfig({pipeline,endpoint:this.node('[data-field="ai.endpoint"]').value.trim(),model:this.node('[data-field="ai.model"]').value.trim()}),endpoint=validateEndpoint(reply.endpoint),omni=pipeline.mode==='omni-only';
       return Boolean(reply.model && (['localhost','127.0.0.1','[::1]'].includes(new URL(endpoint).hostname) || this.node(omni ? '[data-media-key="pipeline"]' : '[data-api-key]').value.trim() || this.callbacks.hasAIKey?.(endpoint,omni)));
     } catch { return false; }
+  }
+  profileTurn(input){
+    const config=copy(this.config);
+    for(const key of ['endpoint','model'])config.ai[key]=this.node(`[data-field="ai.${key}"]`).value.trim();
+    config.ai.pipeline=this.readPipeline();
+    if(!this.callbacks.profileTurn)throw Error('请先配置AI模型后再整理人物资料');
+    return this.callbacks.profileTurn(input,config,this.node('[data-api-key]').value.trim(),this.node('[data-remember-key]').checked,this.aiSettings.credentials());
   }
   async fillPhrases(button) {
     if (button.disabled || this.busyActions.has('generate-phrases') || !this.phraseServiceReady()) return;

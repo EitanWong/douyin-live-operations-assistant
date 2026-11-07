@@ -1,4 +1,5 @@
 import {createKnowledgeMemory} from './services/automatic-knowledge.js';
+import {updatePersonProfile} from './services/person-profile.js';
 import {createRelationshipLibrary} from './ai/relationship-library.js';
 import {withRelationshipEvidence} from './services/relationship-query.js';
 import {createSpeechRecognizer} from './services/speech-routing.js';
@@ -718,6 +719,11 @@ export function boot(options = {}) {
       },
       webKnowledge,
       relationships:queryRelationships,
+      profileTurn:async(input,c,key,remember,credentials)=>{
+        if(c.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveReplyConfig(c.ai).endpoint).hostname))throw Error('仅本地模式下，请将人物整理模型配置为本机兼容接口');
+        await keepKey(c,key,remember);await prepareMediaKeys(c,credentials)();
+        return updatePersonProfile(input,resolveReplyConfig(c.ai),cloudClient);
+      },
       startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
       stopMedia:()=>{mediaManuallyStopped=true;mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
