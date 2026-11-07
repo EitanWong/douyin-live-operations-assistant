@@ -1,4 +1,4 @@
-import {resolveReplyConfig} from '../services/ai-pipeline.js';
+import {resolveAITaskConfig} from '../services/ai-task-config.js';
 import {AgentHarness} from './harness.js';
 import {createResearchAgent} from './agent.js';
 import {readPublicPage} from './public-sources.js';
@@ -10,6 +10,6 @@ export function createLocalAgentTasks({room,anchor,request,getKey,get,set,public
  const execute=async(job,options)=>{const current=get(`live-assistant:config:${room}`,null);if(!current?.ai?.enabled || String(current.anchorId)!==job.input.anchor)throw new Error('AI已关闭或主播已变化，请核对后重新提交');
   const context={...job.input.context},selection=context.relationshipContext;
   if(selection?.focus && relationships)context.relationshipContext=scopedRelationshipContext(await relationships(job.question,relationshipResearchOptions(selection)),selection);
-  return research({...job,input:{...job.input,context,ai:resolveReplyConfig(current.ai)}},options);};
+  return research({...job,input:{...job.input,context,ai:resolveAITaskConfig(current.ai,'research')}},options);};
  const harness=new AgentHarness({store,execute,concurrency:1});return {submit:job=>harness.submit({...job,scope:`${room}:${anchor()}`}),list:async()=>{await harness.ready;return harness.list(`${room}:${anchor()}`);},cancel:id=>harness.cancel(id,`${room}:${anchor()}`),close:()=>harness.close()};
 }

@@ -80,7 +80,7 @@ const accountResearch=createAccountResearch({readConfig:room=>readRecord(`live-a
     try{const result=await publicMedia.collect({room,anchor,records,media});if(result.error)for(const work of records.filter(r=>r.kind==='work'))work.coverage=`${work.coverage || ''}；${result.error}`.slice(0,500);}
     catch{for(const work of records.filter(r=>r.kind==='work'))work.coverage=`${work.coverage || ''}；完整音轨任务未启动，请检查本地数据组件和感知组件`.slice(0,500);}
   }});
-const relationshipLibrary=createRelationshipLibrary({all:()=>durableStorage.getAll(['live-assistant:config:','live-assistant:profile:','live-assistant:runtime:','live-assistant:live-memory:','live-assistant:knowledge:'])});
+const relationshipLibrary=createRelationshipLibrary({all:()=>durableStorage.getAll(['live-assistant:config:','live-assistant:profile:','live-assistant:runtime:','live-assistant:live-memory:','live-assistant:knowledge:','live-assistant:profile-insights:'])});
 const deleteRecord = async keys => {
   const list = Array.isArray(keys) ? keys : [keys], durable = list.filter(durableKey), local = list.filter(key=>!durableKey(key));
   if (durable.length) await durableStorage.remove(durable);
@@ -102,7 +102,7 @@ const roomFromUrl = value => {
   } catch { return null; }
 };
 const isRoom = sender => sender.frameId === 0 && Boolean(roomFromUrl(sender.tab?.url)) && (!sender.url || roomFromUrl(sender.url) === roomFromUrl(sender.tab.url));
-const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|live-memory:\d+:(?:\d{1,40}|unknown)|income-calibration:\d+|event:\d+:[a-z\d-]+|(?:api-key|search-key|media-key):https?:\/\/[^\s/]+)$/.test(key);
+const keyAllowed = key => typeof key === 'string' && /^live-assistant:(config:\d+|runtime:\d+|live-memory:\d+:(?:\d{1,40}|unknown)|income-calibration:\d+|event:\d+:[a-z\d-]+|(?:(?:api-key|search-key|media-key):|task-key:(?:research|profile):)https?:\/\/[^\s/]+)$/.test(key);
 const jsonLength = value => {
   try { const text = JSON.stringify(value); return typeof text === 'string' ? text.length : null; }
   catch { return null; }
@@ -160,7 +160,7 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake'){void getAIBackground().wake().catch(()=>{});void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});}});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
@@ -429,6 +429,8 @@ async function notifyChanges(changes) {
   for(const [key,change] of Object.entries(changes)){
     if(/^live-assistant:config:\d+$/u.test(key))mediaChanged=true;
     else if(/^live-assistant:live-memory:\d+:\d+$/u.test(key)){
+      const [, ,room,anchor]=key.split(':');
+      await getAIBackground().pruneProfiles(room,anchor);
       const value=change.newValue?.audience,signature=JSON.stringify([value?.forgetBefore || 0,value?.forgotten || []]);
       if(publicMediaPrivacy.get(key)!==signature){mediaChanged=true;publicMediaPrivacy.delete(key);publicMediaPrivacy.set(key,signature);while(publicMediaPrivacy.size>64)publicMediaPrivacy.delete(publicMediaPrivacy.keys().next().value);}
     }

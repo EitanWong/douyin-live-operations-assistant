@@ -1,3 +1,4 @@
+import {resolveAITaskConfig,taskSecretKey,taskModelSecret} from './services/ai-task-config.js';
 import {createKnowledgeMemory} from './services/automatic-knowledge.js';
 import {AI_SERVICE_GROUPS,selectAIServices,projectSharedAIServices} from './services/shared-ai-services.js';
 import {updatePersonProfile} from './services/person-profile.js';
@@ -326,7 +327,7 @@ export function boot(options = {}) {
   const searchClient = createSearchClient({request,getKey:endpoint=>sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'')});
   const recordSearch=record=>{panel?.recordSearch(record);log('ai',record.error ? `联网搜索失败：${record.error}` : `${record.cached ? '知识缓存' : '联网搜索'}：${record.query} · ${record.results.length} 条来源`);};
   let aiStatusSequence=0;
-  const cloudClient = createAIClient({ request, getKey: (endpoint,ai) => pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,knowledge:webKnowledge,
+  const cloudClient = createAIClient({ request, getKey: (endpoint,ai) => ai.taskKind && taskModelSecret(ai,ai.taskKind) ? sessionKeys.get(taskModelSecret(ai,ai.taskKind)) ?? get(taskModelSecret(ai,ai.taskKind),'') : pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), ''),search:searchClient,knowledge:webKnowledge,
     onStatus:status=>{if (engine && resolveReplyConfig(engine.config.ai).endpoint===status.endpoint && resolveReplyConfig(engine.config.ai).model===status.model && status.sequence>aiStatusSequence) {aiStatusSequence=status.sequence;panel?.setAIServiceStatus(status.error);}},
     onIntent:record=>log('ai',`识别意图：${({'live-data':'直播数据','web-search':'联网查询',weather:'天气查询',clock:'当前时间','public-data':'公共数据工具',knowledge:'复用知识',chat:'普通对话',clarify:'澄清问题',skip:'无需回复'})[record.intent]}`),
     onSearch:recordSearch
@@ -575,6 +576,7 @@ export function boot(options = {}) {
       if(keys.has(name) && (keys.get(name).key!==value.key || keys.get(name).remember!==value.remember))throw new Error('同域音视频服务请使用相同密钥和记住选项，或仅在一处填写');
       keys.set(name,value);
     }
+    for(const kind of ['research','profile']){const value=credentials[kind];if(value?.key && c.ai.taskModels[kind].enabled)keys.set(taskSecretKey(kind,c.ai.taskModels[kind].endpoint),value);}
     for(const [name,value] of keys)sessionKeys.set(name,value.key);
     return async()=>{for(const [name,value] of keys)if(value.remember){await set(name,value.key);sessionKeys.delete(name);}else await del(name);};
   }
@@ -720,14 +722,14 @@ export function boot(options = {}) {
       webKnowledge,
       relationships:queryRelationships,
       profileTurn:async(input,c,key,remember,credentials)=>{
-        if(c.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveReplyConfig(c.ai).endpoint).hostname))throw Error('仅本地模式下，请将人物整理模型配置为本机兼容接口');
+        if(c.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveAITaskConfig(c.ai,'profile').endpoint).hostname))throw Error('仅本地模式下，请将人物整理模型配置为本机兼容接口');
         await keepKey(c,key,remember);await prepareMediaKeys(c,credentials)();
-        return updatePersonProfile(input,resolveReplyConfig(c.ai),cloudClient);
+        return updatePersonProfile(input,c.ai,cloudClient);
       },
       startMedia,
       checkNative:()=>checkNativeComponent(options.nativeConnect),
       stopMedia:()=>{mediaManuallyStopped=true;mediaAttemptKey=mediaRunKey();media.stop();},clearMedia,
-      forgetMediaKey:async(kind,endpoint)=>{const name=mediaSecretKey(endpoint);media.stop();await del(name);sessionKeys.delete(name);for(const input of panel.root.querySelectorAll('[data-media-key]'))input.value='';panel.toast('此服务的音视频密钥已清除；同域普通AI密钥需在服务连接中清除');},
+      forgetMediaKey:async(kind,endpoint)=>{const task=['research','profile'].includes(kind),name=task ? taskSecretKey(kind,endpoint) : mediaSecretKey(endpoint);if(!task)media.stop();await del(name);sessionKeys.delete(name);for(const input of panel.root.querySelectorAll('[data-media-key]'))input.value='';panel.toast(task ? '此任务的模型密钥已清除' : '此服务的音视频密钥已清除；同域普通AI密钥需在服务连接中清除');},
       hasAIKey: (endpoint,omni=false) => Boolean(omni ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint), '')),
       generatePhrases: async (c, key, remember, options,mediaCredentials) => {
         await keepKey(c, key, remember);await prepareMediaKeys(c,mediaCredentials)();
@@ -904,7 +906,7 @@ export function boot(options = {}) {
     const taskTransport=async()=>{
       if(options.agentTasks)return options.agentTasks;
       localAgentReady ||= import('./ai/local-agent.js').then(({createLocalAgentTasks})=>{
-        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:(kind,endpoint)=>kind==='search' ? sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'') : pipelineConfig(engine.config.ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''),get,set,relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results)});
+        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:(kind,endpoint)=>kind==='search' ? sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'') : taskModelSecret(engine.config.ai,'research') ? sessionKeys.get(taskModelSecret(engine.config.ai,'research')) ?? get(taskModelSecret(engine.config.ai,'research'),'') : pipelineConfig(engine.config.ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''),get,set,relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results)});
         return localAgentTasks;
       });
       return localAgentReady;
@@ -933,7 +935,7 @@ export function boot(options = {}) {
       exportReport:report=>download(`douyin-ai-tests-${room}-${giftDate()}.json`,JSON.stringify(report,null,2))
     });
     workbench=new AIWorkbench(panel.root,{memory:currentMemory,perceptionMemory:()=>memoryScope().perception,saveMemory:()=>{accountRevision++;engine.cancelAI();return persistRuntime(true);},onError:error=>panel.toast(error.message,true),tasks:{
-      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,relationshipContext:await queryRelationships(question),accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveReplyConfig(engine.config.ai),context,sources}});},
+      submit:async(question,sources)=>{if(!engine.config.ai.enabled)throw new Error('请先启用并保存AI设置');const current=engine.aiContext();const context={persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,relationshipContext:await queryRelationships(question),accountContext:accounts.context(engine.config.anchorId,question),now:Date.now()};return (await taskTransport()).submit({id:crypto.randomUUID(),question,input:{anchor:engine.config.anchorId,ai:resolveAITaskConfig(engine.config.ai,'research'),context,sources}});},
       list:async()=>options.agentTasks ? options.agentTasks.list() : localAgentTasks || get(`live-assistant:ai-tasks:${room}`,[])?.length ? (await taskTransport()).list() : [],cancel:async id=>(await taskTransport()).cancel(id)
     }});
     const installCommand=panel.root.querySelector('[data-native-install-command]');

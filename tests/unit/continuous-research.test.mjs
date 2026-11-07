@@ -1,6 +1,23 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {createContinuousResearch} from '../../src/ai/continuous-research.js';
+import {createContinuousResearch,researchEvidenceIsCurrent} from '../../src/ai/continuous-research.js';
+
+test('画面、语音、音画与未归属弹幕进入同一研究队列并保留原始证据边界',async()=>{
+ const now=1800000000000,jobs=[];let saved;
+ const config={anchorId:'10',ai:{enabled:true,assistant:{research:{enabled:true,intervalSec:60,maxPerHour:3}}}};
+ const memory={anchor:'10',audience:{unattributed:[{id:'chat-1',text:'陶瓷茶杯活动何时开始？',at:now-2000}]},perception:{observations:[{id:'frame-1',kind:'video',text:'海报写着陶瓷文化节将于周末开幕',at:now-1000,endedAt:now-900},{id:'speech-1',kind:'audio',text:'陶瓷文化节在哪里举办？',at:now-800,endedAt:now-700}]}};
+ const deps={now:()=>now,configs:async()=>({'live-assistant:config:1':config}),read:async()=>memory,store:{readLoop:async()=>saved,writeLoop:async r=>saved=r},submit:async j=>jobs.push(j),cancelDisabled:async()=>{},hasPending:()=>false};
+ await createContinuousResearch(deps).tick();
+ assert.equal(jobs.length,1);assert.equal(jobs[0].input.subject,undefined);
+ const rows=jobs[0].input.context.context;
+ assert.deepEqual(new Set(rows.map(r=>r.source)),new Set(['chat','video','audio']));
+ assert.equal(rows.find(r=>r.source==='video').id,'frame-1');
+ assert.equal(rows.find(r=>r.source==='video').endedAt,now-900);
+ assert.match(rows.find(r=>r.source==='audio').identity,/unverified/);
+ assert.equal(researchEvidenceIsCurrent(rows,memory),true);
+ assert.equal(researchEvidenceIsCurrent(rows,{...memory,perception:{observations:[]}}),false);
+ saved.nextAt=0;await createContinuousResearch(deps).tick();assert.equal(jobs.length,1,'同一批上下文只提交一次');
+});
 
 test('稳定主页的近期人物每天复查公开资料；冷却去重、开关与遗忘版本仍生效',async()=>{
  let now=1800000000000,enabled=true,epoch=0;const loops=new Map(),submitted=[];

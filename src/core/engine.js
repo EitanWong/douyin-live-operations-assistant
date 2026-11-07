@@ -24,6 +24,7 @@ import { SEARCH_DEFAULTS, validateSearchEndpoint } from '../services/search.js';
 import { REWARDS_DEFAULTS } from '../browser/rewards.js';
 import { MEMORY_DEFAULTS, validateMemory } from '../services/knowledge.js';
 import {AI_PIPELINE_DEFAULTS,validatePipeline,resolveMediaConfig} from '../services/ai-pipeline.js';
+import {AI_TASK_DEFAULTS,validateTaskModels} from '../services/ai-task-config.js';
 import {TEXT_MODELS} from '../ai/device-policy.js';
 import { MEDIA_DEFAULTS, validateMediaConfig } from '../services/media.js';
 import {CONTEXT_DEFAULTS} from '../ai/context-policy.js';
@@ -66,7 +67,7 @@ export const DEFAULTS = {
     intervalSec: 0, userCooldownSec: 0,
     assistant:{...ASSISTANT_DEFAULTS,skills:[]}, contextSize: 30, contextAgeSec: 180, maxPerHour: 3600, idleEnabled: false, idleSec: 180, proactiveEnabled:false, proactiveIntervalSec:300, replyFrequency:'quiet',
     persona: '你是直播间里会聊天的场控。先听懂对方的意思，接着现场的话自然回应，有常识、有分寸，直接说重点，不端着、不用客服套话。轻松时可以有一点幽默，认真时说实在的；欢迎和答谢简短，聊天不机械套模板。不冒充主播，不编造经历或承诺，不抢话。',
-    knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS,latency:LATENCY_DEFAULTS,edge:EDGE_DEFAULTS,contextSources:CONTEXT_DEFAULTS,accountCollection:ACCOUNT_COLLECTION_DEFAULTS
+    knowledge: '', temperature: 0.7, search:SEARCH_DEFAULTS, memory:MEMORY_DEFAULTS,media:MEDIA_DEFAULTS,pipeline:AI_PIPELINE_DEFAULTS,taskModels:AI_TASK_DEFAULTS,latency:LATENCY_DEFAULTS,edge:EDGE_DEFAULTS,contextSources:CONTEXT_DEFAULTS,accountCollection:ACCOUNT_COLLECTION_DEFAULTS
   },
   timers: [{ id: 'welcome', enabled: false, responseMode: 'rules', intervalSec: 300, start: '', end: '', quietSec: 15, messages: DEFAULT_TIMER_PHRASES }],
   adapter: { inputSelector: '', sendSelector: '', chatSelector: '', nicknameSelector: '', contentSelector: '', startSelector: '', endSelector: '' }
@@ -173,6 +174,7 @@ export function validateConfig(c) {
   validateMemory(c.ai.memory);validateAssistant(c.ai.assistant);
   validateMediaConfig(c.ai.media);
   validatePipeline(c.ai);
+  validateTaskModels(c.ai);
   for(const [key,min,max] of [['cloudMs',1000,25000],['totalMs',2000,42000],['edgeDelayMs',500,10000]])range(c.ai.latency[key],min,max,'AI 等待时限');
   if(c.ai.latency.totalMs<c.ai.latency.cloudMs)throw new Error('AI 总时限不能小于云端时限');
   choice(c.ai.edge.audioBackend,['auto','native-sensevoice','browser-whisper'],'本地语音方案');
