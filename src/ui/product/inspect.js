@@ -9,7 +9,7 @@ const EntryScope=createContext(false);
 // Enlargement serves detailed content, rather than the container around it.
 export function canInspect(node) {
   if(!node)return false;
-  if(node.inspectable || ['chart','svg','table','bars','record-browser'].includes(node.kind) || node.collection?.mode==='records')return true;
+  if(node.inspectable || ['chart','network','svg','table','bars','record-browser'].includes(node.kind) || node.collection?.mode==='records')return true;
   return (node.children || []).some(canInspect);
 }
 export function InspectionContents({children}) {return h(EntryScope.Provider,{value:true},children);}

@@ -1,3 +1,4 @@
+import {WORKBENCH_CSS} from './workbench-styles.js';
 import {SCROLLBAR_CSS} from '../scrollbar-styles.js';
 import {PRODUCT_LIQUID_GLASS_CSS} from '../liquid-glass.js';
 import {PRODUCT_DIMENSIONS,PRODUCT_COMPACT_DIMENSIONS} from './layout.js';
@@ -164,4 +165,4 @@ export const PRODUCT_CSS=`
 .ai-trace-step{position:relative;display:flex;flex-direction:column;gap:4px;padding:12px 12px 12px 42px;border:1px solid var(--product-line);border-radius:8px;min-width:0;font-size:12px}
 .ai-trace-number{position:absolute;left:10px;top:12px;display:grid;place-items:center;width:23px;height:23px;border-radius:50%;background:var(--sg-brand-wash);color:var(--sg-brand);font-size:11px;font-weight:650}.ai-trace-step p{overflow-wrap:anywhere}.ai-trace-step small{font-size:10px;color:var(--mantine-color-dimmed)}
 .ai-result-checks,.ai-result-sources,.ai-result-history{border-top:1px solid var(--product-line);padding-top:10px}.ai-result-history>.ai-result{padding-block:16px;border-bottom:1px solid var(--product-line)}.ai-result-warning,.ai-trace-step.is-warning{color:var(--mantine-color-orange-text)}.ai-trace-step.is-failed{color:var(--mantine-color-red-text)}.ai-source{padding:12px 0;display:flex;flex-direction:column;gap:6px}.ai-source a{font-size:12px;overflow-wrap:anywhere}
-`+PRODUCT_LIQUID_GLASS_CSS+SCROLLBAR_CSS;
+`+WORKBENCH_CSS+PRODUCT_LIQUID_GLASS_CSS+SCROLLBAR_CSS;

@@ -843,7 +843,7 @@ export function boot(options = {}) {
     let stopContributionWatch = watchAudienceContributions(()=>void sampleContributions());
     const timer = setInterval(async () => {
       if (closed || suspended) return;
-      if(panel.open && panel.activeTab==='knowledge' && !document.hidden)panel.knowledgeLibrary.tickRelationships();
+      if(panel.open && panel.activeTab==='knowledge' && !document.hidden)panel.relationshipWorkspace.tick();
       if(roomContext.current())void accountRefresh.tick().catch(error=>log('ai',`公开资料更新：${error.message}`));
       tools.notify('tick');
       if(!persistenceDisabled && roomContext.current())void predictions.pulse(predictionPulse({engine,network,identity,connected:(demo || adapter.healthy()) && (!identity.live?.status || identity.live.status==='live')}));
@@ -870,7 +870,7 @@ export function boot(options = {}) {
     if (!engine.config.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, engine.config.gift.yuanPerDiamond);
     void registerProfile().catch(error => reportPersistenceError(error, '主播资料保存失败'));
     window.addEventListener('pagehide', event => {
-      media.detach();playground?.cancel();
+      media.detach();playground?.cancel();panel?.relationshipWorkspace.cancel();
       void accountRefresh.cancel().catch(()=>{});
       void (event.persisted ? tools.suspend() : tools.close());
       resumeAutoStart = event.persisted && autoStartArmed && !manualPause;
@@ -922,10 +922,11 @@ export function boot(options = {}) {
     },collector:options.accountCollector,accountRefresh,accounts,anchor:()=>engine.config.anchorId,dirty:()=>panel.markDirty(),getContext:()=>engine.aiContext(),targets:()=>[identity.anchor,...viewers.values()].filter(row=>row?.secUid).map(row=>({name:row.name,url:`https://www.douyin.com/user/${row.secUid}`})),
       changed:async()=>{accountRevision++;engine.cancelAI();await persistRuntime(true);},onError:error=>panel.toast(error.message,true)});
     syncLocalModels();
-    playground=new AIPlayground(panel.root,{
-      service:createAIPlayground({request,search:searchClient,knowledge:webKnowledge,edge,getConfig:()=>engine.config,getContext:c=>engine.aiContext(c),
+    const previewService=createAIPlayground({request,search:searchClient,knowledge:webKnowledge,edge,getConfig:()=>engine.config,getContext:c=>engine.aiContext(c),
         isCurrent:()=>!closed && !suspended && roomContext.current(),
-        getKey:(endpoint,ai)=>pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),'')}),
+        getKey:(endpoint,ai)=>pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),'')});
+    panel.relationshipWorkspace.service=previewService;
+    playground=new AIPlayground(panel.root,{service:previewService,
       describe:()=>{const ai=resolveReplyConfig(engine.config.ai);return `已保存 · ${ai.model} · 联网${ai.search.enabled ? '开启' : '关闭'} · 每条最多${engine.config.sending.maxLength}字`;},
       exportReport:report=>download(`douyin-ai-tests-${room}-${giftDate()}.json`,JSON.stringify(report,null,2))
     });

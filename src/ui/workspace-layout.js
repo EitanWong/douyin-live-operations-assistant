@@ -51,7 +51,7 @@ export class WorkspaceLayout {
     this.toolbar.append(root.querySelector('.foot'));root.querySelector('.workspace-content').prepend(this.toolbar);
     this.select=this.toolbar.querySelector('select');
     this.views=element(this.toolbar,'div','workspace-views','data-workspace-views');this.toolbar.after(this.views);
-    this.subviews=new Map();for(const [key,selector] of [['anchor','.anchor-views'],['ai','.ai-section-tabs']]){const node=root.querySelector(selector);if(node){this.views.append(node);this.subviews.set(key,node);}}
+    this.subviews=new Map();for(const [key,selector] of [['anchor','.anchor-views'],['ai','.ai-section-tabs'],['knowledge','.knowledge-section-tabs']]){const node=root.querySelector(selector);if(node){this.views.append(node);this.subviews.set(key,node);}}
     this.status=element(this.toolbar,'footer','workspace-status','data-workspace-status');this.status.setAttribute('aria-label','运行状态与消息');
     this.status.append(root.querySelector('.shell-status'));root.querySelector('.workspace-content').append(this.status);
     this.messages=element(this.status,'details','workspace-messages','data-workspace-messages');this.messageTitle=element(this.messages,'summary');this.messageTitle.textContent='消息';this.messages.append(this.messageTitle);
@@ -68,7 +68,7 @@ export class WorkspaceLayout {
       target.tabIndex=-1;target.focus({preventScroll:true});target.scrollIntoView?.({block:'start',behavior:'instant'});
     };
     this.select.addEventListener('change',this.onJump);
-    this.onSection=event=>{if(event.target.closest('[data-ai-section-tab],[data-anchor-view],[data-field="ai.pipeline.mode"],[data-field^="ai.media."]'))this.document.defaultView.queueMicrotask(()=>{if(!this.destroyed)this.show(this.key);});};
+    this.onSection=event=>{if(event.target.closest('[data-ai-section-tab],[data-anchor-view],[data-knowledge-section-tab],[data-field="ai.pipeline.mode"],[data-field^="ai.media."]'))this.document.defaultView.queueMicrotask(()=>{if(!this.destroyed)this.show(this.key);});};
     root.addEventListener('click',this.onSection);root.addEventListener('change',this.onSection);
   }
   show(key){

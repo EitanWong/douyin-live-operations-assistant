@@ -7,6 +7,7 @@ import {useTable,tableFeatures} from '@tanstack/react-table';
 import mantineCss from '@mantine/core/styles.css';
 import {PRODUCT_CSS} from './styles.js';
 import {createChartView} from './chart.js';
+import {NetworkWorkbench} from './network-workbench.js';
 import {gridOptions,cardRuns} from './layout.js';
 import {WorkspaceFit} from './fit.js';
 import {InspectionProvider,InspectionContents,InspectButton,Inspectable,viewLabel,canInspect,RecordBrowser} from './inspect.js';
@@ -104,6 +105,7 @@ const View=React.memo(function View({node,bridge}) {
   if(node.kind==='record-browser')return h(RecordBrowser,{node});
   if(node.kind==='table')return h(DataTable,{node,bridge});
   if(node.collection?.mode==='records')return h(RecordCollection,{node,bridge});
+  if(node.kind==='network')return h(NetworkWorkbench,{node,bridge});
   if(node.kind==='chart')return h(Chart,{node,bridge});
   if(node.kind==='progress')return node.value===null ? h('small',null,node.label) : h(Progress,{value:node.value,'aria-label':node.label});
   if(node.kind==='bars')return h(Inspectable,{node},h('div',{className:'product-stat-bars','aria-label':node.label},node.items.map((item,i)=>h('div',{key:i,title:item.label},h('small',null,item.label),h(Progress,{value:item.scale,'aria-label':item.label})))));

@@ -52,7 +52,9 @@ export function makeAIRequest(prompt, config) {
   request.messages[1].content='';
   const wireBudget=Math.floor((98000-JSON.stringify(request).length)/2);
   if(wireBudget<1000)throw new Error('固定任务指令超过请求预算，请缩短场控风格和任务');
-  request.messages[1].content=JSON.stringify(applyContextBudget(data,Math.min(prompt.researchInstruction ? 10000 : pipelineConfig(config).contextBudgetChars,wireBudget)));
+  const budgeted=applyContextBudget(data,Math.min(prompt.researchInstruction ? 10000 : pipelineConfig(config).contextBudgetChars,wireBudget));
+  if(prompt.task?.data?.replyMode==='relationships' && !budgeted.evidence_context?.relationships)throw new Error('人物证据超过当前模型上下文预算，请选择具体人物或缩小问题范围');
+  request.messages[1].content=JSON.stringify(budgeted);
   if(JSON.stringify(request).length>100000)throw new Error('AI 请求超过整包预算');
   if(/qwen.*omni/iu.test(config.model)){request.stream=true;request.modalities=['text'];if(/^qwen3\.8-omni-/iu.test(config.model))request.reasoning_effort='none';}
   return request;

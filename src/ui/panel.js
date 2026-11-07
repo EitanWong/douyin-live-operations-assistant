@@ -34,6 +34,7 @@ import { SEARCH_PROVIDERS, validateSearchEndpoint } from '../services/search.js'
 import { giftDate } from '../data/gifts.js';
 import { BOT_COMMANDS, RoomBot } from '../core/bot.js';
 import { collectionGapCount, hasUnacknowledgedRuntimeAlert } from '../runtime/health.js';
+import {RelationshipWorkspace} from './relationship-workspace.js';
 import {KnowledgeLibrary} from './knowledge-library.js';
 import {knowledgePageTemplate} from './knowledge-template.js';
 import {KNOWLEDGE_CSS} from './knowledge-styles.js';
@@ -137,7 +138,9 @@ export class Panel {
     this.aiSettings=new AISettings(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),
       start:()=>this.callbacks.startMedia?.(this.read(),this.aiSettings.credentials()),stop:()=>this.callbacks.stopMedia?.(),clear:()=>this.callbacks.clearMedia?.(),checkNative:()=>this.callbacks.checkNative?.(),diagnose:()=>this.callbacks.diagnoseAI(),
       forget:kind=>this.callbacks.forgetMediaKey?.(kind,kind==='pipeline' ? this.aiSettings.pipelineEndpoint() : this.read().ai.media[`${kind}Endpoint`])});
-    this.knowledgeLibrary=new KnowledgeLibrary(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),reveal:element=>this.revealError(element),webKnowledge:this.callbacks.webKnowledge,relationships:this.callbacks.relationships,profileTurn:input=>this.profileTurn(input)});
+    this.knowledgeLibrary=new KnowledgeLibrary(this.root,{dirty:()=>this.markDirty(),error:error=>this.toast(error.message,true),reveal:element=>this.revealError(element),webKnowledge:this.callbacks.webKnowledge,profileTurn:input=>this.profileTurn(input)});
+    this.knowledgeSection='library';this.relationshipWorkspace=new RelationshipWorkspace(this.root,{retrieve:this.callbacks.relationships,readMemory:()=>this.knowledgeLibrary.read()});
+    for(const tab of this.root.querySelectorAll('[data-knowledge-section-tab]'))tab.addEventListener('click',()=>this.setKnowledgeSection(tab.dataset.knowledgeSectionTab));
     this.modelPickers=new ModelPickers(this.root);
     this.populate(config); this.bind(); this.floating = new FloatingWindow({root:this.root, onToggle:() => this.toggleOpen()});this.workspaceLayout.show(this.activeTab);
     this.productUI=mountProductPanel(this);
@@ -838,6 +841,13 @@ export class Panel {
     if(this.isPKVisible() && this.latest)this.renderPK(this.latest[0]);
     if(this.activeTab==='anchor')this.workspaceLayout.show('anchor');
   }
+  setKnowledgeSection(key) {
+    if(!['library','relationships'].includes(key))return;this.knowledgeSection=key;
+    for(const tab of this.root.querySelectorAll('[data-knowledge-section-tab]')){const active=tab.dataset.knowledgeSectionTab===key;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active ? 0 : -1;}
+    for(const section of this.root.querySelectorAll('[data-knowledge-section]'))section.hidden=section.dataset.knowledgeSection!==key;
+    this.relationshipWorkspace.setVisible(this.activeTab==='knowledge' && key==='relationships');
+    if(this.activeTab==='knowledge')this.workspaceLayout.show('knowledge');
+  }
   tab(key) {
     if(key==='pk'){this.setAnchorView('pk');key='anchor';}
     if (this.root.querySelector(`[data-tab="${key}"]`)?.hidden) return;
@@ -855,7 +865,8 @@ export class Panel {
       node.hidden = node.dataset.page !== key || Boolean(disabled);
     }
     this.workspaceLayout.show(key);
-    if(key==='knowledge') {this.knowledgeLibrary.filter();void this.knowledgeLibrary.refresh();if(this.callbacks.relationships)this.knowledgeLibrary.previewRelationships(this.callbacks.relationships);}
+    if(key==='knowledge') {this.knowledgeLibrary.filter();void this.knowledgeLibrary.refresh();}
+    this.relationshipWorkspace.setVisible(key==='knowledge' && this.knowledgeSection==='relationships');
     if(this.isPKVisible() && this.latest) this.renderPK(this.latest[0]);
     if(key==='anchor' && this.latest) this.renderAnchor(this.latest[0]);
   }
@@ -1148,5 +1159,5 @@ export class Panel {
     this.productUI?.refresh();
     for (const action of ['identify','test-ai','diagnose','refresh-anchor']) this.disabled(`[data-action="${action}"]`, this.busyActions.has(action) || (action === 'test-ai' && ['save','start'].some(a=>this.busyActions.has(a))));
   }
-  destroy() { this.knowledgeLibrary.destroy();this.productUI?.destroy();this.workspaceLayout.destroy();this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.predictionCharts.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
+  destroy() { this.relationshipWorkspace.destroy();this.knowledgeLibrary.destroy();this.productUI?.destroy();this.workspaceLayout.destroy();this.navigation.destroy(); this.adaptive.destroy(); this.anchorDashboard.destroy(); this.predictionCharts.destroy(); this.charts.destroy(); this.theme.destroy(); this.floating.destroy(); clearTimeout(this.logTimer); clearTimeout(this.toastTimer); this.host.remove(); }
 }

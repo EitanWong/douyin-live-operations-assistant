@@ -9,7 +9,7 @@
 | 加强联网搜索、成熟供应商与公开API | `src/services/search.js` 支持 Bocha、Tavily、SearXNG；`public-data.js`、`weather.js` 提供具名工具和参数校验；Readability/linkedom读取正文，MiniSearch检索原文 | `mature-retrieval`、`public-data`、`web-research`、`web-knowledge`测试；[公开API真实核实](../development/public-data-tools.zh-CN.md) | 供应商需配置/权限并受限流；SearXNG需自建。天气/汇率等按时效现场查询，不把所有API响应永久记作稳定常识。尚无跨供应商的大规模真实问题召回率基准 |
 | 主播公开主页、作品、评论与关联账号 | `extension/account-research.js`、`src/ai/account-context.js`：稳定UID/secUID核对、实际加载页面采样、分级额度与去重 | `account-research`、`profile-research-flow`、`profile-knowledge`及既有浏览器验收 | 登录、验证、未加载、未授权均为未知；没有全量遍历任意主页或跨平台身份自动认证。已研究 jiji262/douyin-downloader，未将其CLI接为生产下载后端；当前采用已有页面归属的下载链路 |
 | 视频音轨、视觉、重点原文入库与索引 | `extension/public-media-research.js`、`native/public_media_source.py`、`public_media_worker.py`、`public_media_frames.py`：HTTPX下载、FFmpeg、完整音轨分段及有界关键帧，结果进入唯一原文库 | `public-media-knowledge-flow`、`public-media-visual-flow`、`public-media-session-flow`；既有真实媒体SHA `5db5a0a730539b8ac2f8907cf64ba7ece909d834de83a9c4e7c6fd5bc57931e2`，五段转录和三帧观察 | 完整音轨不等于完整连续视觉分析；机器文本待核实、说话人未知。独立人工字幕/视觉真值及CER/WER未完成，不能宣称商业识别准确率 |
-| 精确人物档案与关系图谱 | `audience-profile.js`、`person-dossier.js`、`relationship-library.js`：按稳定主体、来源、时效、明确陈述与观测互动重建；ECharts展示，Dexie/SQLite持久索引 | `audience-profile`、`relationship-library`、`relationship-query`、`relationship-memory`和[人物档案验收](person-dossier-2026-11-07.json) | 研究subject不是网页作者认证，提及/互动不证明私人关系。保存可核对事实和自述，不从礼物、衣着、歌词推定人格、心理诊断、财富或私密身份；不做隐私挖掘或欺骗性社工 |
+| 精确人物档案与关系图谱 | `audience-profile.js`、`person-dossier.js`、`relationship-library.js`：按稳定主体、来源、时效、明确陈述与观测互动重建；Cytoscape.js关系探索，Dexie/SQLite持久索引 | `audience-profile`、`relationship-library`、`relationship-query`、`relationship-memory`和[人物档案验收](person-dossier-2026-11-07.json) | 研究subject不是网页作者认证，提及/互动不证明私人关系。保存可核对事实和自述，不从礼物、衣着、歌词推定人格、心理诊断、财富或私密身份；不做隐私挖掘或欺骗性社工 |
 | 长期记住观众原话及删除恢复 | `src/ai/audience-memory.js` 的 `snapshot()` 保存已观察的全部原话，查询按相关性和预算披露；遗忘水位、主体版本防止旧任务回填 | `ai-memory-agent`、`live-memory-continuity`、`live-memory-archive`测试；既有真实Chrome IndexedDB重开、遗忘与持久化验收 | 查询的3条明细限制不等于只存3条；30天礼物/活跃窗口不等于30天删除全部原话。未采集发言不能补造。真正多日实播、磁盘容量与实际安装仍待验收 |
 | 后台Harness持续循环、额度、断点和取消 | `AgentHarness`、LangGraph `StateGraph`、Dexie检查点、`continuous-research.js`、`extension/ai-background.js`；XState管理任务生命周期，单写者拥有知识与遗忘版本 | 既有受控48小时/3房间/288任务/24重建；真实Chrome三次生产一分钟alarm、三次worker停止、浏览器重开、关闭研究后1ms收到abort | 受控时间不是实际48小时。浏览器关闭时暂停，MV3唤醒可能延后；真实多日实播未完成，不保证全天不间断运行 |
 | 前台按资料准确回复，保留音画原文与来源限制 | `automatic-knowledge.js` 按网址组合至多3段；`source-evidence.js`统一引用格式和范围；`intent.js`接受有界复合引用并拒绝用内部引用搜索；`ai.js`重新路由失效候选、交付前复核原文 | `compound-knowledge.test.mjs`、`knowledge-invalidation.test.mjs`：云端/端侧单次回答、失效语义查询、删除/到期/主体/正文/范围变化、修订后复核、预算/取消/工具分派；复用原8条媒体记录执行三态事务 | 检查实现与真实资料交付路径，模型响应仍为夹具，不能当真实模型语义正确率。至多3片段不能代表读完所有视频；真实模型搜索词质量与回答盲评待独立验收 |
@@ -36,3 +36,7 @@
 新缓存回归还复现普通 web-search 意图命中 UUID 缓存后，生成/修订期间删除 canonical 原文仍交付旧结论的路径。现统一重读原文，核对原到期与范围，拒绝失效结论和旧来源通知。云端、实际端侧入口、取消及正常缓存复用均覆盖。
 
 本轮全量1910/1910、构建、索引与静态检查通过，实际浏览器11个状态检查通过。原四角色扩为120文件/20组；本轮两组相同输入的基线/修改/回滚实际执行，其余18组保留原回执。用户提供的真实人物准备资料仅保存在忽略的本地 output 内，未写入运行中应用或公开提交。真实模型独立抽取质量、心理解读边界的人工评审、用户实际安装与多日实播仍待验收；不能以夹具通过宣称商业级准确率。
+
+合入远端独立关系探索工作台后，人物对话仍在“知识资料”，保存后的同一资料可在“人物关系图谱 → 人物档案”查看，包括独立的心理/互动假设、局限与来源。合并相关24项和新浏览器工作台验证通过；四角色现为150文件/22组，原20组保留。最终合并全量结果与提交以行动日志后续回执为准。
+
+最终合并功能源码全量1917/1917通过，0失败/取消/跳过；构建、549模块索引、check及21状态真实浏览器检查通过。源码冻结SHA保持一致，模型仍为合成响应，真实质量与多日实播验收仍未完成。

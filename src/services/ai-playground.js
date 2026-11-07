@@ -11,6 +11,7 @@ export {AI_TEST_CASES} from '../ai/reply-evaluation.js';
 const fingerprint=c=>JSON.stringify([c.anchorId,c.ai,c.sending]);
 const cancelled=()=>Object.assign(new Error('测试已取消或配置、直播间已变化'),{name:'AbortError'});
 function replyChecks(result,config,testCase){
+ if(result.mode==='relationships')return [{label:'工作台回答在1200字以内',pass:Boolean(result.answer.trim()) && [...result.answer].length<=1200}];
  const checked=cleanMessage(result.answer,config),skip=result.answer==='[SKIP]';
  const checks=[{label:skip ? '模型选择不回复' : checked.ok ? '回复通过公屏格式与长度检查' : checked.reason,pass:skip || checked.ok},
   {label:'没有代主持或劝留表达',pass:!isIntrusiveReply(result.answer)}];
@@ -35,9 +36,10 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
   if(calls[kind].length>=limit)throw new Error(`${kind==='cloud' ? '云端' : '本地'}测试每小时额度已用完`);
   calls[kind].push(now());
  };
- return {async run({question,mode='direct',fresh=false,turns=[],signal,onProgress=()=>{},testCase}={}){
+ return {async run({question,mode='direct',fresh=false,turns=[],signal,onProgress=()=>{},testCase,relationshipContext}={}){
   if(typeof question!=='string' || !question.trim() || [...question.trim()].length>1000)throw new Error('请填写1–1000字的测试问题');
-  if(!['direct','contextual'].includes(mode))throw new Error('测试问答模式无效');
+  if(!['direct','contextual','relationships'].includes(mode))throw new Error('测试问答模式无效');
+  if(mode==='relationships' && !Array.isArray(relationshipContext?.entities))throw new Error('关系问答需要当前人物证据');
   if(busy)throw new Error('已有测试进行中，请等待或取消');
   const config=structuredClone(getConfig()),version=fingerprint(config),started=now(),controlled=testCase?.fixture;
   if(controlled)config.ai={...config.ai,knowledge:'',memory:{...config.ai.memory,enabled:false},search:{...config.ai.search,enabled:true,rememberKnowledge:false}};
@@ -80,8 +82,9 @@ export function createAIPlayground({request,getKey,search,knowledge,edge,getConf
    const initial=context();result.context={chat:initial.context?.length || 0,media:initial.mediaContext?.observations?.length || 0,knowledge:config.ai.memory.enabled};
    record('context','准备测试上下文',`${result.context.chat} 条对话 · ${result.context.media} 条音画观察 · 知识库${result.context.knowledge ? '开启' : '关闭'}`);
    const output=await client({...initial,getAIContext:context,persona:config.ai.persona,knowledge:config.ai.knowledge,signal,isCurrent:current,
-    target:{type:'chat',name:'测试提问',address:'测试提问',text:result.question},task:{kind:'ai',instruction:mode==='direct' ? DIRECT_TURN_INSTRUCTION : TURN_TAKING_INSTRUCTION,data:{replyMode:mode}},
-    maxLength:config.sending.maxLength,reserveLocal:localReserve,
+    ...(mode==='relationships' ? {getRelationshipContext:()=>relationshipContext,relationshipContext} : {}),
+    target:{type:'chat',name:'测试提问',address:'测试提问',text:result.question},task:{kind:'ai',instruction:mode==='relationships' ? '面向操作者梳理人际关系，只使用提供的人物和原话证据。优先围绕relationships.focus中的人物，区分核实、自述、互动与冲突。先列直接关系和依据，再说明连接路径与未知；路径不能推导直接关系，未找到不能编造。回答仅在工作台展示。' : mode==='direct' ? DIRECT_TURN_INSTRUCTION : TURN_TAKING_INSTRUCTION,data:{replyMode:mode}},
+    maxLength:mode==='relationships' ? 1200 : config.sending.maxLength,reserveLocal:localReserve,
     onLookup:row=>{result.query=row.query;record('search',controlled ? '读取固定评测资料' : '联网查证',row.query,'running');}
    },fresh ? {...config.ai,search:{...config.ai.search,rememberKnowledge:false}} : config.ai);
    if(!current())throw cancelled();
