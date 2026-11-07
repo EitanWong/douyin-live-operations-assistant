@@ -3371,3 +3371,8 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 本机最终冻结：npm test 1819/1819，0失败/取消/跳过，Node 181195.764292ms/外层181.415秒；build/check、530/2983索引、git diff --check 均通过。实际三份媒体集成5/5，覆盖真实 native framing/SQLite/FFmpeg/原文库/按人检索、重启去重和遗忘，ASR/视觉语义仍是受控服务。生产代码在全量运行中没有再改；Python 本轮未变，原生全量由精确实施 SHA 的 CI 复核，不把本机专项称作119项全测。
 - 下一门槛的实际观察：第二个独立干净 Chrome/CDP 场景针对播放器关系，正常关闭并清理临时配置。实际媒体请求206，包含目标 __vid，和详情中某地址 origin/path 相同，但除了 __vid 之外查询仍不同；DOM video 的 src 属性不能冒充 currentSrc getter。保留脱敏关系/SHA，不做“只删 __vid 就可匹配”的推断。下一单位需比较这些实际查询变化与播放器绑定证据，不能泛放行或猜参数。
 - 四角色已再次读取并核对86文件当前哈希；七组 BASELINE/MODIFIED/ROLLBACK 字面输出保留。只读盘点其他工作树缺少可确认废弃的依据，未回收其他任务的数据。下面提交并普通推送 dev，不改 main、版本或标签，实施 SHA/远端 CI 回执随后补记。
+
+- 实施提交/推送：36a7a831e6063eb48874532ad32b3639cc177370 已普通推送 origin/dev（d6cd6ee→36a7a83），git ls-remote 完整 SHA 一致。CI 42333494756 completed/success：JavaScript1819/1819、0失败/取消/跳过、616272.859952ms；原生119/119、17.904秒。index/build/check、Chrome扩展打包与产物上传全部通过。本轮无重试，不将运行时间当作产品性能基准。
+- 后续绑定证据：独立公开播放器媒体请求206，和详情中某地址同origin/path；新增查询键temp/__vid，改变cquery/l。使用保存的实际详情与媒体输入重放生产观察器，workCaptured=true、mediaMatches=false、downloadDescriptor=false，确认下一阻断；未修改相关生产边界。源码核对capturePublicWorkSample在挑选视频时依赖mediaMatches(currentSrc)，onMedia只接采样返回来源；下一单位先写这条失败回归，再评估直接使用同作品/作者响应内原始CDN来源，避免忽略任意查询或伪造参数。保存地址是离线证据，新的真实下载需重新观测有效来源。
+- 额外诊断更正：生成player-binding脚本时多一个右括号，Node退出1且未启动浏览器；精确修正后退出0并完成临时配置清理。一次只读rg猜测native/public_media_download.py退出2，随后用rg --files定位实际public_media_source.py与public_media_worker.py；未改生产源码。所有错误及成功回执保留于同一账本。
+- 最终交付：同一86文件、原始pristine、四角色路径及七组同输入行为保留，当前源码继续为修改版。全部临时Chrome配置已清理，无其他工作树回收、无部署/重载宿主、无真实弹幕或模型加载。crapper/dryer/mutator不可用，三项未执行。真实媒体自动来源、已部署采集、真实模型事实性、长期实播及商业准确率仍未验收，目标active。下面仅提交并推送本回执，最终回执SHA在完成报告提供。

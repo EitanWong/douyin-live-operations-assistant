@@ -138,3 +138,5 @@ publicMedia:3/modelLease:1/keyframes:1 协议把帧交给原 createMediaClient �
 原四角色继续对应 86 文件，新增第七组同输入探针：BASELINE 别名详情漏采 → MODIFIED 三种通道捕获作品/UID/secUID/受控下载描述 → ROLLBACK 再次漏采。补丁重建、全部原始哈希恢复、原六组探针与当前修改版哈希均通过。完整构建/测试/推送/CI 回执及工具限制见行动日志，不能把夹具中的下载描述当作上述真实缺口已解决。
 
 本机最终冻结全量 1819/1819、媒体集成5/5、build/check/index通过。另一次独立播放器关系观察取得带目标 `__vid` 的媒体206响应，与详情某地址 origin/path 相同，但去除 `__vid` 后查询仍不相等；不能据此直接放开相似地址。DOM `src` 属性和运行时 `currentSrc` 分别对待。下一阶段仍须取得完整的可验证关系并写对应失败回归，之后才能修改共享媒体来源绑定。
+
+实施36a7a831e6063eb48874532ad32b3639cc177370已推送dev；CI42333494756 success，JavaScript1819/1819、原生119/119，index/build/check/package/upload全部通过。实际播放器生产回放进一步确认workCaptured=true而mediaMatches=false/downloadDescriptor=false；新增temp/__vid及修改cquery/l只是已观测变化，不能自动解释为可信改写规则。来源在capturePublicWorkSample中与播放采样共用currentSrc入口；下一单位先复现该耦合，再核对能否从明确同作品/作者的详情响应直接取得受约束的原始CDN来源。未完成的真实下载绑定与模型/实播验收继续保持。
