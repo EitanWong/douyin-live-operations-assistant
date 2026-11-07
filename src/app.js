@@ -735,7 +735,6 @@ export function boot(options = {}) {
       knowledgeSupplement:async({message,entryId,signal,onProgress})=>{
         const supplement=supplementInputSchema.parse({text:message,...(entryId ? {entryId} : {})});
         if(engine.config.ai.edge?.localOnly && !['localhost','127.0.0.1','[::1]'].includes(new URL(resolveAITaskConfig(engine.config.ai,'research').endpoint).hostname))throw Error('仅本地模式下，请将后台研究模型配置为本机兼容接口');
-        if(JSON.stringify(panel.read().ai.memory.entries)!==JSON.stringify(engine.config.ai.memory.entries))throw Error('请先保存或撤销已有知识草稿，再提交补充');
         const result=await backgroundResearch.run({question:`补充知识并更新人物关系：${message.slice(0,300)}`,supplement,signal,onProgress});
         if(!result.knowledgeStored)throw Error('补充知识尚未保存，请重试');return result;
       },
