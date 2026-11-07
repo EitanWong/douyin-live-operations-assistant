@@ -6,7 +6,6 @@ import types
 import unittest
 import wave
 import weakref
-import numpy as np
 from unittest.mock import patch
 from local_asr import pcm16, clean_transcript, performance_phase, LocalASR
 from model_lease import ModelLease
@@ -72,7 +71,7 @@ class PreparationOwnershipContracts(unittest.TestCase):
         (self.folder / 'tokens.txt').write_text('fixture')
         with wave.open(str(self.folder / 'test_wavs/zh.wav'), 'wb') as audio:
             audio.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
-            audio.writeframes(np.full(64000, 8191, dtype='<i2').tobytes())
+            audio.writeframes(b'\xff\x1f' * 64000)
         self.runtime = LocalASR(None)
         self.runtime.folder = self.folder
         self.runtime.lease = ModelLease(self.folder)
@@ -82,18 +81,9 @@ class PreparationOwnershipContracts(unittest.TestCase):
         self.overlaps = []
         self.on_load = lambda _threads: None
         self.text = lambda threads: 'threads:' + str(threads)
-        owner = self
-
         class Recognizer:
             def __init__(self, threads):
                 self.threads = threads
-
-            def create_stream(self):
-                return types.SimpleNamespace(accept_waveform=lambda *_: None,
-                                             result=types.SimpleNamespace(text=owner.text(self.threads)))
-
-            def decode_stream(self, _stream):
-                pass
 
         def load(**options):
             self.overlaps.append(len(self.live))
@@ -106,6 +96,13 @@ class PreparationOwnershipContracts(unittest.TestCase):
 
         factory = types.SimpleNamespace(OfflineRecognizer=types.SimpleNamespace(from_sense_voice=load))
         self.enterContext(patch.dict('sys.modules', {'sherpa_onnx': factory}))
+        # Ownership tests run without optional NumPy or speech weights. Keep
+        # preparation, allocation, scheduling, self-test decisions and leases real.
+        self.enterContext(patch('local_asr.benchmark_frames', side_effect=lambda frames: frames))
+        def decode(_frames):
+            self.runtime.check_priority()
+            return self.text(self.runtime.recognizer.threads)
+        self.enterContext(patch.object(self.runtime, 'decode', side_effect=decode))
         self.enterContext(patch('local_asr.os.cpu_count', return_value=8))
         # One thread is fastest; the winning configuration must survive later candidates.
         self.enterContext(patch('local_asr.time.perf_counter', side_effect=lambda: next(self.clock)))
