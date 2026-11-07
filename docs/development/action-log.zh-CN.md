@@ -3278,3 +3278,10 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 复核边界：Python parse_qs 默认忽略空重复参数，使 __vid=70&__vid= 被接受，新增断言先观察 ValueError not raised 的失败，再用 keep_blank_values=True 修正；浏览器既有解析也拒绝这一输入。相同 URL 只能有一个精确作品 ID。
 - 事务终验：同一路径四角色扩展为 77 文件，纳入两份工作流；补丁重建、独立副本回滚逐哈希通过，新增文件从恢复副本移除，当前源码保留修改版。四组 BASELINE/MODIFIED/ROLLBACK 探针保持前述行为，来源原始输入、字面 stdout/stderr 与退出码追加原 VERIFICATION.txt；最终路径与哈希重新打开核对。
 - 本轮续查的命令错误：两次 zsh 对猜测 glob 报 no matches found，改用现有目录 rg；全量未结束时读取 javascript-final.json 返回文件不存在，随后续等原会话得到成功回执，没有重启同一测试。crapper/dryer/mutator 再次检查均不可用，三项仍未执行。未删除工作树、未部署/重载原生宿主、未加载第二个真实模型、未发送直播消息。
+
+- 实施推送回执：e25376fdd485646127572252b4941155290c62ee 已从 dev 推送 origin/dev（d8efb73→e25376f），git ls-remote 核对远端完整 SHA 一致；实施提交后工作区干净。新 CI 42321632834 的 native-perception 实际日志为 Ran 94 tests / OK，test-build 已通过 FFmpeg 安装、agent:index 核对和 build，仍在全量测试。尚未将整轮 CI 计为通过；main、版本、标签和已安装运行时均未改。
+- 交付后核对：77 个实现文件的 live SHA 仍与 MODIFIED_FILE.tar 对应 manifest 一致；git worktree list 只读列出已有工作树，缺少不再使用的可靠依据，未回收其他任务的工作树。已确认现有 createMediaClient 接受带时间戳帧且持有额度/本地服务边界，下一阶段从该契约扩展，不新建画像库或后台模型所有者。本轮未修改视觉路径。
+
+- 远端最终验证：实施 SHA e25376fdd485646127572252b4941155290c62ee 的 CI 42321632834 completed/success。远端完整 JavaScript 1801/1801、0 失败/取消/跳过，原生 94/94；agent:index 核对、正式 build、check、Chrome 扩展打包和分发物上传均通过。JavaScript 自报 633096.181726ms，test-build job 总耗时 11m51s；等待比上轮长但没有失败或取消，不能作为产品性能基准。此前缺 FFmpeg 导致的两项集成失败本轮均通过。
+- 日志获取更正：gh run view --job --log 在整轮运行中返回“logs will be available when it is complete”；已结束原生 job 的 API 日志要求显式允许终端转义，按 CLI 提示重试成功；仍在运行的 JavaScript job 日志 API 返回 BlobNotFound/404。只读网页随后直接显示 test-build succeeded，立即结束浏览器核查；整轮结束后原命令成功取得完整日志。失败命令、字面输出和最终成功回执均留在原账本，不尝试改写失败结果或绕过权限。
+- 文档回执：本次后续提交仅记录实施 SHA、已核实推送与 CI、限制和下一动作；四角色仍指向相同 77 文件实现，没有再次改变代码。回执提交/推送结果及最终 SHA 在完成报告提供。持续目标保持 active，下一单位是有界关键帧与既有视觉客户端接入；已部署页面采集、真实模型准确率和长期实播仍未完成，不宣称商业级验收。crapper/dryer/mutator 未执行的状态不变。
