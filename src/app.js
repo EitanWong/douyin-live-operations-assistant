@@ -59,6 +59,7 @@ export function boot(options = {}) {
   let config, configError = '';
   try { config = validateConfig(mergeConfig(get(configKey, {}))); }
   catch (e) { config = copy(DEFAULTS); configError = `旧配置无效，已使用默认值：${e.message}`; }
+  let sharedBaseConfig=copy(config);
   if (!config.anchorId) config.anchorId = new URLSearchParams(location.search).get('anchor_id')?.match(/^\d+$/)?.[0] || '';
   const accounts=new AccountContext({snapshot:runtimeSnapshot?.accountSources});let accountRevision=0,foundationSettings;
   const liveMemory=new LiveMemoryArchive({room,get,set,all:options.all || (()=>Object.fromEntries((typeof GM_listValues==='function' ? GM_listValues() : []).filter(key=>key.startsWith(`live-assistant:live-memory:${room}:`)).map(key=>[key,get(key,null)]))),legacy:runtimeSnapshot?.audienceMemory});
@@ -712,7 +713,8 @@ export function boot(options = {}) {
         if (c.identity.autoSelf && Object.hasOwn(identity,'self')) c.selfId = identity.self?.id || '';
         const {autoStart:nextAuto,...nextMedia}=resolveMediaConfig(c.ai),{autoStart:previousAuto,...previousMedia}=resolveMediaConfig(engine.config.ai);
         if(activeMediaConfig.inputSource!=='native' && c.ai.enabled!==engine.config.ai.enabled || c.anchorId!==mediaAnchor || JSON.stringify(nextMedia)!==JSON.stringify(previousMedia)){media.stop();mediaAttemptKey='';}
-        await set(configKey, c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c);playground?.cancel();playground?.updateConfig(); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
+        if(options.saveConfig)Object.assign(c,await options.saveConfig(c,sharedBaseConfig));else await set(configKey,c);
+        sharedBaseConfig=copy(c); if (JSON.stringify(resolveReplyConfig(engine.config.ai))!==JSON.stringify(resolveReplyConfig(c.ai))) panel.setAIServiceStatus(''); engine.update(c);playground?.cancel();playground?.updateConfig(); tools.notify('resume'); tools.notify('tick'); manualPause = false; autoStartArmed = Boolean(c.automation.autoStart); autoStartNext = 0; autoStartError = ''; refresh(); panel.toast(c.rewards.enabled ? '设置已保存；福袋红包自动参与已开启。' : c.automation.autoStart ? '设置已保存；连接就绪后会自动开始场控。' : '设置已保存，点击“开始场控”即可运行。');
         if (!c.incomeEnabled) panel.updateGiftSummary(giftLedger.currentSession() || {}, c.gift.yuanPerDiamond);
         else await loadIncome();
         syncLocalModels();
@@ -936,7 +938,14 @@ export function boot(options = {}) {
     }});
     const installCommand=panel.root.querySelector('[data-native-install-command]');
     if(installCommand && /^[a-p]{32}$/u.test(options.nativeExtensionId || ''))installCommand.textContent=`npm run native:install -- --extension-id=${options.nativeExtensionId}`;
-    options.onReady?.({ engine, panel, adapter, tools,media,predictions, stop: pause, rememberUser, refreshIncome, wake:wakeRoom, checkpoint:() => persistRuntime(true) });
+    options.onReady?.({ engine, panel, adapter, tools,media,predictions, stop: pause, rememberUser, refreshIncome, wake:wakeRoom, sharedKnowledgeChanged:saved=>{
+      const next=copy(engine.config);next.ai.memory.entries=copy(saved.ai.memory.entries);next.ai.knowledge=saved.ai.knowledge;engine.update(next);
+      if(!panel.dirty && !panel.knowledgeLibrary.editing){
+        sharedBaseConfig=copy(next);panel.config.ai.memory=copy(next.ai.memory);panel.config.ai.knowledge=next.ai.knowledge;
+        panel.knowledgeLibrary.populate(next.ai.memory);panel.node('[data-field="ai.knowledge"]').value=next.ai.knowledge;
+      }
+      refresh();
+    }, checkpoint:() => persistRuntime(true) });
     void resumeNativeMedia();
   }
   if (document.body) void ready(); else document.addEventListener('DOMContentLoaded', ready, { once: true });

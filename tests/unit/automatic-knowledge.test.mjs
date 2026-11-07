@@ -4,6 +4,21 @@ import {createKnowledgeCorpus} from '../../src/ai/knowledge-corpus.js';
 import {createAutomaticKnowledge,createKnowledgeMemory} from '../../src/services/automatic-knowledge.js';
 import {createRelationshipLibrary} from '../../src/ai/relationship-library.js';
 const now=1800000000000;
+test('全局原文跨直播间检索，保留来源范围；跨房删除与清空阻止旧请求复活',async()=>{
+ const values={
+  'live-assistant:config:1':{anchorId:'2',ai:{enabled:true,search:{rememberKnowledge:true}}},
+  'live-assistant:config:3':{anchorId:'4',ai:{enabled:true,search:{rememberKnowledge:true}}}
+ };
+ const corpus=createKnowledgeCorpus({read:async k=>values[k],write:async(k,v)=>values[k]=v,now:()=>now});
+ const service=createAutomaticKnowledge({corpus,all:async()=>structuredClone(values),readConfig:async room=>values[`live-assistant:config:${room}`],now:()=>now});
+ await service.handle('1','remember',{anchor:'2',sources:[{url:'https://example.org/a',content:'陶瓷清洗使用温水'}]});
+ const rows=await service.handle('3','list',{anchor:'4'});assert.equal(rows.length,1);assert.deepEqual(rows[0].scope,{room:'1',anchor:'2'});
+ const version=await service.handle('1','version',{anchor:'2'});
+ await service.handle('3','remove',{anchor:'4',id:rows[0].id});assert.equal((await service.handle('1','list',{anchor:'2'})).length,0);
+ assert.equal(await service.handle('1','remember',{anchor:'2',version,sources:[{url:'https://example.org/a',content:'陶瓷清洗使用温水'}]}),false);
+ await service.handle('1','remember',{anchor:'2',sources:[{url:'https://example.org/b',content:'新原文'}]});
+ await service.handle('3','clear',{anchor:'4'});assert.equal((await service.handle('1','list',{anchor:'2'})).length,0);
+});
 test('真实搜索原文自动入持久库，重启后可检索和构图；过期、删除、停用不复活',async()=>{
  const values={'live-assistant:config:1':{anchorId:'2',ai:{enabled:true,search:{rememberKnowledge:true},assistant:{memoryEnabled:true}}}};
  const corpus=createKnowledgeCorpus({read:async k=>values[k],write:async(k,v)=>values[k]=v,now:()=>now});

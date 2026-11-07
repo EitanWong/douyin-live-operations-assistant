@@ -33,7 +33,7 @@ const activeAccounts=input=>(input.accounts || []).filter(row=>row.expiresAt>inp
 function sourceDocuments(input){
  const documents=[],entities=[],audience=input.audience?.snapshot(),perception=input.perception?.snapshot();
  const add=(id,text,at,source,trust,speaker,kind)=>documents.push({id,text,at,source,trust,speaker,kind});
- entities.push({key:`uid:${input.anchor}`,name:input.anchorName || '主播',role:'主播',identities:input.anchorSecUid ? [`sec:${input.anchorSecUid}`] : []});
+ if(input.anchor)entities.push({key:`uid:${input.anchor}`,name:input.anchorName || '主播',role:'主播',identities:input.anchorSecUid ? [`sec:${input.anchorSecUid}`] : []});
  for(const row of audience?.interactions || []){
   entities.push(row.from,row.to);
   documents.push({id:`interaction:${row.id}`,text:`${row.from.name}与${row.to.name}：${row.predicate}`,at:row.at,source:'直播协议已连接/对局观测',trust:'observed',interaction:row});
@@ -55,8 +55,8 @@ function sourceDocuments(input){
    const parsed=personProfileSchema.safeParse(row.person);if(!parsed.success)continue;
    const person=parsed.data,key=person.key || `manual:${input.room || 'current'}:${input.anchor}:${row.id}`;
    entities.push({key,name:person.name,role:person.key ? '已指定账号' : '资料人物（未绑定账号）'});
-   documents.push({id:`memory:${row.id}`,text:row.content,at:row.updatedAt,source:row.source || '用户补充',trust:'unverified',person,personKey:key});
-  }else add(`memory:${row.id}`,row.content,row.updatedAt,row.source || '运营背景知识',row.trust || 'verified');
+   documents.push({id:`memory:${row.id}`,text:row.content,at:row.updatedAt,source:row.source || '用户补充',trust:'unverified',person,personKey:key,origin:row.origin});
+  }else {add(`memory:${row.id}`,row.content,row.updatedAt,row.source || '运营背景知识',row.trust || 'verified');documents.at(-1).origin=row.origin;}
  }
  if(input.knowledge)add('session',input.knowledge,input.now,'运营本场资料','verified');
  for(const row of activeAccounts(input)){
@@ -231,7 +231,7 @@ export function createRelationshipRetriever(){
  return (input,query,options={})=>{
   const validity=(input.scopes || [input]).map(s=>[(s.corpus || []).map(r=>r.expiresAt>input.now),(s.audience?.snapshot().viewers || []).map(v=>v.gifts.map(g=>g.at<=input.now && input.now-g.at<=30*86400000))]);
   const key=JSON.stringify([validity,input.scopes?.map(s=>({...s,audience:s.audience?.snapshot(),perception:s.perception?.snapshot()})),input.anchor,input.anchorSecUid,input.includeAccountHistory,input.anchorName,input.audience?.revision,input.perception?.revision,input.memory,input.knowledge,input.corpus,activeAccounts(input),beijingDate(input.now)]);
-  if(key!==signature){const sources=input.scopes ? input.scopes.reduce((all,row)=>{const source=sourceDocuments({...row,now:input.now}),scope=JSON.stringify([row.room,row.anchor]);all.documents.push(...source.documents.map(doc=>({...doc,id:`${scope}:${doc.id}`,scope,provenance:{room:row.room,anchor:row.anchor}})));all.entities.push(...source.entities.map(entity=>({...entity,scope,provenance:{room:row.room,anchor:row.anchor}})));return all;},{documents:[],entities:[]}) : sourceDocuments(input);graph=createGraph(sources,parsed);signature=key;const active=new Set(sources.documents.map(row=>JSON.stringify([row.text,Boolean(row.speaker)])));for(const text of parsed.keys())if(!active.has(text))parsed.delete(text);}
+  if(key!==signature){const sources=input.scopes ? input.scopes.reduce((all,row)=>{const source=sourceDocuments({...row,now:input.now}),scope=JSON.stringify([row.room,row.anchor]);all.documents.push(...source.documents.map(doc=>({...doc,id:`${scope}:${doc.id}`,scope,provenance:doc.origin || {room:row.room,anchor:row.anchor}})));all.entities.push(...source.entities.map(entity=>({...entity,scope,provenance:{room:row.room,anchor:row.anchor}})));return all;},{documents:[],entities:[]}) : sourceDocuments(input);graph=createGraph(sources,parsed);signature=key;const active=new Set(sources.documents.map(row=>JSON.stringify([row.text,Boolean(row.speaker)])));for(const text of parsed.keys())if(!active.has(text))parsed.delete(text);}
   const result=queryGraph(graph,String(query || '').slice(0,2000),options);
   const rows=(input.scopes ? input.scopes.flatMap(s=>(s.corpus || []).map(r=>({...r,scope:{room:s.room,anchor:s.anchor}}))) : input.corpus || []).filter(r=>!r.subject && r.expiresAt>input.now);
   const retrieval=retrieveSources(rows.map(r=>({id:JSON.stringify([r.scope,r.id]),title:r.title,content:r.text,source:r.source,updatedAt:r.at,expiresOn:''})),query);

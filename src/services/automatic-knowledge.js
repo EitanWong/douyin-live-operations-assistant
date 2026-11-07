@@ -43,19 +43,45 @@ export function retrieveSourceRecords(rows,question,now=Date.now(),scope={}){
 
 // Background-owned canonical corpus. Page messages supply raw search sources,
 // not graph edges or verified facts. Every operation resolves the saved scope.
-export function createAutomaticKnowledge({corpus,readConfig,readAudience=async()=>null,readProfile=async()=>null,now=Date.now}){
- return {async handle(room,action,input={}){
+export function createAutomaticKnowledge({corpus,readConfig,all,readAudience=async()=>null,readProfile=async()=>null,now=Date.now}){
+ let tail=Promise.resolve();
+ async function scopes(room,anchor){
+  const found=new Map([[`${room}:${anchor}`,{room,anchor}]]);
+  for(const [key,value] of Object.entries(all ? await all() : {})){
+   const match=key.match(/^live-assistant:knowledge:(\d+):(\d+)$/u);
+   if(match)found.set(`${match[1]}:${match[2]}`,{room:match[1],anchor:match[2]});
+   const configured=key.match(/^live-assistant:config:(\d+)$/u);
+   if(configured && /^\d{1,40}$/u.test(value?.anchorId))found.set(`${configured[1]}:${value.anchorId}`,{room:configured[1],anchor:String(value.anchorId)});
+  }
+  return [...found.values()];
+ }
+ return {handle(room,action,input={}){
+  const work=tail.then(()=>handle(room,action,input));tail=work.catch(()=>{});return work;
+ }};
+ async function handle(room,action,input){
   const config=await readConfig(room),anchor=String(config?.anchorId || '');
   if(!/^\d{1,30}$/u.test(anchor) || input.anchor!==anchor)throw Error('主播已变化，请刷新知识库');
   if(action==='version')return corpus.version(room,anchor);
-  if(action==='clear')return corpus.clear(room,anchor);
+  if(action==='clear'){for(const source of await scopes(room,anchor))await corpus.clear(source.room,source.anchor);return;}
   if(action==='remove'){
    if(!/^[a-f0-9]{64}$/u.test(input.id || ''))throw Error('来源标识无效');
-   return corpus.remove(room,anchor,input.id);
+   for(const source of await scopes(room,anchor))await corpus.remove(source.room,source.anchor,input.id);return;
   }
   if(action==='list'){
-   const audience=await readAudience(room,anchor),profile=await readProfile(room);
-   return (await corpus.list(room,anchor)).filter(r=>r.expiresAt>now() && (!r.subject || config.ai?.assistant?.memoryEnabled!==false && config.ai?.contextSources?.audience!==false && Number.isSafeInteger(r.subjectEpoch) && r.subjectEpoch===researchSubject(audience,r.subject,{room,anchor,profile})?.epoch));
+   if(config.ai?.search?.rememberKnowledge===false || config.ai?.assistant?.memoryEnabled===false)return [];
+   const rows=[];
+   for(const source of await scopes(room,anchor)){
+    const owner=await readConfig(source.room);
+    if(owner?.ai?.assistant?.memoryEnabled===false || owner?.ai?.search?.rememberKnowledge===false)continue;
+    const audience=await readAudience(source.room,source.anchor),profile=await readProfile(source.room);
+    rows.push(...(await corpus.list(source.room,source.anchor)).filter(r=>r.expiresAt>now() && (!r.subject || config.ai?.contextSources?.audience!==false && owner?.ai?.contextSources?.audience!==false && Number.isSafeInteger(r.subjectEpoch) && r.subjectEpoch===researchSubject(audience,r.subject,{...source,profile})?.epoch)).map(r=>({...r,scope:source})));
+   }
+   const unique=new Map();
+   for(const row of rows.toSorted((a,b)=>a.expiresAt-b.expiresAt)){
+    const old=unique.get(row.id);
+    if(old)old.origins.push(row.scope);else unique.set(row.id,{...row,origins:[row.scope]});
+   }
+   return [...unique.values()];
   }
   if(action!=='remember')throw Error('知识库操作无效');
   if(!config.ai?.enabled || config.ai.assistant?.memoryEnabled===false || config.ai.search?.rememberKnowledge===false)throw Error('自动知识记忆已关闭');
@@ -66,7 +92,7 @@ export function createAutomaticKnowledge({corpus,readConfig,readAudience=async()
    scope={subject,subjectEpoch:epoch};
   }
   return corpus.remember(room,anchor,input.sources,{version:input.version,lifetime:input.lifetime,...scope});
- }};
+ }
 }
 
 // Preserve the existing short-lived search cache contract, and persist original

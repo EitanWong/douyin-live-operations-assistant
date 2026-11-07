@@ -4,6 +4,19 @@ import {AudienceMemory} from '../../src/ai/audience-memory.js';
 import {mergeLiveMemory} from '../../src/ai/live-memory.js';
 import {createRelationshipLibrary} from '../../src/ai/relationship-library.js';
 const at=1800000000000;
+test('共享人物只建一个全局节点，在无已识别主播的新房也可查询，更正删除同步生效',async()=>{
+ const {profileMemoryEntry}=await import('../../src/services/person-profile.js');
+ const f=fixture();f.values['live-assistant:config:3']={ai:{memory:{enabled:true,entries:[]}}};
+ const row=profileMemoryEntry({version:1,name:'云杉',key:'',facts:[],relationships:[{name:'阿明',predicate:'助理',negative:false,evidence:[{turn:1,quote:'云杉是阿明的助理。'}]}],analysis:[],knowledge:[],reply:'待核实',turns:[{text:'云杉是阿明的助理。',at}]},{id:'global-person',updatedAt:at});
+ row.content='云杉是阿明的助理。';
+ f.values['live-assistant:knowledge:global']={version:1,entries:[row],knowledge:''};
+ const a=await f.library.query('1','云杉'),b=await f.library.query('3','云杉');
+ assert.equal(b.entities.filter(n=>n.name==='云杉').length,1);
+ assert.deepEqual(a.entities.filter(n=>n.role.includes('资料人物')).map(n=>n.id),b.entities.filter(n=>n.role.includes('资料人物')).map(n=>n.id));
+ assert.equal(b.relations[0]?.predicate,'助理');
+ f.values['live-assistant:knowledge:global'].entries=[];
+ assert.equal((await f.library.query('3','云杉')).relations.length,0);
+});
 const chat=(id,user,text)=>({id,type:'chat',source:'socket',receivedAt:at,user,text});
 function fixture(){
  const a=new AudienceMemory({anchor:'10',now:()=>at}),b=new AudienceMemory({anchor:'20',now:()=>at});

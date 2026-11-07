@@ -3,6 +3,7 @@ import {AudienceMemory} from './audience-memory.js';
 import {PerceptionMemory} from './live-memory.js';
 import {AccountContext} from './account-context.js';
 import {createRelationshipRetriever} from './relationship-memory.js';
+import {SHARED_KNOWLEDGE_KEY} from '../services/shared-knowledge.js';
 
 // Query durable sources in the background. Never copy other rooms' mutable
 // archives into a live page or create a competing graph database writer.
@@ -12,6 +13,8 @@ export function createRelationshipLibrary({all,now=Date.now}){
   if(typeof query!=='string' || !query.trim() && !options.browse || query.length>2000)throw Error('人物问题需为1–2000字');
   const values=await all(),current=values[`live-assistant:config:${room}`],scopes=[],skipped=[];
   if(current?.ai?.assistant?.memoryEnabled===false)return retrieve({scopes:[],now:now()},query);
+  const shared=values[SHARED_KNOWLEDGE_KEY];
+  if(shared)scopes.push({room:'global',anchor:'',memory:override.memory || {enabled:current?.ai?.memory?.enabled!==false,entries:shared.entries},knowledge:shared.knowledge});
   const archives=new Map(Object.entries(values).filter(([key])=>key.startsWith('live-assistant:live-memory:')));
   for(const [key,config] of Object.entries(values))if(/^live-assistant:config:\d+$/u.test(key)){
    const sourceRoom=key.split(':').at(-1),snapshot=values[`live-assistant:runtime:${sourceRoom}`]?.accountSources;
@@ -34,7 +37,7 @@ export function createRelationshipLibrary({all,now=Date.now}){
     scopes.push({room:sourceRoom,anchor,audience,perception:new PerceptionMemory({state:saved.perception,now}),
      anchorSecUid:active && String(profile?.anchorId)===anchor ? profile?.secUid : undefined,anchorName:active && String(profile?.anchorId)===anchor ? profile?.name : undefined,memory:active ? ai.memory : undefined,knowledge:active ? ai.knowledge : '',corpus:current?.ai?.search?.rememberKnowledge!==false && ai.search?.rememberKnowledge!==false ? parseKnowledgeCorpus(values[`live-assistant:knowledge:${sourceRoom}:${anchor}`],now()).rows : [],
      accounts:current?.ai?.contextSources?.accounts!==false && ai.contextSources?.accounts!==false ? [...accounts.history(anchor),...accounts.list(anchor)] : [],includeAccountHistory:true,
-     ...(selected ? override : {})});
+     ...(selected && !shared ? override : {}),...(shared ? {memory:undefined,knowledge:''} : {})});
    }catch{skipped.push({room:sourceRoom,anchor});}
   }
   const result=retrieve({scopes,now:now()},query,options);

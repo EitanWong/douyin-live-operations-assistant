@@ -91,6 +91,20 @@ test('通用后台路由不抢答离屏准备的存储消息',async()=>{
  for(const target of ['edge-offscreen','edge-background'])assert.equal(w.route({target,action:'preparation-read'},sender,value=>replies.push(value)),undefined);
  await new Promise(setImmediate);assert.deepEqual(replies,[]);
 });
+test('运行后台共享知识单写入者跨房保存、通知、重启和图谱重读',async()=>{
+ const entry={id:'shared-person',title:'人物资料',content:'云杉是小雨的助理。',source:'用户补充',updatedAt:Date.now(),expiresOn:'',enabled:true,trust:'unverified'};
+ const w=await worker({'live-assistant:config:1':{anchorId:'10',ai:{memory:{enabled:true,entries:[entry]}}},'live-assistant:config:2':{anchorId:'20',ai:{memory:{enabled:true,entries:[]}}}});
+ const sender={frameId:0,tab:{url:'https://live.douyin.com/2'}};
+ const init=await w.send({type:'init'},sender);assert.equal(init.ok,true);const base=init.value['live-assistant:config:2'];
+ assert.equal(base.ai.memory.entries[0].content,entry.content);
+ const config=structuredClone(base);config.ai.memory.entries[0].content='云杉是小雨的搭档。';
+ const result=await w.send({type:'save-config',config,base},sender);assert.equal(result.ok,true,result.error);
+ assert.ok(w.sent.some(([id,m])=>id===1 && m.sharedKnowledge && m.changes['live-assistant:config:1'].newValue.ai.memory.entries[0].content.includes('搭档')));
+ const restarted=await worker({},w.indexedDB),again=await restarted.send({type:'init'});
+ assert.match(again.value['live-assistant:config:1'].ai.memory.entries[0].content,/搭档/);
+ const graph=await restarted.send({type:'relationship-query',query:'云杉'});assert.equal(graph.value.relations[0].predicate,'搭档');
+ const raw=await w.durable().get('live-assistant:config:2');assert.deepEqual(raw.ai.memory.entries,[]);
+});
 test('MV3产物包含所有入口、图标，无远程代码依赖', async()=>{
   const m=JSON.parse(await readFile(file('manifest.json'),'utf8')); assert.equal(m.manifest_version,3);
   assert.deepEqual(m.permissions,['storage','unlimitedStorage','alarms','power','scripting','nativeMessaging','offscreen']); assert.deepEqual(m.host_permissions,['https://live.douyin.com/*','https://www.douyin.com/*','https://geocoding-api.open-meteo.com/*','https://api.open-meteo.com/*','https://wttr.in/*','https://air-quality-api.open-meteo.com/*','https://api.frankfurter.dev/*','https://raw.githubusercontent.com/*','https://date.nager.at/*']);

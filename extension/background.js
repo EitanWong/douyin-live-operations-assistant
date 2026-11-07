@@ -1,6 +1,8 @@
 import {createKnowledgeCorpus} from '../src/ai/knowledge-corpus.js';
 import {createAutomaticKnowledge} from '../src/services/automatic-knowledge.js';
 import {validateMemory} from '../src/services/knowledge.js';
+import {mergeConfig,validateConfig} from '../src/core/engine.js';
+import {createSharedKnowledge,SHARED_KNOWLEDGE_KEY,projectSharedKnowledge} from '../src/services/shared-knowledge.js';
 import {createRelationshipLibrary} from '../src/ai/relationship-library.js';
 import {installNativeASRBridge} from './native-asr.js';
 import {installEdgeBridge} from './edge-background.js';
@@ -46,7 +48,12 @@ const durableStorage = new DurableStorage({ local:chrome.storage.local });
 const storageReady = (async()=>{ await chrome.storage.local.setAccessLevel({ accessLevel:'TRUSTED_CONTEXTS' }); await durableStorage.migrate(); })();
 void storageReady.catch(()=>{});
 const durableKey = isDurableKey;
-const readRecord = async key => durableKey(key) ? durableStorage.get(key) : (await chrome.storage.local.get(key))[key];
+const rawReadRecord = async key => durableKey(key) ? durableStorage.get(key) : (await chrome.storage.local.get(key))[key];
+const readRecord = async key => /^live-assistant:config:\d+$/u.test(key) ? sharedKnowledge.config(key.split(':').at(-1)) : rawReadRecord(key);
+const sharedKnowledge=createSharedKnowledge({read:rawReadRecord,all:()=>durableStorage.getAll(['live-assistant:config:']),commit:async rows=>{
+ await durableStorage.putRecords(rows);
+ await notifyChanges(Object.fromEntries(rows.map(([key,value])=>[key,{newValue:value}])));
+}});
 let predictionHost;
 let localData;
 let publicMedia;
@@ -55,12 +62,13 @@ const dataEngine=()=>localData ||=new LocalDataEngine({request:nativeDataRequest
 const opponentCollector=createOpponentCollector(chrome);
 const readAll = async () => durableStorage.getAll(['live-assistant:config:','live-assistant:profile:']);
 const writeRecord = async (key,value) => {
+  if(/^live-assistant:config:\d+$/u.test(key))return sharedKnowledge.saveRoom(key,value);
   if (!durableKey(key)) return writeStorage(key,value);
   await durableStorage.set(key,value);
   await notifyChanges({[key]:{newValue:value}});
 };
 const knowledgeCorpus=createKnowledgeCorpus({read:readRecord,write:writeRecord,archive:async({room,anchor,at,...payload})=>{await dataEngine().enqueue({id:`knowledge:${room}:${anchor}:${payload.sequence}`,room,anchor,kind:'knowledge',receivedAt:at,payload});void dataEngine().flush();}});
-const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,readAudience:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,readProfile:room=>readRecord(`live-assistant:profile:${room}`),readConfig:room=>readRecord(`live-assistant:config:${room}`)});
+const automaticKnowledge=createAutomaticKnowledge({corpus:knowledgeCorpus,all:()=>durableStorage.getAll(['live-assistant:knowledge:','live-assistant:config:']),readAudience:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,readProfile:room=>readRecord(`live-assistant:profile:${room}`),readConfig:room=>readRecord(`live-assistant:config:${room}`)});
 const mediaVisual=createPublicMediaVisualAnalyzer({authorizeResource:endpoint=>authorizeLocalMediaEndpoint(chrome,endpoint),readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),readVersion:(room,anchor)=>automaticKnowledge.handle(room,'version',{anchor}),canArchive:()=>dataEngine().enabled(),backgroundAllowed:()=>modelOwnership.backgroundAllowed(),recognize:createMediaClient({request:createLocalMediaRequest(chrome),getKey:()=>''})});
 const mediaWorker=publicMediaWorkerClient(chrome,{analyzeVisual:mediaVisual,allowed:()=>modelOwnership.backgroundAllowed(),onResult:()=>{void publicMedia?.wakeAll().catch(()=>{});}});
 publicMedia=createPublicMediaResearch({readConfig:room=>readRecord(`live-assistant:config:${room}`),resolveProfile:createPublicMediaProfileResolver(readRecord),checkProfile:input=>checkResearchProfile({...input,read:readRecord}),request:nativeDataRequest(chrome),worker:mediaWorker,knowledge:automaticKnowledge,canArchive:()=>dataEngine().enabled(),readPrivacy:async(room,anchor)=>(await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience ?? null});
@@ -247,7 +255,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const override={};
         if(message.memory!==undefined)override.memory=validateMemory(message.memory);
         const graphOptions={browse:message.browse===true,status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all',...(typeof message.recordId==='string' && message.recordId.length<=4000 ? {recordId:message.recordId} : {})};
-        value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override,graphOptions);
+        await sharedKnowledge.ensure();value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override,graphOptions);
       }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
         await chrome.tabs.create({url:`https://www.douyin.com/search/${encodeURIComponent(message.query.trim())}?type=general`,active:true});value=true;
@@ -259,7 +267,12 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         }finally{accountCollections.delete(key);}
       }else if(message.type==='account-cancel' && isRoom(sender)){accountCollections.get(sender.tab.id)?.abort();value=true;}
       else if (message.type === 'page-command' && isRoom(sender)) value = await accessPage(chrome,sender,message.command);
-      else if (message.type === 'init' && isRoom(sender)) value = Object.fromEntries(Object.entries(await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:',`live-assistant:live-memory:${roomFromUrl(sender.tab.url)}:`,'live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:'])).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')));
+      else if (message.type === 'init' && isRoom(sender)) {
+        const room=roomFromUrl(sender.tab.url),shared=await sharedKnowledge.ensure();
+        const values=await durableStorage.getAll(['live-assistant:config:','live-assistant:runtime:',`live-assistant:live-memory:${room}:`,'live-assistant:income-calibration:','live-assistant:api-key:','live-assistant:search-key:','live-assistant:media-key:']);
+        values[`live-assistant:config:${room}`] ||= {};
+        value=Object.fromEntries(Object.entries(values).filter(([key])=>keyAllowed(key) && !key.startsWith('live-assistant:event:')).map(([key,value])=>[key,/^live-assistant:config:\d+$/u.test(key) ? projectSharedKnowledge(value,shared) : value]));
+      }
       else if (['rewards-read','rewards-write'].includes(message.type) && isRoom(sender)) {
         const room = roomFromUrl(sender.tab.url);
         if (typeof message.key !== 'string' || !new RegExp(`^live-assistant:rewards:${room}:[1-9]\\d{0,24}$`).test(message.key)) throw new Error('活动记录范围无效');
@@ -290,6 +303,11 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const preference=APPEARANCE_PREFERENCES[message.kind];
         if(message.type==='appearance-get')value=await readRecord(preference.key) ?? preference.fallback;
         else {if(!preference.values.includes(message.value))throw new Error('外观选项无效');await giftStore.transaction(()=>writeRecord(preference.key,message.value));value=true;}
+      }
+      else if(message.type==='save-config' && isRoom(sender)){
+        if(jsonLength(message.config)>1024*1024 || jsonLength(message.base)>1024*1024)throw Error('设置过大');
+        value=await sharedKnowledge.save(roomFromUrl(sender.tab.url),validateConfig(mergeConfig(message.config)),validateConfig(mergeConfig(message.base)));
+        void getAIBackground().wake().catch(()=>{});
       }
       else if (message.type === 'set' && keyAllowed(message.key) && isRoom(sender)) {
         // Pending delivery state must not be truncated or rejected at the config limit.
@@ -414,14 +432,19 @@ async function notifyChanges(changes) {
   }
   if(mediaChanged && publicMedia)void publicMedia.wakeAll().catch(()=>{});
   const relevant = Object.fromEntries(Object.entries(changes).filter(([key]) => /^(live-assistant:(config|income|income-calibration|profile):\d+|douyin-live-assistant:(theme|palette|material))$/.test(key)));
-  if (!Object.keys(relevant).length) return;
+  const shared=changes[SHARED_KNOWLEDGE_KEY]?.newValue || await rawReadRecord(SHARED_KNOWLEDGE_KEY);
+  const sharedChanged=Boolean(changes[SHARED_KNOWLEDGE_KEY]);
+  if (!Object.keys(relevant).length && !sharedChanged) return;
   // Delivery of change notifications must never turn a committed write into a failure.
   try {
     const tabs = await chrome.tabs.query({url:'https://live.douyin.com/*'});
     for (const tab of tabs) {
       const room = roomFromUrl(tab.url);
       const scoped = Object.fromEntries(Object.entries(relevant).filter(([key]) => /:config:/.test(key) && key.endsWith(`:${room}`)));
-      if (Object.keys(scoped).length) void chrome.tabs.sendMessage(tab.id,{type:'storage',changes:scoped}).catch(()=>{});
+      const configKey=`live-assistant:config:${room}`;
+      if(sharedChanged && !scoped[configKey])scoped[configKey]={newValue:await rawReadRecord(configKey) || {}};
+      if(shared)for(const change of Object.values(scoped))change.newValue=projectSharedKnowledge(change.newValue,shared);
+      if (Object.keys(scoped).length) void chrome.tabs.sendMessage(tab.id,{type:'storage',changes:scoped,...(sharedChanged ? {sharedKnowledge:true} : {})}).catch(()=>{});
       if (Object.keys(relevant).some(key => /:(income|income-calibration|profile):/.test(key))) void chrome.tabs.sendMessage(tab.id,{type:'income-updated'}).catch(()=>{});
       if (relevant[themeKey]) void chrome.tabs.sendMessage(tab.id,{type:'theme-changed',value:relevant[themeKey].newValue}).catch(()=>{});
       for(const kind of ['palette','material']){const change=relevant[APPEARANCE_PREFERENCES[kind].key];if(change)void chrome.tabs.sendMessage(tab.id,{type:'appearance-changed',kind,value:change.newValue}).catch(()=>{});}
