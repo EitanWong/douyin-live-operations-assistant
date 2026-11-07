@@ -25,13 +25,14 @@ export function relationshipResearchSeed(graph){
  const people=graph.entities.filter(n=>!chosen.size || chosen.has(n.id)).slice(0,6).map(n=>({id:n.id,name:n.name,role:n.role,facets:(n.dossier?.facets || []).slice(0,2),events:(n.dossier?.events || []).slice(0,1)}));
  const relevant=graph.relations.filter(r=>!chosen.size || chosen.has(r.from) || chosen.has(r.to)).toSorted((a,b)=>Number(b.status==='conflicted')-Number(a.status==='conflicted'));
  const relations=relevant.slice(0,12).map(r=>({from:names.get(r.from),to:names.get(r.to),predicate:r.predicate,negative:r.negative,status:r.status,evidence:r.evidence?.slice(0,1)}));
- const seed={focus,people,relations,...(graph.deduplication?.enabled ? {deduplication:{enabled:true}} : {}),coverage:'Selected evidence seed only; query relationships and knowledge for omitted records. Absence remains unknown.',omittedRelations:graph.relations.length-relations.length};
+ const seed={focus,people,relations,...(graph.supportRankings?.length ? {supportRankings:graph.supportRankings.slice(0,2).map(board=>({...board,rows:board.rows.slice(0,3),omitted:board.omitted+Math.max(0,board.rows.length-3)}))} : {}),...(graph.deduplication?.enabled ? {deduplication:{enabled:true}} : {}),coverage:'Selected evidence seed only; query relationships and knowledge for omitted records. Absence remains unknown.',omittedRelations:graph.relations.length-relations.length};
  for(const person of people)for(const field of ['events','facets'])while(JSON.stringify(seed).length>6000 && person[field].length)person[field].pop();
  while(JSON.stringify(seed).length>6000 && relations.length){relations.pop();seed.omittedRelations++;}
+ while(JSON.stringify(seed).length>6000 && seed.supportRankings?.length)seed.supportRankings.pop();
  return seed;
 }
-export const relationshipEvidenceVersion=graph=>JSON.stringify([graph?.entities,graph?.relations,graph?.ambiguities,graph?.sources,graph?.deduplication],function(key,value){
- if(key==='at' && this?.source==='运营本场资料' || ['from','through'].includes(key) && this?.basis==='deduplicated observed gifts in this room over 30 days; lower bound, not lifetime spending')return 0;
+export const relationshipEvidenceVersion=graph=>JSON.stringify([graph?.entities,graph?.relations,graph?.ambiguities,graph?.sources,graph?.deduplication,graph?.supportRankings,graph?.queryMatches],function(key,value){
+ if(key==='at' && this?.source==='运营本场资料' || ['from','through'].includes(key) && (this?.basis==='deduplicated observed gifts in this room over 30 days; lower bound, not lifetime spending' || this?.basis?.startsWith('近30天本房已观测送礼')))return 0;
  return value;
 });
 export function withRelationshipEvidence({reply,query,persist}){

@@ -15,9 +15,9 @@ test('deadline aborts transport and discards late completion',async()=>{
  await assert.rejects(withDeadline(signal=>new Promise(resolve=>{signal.addEventListener('abort',()=>{aborted=true;resolve('late');});}),{timeout:10}),/超时/);
  assert.equal(aborted,true);
 });
-test('prepared local fallback receives current prompt after cloud timeout, no cold download',async()=>{
+test('prepared local fallback receives current prompt after transport timeout, no cold download',async()=>{
  let local=0,aborted=false;const traces=[];
- const ai=createResilientAI({cloud:(_p,_c,{signal})=>new Promise(()=>signal.addEventListener('abort',()=>{aborted=true;})),
+ const ai=createResilientAI({cloud:(_p,_c,{signal})=>withDeadline(transport=>new Promise(()=>transport.addEventListener('abort',()=>{aborted=true;})),{signal,timeout:10}),
   edge:{ready:async()=>true,reply:async p=>{local++;assert.equal(p.target.text,'中文问题');return '可以试试蓝色。';}},onTrace:r=>traces.push(r)});
  assert.equal(await ai({target:{text:'中文问题'},isCurrent:()=>true},{edge:{enabled:true},latency:{cloudMs:10,totalMs:200}}),'可以试试蓝色。');
  assert.equal(aborted,true);assert.equal(local,1);assert.equal(traces.at(-1).provider,'edge');
@@ -80,10 +80,10 @@ test('addressed chat can use local quota after cloud cap without bypassing the l
   now+=21000;engine.requestChatAI({type:'chat',user:{id:'b',name:'其他人'},text:'再聊一句'},true);await new Promise(setImmediate);assert.equal(engine.localCalls.length,1);
  }finally{engine.stop();}
 });
-test('未启用端侧时云端可用完整总预算，仍受总截止限制并取消底层',async()=>{
+test('未启用端侧时等待云端结果，传输实际超时仍明确失败并清理底层',async()=>{
  const ai=createResilientAI({cloud:async()=>{await new Promise(resolve=>setTimeout(resolve,25));return '蓝白搭配很清爽。';}});
  assert.equal(await ai({},{edge:{enabled:false},latency:{cloudMs:5,totalMs:100}}),'蓝白搭配很清爽。');
  let aborted=false;
- const blocked=createResilientAI({cloud:p=>new Promise(()=>p.signal.addEventListener('abort',()=>{aborted=true;}))});
+ const blocked=createResilientAI({cloud:p=>withDeadline(transport=>new Promise(()=>transport.addEventListener('abort',()=>{aborted=true;})),{signal:p.signal,timeout:20})});
  await assert.rejects(blocked({},{edge:{enabled:false},latency:{cloudMs:5,totalMs:20}}),/超时/u);assert.equal(aborted,true);
 });

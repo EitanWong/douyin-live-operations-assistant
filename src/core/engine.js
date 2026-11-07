@@ -177,7 +177,6 @@ export function validateConfig(c) {
   validatePipeline(c.ai);
   validateTaskModels(c.ai);
   for(const [key,min,max] of [['cloudMs',1000,25000],['totalMs',2000,42000],['edgeDelayMs',500,10000]])range(c.ai.latency[key],min,max,'AI 等待时限');
-  if(c.ai.latency.totalMs<c.ai.latency.cloudMs)throw new Error('AI 总时限不能小于云端时限');
   choice(c.ai.edge.audioBackend,['auto','native-sensevoice','browser-whisper'],'本地语音方案');
   choice(c.ai.edge.textModel,['auto',...Object.keys(TEXT_MODELS)],'端侧文字模型');
   for(const key of ['enabled','audioEnabled','visionEnabled','autoTune','localOnly'])if(typeof c.ai.edge[key]!=='boolean')throw new Error('端侧开关无效');
@@ -1229,7 +1228,7 @@ export class Engine {
       this.log('ai','联网查询已接收，完成后自动回复');this.changed();queueMicrotask(()=>this.drainChatAI());
     };
     try {
-      const rawOutput=await withDeadline(signal=>this.ai({...prompt,signal},a),{signal:active.controller.signal,timeout:()=>active.lookup ? researchTimeoutMs(a) : task.timeoutMs || (a.edge.autoTune ? LATENCY_DEFAULTS.totalMs : a.latency.totalMs)});
+      const rawOutput=await withDeadline((signal,refresh)=>this.ai({...prompt,signal,onLookup:()=>{prompt.onLookup();refresh();}},a),{signal:active.controller.signal,timeout:()=>active.lookup ? researchTimeoutMs(a) : task.timeoutMs || Infinity});
       if(!prompt.isCurrent())return;
       const output = task.transform ? task.transform(rawOutput) : rawOutput;
       // 拒绝明确的代主持和留存分析用语；昵称自身不参与措辞判断。

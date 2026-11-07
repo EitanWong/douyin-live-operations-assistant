@@ -29,7 +29,8 @@ test('人物档案汇总明确自述、完整事件原话、说话样本、主�
  assert.equal(person.dossier.gifting.observed.count,3);
  assert.equal(person.dossier.gifting.prediction,null,'不凭采样礼物编造下次送礼概率');
  assert.ok(!person.dossier.facets.some(r=>r.category==='consumption'),'礼物不推导现实消费能力');
- assert.equal(result.relations.length,1,'事件一起出现不能推断额外关系');
+ assert.equal(result.relations.filter(r=>r.predicate!=='送礼支持').length,1,'事件一起出现不能推断额外关系');
+ assert.ok(result.relations.some(r=>r.predicate==='送礼支持' && r.status==='observed'),'实际礼物另有直接支持关系');
  assert.ok(person.dossier.events.every(e=>e.recordId && e.source && Number.isFinite(e.at)));
  const prompt={target:{text:'小雨喜欢什么'},getRelationshipContext:f.query,maxLength:50},config=mergeConfig().ai;
  assert.ok(JSON.parse(makeAIRequest(prompt,config).messages[1].content).evidence_context.relationships.entities.some(n=>n.dossier));
