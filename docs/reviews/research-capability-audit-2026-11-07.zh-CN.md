@@ -12,7 +12,7 @@
 | 精确人物档案与关系图谱 | `audience-profile.js`、`person-dossier.js`、`relationship-library.js`：按稳定主体、来源、时效、明确陈述与观测互动重建；ECharts展示，Dexie/SQLite持久索引 | `audience-profile`、`relationship-library`、`relationship-query`、`relationship-memory`和[人物档案验收](person-dossier-2026-11-07.json) | 研究subject不是网页作者认证，提及/互动不证明私人关系。保存可核对事实和自述，不从礼物、衣着、歌词推定人格、心理诊断、财富或私密身份；不做隐私挖掘或欺骗性社工 |
 | 长期记住观众原话及删除恢复 | `src/ai/audience-memory.js` 的 `snapshot()` 保存已观察的全部原话，查询按相关性和预算披露；遗忘水位、主体版本防止旧任务回填 | `ai-memory-agent`、`live-memory-continuity`、`live-memory-archive`测试；既有真实Chrome IndexedDB重开、遗忘与持久化验收 | 查询的3条明细限制不等于只存3条；30天礼物/活跃窗口不等于30天删除全部原话。未采集发言不能补造。真正多日实播、磁盘容量与实际安装仍待验收 |
 | 后台Harness持续循环、额度、断点和取消 | `AgentHarness`、LangGraph `StateGraph`、Dexie检查点、`continuous-research.js`、`extension/ai-background.js`；XState管理任务生命周期，单写者拥有知识与遗忘版本 | 既有受控48小时/3房间/288任务/24重建；真实Chrome三次生产一分钟alarm、三次worker停止、浏览器重开、关闭研究后1ms收到abort | 受控时间不是实际48小时。浏览器关闭时暂停，MV3唤醒可能延后；真实多日实播未完成，不保证全天不间断运行 |
-| 前台按资料准确回复，保留音画原文与来源限制 | `automatic-knowledge.js` 按网址组合至多3段；`source-evidence.js`统一引用格式和范围；`intent.js`接受有界复合引用；`edge-prompt.js`按完整候选控制预算 | 本次 `compound-knowledge.test.mjs`：单次问答、逐段删除/到期/范围校验、旧引用兼容、非法引用拒绝、来源分散和端侧完整投影；复用原8条真实媒体记录执行同输入三态事务 | 本次修复的是已观察的检索/交付遗漏；规划响应为夹具，不能当真实模型语义正确率。至多3片段不能代表读完所有视频。模型候选期间失效后，现有重新搜索仍需专门核验搜索词质量 |
+| 前台按资料准确回复，保留音画原文与来源限制 | `automatic-knowledge.js` 按网址组合至多3段；`source-evidence.js`统一引用格式和范围；`intent.js`接受有界复合引用并拒绝用内部引用搜索；`ai.js`重新路由失效候选、交付前复核原文 | `compound-knowledge.test.mjs`、`knowledge-invalidation.test.mjs`：云端/端侧单次回答、失效语义查询、删除/到期/主体/正文/范围变化、修订后复核、预算/取消/工具分派；复用原8条媒体记录执行三态事务 | 检查实现与真实资料交付路径，模型响应仍为夹具，不能当真实模型语义正确率。至多3片段不能代表读完所有视频；真实模型搜索词质量与回答盲评待独立验收 |
 | 商业级稳定性与回复自然度 | 共用 `reply-style.js` 和引用/时效校验；原有Promptfoo场景、完整JS/native回归与CI | 每次实际全量结果及提交见[行动日志](../development/action-log.zh-CN.md)，本机详细字面回执位于 `output/deep-research-2026-11-07/` | 自动化通过不等于商业质量认证。独立人工参考、真实模型事实性/礼貌盲评、真实安装和长期直播仍缺；历史 `native/host.py:174` 图像新鲜度故障尚无稳定复现根因。crapper/dryer/mutator不可用、未执行 |
 
 ## 本次可检查的产品变化
@@ -25,6 +25,6 @@
 
 ## 后续验收顺序
 
-1. 独立复现“候选在生成期间失效”后的前台回退，检查外部搜索实际收到的查询，不能将内部引用ID误当语义搜索词。
+1. 已复现并修复“候选在生成期间失效”后的内部引用外泄路径，以及修订后交付已删除原文的问题；继续以独立真实模型问题集评估搜索词质量，夹具通过不代表模型质量通过。
 2. 使用独立人工字幕、逐帧事实标签和真实模型回答评估检索召回、引用支持、条件保留、CER/WER与未知判断。既有机器输出不得自充真值。
 3. 在实际安装、真实直播与多日运行中验证吞吐、容量、断网、浏览器更新/重启、取消与遗忘。发现真实问题后再按证据修复，不以反复跑已通过夹具替代。

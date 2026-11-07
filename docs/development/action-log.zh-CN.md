@@ -3601,3 +3601,18 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终check退出0（38.395秒），包含索引新鲜度与源码/生成JavaScript语法；git diff --check及暂存差异检查通过。验证证据追加同一VERIFICATION.txt，重新打开四角色后普通提交本次10文件并推送origin/dev；本节后续补记精确提交与远端回执，不修改main、版本或标签。
 
 - 实现交付：07e66ecd867b8ea7969061c3b11dae1d980d136c已提交。首次普通git push因LibreSSL SSL_ERROR_SYSCALL退出128，未关闭TLS校验；改用单命令http.version=HTTP/1.1正常推送退出0（2.712秒）。git ls-remote核实origin/dev完整SHA一致，工作区干净。该精确实现CI42355535275已启动，未重启或冒称通过；本条作为独立文档回执提交推送，最终CI和完整SHA记录于retrieval-audit-stage/final-receipt.json。补充实际引用边界探针验证2种拆代理对范围拒绝、完整Unicode通过、237字符三段引用及1802字符合并正文通过；源码与全量冻结SHA未变，不重复已有全测。
+
+
+## 2026-11-07：失效知识重新路由与修订交付复核
+
+- 续接dev/749f6e954425f3a048ee2795299e32147b75b38d、原四角色101文件/17组。父实现CI42355535275与最终日志CI42355619775均success（JS1852/1852、原生138/138），不重复媒体下载/真实推理或已有调度验收。先运行agent:find createAIClient、agent:impact src/services/ai.js src/ai/edge-prompt.js并核对源码；复用已有MiniSearch、Zod与统一客户端，无新增依赖。父字节/哈希存入fallback-stage/parent-BASELINE.tar，首次纳入事务的ai.js和conversation-policy.js另存FALLBACK_ORIGINALS.tar，不改旧原件档案。
+- 两条生产调用探针真实复现：原8条音画记录中删除贝雷帽视觉段后，搜索器收到corpus:复合内部引用；知识引用修订期间删除全部原文后，仍交付“删除后的旧结论仍被交付。”。探针只用离线模型/搜索响应，没有真实联网或推理。先写16项行为测试，15失败、1有效知识路径通过；失败确为错误查询、旧结论交付及缺少有界重新路由。
+- 最小修复共用createAIClient：canonical候选失效时在canFollowup/reserveFollowup、原deadline及取消约束下仅重新路由一次，候选置空、不附旧答案；随后复用clock/weather/public-data/web-search/live-data/chat/clarify/skip分派，再选knowledge则有界停止。旧UUID缓存保留语义查询回退。web-search.query边界拒绝corpus:内部标识，云端与端侧共用失效说明。有效知识仍一次模型调用，不占后续额度；交付前再次读取并比对id及results，正文、主体、范围、到期或删除变化均不交付旧结论，也不通过onSearch泄露旧来源。
+- 新增集成回归最终20项，覆盖实际createLocalReply入口、云端/端侧请求投影、删除/过期/主体/正文/coverage变化、修订中失效、预算与取消、再次选失效知识、伪造内部查询，以及时钟/天气/公共数据/现场/澄清/skip的正常分派。修订投影原已完整保留多段sourceId/coverage/偏移，本轮只验证、不另改一套压缩逻辑。首批相关53/53、扩展专项50/50通过；构建及索引生成通过（534模块/3017符号），完整全量和check最终回执接着补记。
+- 同输入事务新增第18组，原17组保留不伪称重跑：同一原8条媒体输入、同一SHA，云端和实际端侧入口的BASELINE均把corpus:送入搜索且交付已删除结论exit1；MODIFIED改发“公开视频 整个夏天 贝雷帽 音画资料”，删除后返回“这部分资料已变化，暂时还不能确定。”，无旧来源通知，exit0；独立修改副本执行ROLLBACK.sh knowledge-fallback后复原父哈希及两项缺陷exit1。104文件补丁重建、聚合原件/父检查点回滚与逐SHA验证通过，三个既有原件档案字节未变，生产工作区仍保留修复。
+- 诊断错误如实保留：只读cat误猜不存在的tests/unit/intent.test.mjs退出1；一次manifest当dict读取触发AttributeError退出1，随后按实际list结构查询；错误与更正写入fallback-stage/inspection-errors.json，不算产品红测。crapper/dryer/mutator的CLI与可用工具目录均不可用，三项未执行，其他检查不替代。无界面/布局变化、真实弹幕、宿主/用户扩展重载、用户安装、main/版本/标签或其他工作树清理。
+- 本次证明的是失效资料处理与来源交付边界；语义查询和答案为受控响应，不代表真实模型准确率。整体目标仍active：独立人工ASR/视觉真值及CER/WER、真实模型事实性/礼貌盲评、实际安装、多日实播、历史native/host.py:174新鲜度根因和默认并发超时根因仍待完成。
+
+- 最终静态check退出0（64.921秒），包含索引新鲜度与源码/生成JavaScript语法；git diff --check通过。完整源码/测试/索引8份冻结哈希保持不变。已再次核实父CI42355619775为精确749f6e9的success，当前远端dev仍为该父提交；新实现完整全量尚在执行，未将父CI当成本轮通过。
+
+- 冻结全量退出0：node --test --test-concurrency=2 tests，1872/1872通过、0失败/取消/跳过，340585.563334ms（外层340.679秒）。没有扩大测试时限或跳过用例。8份源码/测试/索引与全量前冻结哈希一致；本轮未修改native，原生本机未重复运行，待精确新提交CI核实。本轮所有命令、输入、字面stdout/stderr/exit、父/修改/回滚哈希补充进同一VERIFICATION.txt；四角色重新打开后提交推送dev，后续完整SHA与远端/CI回执写入外部证据和交付日志。

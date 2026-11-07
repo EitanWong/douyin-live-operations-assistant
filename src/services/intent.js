@@ -12,7 +12,7 @@ export const intentSchema=z.discriminatedUnion('intent',[
  weatherPlanSchema,
  publicDataIntentSchema,
  z.strictObject({intent:z.literal('clock'),timeZone:z.string().refine(validTimeZone).default(DEFAULT_TIME_ZONE)}),
- z.strictObject({intent:z.literal('web-search'),query:z.string().trim().min(1),reply:empty.default(''),freshness:z.enum(['realtime','rules','stable','short']).optional()}),
+ z.strictObject({intent:z.literal('web-search'),query:z.string().trim().min(1).refine(value=>!/corpus:/iu.test(value)),reply:empty.default(''),freshness:z.enum(['realtime','rules','stable','short']).optional()}),
  z.strictObject({intent:z.literal('knowledge'),query:z.union([z.string().uuid(),corpusReferenceSchema]),reply:z.string().trim().min(1),sources:z.array(z.number().int().positive()).max(5).optional()}),
  z.strictObject({intent:z.literal('skip'),query:empty.default(''),reply:empty.default('')}),
  ...['live-data','chat','clarify'].map(intent=>z.strictObject({...base,intent:z.literal(intent)}))
