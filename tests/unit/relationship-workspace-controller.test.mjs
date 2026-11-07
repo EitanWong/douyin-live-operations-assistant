@@ -19,6 +19,18 @@ function fixture(retrieve=async()=>graph()){
  let now=10000;const memory={enabled:true,entries:[]},controller=new RelationshipWorkspace(root,{retrieve,readMemory:()=>memory,now:()=>now});
  return {controller,memory,dom,setNow:value=>now=value,close(){controller.destroy();dom.window.close();}};
 }
+test('默认检索、原文与问答使用自动去重；按钮强制重建并映射选择，保留问题草稿',async()=>{
+ const calls=[],f=fixture(async(q,m,o)=>{calls.push(o);return {...graph(),deduplication:{mergedProfiles:1,resolvedMentions:2,conflicts:[],aliases:[{from:'old',to:'a'}]}};});
+ try{
+  const c=f.controller;await c.refresh();assert.equal(calls[0].deduplicate,true);
+  c.publish({selected:{kind:'entity',id:'old'},people:['old'],question:'保留草稿'});
+  await c.dispatch({type:'deduplicate'});
+  assert.equal(calls.at(-1).rebuild,true);assert.equal(calls.at(-1).deduplicate,true);
+  assert.equal(c.state.selected.id,'a');assert.deepEqual(c.state.people,['a']);assert.equal(c.state.question,'保留草稿');assert.match(c.state.deduplicationStatus,/已重新核对/);
+  await c.original('x');assert.equal(calls.at(-1).deduplicate,true);
+  c.service={run:async()=>({status:'succeeded',answer:'已核对'})};await c.ask();assert.ok(calls.every(o=>o.deduplicate));
+ }finally{f.close();}
+});
 test('并发检索只交付最新问题，隐藏不轮询，未变图保留同一对象，销毁拒绝迟到结果',async()=>{
  const pending=[],f=fixture((query,memory,options)=>new Promise(resolve=>pending.push({query,memory,options,resolve})));
  try{

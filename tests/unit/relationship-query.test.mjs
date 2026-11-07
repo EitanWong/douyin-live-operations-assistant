@@ -37,3 +37,10 @@ test('长图谱的固定人物证据种子保留选择与冲突，受上下文�
  const seed=relationshipResearchSeed(graph);assert.ok(JSON.stringify(seed).length<=6000);assert.deepEqual(seed.focus,graph.focus);assert.equal(seed.relations[0].status,'conflicted');assert.ok(seed.omittedRelations>0);assert.equal(seed.people.length,1);assert.equal(seed.people[0].facets[0].text,'陶艺');
  assert.throws(()=>scopedRelationshipContext({...graph,entities:[]},graph),/选定人物/);
 });
+
+test('图谱问答的后台查证沿用自动去重模式，固定证据种子保留此模式',async()=>{
+ const {relationshipResearchSeed,relationshipResearchOptions}=await import('../../src/services/relationship-query.js');
+ const graph={focus:{scope:'single',entityIds:['person:uid%3A101'],names:['Lucy小露']},deduplication:{enabled:true},entities:[{id:'person:uid%3A101',name:'Lucy小露'}],relations:[]};
+ const seed=relationshipResearchSeed(graph),options=relationshipResearchOptions(seed);
+ assert.equal(options.deduplicate,true);assert.deepEqual(options.entityIds,graph.focus.entityIds);
+});

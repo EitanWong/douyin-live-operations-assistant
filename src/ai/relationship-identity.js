@@ -20,9 +20,29 @@ function sourceProfileAliases(entities,canonical){
  return aliases;
 }
 
+// A display dossier can collect unbound material without asserting an account
+// identity. Never use a name to join two stable accounts or masked placeholders.
+function displayProfileAliases(entities,canonical){
+ const names=new Map(),aliases=new Map(),conflicts=[],targets=new Map();
+ for(const row of entities){
+  if(isMaskedName(row.name) || ['主播','公开账号'].includes(row.name))continue;
+  const group=names.get(row.name) || {accounts:new Set(),profiles:new Set()};
+  if(stableKey.test(row.key))group.accounts.add(canonical(row.key));
+  else if(row.key.startsWith('manual:'))group.profiles.add(row.key);
+  names.set(row.name,group);
+ }
+ for(const [name,{accounts,profiles}] of names){
+  if(accounts.size>1){conflicts.push({name,accounts:accounts.size});continue;}
+  const target=[...accounts][0] || [...profiles].toSorted()[0];
+  for(const key of profiles){const values=targets.get(key) || new Set();values.add(target);targets.set(key,values);}
+ }
+ for(const [key,values] of targets)if(values.size===1 && !values.has(key))aliases.set(key,[...values][0]);
+ return {aliases,conflicts:conflicts.toSorted((a,b)=>a.name.localeCompare(b.name))};
+}
+
 // A component may contain several room/secUID aliases, but never two UIDs.
 // Keep conflicting components separate until their source records are corrected.
-export function identityResolver(entities){
+export function identityResolver(entities,{deduplicate=false}={}){
  const links=new Map(),aliases=new Map(),visited=new Set();
  for(const row of entities)for(const other of row.identities || []){
   if(!stableKey.test(row.key) || !stableKey.test(other) || row.key===other)continue;
@@ -42,8 +62,10 @@ export function identityResolver(entities){
   const key=uids[0] || secs[0] || component.toSorted()[0];
   for(const id of component)aliases.set(id,key);
  }
- const canonical=key=>aliases.get(key) || key,profiles=sourceProfileAliases(entities,canonical);
- return key=>profiles.get(key) || canonical(key);
+ const canonical=key=>aliases.get(key) || key;
+ const projection=deduplicate ? displayProfileAliases(entities,canonical) : {aliases:sourceProfileAliases(entities,canonical),conflicts:[]};
+ const resolve=key=>projection.aliases.get(key) || canonical(key);
+ return Object.assign(resolve,{profileAliases:projection.aliases,conflicts:projection.conflicts});
 }
 
 // Read only explicit fields in operator-verified records. Source room and

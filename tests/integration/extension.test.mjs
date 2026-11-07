@@ -1347,6 +1347,17 @@ test('人物关系后台查询跨房间读取持续档案，只返回相关证�
  assert.equal((await w.send({type:'relationship-query',query:'x'.repeat(2001)})).ok,false);
 });
 
+test('人物图谱自动去重参数通过真实扩展消息通道，无来源资料合为唯一账号且重启幂等',async()=>{
+ const {profileMemoryEntry}=await import('../../src/services/person-profile.js'),at=Date.now();
+ const profile={version:1,name:'Lucy小露',key:'',turns:[{text:'我喜欢陶艺。',at}],facts:[{field:'interests',value:'陶艺',evidence:[{turn:1,quote:'我喜欢陶艺'}]}],relationships:[],analysis:[],knowledge:[],reply:'保留原话'};
+ const values={'live-assistant:config:1':{anchorId:'10'},'live-assistant:profile:1':{anchorId:'10',name:'Lucy小露'},'live-assistant:knowledge:global':{entries:[profileMemoryEntry(profile,{id:'lucy'})],knowledge:''}};
+ const indexedDB=new IDBFactory(),w=await worker(values,indexedDB),request={type:'relationship-query',query:'Lucy小露',browse:true,deduplicate:true,rebuild:true};
+ const raw=await w.send({...request,deduplicate:false});assert.equal(raw.value.entities.filter(n=>n.name==='Lucy小露').length,2);
+ const result=await w.send(request);assert.equal(result.ok,true);assert.equal(result.value.entities.filter(n=>n.name==='Lucy小露').length,1);assert.equal(result.value.deduplication.mergedProfiles,1);
+ assert.equal(result.value.entities[0].dossier.facets[0].text,'陶艺');assert.equal(result.value.entities[0].dossier.facets[0].trust,'unverified');
+ const reopened=await worker({},indexedDB),again=await reopened.send(request);assert.equal(again.value.entities.filter(n=>n.name==='Lucy小露').length,1);assert.equal(again.value.deduplication.mergedProfiles,1);
+});
+
 test('自动知识库后台单写者保留原文，拒绝页面直写和旧主播范围，删除后图谱与重启均不复活',async()=>{
  const values={'live-assistant:config:1':{anchorId:'10',ai:{enabled:true,assistant:{memoryEnabled:true},search:{rememberKnowledge:true}}}},indexedDB=new IDBFactory();
  const w=await worker(values,indexedDB),input={anchor:'10',sources:[{url:'https://example.org/profile',title:'公开资料',text:'阿明是小雨的师傅'}]};
