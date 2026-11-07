@@ -9,16 +9,17 @@ export class RelationshipWorkspace {
  }
  publish(patch){if(this.closed)return;this.state={...this.state,...patch};this.host.networkView=this.state;this.host.dispatchEvent(new this.root.ownerDocument.defaultView.Event('network-update',{bubbles:true}));}
  setVisible(visible){this.visible=visible;if(!visible){this.revision++;this.cancel();this.publish({loading:false});}else void this.refresh();}
- async refresh(){
+ async refresh({rebuild=false}={}){
   if(this.closed)return;const revision=++this.revision,query=this.state.query.trim();this.lastAt=this.now();this.publish({loading:true,error:''});
   try{
    if(!this.retrieve)throw Error('当前环境尚未连接人物记忆。');
-   const graph=await this.retrieve(query,this.readMemory(),{browse:true});
+   const graph=await this.retrieve(query,this.readMemory(),{browse:true,deduplicate:true,...(rebuild ? {rebuild:true} : {})});
    if(this.closed || revision!==this.revision || query!==this.state.query.trim())return;
    const changed=relationshipEvidenceVersion(graph)!==relationshipEvidenceVersion(this.state.graph);
    if(changed)this.cancel();
-   const selected=this.state.selected,rows=selected?.kind==='entity' ? graph.entities : graph.relations;
-   this.publish({graph:changed ? graph : this.state.graph,loadedQuery:query,loading:false,people:this.state.people.filter(id=>graph.entities.some(n=>n.id===id)),selected:selected && rows.some(r=>r.id===selected.id) ? selected : null,...(changed ? {original:null,answer:null} : {})});
+   const alias=id=>graph.deduplication?.aliases?.find(row=>row.from===id)?.to || id;
+   const previous=this.state.selected,selected=previous?.kind==='entity' && alias(previous.id)!==previous.id ? {...previous,id:alias(previous.id)} : previous,rows=selected?.kind==='entity' ? graph.entities : graph.relations;
+   this.publish({graph:changed ? graph : this.state.graph,loadedQuery:query,loading:false,people:[...new Set(this.state.people.map(alias))].filter(id=>graph.entities.some(n=>n.id===id)),selected:selected && rows.some(r=>r.id===selected.id) ? selected : null,...(rebuild ? {deduplicationStatus:'已重新核对全部已保存资料，自动去重结果已更新。'} : {}),...(changed ? {original:null,answer:null} : {})});
   }catch(error){if(!this.closed && revision===this.revision)this.publish({loading:false,error:error.message});}
  }
  tick(){if(this.visible && !this.state.loading && this.now()-this.lastAt>=10000)void this.refresh();}
@@ -29,7 +30,7 @@ export class RelationshipWorkspace {
  }
  async original(recordId){
   const revision=this.revision,selection=this.state.selected;
-  try{const graph=await this.retrieve(this.state.loadedQuery,this.readMemory(),{browse:true,recordId});if(!this.closed && revision===this.revision && selection===this.state.selected)this.publish({original:graph.record || {text:'原记录已删除或不再可用。'}});}
+  try{const graph=await this.retrieve(this.state.loadedQuery,this.readMemory(),{browse:true,deduplicate:true,recordId});if(!this.closed && revision===this.revision && selection===this.state.selected)this.publish({original:graph.record || {text:'原记录已删除或不再可用。'}});}
   catch(error){if(!this.closed && revision===this.revision)this.publish({error:error.message});}
  }
  cancel(){this.questionRevision++;this.controller?.abort();this.controller=null;if(this.state.answering)this.publish({answering:false,questionStatus:'问答已取消。'});}
@@ -45,7 +46,7 @@ export class RelationshipWorkspace {
   this.publish({answering:true,answer:null,trace:[],questionStatus:'正在提交后台研究并核对人物证据…'});
   const current=()=>!this.closed && !controller.signal.aborted && revision===this.questionRevision;
   try{
-   const options={browse:true,entityIds:focus,overview:scope==='global'},graph=await this.retrieve(query,this.readMemory(),options);if(!current())return;
+   const options={browse:true,deduplicate:true,entityIds:focus,overview:scope==='global'},graph=await this.retrieve(query,this.readMemory(),options);if(!current())return;
    const result=await this.service.run({question,mode:'relationships',relationshipContext:relationshipAnswerContext(graph,{scope,entityIds:focus,names}),signal:controller.signal,onProgress:progress=>{if(current())this.publish({trace:progress?.trace || [],questionStatus:progress?.trace?.at(-1)?.detail || '正在检索档案、关系与公开来源…'});}});
    if(!current())return;
    if(result.status!=='succeeded')throw Error(result.error || '本次没有生成可用回答，请补充具体人物与问题。');
@@ -66,6 +67,7 @@ export class RelationshipWorkspace {
   if(action.type==='questionScope' && ['single','group','global'].includes(action.value) && action.value!==this.state.questionScope){this.cancel();this.publish({questionScope:action.value,answer:null,trace:[]});}
   if(action.type==='people' && Array.isArray(action.value)){this.cancel();this.publish({people:[...new Set(action.value)].filter(id=>this.state.graph.entities.some(n=>n.id===id)).slice(0,6),answer:null,trace:[]});}
   if(action.type==='search')return this.refresh();
+  if(action.type==='deduplicate')return this.refresh({rebuild:true});
   if(action.type==='overview'){this.publish({query:'',status:'all',predicate:'all',depth:0,selected:null,inspectorOpen:false,pathTo:''});return this.refresh();}
   if(action.type==='select')this.select(action.selection);
   if(action.type==='status' && ['all','verified','observed','unverified','conflicted'].includes(action.value))this.publish({status:action.value});

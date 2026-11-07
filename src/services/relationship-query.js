@@ -9,7 +9,7 @@ export function relationshipAnswerContext(graph,focus){
 export function relationshipResearchOptions(context){
  const focus=context?.focus;
  if(!focus || !['single','group','global'].includes(focus.scope))return {};
- return {browse:true,overview:focus.scope==='global',entityIds:Array.isArray(focus.entityIds) ? focus.entityIds.filter(id=>typeof id==='string' && id.startsWith('person:')).slice(0,6) : []};
+ return {browse:true,...(context.deduplication?.enabled ? {deduplicate:true} : {}),overview:focus.scope==='global',entityIds:Array.isArray(focus.entityIds) ? focus.entityIds.filter(id=>typeof id==='string' && id.startsWith('person:')).slice(0,6) : []};
 }
 export function scopedRelationshipContext(graph,context){
  if(!context?.focus)return graph;
@@ -25,12 +25,12 @@ export function relationshipResearchSeed(graph){
  const people=graph.entities.filter(n=>!chosen.size || chosen.has(n.id)).slice(0,6).map(n=>({id:n.id,name:n.name,role:n.role,facets:(n.dossier?.facets || []).slice(0,2),events:(n.dossier?.events || []).slice(0,1)}));
  const relevant=graph.relations.filter(r=>!chosen.size || chosen.has(r.from) || chosen.has(r.to)).toSorted((a,b)=>Number(b.status==='conflicted')-Number(a.status==='conflicted'));
  const relations=relevant.slice(0,12).map(r=>({from:names.get(r.from),to:names.get(r.to),predicate:r.predicate,negative:r.negative,status:r.status,evidence:r.evidence?.slice(0,1)}));
- const seed={focus,people,relations,coverage:'Selected evidence seed only; query relationships and knowledge for omitted records. Absence remains unknown.',omittedRelations:graph.relations.length-relations.length};
+ const seed={focus,people,relations,...(graph.deduplication?.enabled ? {deduplication:{enabled:true}} : {}),coverage:'Selected evidence seed only; query relationships and knowledge for omitted records. Absence remains unknown.',omittedRelations:graph.relations.length-relations.length};
  for(const person of people)for(const field of ['events','facets'])while(JSON.stringify(seed).length>6000 && person[field].length)person[field].pop();
  while(JSON.stringify(seed).length>6000 && relations.length){relations.pop();seed.omittedRelations++;}
  return seed;
 }
-export const relationshipEvidenceVersion=graph=>JSON.stringify([graph?.entities,graph?.relations,graph?.ambiguities,graph?.sources],function(key,value){
+export const relationshipEvidenceVersion=graph=>JSON.stringify([graph?.entities,graph?.relations,graph?.ambiguities,graph?.sources,graph?.deduplication],function(key,value){
  if(key==='at' && this?.source==='运营本场资料' || ['from','through'].includes(key) && this?.basis==='deduplicated observed gifts in this room over 30 days; lower bound, not lifetime spending')return 0;
  return value;
 });

@@ -26,8 +26,9 @@ export function createServiceAccess(chrome,{waitMs=120000}={}){
   const url=chrome.runtime.getURL('service-access.html');
   const existing=(await chrome.tabs.query?.({url}))?.find(tab=>tab.url===url);
   const tab=existing || await chrome.tabs.create({url,active:true});
+  if(existing)await chrome.tabs.update(tab.id,{active:true});
   tabId=tab.id;
- })().catch(error=>{opening=undefined;for(const row of [...pending.values()])finish(row,new Error(`无法打开服务授权页：${error.message}`));});
+ })().catch(error=>{for(const row of [...pending.values()])finish(row,new Error(`无法打开服务授权页：${error.message}`));}).finally(()=>{opening=undefined;});
  const onAdded=()=>{void complete([...new Set([...pending.keys(),...declined.keys()])],false).catch(error=>{for(const row of [...pending.values()])finish(row,error);});};
  const onRemoved=id=>{
   if(id!==tabId)return;
@@ -52,7 +53,7 @@ export function createServiceAccess(chrome,{waitMs=120000}={}){
     const abort=()=>{waiter.finish(Error('请求已取消'));notify();};
     row.waiters.add(waiter);signal?.addEventListener('abort',abort,{once:true});
     timer=setTimeout(()=>finish(row,Error('服务授权等待超时，本次请求未发送；授权后请重试')),waitMs);
-    notify();void open();
+    notify();if(row.waiters.size===1)void open();
    });
   },
   async handle(message){

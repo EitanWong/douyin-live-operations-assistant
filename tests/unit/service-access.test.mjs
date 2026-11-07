@@ -33,6 +33,17 @@ test('拒绝后不重复弹页或放行请求，授权页可重试；不相信�
  }finally{f.access.close();}
 });
 
+test('先授权模型再需要搜索时重新显示同一授权页，不让新服务在后台无声等待',async()=>{
+ const f=fixture(),focused=[];
+ f.chrome.tabs.query=async()=>f.opened.length ? [{id:7,url:'chrome-extension://test/service-access.html'}] : [];
+ f.chrome.tabs.update=async(id,options)=>focused.push({id,...options});
+ try{
+  const first=f.access.ensure('https://model.example/v1/responses');await tick();f.granted.add('https://model.example/*');await f.access.handle({type:'service-access-complete',patterns:['https://model.example/*']});await first;
+  const second=f.access.ensure('https://search.example/search');void second.catch(()=>{});await tick();assert.deepEqual(focused,[{id:7,active:true}]);assert.equal(f.opened.length,1);
+  f.granted.add('https://search.example/*');await f.access.handle({type:'service-access-complete',patterns:['https://search.example/*']});await second;
+ }finally{f.access.close();}
+});
+
 test('取消一个请求不影响同域其他请求，迟到授权不会复活已取消请求',async()=>{
  const f=fixture(),controller=new AbortController();let calls=0;
  try{

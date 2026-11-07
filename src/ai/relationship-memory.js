@@ -92,8 +92,8 @@ function sourceDocuments(input){
  return {documents,entities};
 }
 
-function createGraph({documents,entities},parsed){
- const nodes=new Map(),names=new Map(),localNames=new Map(),relations=new Map(),ambiguities=new Map(),canonical=identityResolver(entities);
+function createGraph({documents,entities},parsed,options){
+ const nodes=new Map(),names=new Map(),localNames=new Map(),relations=new Map(),ambiguities=new Map(),canonical=identityResolver(entities,options),mentionAliases=new Map();
  let scope='';
  const index=(name,key)=>{for(const table of [names,localNames.get(scope) || localNames.set(scope,new Map()).get(scope)]){const ids=table.get(name) || new Set();ids.add(key);table.set(name,ids);}};
  const addNode=(key,name,role='人物提及',at=0)=>{
@@ -119,7 +119,12 @@ function createGraph({documents,entities},parsed){
   const matches=localNames.get(scope)?.get(name);
   if(matches?.size===1)return [...matches][0];
   if(matches?.size>1)ambiguities.set(name,[...matches]);
-  const key=`mention:${scope}:${name}`;addNode(key,name);return key;
+  const original=`mention:${scope}:${name}`,global=names.get(name);
+  if(options.deduplicate && !isMaskedName(name) && !['主播','公开账号'].includes(name) && !matches?.size){
+   if(global?.size===1){const key=[...global][0];mentionAliases.set(original,key);index(name,key);return key;}
+   if(!global?.size){const key=`mention:deduplicated:${name}`;mentionAliases.set(original,key);addNode(key,name);return key;}
+  }
+  addNode(original,name);return original;
  };
  // Explicit operator records are the only source allowed to bind aliases.
  for(const doc of documents.filter(row=>row.trust==='verified')){
@@ -166,7 +171,7 @@ function createGraph({documents,entities},parsed){
   if(!adjacency.has(from))adjacency.set(from,new Map());
   const neighbors=adjacency.get(from),edges=neighbors.get(to) || [];edges.push(row);neighbors.set(to,edges);
  }
- return {nodes,names,relations,ambiguities,adjacency};
+ return {nodes,names,relations,ambiguities,adjacency,...(options.deduplicate ? {deduplication:{enabled:true,mergedProfiles:canonical.profileAliases.size,resolvedMentions:mentionAliases.size,conflicts:canonical.conflicts},aliases:new Map([...canonical.profileAliases,...mentionAliases])} : {})};
 }
 
 function querySeeds(names,query){
@@ -239,6 +244,7 @@ function queryGraph(graph,query,options={}){
  const relationIds=new Map([...selected.keys()].map((key,i)=>[key,`relation-${i+1}`]));
  const record=options.recordId ? [...keys].flatMap(key=>[...graph.nodes.get(key).person.records.values()]).find(r=>r.recordId===options.recordId) : null;
  return {policy:RELATIONSHIP_POLICY,stats:{entities:graph.nodes.size,relations:graph.relations.size,shownRelations:relations.length,truncated:options.browse ? selected.size<[...graph.relations.values()].filter(r=>!options.status || options.status==='all' || r.status===options.status).length : false},entities:[...keys].slice(0,options.browse ? 80 : 40).map((key,i)=>{const n=graph.nodes.get(key);return {id:ids.get(key),name:n.name,role:n.role,aliases:n.aliases,evidence:n.evidence.slice(0,2),...(options.browse || i<3 ? {dossier:personDossier(n,query,options)} : {})};}),relations,
+  ...(graph.deduplication ? {deduplication:{...graph.deduplication,aliases:[...graph.aliases].filter(([,to])=>ids.has(to)).map(([from,to])=>({from:`person:${encodeURIComponent(from)}`,to:ids.get(to)}))}} : {}),
   ...(options.recordId ? {record:record ? (({self,...row})=>row)(record) : null} : {}),
   ambiguities:[...graph.names].filter(([name,candidates])=>!isMaskedName(name) && candidates.size>1 && (options.browse || query.includes(name))).map(([name,candidates])=>({name,candidates:[...candidates].map(key=>ids.get(key)).filter(Boolean)})).filter(row=>row.candidates.length>1),
   paths:paths.slice(0,4).map(path=>path.map(key=>relationIds.get(key))),coverage:'explicit-statement graph; bounded two-hop selection from durable sources; absence is unknown'};
@@ -250,8 +256,8 @@ export function createRelationshipRetriever(){
  let signature='',graph;const parsed=new Map(),retrieveSources=createKnowledgeRetriever({maxSize:4000000});
  return (input,query,options={})=>{
   const validity=(input.scopes || [input]).map(s=>[(s.profileInsights?.rows || []).map(r=>r.at<=input.now && input.now-r.at<=30*86400000),(s.corpus || []).map(r=>r.expiresAt>input.now),(s.audience?.snapshot().viewers || []).map(v=>v.gifts.map(g=>g.at<=input.now && input.now-g.at<=30*86400000))]);
-  const key=JSON.stringify([validity,input.scopes?.map(s=>({...s,audience:s.audience?.snapshot(),perception:s.perception?.snapshot()})),input.anchor,input.anchorSecUid,input.anchorRoom,input.includeAccountHistory,input.anchorName,input.audience?.revision,input.perception?.revision,input.memory,input.knowledge,input.corpus,input.profileInsights,activeAccounts(input),beijingDate(input.now)]);
-  if(key!==signature){const sources=input.scopes ? input.scopes.reduce((all,row)=>{const source=sourceDocuments({...row,now:input.now}),scope=JSON.stringify([row.room,row.anchor]);all.documents.push(...source.documents.map(doc=>({...doc,id:`${scope}:${doc.id}`,scope,provenance:doc.origin || {room:row.room,anchor:row.anchor}})));all.entities.push(...source.entities.map(entity=>({...entity,scope,provenance:{room:row.room,anchor:row.anchor}})));return all;},{documents:[],entities:[]}) : sourceDocuments(input);graph=createGraph(sources,parsed);signature=key;const active=new Set(sources.documents.map(row=>JSON.stringify([row.text,Boolean(row.speaker)])));for(const text of parsed.keys())if(!active.has(text))parsed.delete(text);}
+  const key=JSON.stringify([Boolean(options.deduplicate),validity,input.scopes?.map(s=>({...s,audience:s.audience?.snapshot(),perception:s.perception?.snapshot()})),input.anchor,input.anchorSecUid,input.anchorRoom,input.includeAccountHistory,input.anchorName,input.audience?.revision,input.perception?.revision,input.memory,input.knowledge,input.corpus,input.profileInsights,activeAccounts(input),beijingDate(input.now)]);
+  if(options.rebuild || key!==signature){const sources=input.scopes ? input.scopes.reduce((all,row)=>{const source=sourceDocuments({...row,now:input.now}),scope=JSON.stringify([row.room,row.anchor]);all.documents.push(...source.documents.map(doc=>({...doc,id:`${scope}:${doc.id}`,scope,provenance:doc.origin || {room:row.room,anchor:row.anchor}})));all.entities.push(...source.entities.map(entity=>({...entity,scope,provenance:{room:row.room,anchor:row.anchor}})));return all;},{documents:[],entities:[]}) : sourceDocuments(input);graph=createGraph(sources,parsed,options);signature=key;const active=new Set(sources.documents.map(row=>JSON.stringify([row.text,Boolean(row.speaker)])));for(const text of parsed.keys())if(!active.has(text))parsed.delete(text);}
   const result=queryGraph(graph,String(query || '').slice(0,2000),options);
   const rows=(input.scopes ? input.scopes.flatMap(s=>(s.corpus || []).map(r=>({...r,scope:{room:s.room,anchor:s.anchor}}))) : input.corpus || []).filter(r=>!r.subject && r.expiresAt>input.now);
   const retrieval=retrieveSources(rows.map(r=>({id:JSON.stringify([r.scope,r.id]),title:r.title,content:r.text,source:r.source,updatedAt:r.at,expiresOn:''})),query);

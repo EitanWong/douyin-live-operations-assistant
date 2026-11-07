@@ -12,7 +12,7 @@ test('默认把整幅图谱留给探索，人物定位和按需详情都在画�
 test('关系工作台明确提示同名歧义与展示上限，不将不可信原话渲染为HTML',()=>{
  const view={graph:{entities:[{id:'a',name:'小雨',role:'观众'},{id:'b',name:'小雨',role:'观众'}],relations:[{id:'r',from:'a',to:'b',predicate:'提及',status:'unverified',evidence:[{text:'<img src=x onerror=bad()>原话',source:'弹幕',at:1800000000000,trust:'unverified'}]}],ambiguities:[{name:'小雨',candidates:['a','b']}],stats:{entities:200,relations:400,truncated:true}},query:'',status:'all',predicate:'all',depth:0,layout:'concentric',selected:{kind:'relation',id:'r'},pathTo:'',question:'',questionStatus:'',error:'',original:null};
  const html=renderToStaticMarkup(h(MantineProvider,null,h(NetworkWorkbench,{node:{id:'network',view},bridge:{networkAction(){}}})));
- assert.match(html,/同名记录：小雨/);assert.match(html,/系统持续比对账号与来源/);assert.doesNotMatch(html,/请核对各自来源/);assert.match(html,/当前仅展示部分资料/);assert.match(html,/&lt;img/);assert.ok(!html.includes('<img src=x'));
+ assert.match(html,/同名记录：小雨/);assert.match(html,/存在多个账号或归属不明/);assert.match(html,/自动去重/);assert.doesNotMatch(html,/请核对各自来源/);assert.match(html,/当前仅展示部分资料/);assert.match(html,/&lt;img/);assert.ok(!html.includes('<img src=x'));
 });
 test('人物档案单独展示心理互动假设、局限与来源，不把解读混为事实',()=>{
  const dossier={profiles:[],facets:[{category:'residence',text:'横店',trust:'unverified',source:'用户补充',at:1800000000000}],analysis:[{text:'熟悉的小熊可能是睡前陪伴习惯。',limitations:'仅依据补充原话，不能判断人格或心理健康。',trust:'unverified',source:'用户补充',at:1800000000000}],events:[],speechSamples:[],leads:[],missing:[]};

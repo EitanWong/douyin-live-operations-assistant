@@ -265,7 +265,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       }else if(message.type==='relationship-query' && isRoom(sender)){
         const override={};
         if(message.memory!==undefined)override.memory=validateMemory(message.memory);
-        const graphOptions={browse:message.browse===true,overview:message.overview===true,entityIds:Array.isArray(message.entityIds) ? [...new Set(message.entityIds.filter(id=>typeof id==='string' && id.startsWith('person:') && id.length<=4000))].slice(0,6) : [],status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all',...(typeof message.recordId==='string' && message.recordId.length<=4000 ? {recordId:message.recordId} : {})};
+        const graphOptions={browse:message.browse===true,deduplicate:message.deduplicate===true,rebuild:message.rebuild===true,overview:message.overview===true,entityIds:Array.isArray(message.entityIds) ? [...new Set(message.entityIds.filter(id=>typeof id==='string' && id.startsWith('person:') && id.length<=4000))].slice(0,6) : [],status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all',...(typeof message.recordId==='string' && message.recordId.length<=4000 ? {recordId:message.recordId} : {})};
         await sharedKnowledge.ensure();value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override,graphOptions);
       }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');
