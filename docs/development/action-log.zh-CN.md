@@ -3732,6 +3732,16 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 无新增工作树，其他工作树均未清理；只清理本任务可重建验收副本与本地演示服务，保留四角色及原件、证据。未改main、版本或标签。功能提交与dev普通推送回执随后补记，最终精确SHA记入同一VERIFICATION/checkpoint。
 - 实际提交与推送：功能提交 **da153fb5feff3bc0f7025f0996f3025cadc10363** 已普通 push 到 origin/dev（f2dabbf→da153fb，exit0），git ls-remote 精确一致；全量1932/1932与本地浏览器2/0/2是已观察结果，未将其等同远端CI通过。仅追加本验收回执；最终文档提交与远端确认记录同一VERIFICATION/checkpoint。本任务四角色、原件及浏览器报告仍在原路径，已关闭本地4197服务，未重载用户直播页。
 
+## 2026-11-07：采集连接待确认时手动开始场控被错误拦截
+
+- 延续同一仓库 dev 与 `output/cytoscape-browser-errors-2026-11-07` 原四角色。先定位用户原文，`agent:find` 无文本命中后直接确认 `src/app.js:start()`，运行 agent:impact，保存 app.js/既有浏览器测试的父检查点与 SHA。根因是手动启动把 `adapter.healthy()` 当作硬前提，与运行期已有的断线等待/恢复调度重复；未观察到连接并不应锁死手动启动。仅删除该启动前提，仍由发送调度根据真实健康状态暂停/恢复，不伪造 connected；自动开始继续等待开播及健康连接，房间互斥锁、切房与扩展失效检查保留。
+- TDD新增两项行为测试，修改前分别抛出原文和在房间锁检查前错误抛出同一原文（2项预期红测）；修复后验证手动开始成功，连接未确认时消息留在队列且不发送，恢复后仅处理一次；竞争标签页仍被房间锁拒绝、切房后不启动。相关5/5通过。最终完整 `node --test --test-concurrency=2 tests` **1934/1934通过**，0失败/取消/跳过，401557.824792ms；agent:index/agent:check、build、check与git diff --check通过。源码仅启动门槛与测试，无界面尺寸改动，无依赖或native改动；未重复原生测试。
+- 真实Chrome使用同一非demo boot/Panel控制器、本地数字房间和可控适配器，所有测试消息仅写本地数组。原版界面准确显示“尚未连接直播数据，请刷新直播页，先用仅预览检查事件”；修复版显示“运行中 · 自动发送 · 等待直播数据”，此时queue1/sent0，恢复后queue0/sent1且日志无warn/error。人工暂停再启动、390窄屏验证通过，面板clientWidth=scrollWidth=370。用户真实直播页仍由另一任务占用，不抢占、不启动真实自动弹幕、不声称已验证该页的采集连接；最新dist/chrome-extension已重新构建，需要重载扩展及刷新直播页应用。
+- 验收仍使用原 `MODIFIED_FILE.tar`、`DIFF_FILE.patch`、`VERIFICATION.txt`、可执行`ROLLBACK.sh`，按本轮app.js/测试扩展，前版角色字节存于live-start/previous-*，原BASELINE.tar不变。本轮相同输入实际BASELINE启动报原错误exit1 → MODIFIED成功启动/待连接保留/恢复后发送exit0 → 执行扩展ROLLBACK脚本的独立修改副本重现原错误exit1；四文件原始SHA恢复，补丁逐字重建修改档，工作区保留修改版。前轮Cytoscape浏览器2/0/2证据保留，本轮未重做该浏览器场景；完整测试包含其回归。
+- 工具问题如实保留：初次rg猜测不存在live-mode/engine/shell-status路径，改查实际browser测试与panel源码；独立探针首次缺vendor导致模块缺失exit1，补全后因navigator缺userAgent在zrender导入失败exit1，改为真实JSDOM navigator后同输入1/0/1通过。最初浏览器验证间隔过长，被房间自动监控刷新而重置夹具；补充直播身份并及时完整重跑，只有最终观测到sent数组的一轮计为恢复发送。没有为探针错误修改产品或放宽断言。
+- crapper/dryer/mutator CLI和工具目录仍不可用，三项未执行。保留原件、角色、探针、字面输出、报告与截图；本任务独立副本和4197本地服务验证后清理，不动其他工作树与直播页。功能提交和dev普通推送结果随后补记；未改main、版本或标签。
+- 实际推送：功能提交 **dfbfd9df57a71fce0db1ea3a234fb84f6141d4a6** 已普通push至origin/dev（16dd4d5→dfbfd9d，exit0），git ls-remote精确一致。源码全量1934/1934、构建/check与同输入1/0/1均为本地已观察结果，不声称远端CI通过。本条仅补验收回执，最终文档提交和远端确认写入原VERIFICATION/checkpoint；本任务独立副本与4197服务已实际清理。
+
 ## 2026-11-07：按任务分配模型、感知研究与人物投影闭环
 
 - 保持用户指定仓库为目标，从干净 dev f2dabbff 创建本聊天 ai-task-pipelines 副本；原始工作区未改字节。先读 AGENTS、导航、发布与布局标准，执行 agent:find / agent:impact 确认源码。基线同输入观测：reply/research/profile 全走 fast，VIDEO_RESEARCH 为 []，exit0；原始源码归档及哈希保存在本次证据目录。
@@ -3747,3 +3757,4 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终冻结源码完整回归：PATH 指向现有 Python 3.12.12，node --test --test-concurrency=2 tests，**1939/1939通过**，0失败/取消/跳过，341656.928291ms，exit0；npm run build、npm run check、git diff --check通过。索引558模块/3136符号，无原生源码改动。
 - 四角色为 /Users/eitan/.codex/ai-task-pipelines-20261107-u1ftbxmz 下的 MODIFIED_FILE.tar.gz、DIFF_FILE.patch、VERIFICATION.txt、ROLLBACK.sh。实际同输入：BASELINE三任务均走fast且VIDEO_RESEARCH=[]；MODIFIED分别走fast/deep/profile且画面产生一项video研究；ROLLBACK独立副本恢复BASELINE，三次均exit0，所有原文件SHA恢复一致。再次应用补丁恢复MODIFIED，另一个原件副本经patch -p1重建逐文件SHA一致，工作树保持修改版。四角色已重开并核对，输入、原件档和哈希清单同目录保留；仅删除可重建的验收副本，未清理其他工作树。
 - 功能提交a2015d86c5c86e924e5e536797bafdaee8a70f79已推送codex/ai-task-pipelines并建立PR #24到dev。等待远端CI时dev推进至16dd4d5（独立Cytoscape警告修复）；普通合并保留该修复，唯一文本冲突是行动日志追加段，按远端段后本任务段保留双方全文，索引重新生成559模块/3136符号。两项画布测试与任务链路共19/19通过；合并后完整测试与PR的新一轮CI继续执行，旧基线CI不作为合并结果的通过证据。
+- 画布修复合并版81e879d本地完整**1941/1941通过**，0失败/取消/跳过，329369.398708ms；远端CI 42372612198原生与test-build均成功。一次gh run watch因GitHub API EOF退出1，误读为CI失败后立即重新查询更正，实际旧/新两轮CI均成功。合并请求执行时dev又推进到dfbfd9d（独立的断线手动启动修复），GitHub因冲突拒绝合并exit1；本地普通合并保留新源码，日志按双方追加保留，派生索引重建。该启动修复两项2/2、AI任务/画像/持续研究17/17通过；只对新增影响补测，不将前述1941项称为最新树的完整全测，后续CI状态单独报告。
