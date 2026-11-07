@@ -30,6 +30,21 @@ test('后台使用已保存设置和密钥，提交不等模型，房间隔离�
  }finally{host.close();}
 });
 
+test('后台研究缺权限时自动引导授权，确认后原任务继续，已授权服务不再提示',async()=>{
+ const store=createAgentTaskStore({indexedDB:new IDBFactory(),IDBKeyRange}),opened=[],added=[];let allowed=false,calls=0;
+ const config=mergeConfig({anchorId:'10',ai:{enabled:true,endpoint:'https://reply.example/v1/chat/completions',model:'reply',taskModels:{research:{enabled:true,endpoint:'https://research.example/v1/responses',model:'research'}}}});
+ const chrome={runtime:{getURL:path=>`chrome-extension://test/${path}`,sendMessage:async()=>{}},permissions:{contains:async()=>allowed,onAdded:{addListener:f=>added.push(f),removeListener(){}}},tabs:{query:async()=>[],onRemoved:{addListener(){},removeListener(){}},create:async options=>{opened.push(options);queueMicrotask(()=>{allowed=true;for(const listener of added)listener({origins:['https://research.example/*']});});return {id:90};}}};
+ const host=createBackgroundAI({store,chrome,readRecord:async key=>key==='live-assistant:config:1' ? config : 'fixture-key',fetch:async url=>{calls++;return {status:200,url,text:async()=>JSON.stringify({output:[{type:'message',role:'assistant',content:[{type:'output_text',text:'{"action":"finish","answer":"现有资料不足。","citations":[]}'}]}]})};}});
+ try{
+  for(const id of ['first-task','second-task']){
+   await host.handle({type:'agent-submit',id,question:'整理已有知识',input:{context:{},sources:[]}},'1');
+   const result=await until(async()=>{const row=(await host.handle({type:'agent-list'},'1')).find(row=>row.id===id);return ['succeeded','failed'].includes(row?.status) && row;});
+   assert.equal(result.status,'succeeded',result.error);
+  }
+  assert.equal(calls,2);assert.deepEqual(opened,[{url:'chrome-extension://test/service-access.html',active:true}]);
+ }finally{await host.close();}
+});
+
 for(const local of [false,true])test(`独立后台API缺权限时指出实际域名，授权后可重新执行${local ? '（本地带端口）' : ''}`,async()=>{
  const endpoint=local ? 'http://localhost:11434/v1/chat/completions' : 'https://research.example/v1/responses',pattern=local ? 'http://localhost/*' : 'https://research.example/*';
  const config=mergeConfig({anchorId:'10',ai:{enabled:true,endpoint:'https://reply.example/v1/chat/completions',model:'reply',taskModels:{research:{enabled:true,endpoint,model:'research'}}}});

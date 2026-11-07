@@ -18,18 +18,19 @@ import {formatAccountEvidence} from '../src/ai/account-evidence.js';
 import {continuousEnabled,createContinuousResearch,researchEvidenceIsCurrent} from '../src/ai/continuous-research.js';
 import {researchLimits,researchSettings} from '../src/ai/research-settings.js';
 import {servicePermissionPattern} from './service-permissions.js';
-export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,saveSupplement,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
+import {createServiceAccess} from './service-access.js';
+export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=async()=>({}),relationships,knowledge,collectAccount,saveSupplement,serviceAccess,fetch:fetcher=globalThis.fetch,store=createAgentTaskStore()}){
+ const access=serviceAccess || createServiceAccess(chrome);
  const authorized=origin=>chrome.permissions.contains({origins:[servicePermissionPattern(origin)]});
  const request=details=>{
   const controller=new AbortController();let timeout;
   void (async()=>{try{
    const searching=details.operation==='search',weather=['weather','public-data'].includes(details.operation),provider=details.searchProvider;
    const url=weather ? details.operation==='weather' ? validateWeatherURL(details.url) : validatePublicDataURL(details.url) : searching ? validateSearchEndpoint(details.url,provider) : validateEndpoint(details.url);
-   const origin=new URL(url).origin;
-   if(!await authorized(origin))throw new Error(weather ? `公开数据服务域名 ${origin} 尚未授权，请在扩展详情中允许访问后重试` : `${searching ? '搜索服务' : '后台研究模型'}域名 ${origin} 尚未授权，请点击扩展图标，在“AI 服务访问权限”中点击“${searching ? '授权搜索服务域名' : '授权后台研究服务域名'}”后重试`);
-   if(controller.signal.aborted)throw new Error('请求已取消');
    if(!weather && (typeof details.data!=='string' || details.data.length>AI_REQUEST_LIMIT))throw new Error('后台请求超过容量');
    if(searching)validateSearchBody(provider==='searxng' ? Object.fromEntries(new URLSearchParams(details.data)) : JSON.parse(details.data),provider);
+   await access.ensure(url,{signal:controller.signal,label:weather ? '公开数据服务' : searching ? '搜索服务' : '后台研究模型'});
+   if(controller.signal.aborted)throw new Error('请求已取消');
    if(details.timeout>0)timeout=setTimeout(()=>controller.abort(),Math.min(details.timeout,2147483647));
    const response=await fetcher(url,{method:weather ? 'GET' : 'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:weather ? {} : details.headers,body:weather ? undefined : details.data});
    const text=await response.text();if(text.length>AI_RESPONSE_LIMIT)throw new Error('后台模型响应超过容量');details.onload({status:response.status,responseText:text,finalUrl:response.url});
@@ -113,5 +114,5 @@ export function createBackgroundAI({chrome,readRecord,writeRecord,readConfigs=as
    const input=validateAgentInput({...message.input,anchor,ai:resolveAITaskConfig(config.ai,'research')});for(const url of input.sources)validatePublicURL(url);
    if(input.subject)input.subjectEpoch=subjectEpoch((await readRecord(`live-assistant:live-memory:${room}:${anchor}`))?.audience,input.subject);
    return harness.submit({id:message.id,scope,question:message.question,input});
-  },pruneProfiles:(room,anchor)=>profiles?.prune(room,anchor),wake:async()=>{await harness.ready;await loop.tick();harness.drain();},close:async()=>{await harness.close();store.close();}};
+  },pruneProfiles:(room,anchor)=>profiles?.prune(room,anchor),wake:async()=>{await harness.ready;await loop.tick();harness.drain();},close:async()=>{await harness.close();if(!serviceAccess)access.close();store.close();}};
 }

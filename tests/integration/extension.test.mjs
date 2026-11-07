@@ -81,12 +81,35 @@ async function worker(values = {}, indexedDB = new IDBFactory(), responseText='{
     constructor(options = {}) { super({...options, indexedDB: options.indexedDB || indexedDB, IDBKeyRange}); }
   };
   const chrome={runtime:{getURL:()=> 'chrome-extension://test/',onMessage:{addListener:f=>listener=f}},storage:{local:{QUOTA_BYTES:5*1024*1024,getBytesInUse:async()=>usedBytes,setAccessLevel:async()=>{},get:async()=>values,set:async v=>Object.assign(values,v),remove:async keys=>{for(const key of Array.isArray(keys)?keys:[keys])delete values[key];}},onChanged:{addListener:f=>changed=f}},permissions:{contains:async()=>allowed},tabs:{query:async()=>[{id:1,url:'https://live.douyin.com/1'},{id:2,url:'https://live.douyin.com/2'}],sendMessage:async(id,m)=>{sent.push([id,m]);return {ok:true};}}};
+  overrides.configureChrome?.(chrome);
   const code=(await readFile(file('background.js'),'utf8'));
   vm.runInNewContext(code,{ReadableStream,TransformStream,Headers,Request,Response,AbortSignal,TextDecoder,performance,atob,btoa,queueMicrotask,CustomEvent,structuredClone,fanclubFrameContext,cleanFanclubSnapshot,chrome,ProtocolCache,installCollectionKeeper,validateEndpoint,validateSearchEndpoint,validateSearchBody,GiftStore,DurableStorage:WorkerDurableStorage,isDurableKey,indexedDB,IDBKeyRange,TextEncoder,crypto:globalThis.crypto,AbortController,setTimeout,clearTimeout,URL,URLSearchParams,fetch:async(url,opts)=>{requests.push({url,opts});return {status:200,url,text:async()=>responseText};},...overrides});
   const sender={frameId:0,tab:{url:'https://live.douyin.com/1'}};
   const durable=()=>new DurableStorage({indexedDB,IDBKeyRange,local:chrome.storage.local});
   return {values,indexedDB,durable,sent,requests,changed,route:(m,s,reply)=>listener(m,s,reply),usage:value=>{usedBytes=value;},send:(m,s=sender)=>new Promise(r=>listener(m,s,result=>r(structuredClone(result)))),deny:()=>allowed=false};
 }
+test('构建后台自动引导AI与搜索授权，确认后继续原请求，拒绝后可重新授权且拒绝网页伪造',async()=>{
+ const granted=new Set(),opened=[];let chrome;
+ const w=await worker({},new IDBFactory(),'{"choices":[]}',{configureChrome:value=>{
+  chrome=value;chrome.runtime.id='test';chrome.runtime.getURL=path=>`chrome-extension://test/${path}`;chrome.runtime.sendMessage=async()=>{};
+  chrome.permissions.contains=async({origins})=>origins.every(p=>granted.has(p));chrome.tabs.create=async value=>{opened.push(value);return {id:90};};
+ }});
+ const popup={id:'test',url:'chrome-extension://test/service-access.html'},request={type:'ai',requestId:'permission-request-001',url:'https://model.example/v1/responses',data:JSON.stringify({model:'test',input:[{role:'user',content:'你好'}]})};
+ const pending=w.send(request);await new Promise(resolve=>setTimeout(resolve,30));assert.equal(w.requests.length,0);assert.equal(opened.length,1);
+ const state=await w.send({type:'service-access-state'},popup);assert.equal(state.ok,true,state.error);assert.equal(state.value.services[0].origin,'https://model.example');
+ assert.equal((await w.send({type:'service-access-complete',patterns:['https://model.example/*']})).ok,false);
+ assert.equal((await w.send({type:'service-access-state'},{id:'evil',url:popup.url})).ok,false);
+ granted.add('https://model.example/*');assert.equal((await w.send({type:'service-access-complete',patterns:['https://model.example/*']},popup)).ok,true);
+ assert.equal((await pending).ok,true);assert.equal(w.requests.length,1);assert.equal((await w.send(request)).ok,true);assert.equal(opened.length,1);
+ const search={type:'search',url:'https://api.bochaai.com/v1/web-search',data:JSON.stringify({query:'测试',count:3,summary:true,freshness:'noLimit'})};
+ const blocked=w.send(search);await new Promise(resolve=>setTimeout(resolve,20));assert.equal(w.requests.length,2);
+ await w.send({type:'service-access-complete',patterns:['https://api.bochaai.com/*'],allowed:true},popup);
+ const denied=await blocked;assert.equal(denied.ok,false);assert.match(denied.error,/尚未授权/);assert.equal(w.requests.length,2);
+ granted.add('https://api.bochaai.com/*');await w.send({type:'service-access-complete',patterns:['https://api.bochaai.com/*']},popup);assert.equal((await w.send(search)).ok,true);assert.equal(w.requests.length,3);
+ const cancelRequest={...request,url:'https://other.example/v1/responses',requestId:'cancel-permission-001'};
+ const cancelled=w.send(cancelRequest);await new Promise(resolve=>setTimeout(resolve,20));await w.send({type:'ai-request-cancel',id:cancelRequest.requestId});assert.equal((await cancelled).ok,false);assert.equal(w.requests.length,3);
+});
+
 test('通用后台路由不抢答离屏准备的存储消息',async()=>{
  const w=await worker(),replies=[],sender={url:'chrome-extension://test/'};
  for(const target of ['edge-offscreen','edge-background'])assert.equal(w.route({target,action:'preparation-read'},sender,value=>replies.push(value)),undefined);

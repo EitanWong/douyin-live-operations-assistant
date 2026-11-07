@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+ <meta charset="utf-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1">
+ <meta name="color-scheme" content="light dark">
+ <title>允许访问 AI 服务</title>
+ <link rel="stylesheet" href="solid-glass.css">
+ <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+ <header><div><h1>允许访问 AI 服务</h1><p>确认一次，继续刚才的操作</p></div></header>
+ <main>
+  <p id="access-status" class="status" role="status">正在检查需要授权的服务…</p>
+  <ul id="access-services" class="hint" aria-label="需要访问的服务"></ul>
+  <button id="access-allow" class="primary" disabled>一键授权并继续</button>
+  <p class="hint">无需填写地址。点击后在 Chrome 提示中确认，刚才等待的请求会自动继续。已经授权的服务不会重复提示。</p>
+  <button id="access-cancel" class="primary">暂不授权</button>
+  <p class="hint">只申请本次实际需要的服务域名，不会申请访问所有网站。取消后保留原输入，不发送尚未授权的请求。</p>
+ </main>
+ <footer><label class="theme-setting">外观<select data-theme-choice aria-label="显示模式"><option value="system">跟随系统</option><option value="light">亮色</option><option value="dark">暗色</option></select></label><p>这是浏览器的网站访问授权。服务商的 API 密钥仍在原设置中管理。</p></footer>
+ <script type="module" src="service-access-page.js"></script>
+</body>
+</html>

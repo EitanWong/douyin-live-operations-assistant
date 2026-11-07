@@ -1,4 +1,4 @@
-import {servicePermissionPattern} from './service-permissions.js';
+import {createServiceAccess} from './service-access.js';
 import {AI_REQUEST_LIMIT,AI_RESPONSE_LIMIT} from '../src/services/ai-wire.js';
 import {createKnowledgeCorpus} from '../src/ai/knowledge-corpus.js';
 import {createAutomaticKnowledge} from '../src/services/automatic-knowledge.js';
@@ -162,13 +162,20 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),saveSupplement:(...args)=>sharedKnowledge.supplement(...args),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
+const serviceAccess=createServiceAccess(chrome);
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,serviceAccess,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),saveSupplement:(...args)=>sharedKnowledge.supplement(...args),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake'){void getAIBackground().wake().catch(()=>{});void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});}});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:0.5});
 void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});
 chrome.runtime.onMessage.addListener((message,sender,reply) => {
   if(['edge-offscreen','edge-background'].includes(message?.target))return;
+  if(message?.type==='service-access-changed')return;
+  if(['service-access-state','service-access-complete','service-access-cancel'].includes(message?.type)){
+    if(sender.url!==chrome.runtime.getURL('service-access.html') || sender.id!==chrome.runtime.id){reply({ok:false,error:'服务授权来源无效'});return;}
+    void serviceAccess.handle(message).then(value=>reply({ok:true,value}),error=>reply({ok:false,error:error.message}));
+    return true;
+  }
   if (message?.type === 'fanclub-frame') {
     void (async()=>{
       try {
@@ -395,7 +402,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       else if(message.type==='media-sdp' && isRoom(sender)){
         const url=validateRealtimeEndpoint(message.url);validateSDP(message.data);
         if(typeof message.headers?.Authorization!=='string' || !/^Bearer [^\s]{1,1000}$/u.test(message.headers.Authorization))throw new Error('百炼实时认证无效');
-        if(!await chrome.permissions.contains({origins:[servicePermissionPattern(url)]}))throw new Error('请点击扩展图标，授权音视频服务域名后重试');
+        await serviceAccess.ensure(url,{label:'音视频服务'});
         const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),25000);
         try{
           const response=await fetch(url,{method:'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:{'Content-Type':'application/sdp',Authorization:message.headers.Authorization},body:message.data});
@@ -407,16 +414,18 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
         const searching=message.type==='search',weather=['weather','public-data'].includes(message.type);
         const provider=message.provider || (String(message.url).endsWith('/web-search') ? 'bocha' : 'tavily');
         const url = weather ? message.type==='weather' ? validateWeatherURL(message.url) : validatePublicDataURL(message.url) : searching ? validateSearchEndpoint(message.url,provider) : validateEndpoint(message.url);
-        if (!await chrome.permissions.contains({origins:[servicePermissionPattern(url)]})) throw new Error(`请点击扩展图标，授权当前${searching ? '搜索' : ' AI '}服务域名后重试`);
         if (!weather && (typeof message.data !== 'string' || message.data.length > (message.type==='media' ? MEDIA_REQUEST_LIMIT : AI_REQUEST_LIMIT))) throw new Error('AI请求过大');
         const form=searching && provider==='searxng';
         const body = weather ? null : form ? Object.fromEntries(new URLSearchParams(message.data)) : JSON.parse(message.data);
         if(searching)validateSearchBody(body,provider);else if(message.type==='media')validateMediaRequest(body);else if (!weather && (!Array.isArray(new URL(url).pathname.endsWith('/responses') ? body.input : body.messages) || typeof body.model !== 'string')) throw new Error('AI请求无效');
         const wait=Number.isSafeInteger(message.timeout) && message.timeout>=0 ? message.timeout : searching ? 30000 : 25000;
-        const controller = new AbortController(), timeout = wait>0 ? setTimeout(()=>controller.abort(),Math.min(wait,2147483647)) : undefined;
+        const controller = new AbortController();let timeout;
         const requestKey=typeof message.requestId==='string' && /^[a-z\d-]{16,80}$/iu.test(message.requestId) ? `${sender.tab.id}:${message.requestId}` : null;
         if(requestKey){activeAIRequests.set(requestKey,controller);if(cancelledAIRequests.delete(requestKey))controller.abort();}
         try {
+          await serviceAccess.ensure(url,{signal:controller.signal,label:searching ? '搜索服务' : message.type==='media' ? '音视频服务' : weather ? '公开数据服务' : 'AI 服务'});
+          if(controller.signal.aborted)throw Error('请求已取消');
+          timeout=wait>0 ? setTimeout(()=>controller.abort(),Math.min(wait,2147483647)) : undefined;
           const response = await fetch(url,{method:weather ? 'GET' : 'POST',credentials:'omit',redirect:'error',signal:controller.signal,headers:weather ? {} : {'Content-Type':form ? 'application/x-www-form-urlencoded' : 'application/json',...(typeof message.headers?.Authorization === 'string' ? {Authorization:message.headers.Authorization} : {})},body:weather ? undefined : message.data});
           const text = await response.text();
           value={status:response.status,responseText:text.slice(0,AI_RESPONSE_LIMIT),finalUrl:response.url};
