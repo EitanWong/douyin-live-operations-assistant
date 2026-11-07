@@ -34,14 +34,19 @@ export class LocalDataEngine{
   if(!await this.enabled())return false;
   if(!record || !/^\d{1,30}$/.test(record.room) || !['event','protocol','forecast','coverage','account','pk-state','knowledge'].includes(record.kind) || typeof record.id!=='string' || record.id.length>240 || !record.id.length || !Number.isFinite(record.receivedAt) || record.receivedAt<=0 || !record.payload || typeof record.payload!=='object')throw Error('本地归档记录无效');
   const size=bytes(record);if(size>500000)throw Error('本地归档记录过大');
-  await this.db.transaction('rw',this.db.queue,this.db.meta,async()=>{
+  try {await this.db.transaction('rw',this.db.queue,this.db.meta,async()=>{
    const previous=await this.db.queue.get(record.id);
    if(previous){if(JSON.stringify(previous.record)!==JSON.stringify(record))throw Error('本地归档记录标识冲突');return;}
    const usage=await this.db.meta.get('usage') || {id:'usage',bytes:0};
    if(usage.bytes+size>MAX_PENDING_BYTES)throw Error('本地归档缓冲已满，请恢复本地数据组件后重试；未确认记录仍保留');
    await this.db.queue.add({id:record.id,room:record.room,receivedAt:record.receivedAt,size,record});
    await this.db.meta.put({...usage,bytes:usage.bytes+size});
-  });return true;
+  });} catch(error) {
+   // A full outbox must still wake its consumer after a host repair/restart.
+   void this.flush();
+   throw error;
+  }
+  return true;
  }
  flush(){
   if(this.flushing)return this.flushing;

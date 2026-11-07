@@ -3817,3 +3817,17 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - Chrome 本机界面点击目标扩展Reload，实际观察字面提示 `Reloaded`。确认两个直播页设置已保存、场控暂停后，使用绑定标签的reload刷新两页；原生快捷键首次未清除旧上下文，定向reload后原失效提示消失。已打开的知识库实际显示新版图内探索入口、80人物/72关系；第二页显示“等待开播 · 持续监控中 · 等待直播数据”“设置已保存”。截图随后因用户切换页面显示新版后台研究模型/人物整理模型设置，图谱数据保存在同任务ui-evidence.json；不将该截图当作图谱截图。未启动场控、发送测试弹幕、提交设置或调用模型。
 - UI中途检测到用户切换Chrome，先重读状态再继续；一次内部页绑定不受支持，使用受支持的本机Chrome界面操作；一次第二标签尚未claim导致查询失败，claim后完成刷新。原文stdout/stderr/exit、探针修正、补丁及UI证据均保留。crapper、dryer、mutator已检查CLI与当前工具目录，均不可用，三项未执行，不由其他检查代替。
 - 本任务无新增工作树；仅清理本任务可重建的baseline/candidate/独立回滚副本及多余构建目录，保留原件、四角色、输入、命令回执和截图。行动日志提交后普通push到dev；精确提交SHA与远端一致性回执存于同目录delivery-receipt.json，完成报告注明实际结果。不操作main、版本、标签或Release。
+
+
+## 2026-11-07：现场修复直播数据等待与整场归档阻塞
+
+- 用户指定直播间558446503161，目标始终是当前仓库dev及其已加载Chrome扩展。先按agent:find/agent:impact定位MAIN桥接、content交付、本地outbox与原生数据宿主，核对源码和历史；原始HEAD为bf53254。抓包和真实outbox只保存在ignored的output/live-capture-fix-2026-11-07，不提交观众数据、签名或HAR。
+- 现场观察MAIN hook=true、frames=5、events=8、errors=0、connected=true，但面板协议帧保存0，显示等待直播连接恢复/等待直播数据；归档pending24518，SQLite148417条。Network实际取得HTTP poll 200与WebSocket101，说明平台连接可用。扩展菜单重试归档复现数据无效，未删除队列。
+- 根因一：2026-11-07 02:16提交d894b1e扩展知识摘要增加subject/subjectEpoch，本机data-host仍是11-06旧版本；真实待写首32条在旧宿主第2条报ValueError: 知识内容摘要不匹配，当前源码同输入inserted32/acknowledged32。根因二：2026-11-05提交919665b在archiveBatch成功前阻挡status/events/captures交付，并将归档错误当connected=false；满队列enqueue失败又无法唤醒原落盘消费者，故故障叠加后无法自行恢复。
+- TDD新增真实content入口/EventInbox回归和outbox回归：归档失败、归档悬而未决、满队列恢复3项先按预期失败。最小修正extension/content.js的drainBridge先发布真实状态并交付一次，bridgeDelivered防重复，归档成功才推进bridgeAck；归档故障独立记录archiveError。extension/local-data.js的enqueue事务失败仍唤醒原flush，保留原错误与未确认记录。专项12/12通过，包含真实Python framing→SQLite；无新依赖、界面布局或用户配置改动。
+- 备份旧宿主native-host-before.tar后，执行npm run data:install -- --extension-id=ochlmfoecapadlllbeodlpnnlpehjdla同步现有组件，保留数据库与安装设置。唤醒data-flush恢复积压；构建后先完成prepare-reload检查点，再通过Chrome原生界面Reload现有扩展并定向刷新同一直播页。用户原有自动发送状态保留，本任务未启动场控、发送测试互动或提交开关设置。
+- 现场验收：页面显示运行中·自动发送·直播数据已连接；本次协议帧保存62→116，等待0/隔离0/已知缺口0。扩展归档菜单实测待落盘0/已落盘174134；随后CLI174173条，目标房间connected=true、fresh=true、gaps=0，最近15分钟包含弹幕、礼物、人数、点赞、榜单、PK等18类事件。原24518条积压已恢复，未清空原记录。截图live-connected.png、archive-drained.png及literal命令输出live-after-ledger.json保存在同证据目录。
+- DevTools导出8请求的sanitized HAR，含真实WS帧；重放90帧155811字节，解码错误0，得到13类事件。另12种未识别协议method原帧仍保留，不将原帧保存等同所有字段已解析，不保证平台未下发数据或故障期间既有缺口可补回。原生Save路径含斜线被对话框转成冒号文件名，确认后移动到证据目录；调试中一次console语法错误修正后重跑，未修改产品绕过错误。
+- 四角色沿用同目录MODIFIED_FILE.tar、DIFF_FILE.patch、VERIFICATION.txt、可执行ROLLBACK.sh，源码原件BASELINE.tar保留。相同6项输入：BASELINE3失败exit1→MODIFIED6/6通过exit0→独立副本ROLLBACK同3失败exit1，两个源码恢复SHA与原件相等；再应用patch保留修改版，补丁逐字重建成功。旧宿主真实32条重放同样得到失败exit1→当前源码成功exit0→旧宿主失败exit1，所有stdout/stderr/status保存并追加原VERIFICATION。
+- npm run build、npm run check及git diff --check通过。系统python3首次原生全测缺httpx出现5错误/1skip，未计通过；改用已有native/.venv/bin/python后138/138通过。首次npm test无界并发与另一个任务测试同时运行造成大量swap，仅按lsof stdout核实后终止本任务PID9864/9916及其子进程，保留中止日志；以现有venv和node --test --test-concurrency=2 tests重跑，结果后续追加，不终止其他任务。查找不存在的docs/development/data-engine.zh-CN.md一次exit2，改用rg --files确认docs/features/local-data-engine.zh-CN.md并补充同步宿主和恢复说明。
+- crapper/dryer/mutator已核对CLI及当前工具目录均不可用，三项未执行，不以其他检查替代。agent:index已更新；完整测试、并行dev集成、最终构建/check、提交与普通push回执随后追加。未改main、版本、标签或Release。

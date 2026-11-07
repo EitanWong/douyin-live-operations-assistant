@@ -147,7 +147,7 @@ if (room) {
     if (request.type === 'open-panel') { if (panel && !panel.open) panel.toggleOpen(); reply({ok:Boolean(panel)}); }
     if (request.type === 'room-info') reply({ ok:true, endpoint:panel?.readEndpoint?.() || panel?.config.ai.endpoint || '', mediaEndpoint:(()=>{try{return panel?.aiSettings.pipelineEndpoint() || '';}catch{return panel?.node('[data-field="ai.media.visionEndpoint"]')?.value || '';}})(), searchEndpoint:panel?.node('[data-field="ai.search.endpoint"]')?.value || panel?.config.ai.search.endpoint || '', ready:Boolean(panel) });
   });
-  let bridgeTimer,bridgeAck,bridgePending=false,bridgeStopped=false;
+  let bridgeTimer,bridgeAck,bridgeDelivered,bridgePending=false,bridgeStopped=false;
   const archiveBatch=createDataCapture(message);
   const drainBridge=async()=>{
     if(bridgeStopped || bridgePending || contextInvalidated)return;
@@ -155,15 +155,25 @@ if (room) {
     try {
       const batch=await message({type:'page-command',command:{type:'drain',ack:bridgeAck,paused:Boolean(activeAdapter?.flowPaused)}});
       if(bridgeStopped || !batch || typeof batch!=='object')return;
+      // Transport health and live consumers must not wait for optional archival.
+      receivePacket({type:'status',status:batch.status});activeAdapter?.sync();
       if(batch.batchId==null || batch.batchId!==bridgeAck){
-        await archiveBatch(batch);
+        const archival=archiveBatch(batch);
+        if(batch.batchId==null || batch.batchId!==bridgeDelivered){
+          for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
+          for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
+          bridgeDelivered=batch.batchId;
+        }
+        try {await archival;}
+        catch(error){
+          if(!contextInvalidated){liveStatus={...liveStatus,archiveError:error.message};activeAdapter?.sync();}
+          return;
+        }
         if(bridgeStopped || contextInvalidated)return;
-        for(const event of [...(batch.priority||[]),...(batch.events||[])])receivePacket({type:'event',event});
-        for(const record of batch.captures||[])receivePacket({type:'protocol-frame',record});
-        // This acknowledges admission to the bounded content queues, not disk durability.
+        // Both live admission and the durable archive outbox must succeed.
         bridgeAck=batch.batchId;
       }
-      receivePacket({type:'status',status:batch.status});activeAdapter?.sync();more=batch.more===true;
+      more=batch.more===true;
     } catch(error) {
       if(!contextInvalidated)liveStatus={...liveStatus,connected:false,bridgeError:error.message};
       activeAdapter?.sync();

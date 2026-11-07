@@ -39,3 +39,22 @@ test('local archive validates room and size, and makes a failed enable visible',
   await assert.rejects(engine.enqueue({...row,payload:{text:'x'.repeat(700000)}}),/过大/);
  }finally{engine.close();}
 });
+
+test('a full outbox retries native draining before accepting another record',async()=>{
+ let calls=0;
+ const engine=new LocalDataEngine({indexedDB:new IDBFactory(),IDBKeyRange,request:async(action,records)=>{
+  calls++;return {acknowledged:records.map(r=>r.id)};
+ }});
+ try {
+  await engine.configure(true,{probe:false});
+  // Existing durable work fills the budget while the native host is offline.
+  await engine.db.queue.add({id:row.id,room:row.room,receivedAt:row.receivedAt,size:256*1024*1024,record:row});
+  await engine.db.meta.put({id:'usage',bytes:256*1024*1024});
+  await assert.rejects(engine.enqueue({...row,id:'next'}),/缓冲已满/);
+  await engine.flushing;
+  assert.equal(calls,1,'a failed admission must still wake the recovered native host');
+  assert.equal((await engine.status()).pending,0);
+  assert.equal(await engine.enqueue({...row,id:'next'}),true);
+  await engine.flush();assert.equal((await engine.status()).pending,0);
+ }finally{engine.close();}
+});
