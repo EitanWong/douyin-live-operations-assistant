@@ -147,7 +147,22 @@
       "modelScopeTests": 6,
       "defaultAndDedicatedModelScopedResearch": true,
       "baselineCommit": "f2dabbff3daa61838f60856af0032df4f0cd1837",
-      "finalCI": "pending"
+      "finalCI": {
+        "run": 42374412949,
+        "head": "d9172073c8932de4ca93551a62d1772a78b96382",
+        "status": "success",
+        "jsPassed": 1955,
+        "nativePassed": 138,
+        "mergeCommit": "faf10fae47d5173c29d38bff83a71733632e0c94",
+        "base": "dev",
+        "pr": 23
+      }
+    },
+    "finalIntegratedBrowser": {
+      "graphStates": 22,
+      "pageStates": 120,
+      "expandedFocusDraft": true,
+      "runtimeErrors": 0
     }
   }
 }
