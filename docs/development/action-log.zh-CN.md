@@ -16,6 +16,7 @@
 - 最终合并树完整JavaScript回归 **2026/2026通过**，0失败/取消/跳过，270498.204334ms、exit0。产品与测试源码在回归前后SHA一致；工作台基准100轮状态刷新中位0.552ms、P95 1.032ms，正文重投影0次、隐藏页面读取图表配置0次（仅该合成基准，不代表所有设备性能）。最终独立油猴脚本和MV3扩展重新构建，build/check及空白差异检查回执保存在VERIFICATION。
 - 四角色事务：独立副本ROLLBACK恢复BASELINE相同字面输出（调用0、知识0、缺姓名错误），exit0；781份原文件SHA逐字恢复。再次应用DIFF_FILE后785份成员与修改包逐字一致，固定输入恢复调用1、知识2、助理关系unverified且无错误，exit0。实际工作树始终保留修改版，原用户工作区仍干净未改源码。四角色与基线、固定输入和原始stdout/stderr/exit均保留；仅清理经本任务进程核对后不再使用的验收副本，不清理其他聊天工作树。
 - crapper/dryer/mutator不可用，三项未执行；本轮未改native源码。没有调用用户真实模型或改写实际直播知识库，现用扩展尚未重载。最终普通push至dev的精确提交与远端一致性回执写入同目录delivery-receipt.json及VERIFICATION；不推main、不改版本、不创建标签或Release。
+- 功能dffd7a5、合并f1ab0c7和验收日志 **bf1cc62f6cc3d04ef97b95063bec02856e076b77** 已普通push至origin/dev（e112064→bf1cc62，exit0），ls-remote精确一致，工作树干净。本条仅补交付回执，随后文档提交的精确SHA和普通push结果继续记录于同目录delivery-receipt.json；实际构建在本聊天受管工作树dist/chrome-extension，加载新版扩展后单文本入口生效。
 
 ## 2026-11-06 浏览器本地多模态兜底与视觉记忆
 
