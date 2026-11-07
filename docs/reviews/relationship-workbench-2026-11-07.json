@@ -8,18 +8,21 @@
   },
   "validation": {
     "javascript": {
-      "tests": 1762,
-      "passed": 1762,
+      "tests": 1878,
+      "passed": 1878,
       "failed": 0,
       "cancelled": 0,
       "skipped": 0,
-      "seconds": 267.129
+      "seconds": 578.806,
+      "concurrency": 1
     },
     "native": {
-      "tests": 53,
-      "passed": 52,
-      "skipped": 1,
-      "reason": "FFmpeg unavailable in this test environment; real decoder test skipped"
+      "tests": 138,
+      "passed": 138,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 18.658,
+      "environment": "Isolated Python3.14 venv using native/requirements.lock.txt; local FFmpeg present"
     },
     "build": true,
     "index": true,
@@ -62,7 +65,7 @@
       "No sustained live-session or browser FPS / RSS claim",
       "System reduced-motion change not performed; shared runtime behavior covered by product-runtime tests"
     ],
-    "integratedDev": "48dde6b72cccaf3a0d7ffdc91c84a59123326d49"
+    "integratedDev": "e00a90c0cb564c666959b496984b8fdfb120f37d"
   },
   "benchmark": {
     "at": "2026-11-06T20:09:15.596Z",
@@ -114,5 +117,21 @@
     "dryer": "unavailable, not executed",
     "mutator": "unavailable, not executed"
   },
-  "evidenceDirectory": "output/relationship-workbench-2026-11-07/"
+  "evidenceDirectory": "output/relationship-workbench-2026-11-07/",
+  "delivery": {
+    "devCommit": "f8c96e201e0c7337dc050e75ea7bd13ae0c19512",
+    "remoteVerified": true,
+    "pullRequest": "https://github.com/EitanWong/douyin-live-operations-assistant/pull/21",
+    "pullRequestState": "MERGED",
+    "ciRun": 42360174146,
+    "ciObserved": "Native and JavaScript tests passed; syntax/package steps still running when recorded",
+    "verificationDirectory": "output/relationship-dev-push-2026-11-07/",
+    "initialFullRun": {
+      "tests": 1878,
+      "passed": 1877,
+      "failed": 1,
+      "seconds": 571.801,
+      "failure": "Existing income restoration display wait; unchanged isolated test passed, then full serial run passed"
+    }
+  }
 }
