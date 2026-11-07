@@ -72,7 +72,7 @@ test('读取千票榜专属区域，并解析昵称与分数合并的用户项',
   dom.window.close();
 });
 
-test('按提供的千票榜选择器读取只有昵称的用户并标记1000分下限', () => {
+test('千票榜只有昵称与序号时不推算1000分，即使标题声称有人上榜', () => {
   const dom = new JSDOM(`<div id="chatroom">
     <div><div class="LyAdeVIF sBRqUw32">
       <div></div><div></div><div><div><div><div></div><div><div class="Ypyh0f2S">
@@ -84,11 +84,18 @@ test('按提供的千票榜选择器读取只有昵称的用户并标记1000分�
   </div>`);
   assert.equal(dom.window.document.querySelectorAll('#chatroom > div > div.LyAdeVIF.sBRqUw32 > div:nth-child(3) > div > div > div:nth-child(2) > div.Ypyh0f2S').length, 1);
   const rows = readAudienceContributions(dom.window.document);
-  assert.deepEqual(rows.map(({name,score,scoreIsFloor,userId})=>({name,score,scoreIsFloor,userId})), [
-    {name:'榜单用户甲',score:1000,scoreIsFloor:true,userId:'12345678'},
-    {name:'榜单用户乙',score:1000,scoreIsFloor:true,userId:'87654321'}
-  ]);
+  assert.deepEqual(rows, []);
   dom.window.close();
+});
+
+test('千票榜空态与加载提示不能生成虚构的1000贡献用户', () => {
+  for (const text of ['暂无1000贡献用户', '暂无上榜用户', '加载中']) {
+    const dom=new JSDOM(`<div id="chatroom"><div><div class="LyAdeVIF sBRqUw32">
+      <div></div><div></div><div><div><div><div></div><div><div class="Ypyh0f2S"><span>${text}</span></div></div></div></div></div>
+    </div></div><p>1000贡献用户(0)</p></div>`);
+    assert.deepEqual(readAudienceContributions(dom.window.document),[],text);
+    dom.window.close();
+  }
 });
 
 test('独立用户榜无需千票标题；嵌套资料链接只归属本行，不能从兄弟行借UID',()=>{

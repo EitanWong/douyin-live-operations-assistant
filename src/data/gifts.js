@@ -43,7 +43,7 @@ export function contributionSnapshot(rows, knownUsers = []) {
   }
   const users = new Map(), boards = new Map(), resolvedRows = [];
   for (const row of rows) {
-    if (!Number.isFinite(row.score) || row.score < 0 || row.score > 1e9 || !nameKey(row.name)) continue;
+    if (row.scoreIsFloor || !Number.isFinite(row.score) || row.score < 0 || row.score > 1e9 || !nameKey(row.name)) continue;
     const matches = identities.get(nameKey(row.name));
     const userId = uidKey(row.userId) || (matches?.size === 1 ? [...matches][0] : '');
     const entry = {...row,userId}; resolvedRows.push(entry);
@@ -146,6 +146,14 @@ export class GiftLedger {
         const user=session.giftAudience[userId] ||= {userId,name:'',giftDiamonds:0,giftCount:0,unknownCount:0,countsPartial:true};
         user.giftCount+=segment.count; if (progress.unitValue === null) user.unknownCount+=segment.count;
       }
+    }
+    // Pre-v7 DOM rows without scores were assigned 1000 solely by their
+    // container. Revoke those estimates, keeping gifts and explicit scores.
+    // A mixed aggregate cannot recover its exact unnamed portion; resampling
+    // supplies it again, while explicit UID contributions remain available.
+    if (state?.version < 7) for (const session of this.sessions.values()) {
+      for (const [userId,entry] of Object.entries(session.contributions || {})) if (entry.scoreIsFloor) delete session.contributions[userId];
+      if (session.contributionFloor?.hasFloor) delete session.contributionFloor;
     }
     this.serial = 0;
   }
@@ -340,6 +348,7 @@ export class GiftLedger {
   }
 
   observeContribution({userId, name, score, scoreIsFloor, capturedAt, roomId, rate}) {
+    if (scoreIsFloor) return false;
     // A sample without a confirmed live session must never revive a finished
     // broadcast or put a stale board in the next broadcast.
     const session = roomId ? [...this.sessions.values()].find(item => item.roomId === roomId) : this.sessions.get(this.currentSessionId);
@@ -421,7 +430,7 @@ export class GiftLedger {
     return total;
   }
   currentSession() { return this.sessions.get(this.currentSessionId) || [...this.sessions.values()].sort((a,b) => b.startAt-a.startAt)[0] || null; }
-  serialize() { return { version: 6, days: [...this.days], legacyDays: [...this.legacyDays], active: [...this.active], finalized: [...this.finalized], sessions: [...this.sessions], currentSessionId: this.currentSessionId }; }
+  serialize() { return { version: 7, days: [...this.days], legacyDays: [...this.legacyDays], active: [...this.active], finalized: [...this.finalized], sessions: [...this.sessions], currentSessionId: this.currentSessionId }; }
 }
 
 // 存储层供扩展后台和用户脚本共用；持久数据每次从存储读取，服务工作线程重启不丢账。
@@ -493,6 +502,7 @@ export class GiftStore {
   recordContribution({ room, date = giftDate(this.now()), userId, name = '', score, scoreIsFloor = false, capturedAt, roomId = '', rate = 0.05 }) {
     return this.transaction(async () => {
       if (!/^\d+$/.test(String(room)) || !/^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(date) || giftDate(Date.parse(`${date}T12:00:00+08:00`)) !== date || !/^uid:\d+$/.test(String(userId)) || !Number.isFinite(score) || score < 0 || score > 1e9) throw new Error('榜单校准数据无效');
+      if (scoreIsFloor) return false;
       if (capturedAt !== undefined) {
         if (!Number.isFinite(capturedAt) || capturedAt <= 0 || capturedAt > this.now() + 60000 || typeof roomId !== 'string' || roomId.length > 100 || !Number.isFinite(rate) || rate < 0 || rate > 10) throw new Error('榜单校准数据无效');
         const incomeKey = `live-assistant:income:${room}`;
@@ -508,7 +518,7 @@ export class GiftStore {
       const entries = new Map(Array.isArray(state?.entries) ? state.entries : []);
       const entryKey = `${date}:${userId}`;
       const previous = entries.get(entryKey);
-      if (previous && (Number(previous.score) > score || (Number(previous.score) === score && (!previous.scoreIsFloor || scoreIsFloor)))) return false;
+      if (previous && !previous.scoreIsFloor && Number(previous.score) >= score) return false;
       entries.set(entryKey, { date, userId, name: String(name).slice(0, 60), score, scoreIsFloor:Boolean(scoreIsFloor), observedAt: this.now() });
       // 历史月报依赖这些持久记录，新一天采样不能删除以前的收入估值。
       await this.set(key, { version: 1, entries: [...entries] });
@@ -548,7 +558,7 @@ export class GiftStore {
     const ledger = new GiftLedger({ state: await this.get(`live-assistant:income:${room}`, null), now: this.now });
     const days = [...ledger.days].filter(([date]) => date.startsWith(month)).sort(([a], [b]) => b.localeCompare(a)).map(([date, day]) => ({ date, ...day }));
     const calibrationState = await this.get(`live-assistant:income-calibration:${room}`, null);
-    const entries = (Array.isArray(calibrationState?.entries) ? calibrationState.entries.map(([, entry]) => entry) : []).filter(entry => entry.date.startsWith(month));
+    const entries = (Array.isArray(calibrationState?.entries) ? calibrationState.entries.map(([, entry]) => entry) : []).filter(entry => !entry.scoreIsFloor && entry.date.startsWith(month));
     const byDay = new Map();
     const monthUsers = new Set();
     for (const entry of entries) {
