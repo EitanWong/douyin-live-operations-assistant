@@ -17,6 +17,8 @@
 - 四角色事务：独立副本ROLLBACK恢复BASELINE相同字面输出（调用0、知识0、缺姓名错误），exit0；781份原文件SHA逐字恢复。再次应用DIFF_FILE后785份成员与修改包逐字一致，固定输入恢复调用1、知识2、助理关系unverified且无错误，exit0。实际工作树始终保留修改版，原用户工作区仍干净未改源码。四角色与基线、固定输入和原始stdout/stderr/exit均保留；仅清理经本任务进程核对后不再使用的验收副本，不清理其他聊天工作树。
 - crapper/dryer/mutator不可用，三项未执行；本轮未改native源码。没有调用用户真实模型或改写实际直播知识库，现用扩展尚未重载。最终普通push至dev的精确提交与远端一致性回执写入同目录delivery-receipt.json及VERIFICATION；不推main、不改版本、不创建标签或Release。
 - 功能dffd7a5、合并f1ab0c7和验收日志 **bf1cc62f6cc3d04ef97b95063bec02856e076b77** 已普通push至origin/dev（e112064→bf1cc62，exit0），ls-remote精确一致，工作树干净。本条仅补交付回执，随后文档提交的精确SHA和普通push结果继续记录于同目录delivery-receipt.json；实际构建在本聊天受管工作树dist/chrome-extension，加载新版扩展后单文本入口生效。
+- 用户后续确认可以刷新扩展后，只读核实Chrome安装记录：扩展ochlmfoecapadlllbeodlpnnlpehjdla实际加载原项目dist/chrome-extension，旧目录尚未包含本轮功能。先完整备份43份现有构建文件到外部reload-update/DIST_BEFORE.tar，再逐文件原子更新ai.js、edge-worker.js、page.js、background.js、content.js；41份新版构建文件SHA全部一致，两个未被manifest引用的旧开发辅助文件保留。路径、扩展ID和0.1.3版本保持一致，未触碰用户存储或代为刷新直播页。
+- 更新备份在独立副本实际回滚，stdout/stderr为空、exit0，43份原文件SHA恢复；重新应用新版后41份构建SHA一致。同步回执、逐文件前后哈希与补充回滚脚本位于原四角色目录reload-update，不替换既有四角色。复用最终2026/2026全测和未变化源码的构建结果，仅补文档/check与普通dev推送；完整stdout/stderr、最终提交和重开角色哈希继续写入VERIFICATION。用户现在可在Chrome扩展页点“重新加载”，然后刷新直播页；本轮没有调用真实模型。一次rg使用不存在的scripts/demo*通配符导致zsh退出1，改用实际文件路径后退出0。
 
 ## 2026-11-06 浏览器本地多模态兜底与视觉记忆
 
