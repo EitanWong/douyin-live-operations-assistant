@@ -3738,3 +3738,12 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 性能：2000条正反关系陈述合并为1000关系，画布有界80人物/76关系，冷20.818ms、温查询中位3.133ms/p95 4.690ms（本机Node26合成CPU基准）。共享工作台100次状态刷新中位0.765ms/p95 4.389ms，正文变更0，隐藏页图表读取0；留存堆变化301984字节。图实例销毁清除canvas、观察器和待处理帧。以上不代表真实浏览器FPS、进程RSS或全天内存保证。
 - 回滚、完整证据目录与最终提交推送结果随后补充；crapper/dryer/mutator仍不可用，未执行。没有删除其他任务工作树、用户草稿、资料或模型。
 - 回滚事务已执行：相同三条朋友语句的BASELINE为2条关系、MODIFIED为1条、单独副本ROLLBACK恢复2条，命令均退出0；恢复SHA256与原件完全一致（6ab95e404116a9067928f3908b5fc8d8942b113ac2e72e9123890fd3e6b9bae3），随后重新写回修改版。原始工作区源码未改。修改源、全项目补丁、VERIFICATION.txt与自包含可执行ROLLBACK.sh保存并重新打开核对，证据目录为 `output/relationship-intelligence-2026-11-07/`，汇总见 `docs/reviews/relationship-intelligence-2026-11-07.json`。
+## 2026-11-07：导出并修复 Cytoscape 浏览器警告
+
+- 目标保持当前仓库 dev，用户提供的两条 Cytoscape 警告均在 `createNetworkView` 与共享画布样式中定位。先查 agent:find / agent:impact、保存两份源码原字节与 SHA，再写行为红测；两项均按预期失败，分别观察到自定义滚轮敏感度警告和缺失定位上下文。仅删除 `wheelSensitivity:.18` 并在共享 `.network-canvas` 增加 `position:relative`；采用库默认滚轮行为，不屏蔽 console，不新增尺寸算法。
+- 真实 Chrome 首次普通 DOM 仅复现滚轮警告，查明 Cytoscape 自动将定位样式写到 document.head；将夹具改成扩展相同的 Shadow DOM 后，两条原警告同时复现，确认根因是文档样式不能跨影子树。浏览器同输入 BASELINE 两警告/static → MODIFIED 无警告/relative → ROLLBACK 两警告/static。独立回滚副本原始 SHA 全部恢复，patch 重建与修改档逐字一致；工作区保留修改版。原件、原始控制台 JSON、源码副本、补丁、输入、stdout/stderr/exit、截图与可执行回滚留在 `output/cytoscape-browser-errors-2026-11-07`，四角色已重开。
+- 独立浏览器夹具实际验证放大/缩小、三种布局、键盘缩放/平移、滚轮、隐藏/恢复、图片导出、销毁后零 canvas；完整本地工作台通过 UI 写入虚构长资料，观察3人物/2关系，长原文与人物档案在有界正文滚动，独立放大/关闭、反复展开/收起、面板隐藏/恢复、两次指针拖动及六次键盘缩放未新增控制台警告或错误。390窄屏稳定状态主内容362px、画布278px，正文scrollHeight2419px由220px高的overflow:auto区域承接，无主内容横向溢出；桌面恢复与拖动后同样通过。560视口的首次读数处于过渡、仍为桌面几何，不作为该断点通过证据。未修改通用尺寸预算；不声称所有硬件性能或所有页面全面浏览器回归。
+- 验证通过：专项12/12；完整 `node --test --test-concurrency=2 tests` **1932/1932**、0失败/取消/跳过，332581.026833ms；agent:index 554模块/3113符号；build、check（含索引与源码/产物语法）、git diff --check 均退出0。原生与依赖未修改，未重复原生测试；crapper/dryer/mutator 已检查CLI与当前工具目录，均不可用，三项未执行，不用其他检查冒充通过。
+- 工具诊断：首轮shell误用zsh只读变量status退出1，改为result_code后重新保留红测退出1；浏览器等待下载事件超时，但实际JSON已落盘，恢复会话后直接读回并解析验证。真实直播页被另一任务占用，本轮不抢占或重载；诊断导出范围是本项目真实Chrome复现和完整本地工作台，未声称导出 chrome://extensions 全部历史或其他扩展错误。修复已重新构建到 dist/chrome-extension，运行实例需重新加载扩展及刷新直播页后生效。
+- 无新增工作树，其他工作树均未清理；只清理本任务可重建验收副本与本地演示服务，保留四角色及原件、证据。未改main、版本或标签。功能提交与dev普通推送回执随后补记，最终精确SHA记入同一VERIFICATION/checkpoint。
+- 实际提交与推送：功能提交 **da153fb5feff3bc0f7025f0996f3025cadc10363** 已普通 push 到 origin/dev（f2dabbf→da153fb，exit0），git ls-remote 精确一致；全量1932/1932与本地浏览器2/0/2是已观察结果，未将其等同远端CI通过。仅追加本验收回执；最终文档提交与远端确认记录同一VERIFICATION/checkpoint。本任务四角色、原件及浏览器报告仍在原路径，已关闭本地4197服务，未重载用户直播页。
