@@ -10,6 +10,9 @@
 - crapper/dryer/mutator再次核实PATH和工具目录均不可用，三项未执行。操作错误保留：一次zsh不存在的src/browser/boot*通配符退出1；旧夹具mock.js读取退出1后改用实际chrome-fixture.js。首次全测误写不存在的test-venv PATH，主动SIGTERM停止本任务进程，Node退出1；第二次在主题接入修正后主动停止，Node退出1。两次中断不作为验收结果，最终测试对冻结后的648份源码完整重跑。CUA一次browser绑定未定义，绑定已选浏览器id1后继续，未切换用户浏览器或接管直播页。
 - 首轮完整JavaScript回归2044/2044通过，0失败/取消/跳过，292610.233541ms、exit0。固定探针云端/本地BASELINE首次均failed且请求0、无授权页，MODIFIED首次均自动打开1页并在模拟确认后succeeded、请求1次，第二次成功且无重复授权；独立副本ROLLBACK恢复787份父SHA和字面BASELINE，默认回滚恢复781份初始SHA，重放累计补丁后792份成员逐字一致且恢复MODIFIED，stdout/stderr/exit一致。
 - 普通推送前发现origin/dev新增3a8bdf7/f55e8cb人物自动去重修复。先以aed8976提交本轮功能，再安全合并保留对方源码与全部日志；唯一冲突为生成索引，通过agent:index重建解决（592模块/3239符号），不强推。追加顺序访问模型→搜索用例，先复现旧授权页未重新显示的红测；将打开状态限于在途创建，后续新域名聚焦同一页，避免请求无提示等待。红测断言后清理引发一次未处理拒绝提示，夹具加接收器并仍await结果，产品未吞错误。合并后的最终完整回归、部署和精确提交回执继续追加，首轮2044不作为合并树通过数。
+- 最终合并树完整JavaScript回归2053/2053通过，0失败/取消/跳过，289155.189917ms、exit0；649份产品/测试/脚本/native源码SHA前后全部一致，build/check和git diff --check通过。合并后再次实际回滚恢复787份父版SHA和字面BASELINE，重放补丁后793份成员逐字一致并恢复MODIFIED；三态探针exit0、stderr为空，工作树保留最终修复。等待授权120秒为上限，原请求/任务自身时限和取消仍有效，超时后保留原输入可重试。
+- Chrome原加载目录完整备份44份文件，仅原子更新background.js/content.js/popup.html并新增service-access.html和service-access-page.js；44份新构建SHA全部一致，两个旧开发辅助文件保留，部署共46份。独立副本实际执行RESTORE_DIST.sh恢复全部44份原SHA，重放后46份部署成员一致。原项目770份受跟踪源码未变，用户存储未写入，没有重载真实扩展或直播页、没有授予真实域名权限或调用用户API。用户重新加载扩展和刷新直播页后，未来缺权限时自动打开引导页。
+- 本任务4193预览服务主动Ctrl-C停止（exit130），浏览器视口已复原、测试页已关闭；经lsof逐份核实无打开句柄后仅清理本轮可重建基线/事务/部署副本，归档、截图和逐字证据保留。aed8976与合并42314b7197f3a3dd33d014c68d6c1292b68dfcc2已普通push至origin/dev（f55e8cb→42314b7，exit0），ls-remote精确一致；随后仅提交本条交付日志，最终文档提交和普通push精确SHA继续记录于原VERIFICATION及auto-permission/delivery-receipt.json，不推main、不改版本或发布。
 
 ## 2026-11-08：修复后台研究 API 授权入口与错误被泛化
 
