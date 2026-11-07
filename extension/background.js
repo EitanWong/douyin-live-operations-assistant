@@ -160,7 +160,7 @@ async function writeStorage(key, value) {
     await chrome.storage.local.set({[key]:value});
   }
 }
-let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query)=>relationshipLibrary.query(room,query),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
+let aiBackground;const getAIBackground=()=>aiBackground ||= createBackgroundAI({chrome,readRecord,writeRecord,readConfigs:()=>durableStorage.getAll(['live-assistant:config:']),knowledge:automaticKnowledge,relationships:(room,query,options)=>relationshipLibrary.query(room,query,{},options),collectAccount:(room,url,options)=>accountResearch.collect(room,url,options)});
 const activeAIRequests=new Map(),cancelledAIRequests=new Set();
 chrome.alarms?.onAlarm?.addListener(alarm=>{if(alarm.name==='ai-task-wake'){void getAIBackground().wake().catch(()=>{});void storageReady.then(()=>publicMedia.wakeAll()).catch(()=>{});}});
 chrome.alarms?.create?.('ai-task-wake',{periodInMinutes:1});
@@ -256,7 +256,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply) => {
       }else if(message.type==='relationship-query' && isRoom(sender)){
         const override={};
         if(message.memory!==undefined)override.memory=validateMemory(message.memory);
-        const graphOptions={browse:message.browse===true,status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all',...(typeof message.recordId==='string' && message.recordId.length<=4000 ? {recordId:message.recordId} : {})};
+        const graphOptions={browse:message.browse===true,overview:message.overview===true,entityIds:Array.isArray(message.entityIds) ? [...new Set(message.entityIds.filter(id=>typeof id==='string' && id.startsWith('person:') && id.length<=4000))].slice(0,6) : [],status:['verified','unverified','observed','conflicted'].includes(message.status) ? message.status : 'all',...(typeof message.recordId==='string' && message.recordId.length<=4000 ? {recordId:message.recordId} : {})};
         await sharedKnowledge.ensure();value=await relationshipLibrary.query(roomFromUrl(sender.tab.url),message.query,override,graphOptions);
       }else if(message.type==='account-search' && isRoom(sender)){
         if(typeof message.query!=='string' || !message.query.trim() || message.query.length>80)throw new Error('请输入80字以内的抖音搜索词');

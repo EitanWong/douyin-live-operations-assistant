@@ -98,3 +98,13 @@ test('明确人物字段保留完整否定和条件，不把截断前半段写�
  const facets=f.query('小雨性格').entities.find(n=>n.name==='小雨').dossier.facets;
  assert.ok(facets.some(e=>e.category==='personality' && e.text===value));
 });
+test('浏览画像优先覆盖不同维度，重复事实保留多来源但不重复展示',()=>{
+ const f=fixture();
+ for(let i=0;i<12;i++)f.audience.observe(chat(`repeat-${i}`,'我喜欢陶艺。'));
+ const dossier=f.retrieve(f.input,'小雨',{browse:true}).entities.find(n=>n.name==='小雨').dossier;
+ assert.equal(dossier.facets.filter(r=>r.category==='interests' && r.text==='陶艺').length,1);
+ assert.ok(dossier.facets.some(r=>r.category==='personality'));
+ assert.ok(dossier.facets.some(r=>r.category==='speechStyle'));
+ assert.ok(dossier.coverage.dimensions.includes('personality'));
+ assert.ok(dossier.facets.find(r=>r.text==='陶艺').evidenceCount>1);
+});

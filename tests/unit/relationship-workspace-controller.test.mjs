@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {RelationshipWorkspace} from '../../src/ui/relationship-workspace.js';
 const graph=()=>({entities:[{id:'a',name:'阿明',role:'主播',evidence:[]}],relations:[],ambiguities:[],sources:{chunks:[]}});
+test('图内详情按需开启，关闭保留人物、草稿与回答，换人回到速览',async()=>{
+ const f=fixture();try{
+  const c=f.controller;await c.refresh();assert.equal(c.state.inspectorOpen,false);
+  c.select({kind:'entity',id:'a'});assert.equal(c.state.inspectorOpen,false);
+  c.dispatch({type:'question',value:'保留这个问题'});c.dispatch({type:'inspectorTab',value:'questions'});assert.equal(c.state.inspectorOpen,true);
+  c.publish({answer:{answer:'已有回答'}});c.dispatch({type:'closeInspector'});
+  assert.equal(c.state.inspectorOpen,false);assert.equal(c.state.selected.id,'a');assert.equal(c.state.question,'保留这个问题');assert.equal(c.state.answer.answer,'已有回答');
+  c.dispatch({type:'questionScope',value:'single'});assert.equal(c.state.answer.answer,'已有回答');
+  c.dispatch({type:'inspectorTab',value:'dossier'});c.select({kind:'entity',id:'a'});assert.equal(c.state.inspectorOpen,false);
+ }finally{f.close();}
+});
 function fixture(retrieve=async()=>graph()){
  const dom=new JSDOM('<div id="host"><div data-relationship-workspace></div></div>'),root=dom.window.document.querySelector('#host');
  let now=10000;const memory={enabled:true,entries:[]},controller=new RelationshipWorkspace(root,{retrieve,readMemory:()=>memory,now:()=>now});
@@ -36,5 +47,15 @@ test('完整原文按加载时查询读取，切换人物拒绝迟到原文；�
   await f.controller.refresh();f.controller.select({kind:'entity',id:'a'});const original=f.controller.original('record:a');f.controller.select(null);release({record:{text:'旧原文'}});await original;assert.equal(f.controller.state.original,null);
   f.controller.dispatch({type:'pathTo',value:'a'});assert.equal(f.controller.state.pathTo,'a');f.controller.dispatch({type:'pathTo',value:''});assert.equal(f.controller.state.pathTo,'');
   f.controller.dispatch({type:'layout',value:'invalid'});assert.equal(f.controller.state.layout,'concentric');assert.equal(f.memory.entries.length,0);
+ }finally{f.close();}
+});
+test('多人和全局问答携带独立范围，选择变化取消旧请求并保留输入草稿',async()=>{
+ const requests=[],queries=[],value={...graph(),entities:[...graph().entities,{id:'b',name:'小雨'}]};
+ const f=fixture(async(q,m,o)=>{queries.push(o);return value;});
+ try{
+  const c=f.controller;await c.refresh();c.service={run:async args=>{requests.push(args);return {status:'succeeded',answer:'已核对',trace:[{step:'tool:knowledge',detail:'检索原文',at:1}]};}};
+  c.dispatch({type:'question',value:'两人有哪些共同兴趣'});c.dispatch({type:'questionScope',value:'group'});c.dispatch({type:'people',value:['a','a','missing','b']});await c.ask();
+  assert.deepEqual(requests[0].relationshipContext.focus,{scope:'group',entityIds:['a','b'],names:['阿明','小雨']});assert.deepEqual(queries.at(-1).entityIds,['a','b']);assert.equal(c.state.trace[0].detail,'检索原文');
+  c.dispatch({type:'questionScope',value:'global'});await c.ask();assert.deepEqual(requests[1].relationshipContext.focus.entityIds,[]);assert.equal(queries.at(-1).overview,true);assert.equal(c.state.question,'两人有哪些共同兴趣');
  }finally{f.close();}
 });

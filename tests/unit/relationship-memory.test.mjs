@@ -108,7 +108,7 @@ test('中文口语省略“的”和反向自述仍绑定实际说话账号，�
  const names=new Map(result.entities.map(n=>[n.id,n.name]));
  assert.ok(result.relations.some(r=>names.get(r.from)==='阿明' && names.get(r.to)==='小雨' && r.predicate==='师傅'));
  assert.ok(result.relations.some(r=>names.get(r.from)==='青哥' && names.get(r.to)==='阿明' && r.predicate==='徒弟'));
- assert.ok(result.relations.some(r=>names.get(r.from)==='小雨' && names.get(r.to)==='小李' && r.predicate==='朋友'));
+ assert.ok(result.relations.some(r=>new Set([names.get(r.from),names.get(r.to)]).has('小雨') && new Set([names.get(r.from),names.get(r.to)]).has('小李') && r.predicate==='朋友' && r.symmetric));
 });
 
 test('口语省略不把“甲和乙是好朋友”误解为“甲和乙”与“好”的关系',()=>{

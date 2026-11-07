@@ -4,6 +4,7 @@ import {AI_SERVICE_GROUPS,selectAIServices,projectSharedAIServices} from './serv
 import {updatePersonProfile} from './services/person-profile.js';
 import {createRelationshipLibrary} from './ai/relationship-library.js';
 import {withRelationshipEvidence} from './services/relationship-query.js';
+import {createRelationshipResearch} from './services/relationship-research.js';
 import {createSpeechRecognizer} from './services/speech-routing.js';
 import {createAccountRefresh} from './services/account-refresh.js';
 import {rankAccountTargets} from './services/account-targets.js';
@@ -905,7 +906,7 @@ export function boot(options = {}) {
     const taskTransport=async()=>{
       if(options.agentTasks)return options.agentTasks;
       localAgentReady ||= import('./ai/local-agent.js').then(({createLocalAgentTasks})=>{
-        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:(kind,endpoint)=>kind==='search' ? sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'') : taskModelSecret(engine.config.ai,'research') ? sessionKeys.get(taskModelSecret(engine.config.ai,'research')) ?? get(taskModelSecret(engine.config.ai,'research'),'') : pipelineConfig(engine.config.ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''),get,set});
+        localAgentTasks=createLocalAgentTasks({room,anchor:()=>engine.config.anchorId,request,getKey:(kind,endpoint)=>kind==='search' ? sessionKeys.get(searchSecretKey(endpoint)) ?? get(searchSecretKey(endpoint),'') : taskModelSecret(engine.config.ai,'research') ? sessionKeys.get(taskModelSecret(engine.config.ai,'research')) ?? get(taskModelSecret(engine.config.ai,'research'),'') : pipelineConfig(engine.config.ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),''),get,set,relationships:(query,graphOptions)=>queryRelationships(query,undefined,graphOptions),knowledge:async query=>(await webKnowledge.candidates(query,engine.config.ai.search)).flatMap(row=>row.results)});
         return localAgentTasks;
       });
       return localAgentReady;
@@ -926,7 +927,9 @@ export function boot(options = {}) {
     const previewService=createAIPlayground({request,search:searchClient,knowledge:webKnowledge,edge,getConfig:()=>engine.config,getContext:c=>engine.aiContext(c),
         isCurrent:()=>!closed && !suspended && roomContext.current(),
         getKey:(endpoint,ai)=>pipelineConfig(ai).mode==='omni-only' ? mediaKey(endpoint) : sessionKeys.get(secretKey(endpoint)) ?? get(secretKey(endpoint),'')});
-    panel.relationshipWorkspace.service=previewService;
+    panel.relationshipWorkspace.service=createRelationshipResearch({tasks:taskTransport,getConfig:()=>engine.config,
+      getContext:()=>{const current=engine.aiContext();return {persona:engine.config.ai.persona,knowledge:engine.config.ai.knowledge,context:current.context,recentReplies:current.recentReplies,liveContext:current.liveContext,mediaContext:current.mediaContext,now:Date.now()};},
+      isCurrent:()=>!closed && !suspended && roomContext.current()});
     playground=new AIPlayground(panel.root,{service:previewService,
       describe:()=>{const ai=resolveReplyConfig(engine.config.ai);return `已保存 · ${ai.model} · 联网${ai.search.enabled ? '开启' : '关闭'} · 每条最多${engine.config.sending.maxLength}字`;},
       exportReport:report=>download(`douyin-ai-tests-${room}-${giftDate()}.json`,JSON.stringify(report,null,2))

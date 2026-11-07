@@ -42,18 +42,27 @@ function giftingSummary(person){
  return {observed,byScope:person.supports.length>1 ? person.supports.slice(0,3) : [],scopeCount:person.supports.length,types:[...types.values()].sort((a,b)=>b.count-a.count).slice(0,3),prediction:null,
   basis:'本房30天采样的送礼种类和累计件数；多房间分别列出，不作为全平台消费或未来概率'};
 }
-function selectFacets(facets,query){
+function selectFacets(facets,query,{browse=false}={}){
+ const groups=new Map();
+ for(const row of facets){
+  const key=JSON.stringify([row.category,row.text.normalize('NFKC').replace(/\s+/gu,' ').trim(),row.trust]);
+  const previous=groups.get(key);
+  if(previous){previous.evidenceCount++;if(previous.evidence.length<3)previous.evidence.push(row);}
+  else groups.set(key,{...row,evidenceCount:1,evidence:[row]});
+ }
+ facets=[...groups.values()];
  const entries=facets.map((f,i)=>({id:String(i),title:PERSON_FACETS[f.category],content:f.text,source:f.source,updatedAt:f.at}));
  const selected=query ? retrieveKnowledge(entries,query).chunks.map(c=>Number(c.entryId)) : [];
  const rest=facets.map((_,i)=>i).sort((a,b)=>facets[b].at-facets[a].at);
- return [...new Set([...selected,...rest])].slice(0,8).map(i=>facets[i]);
+ const categories=new Set(),diverse=rest.filter(i=>{if(categories.has(facets[i].category))return false;categories.add(facets[i].category);return true;});
+ return [...new Set([...selected,...diverse,...rest])].slice(0,browse ? 20 : 8).map(i=>facets[i]);
 }
 export function personDossier(node,query,{browse=false}={}){
  const person=node.person,records=[...person.records.values()],events=records.filter(r=>r.kind!=='research-lead'),leads=records.filter(r=>r.kind==='research-lead');
  if(!records.length && !person.supports.length && !person.profiles.size)return undefined;
- const facets=selectFacets(person.facets,query);
+ const facets=selectFacets(person.facets,query,{browse});
  const result={policy:PERSON_DOSSIER_POLICY,profiles:[...person.profiles].slice(0,2),facets,analysis:person.analysis.slice(0,3),events:passages(events,query,4),speechSamples:passages(events.filter(r=>r.self && r.kind==='chat'),query,2),leads:passages(leads,query,2),gifting:giftingSummary(person),
-  missing:Object.keys(PERSON_FACETS).filter(key=>!person.facets.some(r=>r.category===key)),coverage:{records:events.length,leads:leads.length,facets:person.facets.length,selection:'相关原文片段；完整原记录仍在来源存档，未采集内容未知'}};
+  missing:Object.keys(PERSON_FACETS).filter(key=>!person.facets.some(r=>r.category===key)),coverage:{records:events.length,leads:leads.length,facets:person.facets.length,dimensions:[...new Set(person.facets.map(r=>r.category))],selection:'相关原文片段；完整原记录仍在来源存档，未采集内容未知'}};
  for(const key of ['speechSamples','leads','events','analysis','facets'])while(JSON.stringify(result).length>(browse ? 6500 : 4000) && result[key].length)result[key].pop();
  return result;
 }
