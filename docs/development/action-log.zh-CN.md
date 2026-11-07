@@ -3511,3 +3511,5 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 深一层真实复核：复用原8条音画知识一次进入实际LangGraph（无模型/联网），8条原文全部保留、1个网址归为1个引用，但coverage只剩末段18767ms视觉说明；披露窗口同时含“整个夏天”音轨和“贝雷帽”视觉文字，却统一带末段单帧限制。mixed-url命令exit0只代表探针执行，allInputCoverageRetained=false，不能记为验收通过。共同错误前提为“一个引用网址只需一份证据种类/范围”；8个片段竞争1个可变字段，最后写者覆盖。停止继续修补单一字段，下一单元先移除这一归属假设，让每段原文绑定自己的范围，保留同URL引用和预算，再验证读取升级/重复片段/重启等行为。该缺口仍未修复，阶段修正不能代表完整多模态事实性通过。
 
 - 按真实生产检索入口复现合并：原retrieveSourceRecords在8条原知识中分别检索“整个夏天”和“贝雷帽”，两次knowledge各返回1段，实际LangGraph归为同一URL引用；音轨和视觉文字都在，但coverage只剩9400ms单帧说明，allDeliveredCoverageRetained=false。该探针exit0不是质量通过。另确认extension/ai-background.js会将result.sources再交给原knowledge.remember，而knowledge-corpus来源schema目前不包含分段范围；下一修正必须覆盖检查点、披露和回存，不能只给临时上下文加数组后在回存时丢掉。生产及测试仍冻结在c02d60f。
+
+- 最终远端回执：精确实施c02d60fe320a152cc963b7c0e325730318cade6f的CI42347580433已completed/success，JavaScript1837/1837、0失败/取消/跳过，原生138/138；index/build/check/package/upload全部成功。CI原始元数据/日志保存，不重启失败的旧文档run，不将本次通过视为旧快照合并故障根因已解决。实施已推送dev，四角色仍为93文件/13组，混合来源范围丢失、独立人工字幕/视觉参考、用户安装与长期实播未完成；目标active，下一执行动作为基于生产检索复现补分段来源回归与结构修正。
