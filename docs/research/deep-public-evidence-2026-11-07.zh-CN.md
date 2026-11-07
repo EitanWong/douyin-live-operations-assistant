@@ -140,3 +140,16 @@ publicMedia:3/modelLease:1/keyframes:1 协议把帧交给原 createMediaClient �
 本机最终冻结全量 1819/1819、媒体集成5/5、build/check/index通过。另一次独立播放器关系观察取得带目标 `__vid` 的媒体206响应，与详情某地址 origin/path 相同，但去除 `__vid` 后查询仍不相等；不能据此直接放开相似地址。DOM `src` 属性和运行时 `currentSrc` 分别对待。下一阶段仍须取得完整的可验证关系并写对应失败回归，之后才能修改共享媒体来源绑定。
 
 实施36a7a831e6063eb48874532ad32b3639cc177370已推送dev；CI42333494756 success，JavaScript1819/1819、原生119/119，index/build/check/package/upload全部通过。实际播放器生产回放进一步确认workCaptured=true而mediaMatches=false/downloadDescriptor=false；新增temp/__vid及修改cquery/l只是已观测变化，不能自动解释为可信改写规则。来源在capturePublicWorkSample中与播放采样共用currentSrc入口；下一单位先复现该耦合，再核对能否从明确同作品/作者的详情响应直接取得受约束的原始CDN来源。未完成的真实下载绑定与模型/实播验收继续保持。
+
+
+## 详情原始 CDN 来源与播放采样分离
+
+上一节的播放器关系证明，下载身份不能依赖“删掉若干查询参数后看起来相似”。本阶段使用已匹配作品与公开作者的详情响应原始CDN地址，mediaSource()默认返回当前作品的有效描述，再经原采样入口的onMedia交接；无需视频元素、可播放状态或currentSrc相同。原有音画采样仍严格匹配。JS/原生协议允许详情地址不含__vid，存在时仍要求唯一且对应作品，地址不被改写。publicMedia能力4拒绝旧版本3，需在之后更新本机组件才能使用，未重载当前环境。
+
+来源的UID/secUID/时长在整个当前作品范围内核对，跨URL或同响应冲突都失效。私有判断复用资料同一纯函数，错误响应不引入新来源；缓存重读不延长五分钟TTL，真正的新响应才刷新。下载地址只进入原临时任务通道，未放入人物资料、知识原文或模型。
+
+真实公开作品6961737553342991651的新详情HTTP200，生产回放在没有video元素时仍绑定正确作者与原始CDN。实际原生边界和production HTTPX取得6,281,768字节（SHA5db5a0a730539b8ac2f8907cf64ba7ece909d834de83a9c4e7c6fd5bc57931e2），完整FFmpeg音画解码退出0、视频显示时长19,734ms；详情为19,782ms，两者分别保留，没有缩放时间。没有Cookie提取或真实模型加载。这份码流与前文旧媒体哈希不同，不宣称是同一文件。
+
+生产观察器/采样到队列/SQLite/FFmpeg/原文检索及遗忘的集成5/5；本机全量JavaScript1827/1827、原生120/120，build/check/index通过；受控ASR/视觉语义仍不代表真实模型准确率。原四角色87文件、八组BASELINE/MODIFIED/ROLLBACK和逐哈希恢复通过。
+
+另用原生产脚本与声明组成无background/nativeMessaging的独立浏览器harness测试自动注入，普通公开详情正常返回但观察器API未出现；原因尚未确认，不算自动采集通过。下一阶段继续诊断实际document_start加载与已部署调度，再做真实模型事实性和长期实播验收。持续目标保持active。

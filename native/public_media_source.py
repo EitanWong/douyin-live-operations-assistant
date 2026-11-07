@@ -31,9 +31,10 @@ def validate_media_source(value, job, now):
         raise ValueError('MEDIA_SOURCE')
     try:
         url = urlsplit(value['url'])
+        query = parse_qs(url.query, keep_blank_values=True)
         if (url.scheme != 'https' or not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+douyinvod\.com', url.hostname or '')
                 or url.username or url.password or url.port not in (None, 443) or url.fragment
-                or parse_qs(url.query, keep_blank_values=True).get('__vid') != [value['workId']]):
+                or '__vid' in query and query['__vid'] != [value['workId']]):
             raise ValueError('MEDIA_SOURCE')
     except (ValueError, TypeError):
         raise ValueError('MEDIA_SOURCE') from None

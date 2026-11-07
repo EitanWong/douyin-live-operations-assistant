@@ -17,7 +17,7 @@ class PublicMediaSession:
     def handle(self, message):
         action = message.get('action')
         if action == 'capabilities':
-            self.emit({'id': message.get('id'), 'value': {'publicMedia': 3, 'modelLease': 1, 'keyframes': 1}})
+            self.emit({'id': message.get('id'), 'value': {'publicMedia': 4, 'modelLease': 1, 'keyframes': 1}})
         elif action == 'visual-result':
             future = self.pending.get(message.get('id'))
             if future is None or future.done():

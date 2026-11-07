@@ -16,8 +16,12 @@ import {createPublicMediaResearch} from '../../extension/public-media-research.j
 import {createPublicMediaProfileResolver} from '../../extension/public-media-profile.js';
 import {checkResearchProfile} from '../../src/ai/research-profile.js';
 import {nativeDataRequest} from '../../extension/local-data.js';
+import {capturePublicWorkSample} from '../../extension/account-media.js';
+import {JSDOM} from 'jsdom';
+import {build} from 'esbuild';
 
 const nativeHost=fileURLToPath(new URL('../../native/data_host.py',import.meta.url));
+const pageObserver=(await build({entryPoints:['extension/account-page.js'],bundle:true,write:false,format:'iife'})).outputFiles[0].text;
 function nativeTransport(database){return nativeDataRequest({runtime:{sendNativeMessage:(_host,message)=>nativeMessage(nativeHost,['--database',database],message)}});}
 
 for(const subject of ['uid:2','uid:10'])test(`${subject} 浏览器稳定身份→真实原生封包/SQLite/FFmpeg→原文库→前台按人引用，重启与遗忘不复活`,async()=>{
@@ -31,8 +35,16 @@ for(const subject of ['uid:2','uid:10'])test(`${subject} 浏览器稳定身份�
   worker:{ready:async()=>true,run:async()=>{execFileSync('python3',[fileURLToPath(new URL('../helpers/public-media-worker.py',import.meta.url)),database]);return true;}}};
  const bridge=createPublicMediaResearch(options),cache=createWebKnowledge({indexedDB:null});
  try{
-  const observedAt=Date.now(),media=[{workId:'70',author:'author-sec',authorUid:subject.slice(4),url:'https://v1.example.douyinvod.com/file?__vid=70',durationMs:8000,observedAt,expiresAt:observedAt+300000}];
-  await bridge.collect({room:'1',anchor,records:[{kind:'work',id:'70',subject:'author-sec',url:'https://www.douyin.com/video/70',text:'茶杯清洗'}],media});
+  const mediaURL=subject==='uid:2' ? 'https://v1.example.douyinvod.com/file?cquery=original&l=trace' : 'https://v1.example.douyinvod.com/file?__vid=70';
+  const page=new JSDOM('<body></body>',{url:'https://www.douyin.com/video/70',runScripts:'outside-only'}).window;let records,media;
+  try{
+   page.fetch=async()=>new Response('{}');page.eval(pageObserver);
+   page.__INITIAL_STATE__={aweme_detail:{aweme_id:'70',desc:'茶杯清洗',author:{uid:subject.slice(4),sec_uid:'author-sec',nickname:'茶友'},video:{duration:8000,play_addr:{url_list:[mediaURL]}}}};
+   records=page.__liveAssistantPublicAccountV1.snapshot();
+   const sample=await page.eval(`(${capturePublicWorkSample.toString()})`)({audio:false,video:false,workId:'70'});
+   assert.equal(sample.mediaSource?.url,mediaURL,'没有播放器时仍交接同作品详情的未改写来源');media=[sample.mediaSource];
+  }finally{page.close();}
+  await bridge.collect({room:'1',anchor,records,media});
   await assert.rejects(bridge.wake('1'),/interruption/);
   assert.equal((await knowledge.handle('1','list',{anchor})).length,2,'入库之后、确认之前中断仍保留已提交原文');
   await createPublicMediaResearch(options).wake('1');

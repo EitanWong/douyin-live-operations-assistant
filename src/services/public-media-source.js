@@ -11,8 +11,9 @@ export function parsePublicMediaSource(value,{workId,author,subject,epoch=0,now=
  if(row.observedAt<=epoch || row.observedAt>now || row.expiresAt<=now || row.expiresAt<=row.observedAt || row.expiresAt-row.observedAt>PUBLIC_MEDIA_SOURCE_TTL)return null;
  try{
   const url=new URL(row.url);
+  // Detail responses bind the work/author; __vid is optional player decoration.
   if(url.protocol!=='https:' || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+douyinvod\.com$/u.test(url.hostname) || url.username || url.password || url.port || url.hash || /\s/u.test(row.url) ||
-   JSON.stringify(url.searchParams.getAll('__vid'))!==JSON.stringify([row.workId]))return null;
+   url.searchParams.has('__vid') && JSON.stringify(url.searchParams.getAll('__vid'))!==JSON.stringify([row.workId]))return null;
  }catch{return null;}
  return row;
 }

@@ -49,7 +49,7 @@ class PublicMediaSessionContracts(unittest.IsolatedAsyncioTestCase):
             with patch('public_media_session.PublicMediaWorker',return_value=worker),patch('public_media_session.LocalASR') as asr:
                 session=PublicMediaSession(root,emitted.append)
                 session.handle({'id':'probe','action':'capabilities'})
-                self.assertEqual(emitted[-1]['value'],{'publicMedia':3,'modelLease':1,'keyframes':1})
+                self.assertEqual(emitted[-1]['value'],{'publicMedia':4,'modelLease':1,'keyframes':1})
                 asr.assert_not_called()
                 session.handle({'id':'one','action':'run'})
                 session.handle({'id':'two','action':'run'})

@@ -40,7 +40,7 @@ export function createPublicMediaWorkerClient({connect,onResult=()=>{},analyzeVi
      if(message.error)row.reject(Error('本机公开视频任务不可用'));else row.resolve(message.value);
     });
     const value=await ask('capabilities');
-    if(value?.publicMedia!==3 || value.modelLease!==1 || value.keyframes!==1){close();return false;}
+    if(value?.publicMedia!==4 || value.modelLease!==1 || value.keyframes!==1){close();return false;}
     return true;
    }catch{close();return false;}
   })();return probe;

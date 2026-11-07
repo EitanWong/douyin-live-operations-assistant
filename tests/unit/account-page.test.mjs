@@ -27,6 +27,63 @@ function observer(transport){
   }
  }};
 }
+test('后台来源直接选择同作品的原始详情 CDN，播放器改写不能参与匹配',async()=>{
+ const view=observer('fetch'),raw='https://v1.example.douyinvod.com/signed/file?cquery=original&l=trace';
+ try{
+  const payload=detail();payload.aweme_detail.video.play_addr.url_list=[raw];
+  await view.request('/aweme/v1/web/aweme/detail/?aweme_id=70',payload);
+  const selected=view.records.mediaSource();assert.ok(selected);assert.equal(selected.url,raw);assert.equal(selected.authorUid,'2');
+  assert.equal(view.records.mediaSource(raw).url,raw);
+  assert.equal(view.records.mediaMatches(raw+'&temp=player&__vid=70'),false);
+  assert.equal(view.records.mediaSource(raw+'&temp=player&__vid=70'),null);
+  assert.equal(JSON.stringify(view.records.snapshot()).includes('cquery='),false);
+  view.page.history.replaceState(null,'','/video/71');assert.equal(view.records.mediaSource(),null);
+ }finally{view.close();}
+});
+test('不同 CDN 地址不能掩盖同一作品 UID、作者或时长冲突',async()=>{
+ for(const change of [{author:{uid:'3',sec_uid:'sec-author',nickname:'作者'}},{author:{uid:'2',sec_uid:'sec-other',nickname:'作者'}},{duration:8500}]){
+  const view=observer('fetch');
+  try{
+   await view.request('/aweme/v1/web/aweme/detail/?aweme_id=70',detail());
+   assert.ok(view.records.mediaSource(),'冲突前存在已绑定下载来源');
+   const changed=detail();if(change.author)changed.aweme_detail.author=change.author;if(change.duration)changed.aweme_detail.video.duration=change.duration;
+   changed.aweme_detail.video.play_addr.url_list=[mediaURL.replace('file.mp4','other.mp4')];
+   await view.request('/aweme/v1/web/aweme/detail/?aweme_id=70',changed);
+   assert.equal(view.records.mediaSource(),null);assert.equal(view.records.mediaSource(mediaURL),null);
+  }finally{view.close();}
+ }
+});
+test('缓存详情重读不续期下载地址，只有页面新响应能刷新来源',async()=>{
+ const view=observer('fetch');let clock=1800000000000;view.page.Date.now=()=>clock;
+ try{
+  view.page.__INITIAL_STATE__=detail();view.records.snapshot();assert.ok(view.records.mediaSource(mediaURL));
+  clock+=300001;view.records.snapshot();assert.equal(view.records.mediaSource(mediaURL),null);
+  await view.request('/aweme/v1/web/aweme/detail/?aweme_id=70',detail());
+  assert.equal(view.records.mediaSource(mediaURL).observedAt,clock);
+ }finally{view.close();}
+});
+test('同一响应内重复作品的不同 UID 也不能生成默认下载来源',async()=>{
+ const view=observer('fetch');
+ try{
+  const first=detail().aweme_detail,second=detail().aweme_detail;second.author.uid='3';second.video.play_addr.url_list=[mediaURL.replace('file.mp4','duplicate.mp4')];
+  await view.request('/aweme/v1/web/aweme/detail/?aweme_id=70',{aweme_list:[first,second]});
+  assert.equal(view.records.mediaSource(),null);assert.equal(view.records.mediaSource(mediaURL),null);
+ }finally{view.close();}
+});
+test('已有公开详情后，错误状态和嵌套私有内容不提供新的下载地址',async()=>{
+ const view=observer('fetch');
+ try{
+  await view.request('/aweme/v1/web/aweme/detail/?aweme_id=70',detail());
+  for(const change of [{status_code:1},{work:{is_private:1}},{work:{is_deleted:1}},{author:{status:{is_private:1}}},{author:{secret:1}}]){
+   const payload=detail(),url=mediaURL.replace('file.mp4',`invalid-${Object.keys(change)[0]}.mp4`);
+   payload.aweme_detail.video.play_addr.url_list=[url];
+   if(change.status_code)payload.status_code=change.status_code;
+   Object.assign(payload.aweme_detail,change.work);Object.assign(payload.aweme_detail.author,change.author);
+   await view.request('/aweme/v1/web/aweme/detail/?aweme_id=70',payload);
+   assert.equal(view.records.mediaSource(url),null,JSON.stringify(change));
+  }
+ }finally{view.close();}
+});
 for(const transport of ['fetch','xhr-text','xhr-json']){
  test(`${transport} 采集两个准确 HTTPS 平台来源的详情并绑定作品、UID/secUID 和下载描述`,async()=>{
   for(const origin of ['https://www.douyin.com','https://www-hj.douyin.com']){

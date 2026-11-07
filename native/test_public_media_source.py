@@ -13,6 +13,16 @@ SOURCE={'workId':'70','author':'author-sec','authorUid':'2','url':'https://v1.ex
 
 
 class PublicMediaSourceBoundary(unittest.TestCase):
+    def test_detail_cdn_url_without_player_vid_keeps_original_address_and_identity_boundaries(self):
+        source={**SOURCE,'url':'https://v1.example.douyinvod.com/signed/file?cquery=original&l=trace'}
+        self.assertEqual(validate_media_source(source,JOB,NOW),source)
+        for change in [{'workId':'71'},{'authorUid':'3'},{'author':'other-sec'}]:
+            with self.subTest(change=change),self.assertRaisesRegex(ValueError,'MEDIA_SOURCE'):
+                validate_media_source({**source,**change},JOB,NOW)
+        for query in ['__vid=','__vid=71','__vid=70&__vid=70','__vid=70&__vid=']:
+            with self.subTest(query=query),self.assertRaisesRegex(ValueError,'MEDIA_SOURCE'):
+                validate_media_source({**source,'url':'https://v1.example.douyinvod.com/file?'+query},JOB,NOW)
+
     def test_only_fresh_same_work_and_stable_author_on_public_media_cdn_is_accepted(self):
         self.assertEqual(validate_media_source(SOURCE,JOB,NOW),SOURCE)
         for change in [{'workId':'71'},{'author':'other-sec'},{'authorUid':'3'},{'durationMs':0},

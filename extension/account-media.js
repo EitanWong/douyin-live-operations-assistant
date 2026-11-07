@@ -40,10 +40,11 @@ export function createAccountMediaAnalyzer({readAI,capture,transcribe,recognize,
 // Runs only in a temporary tab owned by the collector. No microphone/display
 // capture, platform request signing, or cross-origin canvas bypass.
 export async function capturePublicWorkSample({audio,video,workId}){
+ const observed=workId && window.__liveAssistantPublicAccountV1?.mediaSource?.(),mediaSource=observed?.workId===workId ? observed : null;
  const element=[...document.querySelectorAll('video')].filter(v=>v.readyState>=2 && v.getBoundingClientRect().width>0 && (!workId || window.__liveAssistantPublicAccountV1?.mediaMatches(v.currentSrc))).sort((a,b)=>b.videoWidth*b.videoHeight-a.videoWidth*a.videoHeight)[0];
- if(!element)return {};
+ if(!element)return mediaSource ? {mediaSource} : {};
  const within=async(work,ms)=>{let timer;try{return await Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('采样等待超时')),ms);})]);}finally{clearTimeout(timer);}};
- const result={positionMs:Math.max(0,Math.round(element.currentTime*1000)),mediaSource:window.__liveAssistantPublicAccountV1?.mediaSource(element.currentSrc) ?? null};let stream,context,processor,source,gain;
+ const result={positionMs:Math.max(0,Math.round(element.currentTime*1000)),mediaSource:mediaSource ?? window.__liveAssistantPublicAccountV1?.mediaSource(element.currentSrc) ?? null};let stream,context,processor,source,gain;
  try{
   element.muted=true;
   if(audio)try{await within(element.play(),1200);}catch{}
