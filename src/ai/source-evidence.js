@@ -1,5 +1,9 @@
 import {z} from 'zod';
 
+export const CORPUS_REFERENCE_LIMIT=3;
+const corpusPart='[a-f0-9]{64}:\\d{1,5}-\\d{1,5}';
+export const corpusReferenceSchema=z.string().regex(new RegExp(`^corpus:${corpusPart}(?:,${corpusPart}){0,${CORPUS_REFERENCE_LIMIT-1}}$`,'u'));
+
 export const evidenceProvenance=z.object({evidenceKind:z.enum(['search-snippet','public-page','stored-passage','public-data','public-media']).optional(),publishedAt:z.string().max(80).nullable().optional(),coverage:z.string().max(500).optional()});
 const metadata=evidenceProvenance.extend({sourceId:z.string().regex(/^[a-f0-9]{64}$/u).optional(),at:z.number().finite().optional(),expiresAt:z.number().finite().optional(),title:z.string().max(160).optional()});
 const passage=metadata.extend({start:z.number().int().nonnegative(),end:z.number().int().positive()});

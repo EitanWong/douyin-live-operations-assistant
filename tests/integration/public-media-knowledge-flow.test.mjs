@@ -11,6 +11,7 @@ import {createKnowledgeCorpus} from '../../src/ai/knowledge-corpus.js';
 import {createAutomaticKnowledge,createKnowledgeMemory} from '../../src/services/automatic-knowledge.js';
 import {createWebKnowledge} from '../../src/services/web-knowledge.js';
 import {createAIClient} from '../../src/services/ai.js';
+import {sourcePassages} from '../../src/ai/source-evidence.js';
 import {mergeConfig} from '../../src/core/engine.js';
 import {createPublicMediaResearch} from '../../extension/public-media-research.js';
 import {createPublicMediaProfileResolver} from '../../extension/public-media-profile.js';
@@ -52,7 +53,7 @@ for(const subject of ['uid:2','uid:10'])test(`${subject} 浏览器稳定身份�
   assert.equal(JSON.stringify(values).includes('douyinvod'),false,'临时播放源不能进入浏览器原文库');
   const sequence=values['live-assistant:knowledge:1:10'].sequence;await createPublicMediaResearch(options).wake('1');assert.equal(values['live-assistant:knowledge:1:10'].sequence,sequence);
   const retrieval=createKnowledgeMemory({cache,anchor:()=>anchor,transport:(action,input)=>knowledge.handle('1',action,input)});
-  let calls=0;const client=createAIClient({knowledge:retrieval,getKey:()=> 'test',request:details=>{calls++;const input=JSON.parse(JSON.parse(details.data).messages[1].content),candidate=input.knowledge_candidates.find(row=>row.results.some(source=>source.content.includes('冷水')));assert.ok(candidate);assert.match(candidate.results[0].coverage,/说话人未确认/);details.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:JSON.stringify({intent:'knowledge',query:candidate.id,reply:'视频音轨提到冷水清洗，语音说话人未确认。',sources:[1]})}}]})});}});
+  let calls=0;const client=createAIClient({knowledge:retrieval,getKey:()=> 'test',request:details=>{calls++;const input=JSON.parse(JSON.parse(details.data).messages[1].content),candidate=input.knowledge_candidates.find(row=>row.results.some(source=>source.content.includes('冷水')));assert.ok(candidate);for(const p of sourcePassages(candidate.results[0]))assert.match(p.coverage,/说话人未确认/);details.onload({status:200,responseText:JSON.stringify({choices:[{message:{content:JSON.stringify({intent:'knowledge',query:candidate.id,reply:'视频音轨提到冷水清洗，语音说话人未确认。',sources:[1]})}}]})});}});
   const profile=await options.resolveProfile({room:'1',anchor,subject,author:'author-sec',ai:config.ai});
   assert.match(await client({task:{kind:'ai'},target:{text:'陶瓷茶杯如何清洗',memory:{key:subject==='uid:10' ? 'uid:3' : profile.binding.subject,epoch:profile.epoch,profile:profile.profile}},maxLength:100},config.ai),/冷水/);assert.equal(calls,1);
   assert.equal((await retrieval.candidates('陶瓷茶杯清洗',config.ai.search,{subject:'uid:3'})).length,subject==='uid:10' ? 1 : 0);

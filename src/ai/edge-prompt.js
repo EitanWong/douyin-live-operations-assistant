@@ -35,7 +35,9 @@ export function makeEdgeMessages(input,config){
   sessionMemory:(evidence.evidence_context.sessionMemory?.records || []).slice(0,2).map(r=>({kind:r.kind,text:r.text.slice(0,300),at:r.at})),
   perceptionHistory:(evidence.evidence_context.perceptionHistory?.records || []).slice(0,2).map(r=>({kind:r.kind,text:r.text.slice(0,300),at:r.at})),
   conversationHistory:(evidence.evidence_context.conversationHistory?.records || []).slice(0,2).map(r=>({name:r.name,text:r.text.slice(0,200),at:r.at,...(r.attribution ? {attribution:r.attribution} : {})})),
-  knowledge_candidates:(p.knowledgeCandidates || []).map(row=>({...row,results:row.results.slice(0,2).map(r=>({...r,content:r.content.slice(0,200)}))})),
+  // Canonical candidates are already bounded extracts with exact passage
+  // offsets. Budget fitting can omit a candidate, never sever its evidence.
+  knowledge_candidates:(p.knowledgeCandidates || []).map(row=>row.id?.startsWith('corpus:') ? row : {...row,results:row.results.slice(0,2).map(r=>({...r,content:r.content.slice(0,200)}))}),
   search_meta:p.searchResults ? {cached:Boolean(p.searchResults.cached),evidence:p.searchResults.evidence,excluded:p.searchResults.excluded,searchedAt:p.searchResults.searchedAt,query:p.searchResults.query,error:p.searchResults.error || ''} : null,
   web_search:(p.searchResults?.results || []).map(r=>({index:r.index,title:r.title,content:String(r.content || r.snippet || ''),url:r.url,publishedAt:r.publishedAt})),
   live_context:live ? {income:pick(live.income,['totalDiamonds','giftCount','estimatedIncome','pending','stale','estimateOnly']),audience:pick(live.audience,['online','cumulativeUsers','stale']),pk:compactPK(live.pk),predictions:live.predictions || null,roomSignals:(live.roomSignals || []).slice(-2).map(r=>({type:r.type,text:r.text,stale:r.stale}))} : null,

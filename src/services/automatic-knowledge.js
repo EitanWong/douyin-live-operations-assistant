@@ -1,20 +1,44 @@
 import {subjectKeySchema,researchSubject} from '../ai/audience-profile.js';
 import {canReuseSource,knowledgeLifetime} from './web-knowledge.js';
-import {retrieveKnowledge} from './retrieval.js';
+import {retrieveKnowledge,RETRIEVAL_LIMITS} from './retrieval.js';
+import {mergeSourcePassage,evidenceOffset,corpusReferenceSchema,CORPUS_REFERENCE_LIMIT} from '../ai/source-evidence.js';
 
 const sourcePassage=(row,content)=>({index:1,title:row.title,url:row.source,content,sourceId:row.id,at:row.at,expiresAt:row.expiresAt,publishedAt:row.publishedAt ?? null,
  ...(row.subject ? {subject:row.subject} : {}),
  ...(row.evidenceKind ? {evidenceKind:row.evidenceKind} : {}),...(row.coverage ? {coverage:row.coverage} : {})});
 const sourceInScope=(row,{subject,anchor}={})=>!row.subject || row.subject===subject || Boolean(anchor && row.subject===`uid:${anchor}`);
 
+function corpusRecord(parts){
+ const id=`corpus:${parts.map(({row,start,end})=>`${row.id}:${start}-${end}`).join(',')}`;
+ const sources=parts.map(({row,start,end})=>sourcePassage(row,row.text.slice(start,end)));
+ const source=sources.length===1 ? sources[0] : sources.reduce((old,incoming)=>mergeSourcePassage(old,incoming),undefined);
+ for(const key of ['sourceId','subject'])if(sources[0][key] && sources.every(s=>s[key]===sources[0][key]))source[key]=sources[0][key];
+ return {id,query:id,cached:true,freshness:'stable',searchedAt:source.at,expiresAt:source.expiresAt,results:[{...source,index:1}]};
+}
+
+function resolveCorpusRecord(query,rows,question){
+ if(!corpusReferenceSchema.safeParse(query).success)return null;
+ const refs=query.slice(7).split(',');
+ const parts=[];
+ for(const ref of refs){
+  const match=/^([a-f0-9]{64}):(\d+)-(\d+)$/u.exec(ref);if(!match)return null;
+  const row=rows.find(r=>r.id===match[1]),start=Number(match[2]),end=Number(match[3]);
+  if(!row || !canReuseSource(question,row) || end<=start || end-start>RETRIEVAL_LIMITS.chunkChars || end>row.text.length || evidenceOffset(row.text,start)!==start || evidenceOffset(row.text,end)!==end)return null;
+  if(parts.some(p=>p.row.source!==row.source || p.row.id===row.id && p.start<end && start<p.end))return null;
+  parts.push({row,start,end});
+ }
+ return corpusRecord(parts);
+}
+
 export function retrieveSourceRecords(rows,question,now=Date.now(),scope={}){
  const available=rows.filter(row=>sourceInScope(row,scope) && canReuseSource(question,row,now));
- const found=retrieveKnowledge(available.map(r=>({id:r.id,title:r.title,content:r.text,source:r.source,updatedAt:r.at,expiresOn:''})),question,{maxPerSource:1});
- return found.chunks.slice(0,3).map(chunk=>{
-  const row=available.find(r=>r.id===chunk.entryId),id=`corpus:${row.id}:${chunk.range.start}-${chunk.range.end}`;
-  return {id,query:id,cached:true,freshness:'stable',searchedAt:row.at,expiresAt:row.expiresAt,
-   results:[sourcePassage(row,chunk.content)]};
- });
+ const found=retrieveKnowledge(available.map(r=>({id:r.id,title:r.title,content:r.text,source:r.source,updatedAt:r.at,expiresOn:''})),question,{maxPerSource:CORPUS_REFERENCE_LIMIT});
+ const grouped=new Map();
+ for(const chunk of found.chunks){
+  if(!grouped.has(chunk.source))grouped.set(chunk.source,[]);
+  grouped.get(chunk.source).push({row:available.find(r=>r.id===chunk.entryId),...chunk.range});
+ }
+ return [...grouped.values()].slice(0,3).map(corpusRecord);
 }
 
 // Background-owned canonical corpus. Page messages supply raw search sources,
@@ -63,10 +87,7 @@ export function createKnowledgeMemory({cache,transport,anchor}){
    const rows=(await call('list')).filter(r=>sourceInScope(r,scope(options)));
    if(query.startsWith('corpus:')){
     if(config.rememberKnowledge===false)return null;
-    const [,id,range]=query.split(':'),row=rows.find(r=>r.id===id);if(!row || !canReuseSource(options.question || '',row))return null;
-    const match=/^(\d+)-(\d+)$/u.exec(range || '');if(!match)return null;const start=Number(match[1]),end=Number(match[2]);
-    if(end<=start || end-start>600 || end>row.text.length)return null;
-    return {id:query,query,cached:true,searchedAt:row.at,expiresAt:row.expiresAt,results:[sourcePassage(row,row.text.slice(start,end))]};
+    return resolveCorpusRecord(query,rows,options.question || '');
    }
    const record=await cache.find(query,config,options);return eligible(record,rows) ? record : null;
   },
