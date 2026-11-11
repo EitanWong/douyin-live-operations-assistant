@@ -66,19 +66,49 @@ test('连续24小时周期刷新后重建页面，5760次检测和720次持久�
   assert.equal(reads,5760);assert.equal(reloads,720);assert.equal(saves,reloads);assert.equal(monitor.status.active,true);
 });
 
-test('开播但原页没有连接时快速刷新；正常连接不刷新，断线先等重连，假在线超时也恢复',async()=>{
+test('直播中即使始终没有数据连接也只持续检测，24小时不刷新',async()=>{
   const f=fixture();f.context.live='live';await f.monitor.tick();
-  f.advance(5000);await f.monitor.tick();assert.equal(f.reloads,1);
-  const live=fixture();live.context.live='live';live.context.healthy=true;
-  await live.monitor.tick();live.advance(180000);await live.monitor.tick();assert.equal(live.reloads,0);
-  live.context.healthy=false;await live.monitor.tick();live.advance(29000);await live.monitor.tick();assert.equal(live.reloads,0);
-  live.advance(1000);await live.monitor.tick();assert.equal(live.reloads,1);
-  const stale=fixture();stale.context.live='live';stale.context.healthy=true;stale.context.lastActivity=1000000;
-  await stale.monitor.tick();stale.advance(120001);await stale.monitor.tick();
-  stale.advance(30000);await stale.monitor.tick();assert.equal(stale.reloads,1);
-  const silent=fixture();silent.context.live='live';silent.context.healthy=true;
-  await silent.monitor.tick();silent.advance(120001);await silent.monitor.tick();
-  silent.advance(30000);await silent.monitor.tick();assert.equal(silent.reloads,1,'连接打开后始终没有第一帧也应恢复');
+  f.advance(5000);await f.monitor.tick();assert.equal(f.reloads,0);
+  for(let i=0;i<5760;i++){f.advance(15000);await f.monitor.tick();}
+  assert.equal(f.reads,5760);assert.deepEqual(f.order,[]);
+  assert.equal(f.statuses.at(-1).state,'reconnecting');assert.equal(f.statuses.at(-1).active,true);
+});
+
+test('直播连接静默、断开及恢复均不刷新，确认下播后恢复刷新监测',async()=>{
+  for(const lastActivity of [0,1000000]) {
+    const f=fixture();Object.assign(f.context,{live:'live',healthy:true,lastActivity});
+    await f.monitor.tick();assert.equal(f.statuses.at(-1).state,'connected');
+    f.advance(120001);await f.monitor.tick();f.advance(30000);await f.monitor.tick();
+    assert.equal(f.statuses.at(-1).state,'reconnecting');assert.equal(f.reloads,0);
+    f.context.healthy=false;f.advance(60000);await f.monitor.tick();assert.equal(f.reloads,0);
+    f.context.healthy=true;f.context.lastActivity=1210001;await f.monitor.tick();
+    assert.equal(f.statuses.at(-1).state,'connected');assert.equal(f.reloads,0);
+    f.context.live='ended';await f.monitor.tick();assert.deepEqual(f.order,['save','reload']);
+  }
+});
+
+test('直播状态未知时持续查询，不把未知当成未开播刷新',async()=>{
+  const f=fixture();f.context.live='unknown';f.advance(120000);await f.monitor.tick();
+  f.advance(60000);await f.monitor.wake();assert.equal(f.reads,2);assert.deepEqual(f.order,[]);
+  f.context.live='ended';await f.monitor.tick();assert.deepEqual(f.order,['save','reload']);
+});
+
+test('刷新前查询发现开播则取消导航，后续连接缺失也不刷新',async()=>{
+  const f=fixture();f.advance(120000);
+  f.monitor.read=async()=>{f.context.live='live';};await f.monitor.tick();
+  f.advance(60000);await f.monitor.tick();assert.deepEqual(f.order,[]);
+});
+
+test('保存期间开播或状态变为未知时取消刷新，后续仍持续检测',async()=>{
+  for(const status of ['live','unknown']) {
+    const f=fixture();f.advance(120000);
+    let finishSave,started;const savingStarted=new Promise(resolve=>started=resolve);
+    f.monitor.checkpoint=()=>{started();return new Promise(resolve=>finishSave=resolve);};
+    const saving=f.monitor.tick();await savingStarted;f.context.live=status;finishSave();await saving;
+    assert.equal(f.reloads,0);f.monitor.checkpoint=async()=>{};
+    f.advance(60000);await f.monitor.wake();assert.equal(f.reloads,0);
+    assert.equal(f.reads,2);assert.equal(f.statuses.at(-1).active,true);
+  }
 });
 
 test('网络离线、手动暂停、切房、挂起及保存失败不刷新，恢复后可重试',async()=>{

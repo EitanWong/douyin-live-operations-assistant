@@ -7,7 +7,7 @@ export class RoomMonitor {
   constructor({page,context,read,checkpoint,now=()=>Date.now(),onStatus=()=>{},onError=()=>{}}) {
     Object.assign(this,{page,context,read,checkpoint,now,onStatus,onError});
     this.startedAt=now();this.nextCheckAt=this.startedAt+CHECK_MS;this.retryAt=0;
-    this.failures=0;this.disconnectedAt=null;this.everConnected=false;this.closed=false;this.reloading=false;
+    this.failures=0;this.closed=false;this.reloading=false;
     this.key=`live-assistant:room-reload:${roomFromURL(page.location)}`;
     this.lastReloadAt=0;
     try {const saved=Number(page.sessionStorage.getItem(this.key));if(Number.isFinite(saved)&&saved>0)this.lastReloadAt=Math.min(saved,now());} catch {}
@@ -43,15 +43,9 @@ export class RoomMonitor {
     const now=this.now();
     const lastActivity=c.lastActivity>0?c.lastActivity:this.startedAt;
     const connected=c.healthy && now-lastActivity<=STALE_CONNECTION_MS;
-    if(c.live==='live' && connected) {
-      this.everConnected=true;this.disconnectedAt=null;return {state:'connected'};
-    }
-    if(c.live==='live') {
-      this.disconnectedAt ??= now;
-      return {state:'reconnecting',due:now-this.disconnectedAt>=(this.everConnected?30000:5000),reason:'直播已开播，恢复直播数据连接'};
-    }
-    this.disconnectedAt=null;
-    return {state:'waiting',due:now-this.startedAt>=IDLE_REFRESH_MS,reason:'等待开播，刷新直播间'};
+    // A data connection failure does not mean the broadcast has ended.
+    if(c.live==='live')return {state:connected?'connected':'reconnecting'};
+    return {state:'waiting',due:c.live==='ended' && now-this.startedAt>=IDLE_REFRESH_MS,reason:'等待开播，刷新直播间'};
   }
   async run() {
     if(this.closed)return;
@@ -66,7 +60,7 @@ export class RoomMonitor {
     if(this.closed)return;
     c=this.context();
     if(!this.available(c)) {this.publish(c.suspended?'suspended':'stopped');return;}
-    if(!c.enabled) {this.disconnectedAt=null;this.publish('stopped');return;}
+    if(!c.enabled) {this.publish('stopped');return;}
     const recovery=this.recovery(c);this.publish(recovery.state,true);
     if(!recovery.due || c.dirty || this.now()<this.retryAt || this.lastReloadAt && this.now()-this.lastReloadAt<RELOAD_COOLDOWN_MS)return;
     await this.reload(recovery.reason);
@@ -77,7 +71,7 @@ export class RoomMonitor {
       if(this.closed)return;
       const c=this.context();
       if(!this.available(c) || !c.enabled || c.dirty || this.page.navigator?.onLine===false)return;
-      // Recheck after async storage: the original site may already have reconnected.
+      // Recheck after async storage: the broadcast may already have started.
       if(!this.recovery(c).due)return;
       this.lastReloadAt=this.now();
       try {this.page.sessionStorage.setItem(this.key,String(this.lastReloadAt));} catch {}

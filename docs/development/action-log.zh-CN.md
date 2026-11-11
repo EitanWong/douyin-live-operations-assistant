@@ -4057,3 +4057,15 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终agent:index为596模块/3247符号，build、check和git diff --check均exit0。最终文案再验收1440×1000桌面1123×800窗口：三卡286.33×408.42左右、正文有界且可聚焦、无横向溢出；更新原截图与测量文件并恢复浏览器视口。普通视口宽度受限时14次横向键盘扩大未生效，不作为桌面尺寸证据；改为明确桌面视口后确认实际尺寸。未操作真实直播标签或准备模型。补查台账时误在仓库读取外部VERIFICATION.txt，rg报告缺文件（退出2，管道整体退出0）；改用固定外部绝对路径，未丢失已有台账。
 
 - 功能提交 **c7f8c101283322b3a92850e4bf9335182e520cd7** 已普通push到origin/dev（7ff3b86→c7f8c10，exit0），git ls-remote精确一致。仅停止本聊天4186演示服务（SIGINT、exit130）；lsof确认无打开文件后清理本任务baseline-copy/rollback-copy，保留完整父归档、四角色、测试输入、隔离测试runtime、构建产物与工作树。此条只补交付回执，随后文档提交/普通push的最终SHA、归档重建和四角色重开哈希写入同一外部delivery-receipt.json、VERIFICATION.txt与roles.json。原工作区源码保持原样，现有直播扩展未重载；应加载本工作树dist/chrome-extension新版后再刷新直播页。
+
+
+## 2026-11-12：直播中禁止因连接静默或断开自动刷新网页
+
+- 用户报告房间361690799431明明正在直播却意外刷新，要求仅未开播时刷新监测。目标固定为本仓库 RoomMonitor；原工作区干净但落后远端30提交，fetch后从origin/dev cb408ec创建本聊天fix-live-room-refresh副本及codex/fix-live-room-refresh分支，保留原工作区文件。依agent:find/agent:impact定位并核实源码，没有接管或刷新实际直播页面。
+- 根因：RoomMonitor.recovery把直播状态与数据连接健康混为一体，未连通5秒、曾连通后断开30秒或静默超时都会通过整页刷新恢复连接；非live的unknown也被当成未开播。最小修复去掉直播连接的刷新期限与obsolete断线计时状态；live只报告connected/reconnecting并继续查询，仅明确ended且等待满120秒可刷新。查询完成及保存完成后沿用同一recovery重新判断，避免等待期间开播或状态未知时导航；保留15秒检测、退避、草稿保护和跨刷新冷却。
+- TDD：先替换要求直播中刷新的旧断言，补入无连接24小时、连接静默/断开/恢复、unknown、查询中开播、保存中开播/未知等行为；修复前五项按预期失败，修复后unit/integration专项16/16通过。原有未开播24小时5760次检测/720次持久化刷新继续通过。初次红测因测试保存Promise未复位挂起，只终止本任务进程后纠正测试夹具并重新观察五项红测，不把中止计为通过。
+- 事务证据固定在 /Users/eitan/.codex/live-room-refresh-20261112-w8cipf7_：MODIFIED_FILE.js、DIFF_FILE.patch、VERIFICATION.txt、可执行ROLLBACK.sh及BASELINE.js、固定probe、逐命令stdout/stderr/exit。相同输入观察BASELINE直播无连接/静默、unknown、查询时开播均刷新1次；MODIFIED均0次且保持查询；ROLLBACK恢复原始SHA并重现1次；三次probe均exit0，明确ended均仍刷新1次。独立副本回滚后重新应用补丁重建改后字节，probe与MODIFIED完全一致。
+- 新副本最初agent:find缺少acorn退出1，经npm ci安装183包并audit 0漏洞后重跑成功；一次读取不存在room-state.js退出1，改读实际room-context.js；一次rg无匹配退出1，随后分开执行分支命令。错误与修正保留在VERIFICATION。crapper、dryer、mutator已核实CLI和启用工具目录均不可用，三项未执行，其他检查不替代。
+- 本轮不改界面或布局、原生宿主、直播数据、配置、版本号或main。完整回归、索引、构建/check以及实际提交和普通push到dev结果随后追加；没有把合成夹具称为用户直播页实测。
+
+- 使用说明同步删除旧的直播中5秒/30秒/静默刷新策略，说明仅确认未开播才刷新、unknown继续查询及查询/保存期间开播取消导航。npm run agent:index生成596模块/3247符号；npm run build已通过，构建产物在本工作树dist/chrome-extension与dist/douyin-live-assistant.user.js。
