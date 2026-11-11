@@ -4086,3 +4086,9 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 从实际旧/新包抽取同一RoomMonitor执行固定probe：DEPLOYED_BASELINE直播无连接/静默、unknown、查询时开播各刷新1次；DEPLOYED_MODIFIED均0次且保留检测；独立副本经原ROLLBACK.sh恢复旧包SHA后DEPLOYED_ROLLBACK重现1次，均exit0，明确ended均1次。累计补丁重建新包逐字一致。原ROLLBACK.sh扩展为目录参数恢复该content.js、文件参数仍恢复原始源码，旧脚本保存在deployment/previous-ROLLBACK.sh；四角色沿用并重开。
 - 浏览器工具拒绝打开chrome://extensions/?id=ochlmfoecapadlllbeodlpnnlpehjdla（URL协议策略，仅允许HTTP/HTTPS），并明确禁止换用其他浏览器表面或间接方式绕过；未绕过。已请用户在Chrome扩展管理重新加载此扩展并刷新直播页一次，随后继续现场观察。此时只能确认磁盘加载包修复，不能称现有页面已执行新代码；交接与观察结果随后追加。
 - crapper/dryer/mutator再次核实CLI均不可用，未执行；本轮产品源代码未变，沿用上轮2073/2073完整回归结果并重新执行16项监控专项，不重复全量回归来替代实际部署验收。无新增界面或布局改动。
+
+- 用户已确认重载扩展并刷新直播页；随后说明先前标签关闭/重开有手动操作，因此那些变化不作为自动刷新证据。重新静置观察2026-11-12 02:50:40—02:54:14，视频持续可播放，但出现两次播放器blob/播放进度重置及重复页面初始化日志，未通过现场验收；不把仅替换磁盘旧包称为完整根因修复。原始采样、日志和截图保存在同一证据目录deployment/idle-observation.json及idle-observation.png。
+- 补查共同前提：历史engine.liveMode.endedAt被当作当前网页已下播的证据。一个生产者（app的RoomMonitor context）进行该赋值，一个导航所有者（RoomMonitor）消费它；查询不到当前资料时，恢复的旧下播记录仍授权120秒刷新。移除这处赋值：context.live由当前identity.live.status提供，缺少当前结果则unknown；已有开播证据仍可阻止导航。保留历史场次记录供原有功能使用，不清空用户数据，不增加第二个刷新计时器。
+- TDD新增真实boot集成用例：从runtime恢复历史已下播场次，当前查询无直播状态，推进同一时钟并后台唤醒。基线捕获一次location.reload导航；修改后零次、继续查询，随后当前查询明确ended时仍一次。初次红测先在查询次数失败，调整断言顺序后明确在误导航失败；初次绿测不必要地要求两次查询，实际并发唤醒合法合并，改为验证继续查询且保留零导航断言，最终专项17/17通过（20619.225041ms，exit0）。所有失败输出保留。
+- 补充事务沿原四角色扩展current-status/：冻结BASELINE_app.js与MODIFIED_app.js、源码补丁、固定集成输入及独立基线/修改/回滚副本；ROLLBACK.sh支持项目目录或app.js参数恢复本次父字节，既有源码文件及扩展目录回滚用法保留。独立副本最初缺vendor依赖退出1，补齐同版vendor后重跑；zsh未引用glob导致执行前退出1亦保留并改用实际路径。crapper/dryer/mutator再次核实不可用，三项未执行。
+- Chrome加载包候选只替换boot中同一context.live字段，父SHA8064b4059175254746541d340deefc25521fc763e1dfa599906d164000f86706；候选SHA7784e1900724d8aff66cd2f6dcb740f6a1e5a7fdbd77b677b52b6c35840bb918，Acorn解析通过，其他字节保持原样。完整回归、最终检查、原子部署、回滚验证及dev提交/普通push回执随后追加；本阶段尚未重新加载新字段的浏览器代码，不能宣称现场已修复。

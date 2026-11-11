@@ -554,7 +554,8 @@ export function boot(options = {}) {
   if(!demo)roomMonitor=new RoomMonitor({page:window,
     context:()=>({current:roomContext.current(),suspended,blocked:persistenceDisabled || closed,
       enabled:!manualPause && (engine.running || engine.resumeRequested || engine.config.automation.monitorRoom),
-      live:liveEnded()?'ended':broadcastLive()?'live':'unknown',
+      // Restored session history cannot confirm that this page is still offline.
+      live:identity.live?.status || (broadcastLive()?'live':'unknown'),
       healthy:adapter.healthy(),lastActivity:Math.max(network.lastFrame || 0,network.lastPoll || 0),
       dirty:Boolean(panel?.dirty || panel?.busyActions.size || starting)}),
     read:()=>identityReader.refreshRoom?.(),checkpoint:()=>persistRuntime(true),

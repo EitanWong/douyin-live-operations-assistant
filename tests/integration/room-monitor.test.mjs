@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {JSDOM} from 'jsdom';
+import {JSDOM,VirtualConsole} from 'jsdom';
 import {boot} from '../../src/app.js';
 import {webLocks} from '../helpers/web-locks.mjs';
 
@@ -10,12 +10,15 @@ async function until(check) {
   assert.ok(check(),'应用应在初始化及渲染后到达可观察状态');
 }
 
-function launch({mode='auto',autoStart=true,liveStatus='ended',monitorRoom=true}={}) {
-  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/123',pretendToBeVisual:true});
+function launch({mode='auto',autoStart=true,liveStatus='ended',monitorRoom=true,runtime}={}) {
+  const navigationErrors=[],virtualConsole=new VirtualConsole();
+  virtualConsole.on('jsdomError',error=>{if(error.type==='not implemented' && /navigation/.test(error.message))navigationErrors.push(error.message);else throw error;});
+  const dom=new JSDOM('<body></body>',{url:'https://live.douyin.com/123',pretendToBeVisual:true,virtualConsole});
   for(const key of ['window','document','location','MutationObserver','HTMLElement'])globalThis[key]=dom.window[key];
   globalThis.getComputedStyle=dom.window.getComputedStyle.bind(dom.window);
   globalThis.CSS={escape:value=>value};Object.defineProperty(globalThis,'navigator',{configurable:true,value:{locks:webLocks()}});
   const values=new Map([['live-assistant:config:123',{mode,automation:{autoStart,monitorRoom}}]]);
+  if(runtime)values.set('live-assistant:runtime:123',runtime);
   const leases=[];
   let api,publish,reads=0,connected=true,live=liveStatus==='unknown'?undefined:{roomId:'10',status:liveStatus,startAt:Date.now()-60000,endAt:Date.now()-1000,observedAt:Date.now()};
   const engine=boot({page:dom.window,get:(key,fallback)=>values.get(key)??fallback,set:(key,value)=>values.set(key,value),del:key=>values.delete(key),request:()=>{},
@@ -23,7 +26,7 @@ function launch({mode='auto',autoStart=true,liveStatus='ended',monitorRoom=true}
       dispatch:event=>options.onEvent(event),send:async()=>({submitted:true})}),
     identityFactory:onIdentity=>{publish=()=>onIdentity({live});return {refresh:async()=>publish(),refreshRoom:async()=>{reads++;publish();},close(){}};},
     onMonitorStatus:status=>leases.push({...status,rendered:Boolean(dom.window.document.querySelector('#douyin-live-assistant'))}),onReady:value=>api=value});
-  return {dom,engine,values,leases,get api(){return api;},get reads(){return reads;},connect:value=>connected=value,
+  return {dom,engine,values,leases,navigationErrors,get api(){return api;},get reads(){return reads;},connect:value=>connected=value,
     live:(status,roomId='11')=>{live={roomId,status,startAt:Date.now(),endAt:status==='ended'?Date.now():0,observedAt:Date.now()};publish();},
     close:()=>{dom.window.dispatchEvent(new dom.window.Event('pagehide'));api?.panel.destroy();dom.window.close();}};
 }
@@ -70,5 +73,20 @@ test('仅有旧连接不能证明主播开播，状态未知时等待明确开�
   try {
     await until(()=>f.api);await f.api.wake();assert.equal(f.engine.running,false);
     f.live('live');await f.api.wake();assert.equal(f.engine.running,true);
+  }finally{f.close();}
+});
+
+test('恢复的历史下播记录不能授权刷新当前状态未知的直播页',async t=>{
+  let now=Date.now();t.mock.method(Date,'now',()=>now);
+  const f=launch({autoStart:false,liveStatus:'unknown',runtime:{version:1,savedAt:now-60000,
+    liveMode:{version:1,roomId:'9',boundaryAt:now-120000,endedAt:now-60000}}});
+  try {
+    await until(()=>f.api);assert.ok(f.engine.liveMode.endedAt,'确实恢复了历史下播记录');
+    const before=f.reads;
+    now+=120001;await f.api.wake();now+=60000;await f.api.wake();
+    assert.deepEqual(f.navigationErrors,[],'不能根据旧场次下播记录刷新');
+    assert.ok(f.reads>before,'状态未知时继续查询（并发唤醒允许合并）');
+    f.live('ended','11');await f.api.wake();
+    assert.equal(f.navigationErrors.length,1,'当前查询明确下播时仍可刷新');
   }finally{f.close();}
 });
