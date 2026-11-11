@@ -4069,3 +4069,9 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 本轮不改界面或布局、原生宿主、直播数据、配置、版本号或main。完整回归、索引、构建/check以及实际提交和普通push到dev结果随后追加；没有把合成夹具称为用户直播页实测。
 
 - 使用说明同步删除旧的直播中5秒/30秒/静默刷新策略，说明仅确认未开播才刷新、unknown继续查询及查询/保存期间开播取消导航。npm run agent:index生成596模块/3247符号；npm run build已通过，构建产物在本工作树dist/chrome-extension与dist/douyin-live-assistant.user.js。
+
+- 首轮完整回归2069/2073通过，四项原有public-media集成测试失败；独立重跑复现。环境核实系统python3为3.9.6，缺少原生媒体源码使用的hashlib.file_digest与asyncio.timeout。仅在本任务外部目录建立Python3.15.2标准库venv，相同四项即4/4通过，未改动产品源码或测试断言；以该运行时重跑完整回归。期间一次误读native/public_media.py退出1，改读实际public_media_worker.py和media_process.py。
+
+- 最终完整JavaScript回归：隔离Python3.15.2运行时下执行 node --test --test-concurrency=2 tests，**2073/2073通过**，0失败/取消/跳过，521615.372458ms，exit0。最终回归前后产品源码与测试SHA未变；npm run build、npm run check、索引新鲜度及git diff --check均通过。首轮2069/2073和环境复现输出保留，未掩盖失败或改写无关媒体逻辑。
+- 功能提交 **3e89df2edd74034de7b2ac51456bb7dc61117c8b** 已普通push至origin/dev（cb408ec→3e89df2，exit0），git ls-remote精确一致；未推main或发布版本。随后仅提交本条验证/交付日志并普通push，最终文档提交SHA和远端核对回执保存于同一证据目录delivery-receipt.json与VERIFICATION.txt。
+- 四角色重新打开并解析：改后文件与源码一致、补丁能从原件逐字重建、回滚脚本可执行且恢复原始SHA；固定probe的BASELINE/ROLLBACK均复现误刷新1次，MODIFIED/REAPPLIED均0次，明确ended均保留1次刷新，四次probe均exit0。原工作区源码保留；本聊天工作树和新构建用于交付，证据与隔离运行时用于复现，不清理其他任务或用户数据。没有接管或刷新用户的实际直播页，新构建须在合适时机加载到浏览器并刷新一次页面才能应用。crapper/dryer/mutator不可用，三项仍未执行；未声称远端CI或真实直播页已验收。
