@@ -4075,3 +4075,14 @@ SQLite临时库基准（macOS27.2 arm64，合成弹幕10000条/200个稳定用�
 - 最终完整JavaScript回归：隔离Python3.15.2运行时下执行 node --test --test-concurrency=2 tests，**2073/2073通过**，0失败/取消/跳过，521615.372458ms，exit0。最终回归前后产品源码与测试SHA未变；npm run build、npm run check、索引新鲜度及git diff --check均通过。首轮2069/2073和环境复现输出保留，未掩盖失败或改写无关媒体逻辑。
 - 功能提交 **3e89df2edd74034de7b2ac51456bb7dc61117c8b** 已普通push至origin/dev（cb408ec→3e89df2，exit0），git ls-remote精确一致；未推main或发布版本。随后仅提交本条验证/交付日志并普通push，最终文档提交SHA和远端核对回执保存于同一证据目录delivery-receipt.json与VERIFICATION.txt。
 - 四角色重新打开并解析：改后文件与源码一致、补丁能从原件逐字重建、回滚脚本可执行且恢复原始SHA；固定probe的BASELINE/ROLLBACK均复现误刷新1次，MODIFIED/REAPPLIED均0次，明确ended均保留1次刷新，四次probe均exit0。原工作区源码保留；本聊天工作树和新构建用于交付，证据与隔离运行时用于复现，不清理其他任务或用户数据。没有接管或刷新用户的实际直播页，新构建须在合适时机加载到浏览器并刷新一次页面才能应用。crapper/dryer/mutator不可用，三项仍未执行；未声称远端CI或真实直播页已验收。
+
+
+## 2026-11-12：复查直播页仍刷新，修复实际加载包未更新
+
+- 用户反馈房间361690799431直播中仍不固定刷新，复用fix-live-room-refresh工作树与原四角色 /Users/eitan/.codex/live-room-refresh-20261112-w8cipf7_，没有创建新项目或切换目标。先重开当前源码、此前交付回执和四角色，执行agent:find/agent:impact并核查全部location.reload/tabs.reload入口，fetch确认origin/dev仍为30021dd。
+- 确认上轮只推送源码并生成工作树dist，Chrome实际启用扩展ID ochlmfoecapadlllbeodlpnnlpehjdla，加载路径仍为原项目 /Users/eitan/Documents/Projects/Web/douyin-live-operations-assistant/dist/chrome-extension。Secure Preferences有path但未内嵌manifest，首次按manifest名称筛选未找到，改查实际path定位；该包content.js的RoomMonitor仍保留everConnected/disconnectedAt及5秒/30秒直播刷新逻辑。已加载包不是dev构建，后台无installDevelopmentReload，未发现活动npm run dev；不把本次原因误归到开发热更新。
+- 现场UI确认直播有音频、在线观众及“直播中·尚未下播”，助手却显示“等待开播·持续监控中”；操作期间视频blob标识从3027740a变为05b1c018，未执行手动刷新。读DOM最初未进入shadowRoot，改为明确读取#douyin-live-assistant.shadowRoot；首次CDP超时后原生UI读取成功，随后重新绑定同一直播标签成功。一次连接诊断locator未匹配，未修改页面设置或发弹幕。一次cat scripts/lib/development.mjs不存在退出1，改读实际scripts/dev.mjs及development.test.mjs。
+- 最小部署只替换实际content.js中的RoomMonitor类：用Acorn确定ClassExpression边界，取上轮已全量验证的MODIFIED_FILE.js类，保留前后所有其他字节；整包其他文件、manifest权限、配置、账本和原始源码保持原字节。旧content SHA256 9c9ba1935bc6904627cafab944656a38cc0319735c766e0c2998213a64a39a2f，改后8064b4059175254746541d340deefc25521fc763e1dfa599906d164000f86706；语法解析及node --check通过，候选先验后原子替换实际加载文件。补充包基线、改后、补丁与可重跑prepare.mjs保存在原证据目录deployment/。
+- 从实际旧/新包抽取同一RoomMonitor执行固定probe：DEPLOYED_BASELINE直播无连接/静默、unknown、查询时开播各刷新1次；DEPLOYED_MODIFIED均0次且保留检测；独立副本经原ROLLBACK.sh恢复旧包SHA后DEPLOYED_ROLLBACK重现1次，均exit0，明确ended均1次。累计补丁重建新包逐字一致。原ROLLBACK.sh扩展为目录参数恢复该content.js、文件参数仍恢复原始源码，旧脚本保存在deployment/previous-ROLLBACK.sh；四角色沿用并重开。
+- 浏览器工具拒绝打开chrome://extensions/?id=ochlmfoecapadlllbeodlpnnlpehjdla（URL协议策略，仅允许HTTP/HTTPS），并明确禁止换用其他浏览器表面或间接方式绕过；未绕过。已请用户在Chrome扩展管理重新加载此扩展并刷新直播页一次，随后继续现场观察。此时只能确认磁盘加载包修复，不能称现有页面已执行新代码；交接与观察结果随后追加。
+- crapper/dryer/mutator再次核实CLI均不可用，未执行；本轮产品源代码未变，沿用上轮2073/2073完整回归结果并重新执行16项监控专项，不重复全量回归来替代实际部署验收。无新增界面或布局改动。
